@@ -8,9 +8,10 @@ import logging.handlers
 import os
 import queue
 import re
+import shutil
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
@@ -40,6 +41,42 @@ access_logger = logging.getLogger("jztools.access")
 app = Flask(__name__)
 
 
+class WindowsSafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
+    """兼容 Windows 的按天滚动日志 handler。
+
+    Windows 下当服务进程长期占用日志文件时，TimedRotatingFileHandler 的
+    os.rename 会抛 PermissionError（WinError 32），导致该时段所有日志静默丢失。
+    本类在 rename 失败时退回「复制原文件 + 截断」策略（copytruncate）：
+    先把当前内容复制为归档文件，再清空原文件继续写入 —— 永不因文件锁丢日志。
+    """
+
+    def doRollover(self):
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        current_time = int(time.time())
+        dfn = self.rotation_filename(
+            self.baseFilename + "." + time.strftime(self.suffix, time.localtime(current_time))
+        )
+        if os.path.exists(self.baseFilename):
+            try:
+                os.rename(self.baseFilename, dfn)  # 常规路径：直接改名
+            except OSError:
+                # Windows 文件占用：复制 + 截断
+                try:
+                    shutil.copyfile(self.baseFilename, dfn)
+                    with open(self.baseFilename, "w", encoding="utf-8") as f:
+                        f.truncate()
+                except OSError:
+                    pass  # 复制也失败则放弃本次归档，继续写原文件
+        if not self.encoding:
+            self.stream = open(self.baseFilename, "w")
+        else:
+            self.stream = open(self.baseFilename, "w", encoding=self.encoding)
+        self.rolloverAt = self.computeRollover(current_time)
+        return dfn
+
+
 # ===================== 访问日志（异步） =====================
 
 # 后台日志监听器（模块级单例）
@@ -65,7 +102,7 @@ def setup_access_logging(app):
     if access_logger.handlers:
         return
 
-    handler = logging.handlers.TimedRotatingFileHandler(
+    handler = WindowsSafeTimedRotatingFileHandler(
         LOG_FILE, when="midnight", interval=1, backupCount=30, encoding="utf-8"
     )
     handler.setFormatter(logging.Formatter(
@@ -147,7 +184,9 @@ def _should_compress(response):
         return False
     if response.headers.get("Content-Encoding"):
         return False  # 已压缩过
-    if not response.direct_passthrough and len(response.get_data()) < 256:
+    if response.direct_passthrough:
+        return False  # 流式响应（如 send_file 大文件）不压缩，避免序列化错误
+    if len(response.get_data()) < 256:
         return False  # 小响应不压缩
     ct = response.content_type or ""
     if not any(ct.startswith(t) for t in COMPRESSIBLE_TYPES):
