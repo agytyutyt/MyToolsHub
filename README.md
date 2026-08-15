@@ -14,15 +14,18 @@
 4. [核心机制：一切皆插件](#核心机制一切皆插件)
 5. [交互流程说明](#交互流程说明)
 6. [HTTP API](#http-api)
-7. [开发者指南：开发插件](#开发者指南开发插件)
-   - [7.1 纯前端插件](#71-纯前端插件)
-   - [7.2 带 Python 后端的插件](#72-带-python-后端的插件)
-   - [7.3 插件清单字段说明](#73-插件清单字段说明)
-   - [7.4 注册插件到首页](#74-注册插件到首页)
-   - [7.5 常见约定与注意事项](#75-常见约定与注意事项)
-8. [内置插件一览](#内置插件一览)
-9. [故障排查](#故障排查)
-10. [后期接入真实后端](#后期接入真实后端)
+7. [访问日志](#访问日志)
+8. [并发与性能优化](#并发与性能优化)
+9. [健壮性与安全](#健壮性与安全)
+10. [开发者指南：开发插件](#开发者指南开发插件)
+    - [7.1 纯前端插件](#71-纯前端插件)
+    - [7.2 带 Python 后端的插件](#72-带-python-后端的插件)
+    - [7.3 插件清单字段说明](#73-插件清单字段说明)
+    - [7.4 注册插件到首页](#74-注册插件到首页)
+    - [7.5 常见约定与注意事项](#75-常见约定与注意事项)
+11. [内置插件一览](#内置插件一览)
+12. [故障排查](#故障排查)
+13. [后期接入真实后端](#后期接入真实后端)
 
 ---
 
@@ -133,6 +136,18 @@ config/tools.json ──注册──▶ plugins/<id>/manifest.json（改名字/�
 | `GET /api/tools` | 聚合后的工具列表（站点信息 + 分类 + 工具清单） |
 | `GET /api/tools/<id>` | 单个工具信息，不存在返回 404 |
 
+**character-graph 插件后端接口**（演示含后端插件的 API 模式）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/character-graph/config` | 读取大模型配置（base_url / api_key / model / api_source） |
+| `POST /api/character-graph/config` | 保存大模型配置 |
+| `GET /api/character-graph/prompt` | 读取抽取 Prompt 模板 |
+| `POST /api/character-graph/analyze` | 提交文档分析任务（multipart），**立即返回 `task_id`**，后台异步执行 |
+| `GET /api/character-graph/result/<task_id>` | 轮询分析任务状态与结果 |
+
+> 各插件后端路由统一挂在 `/api/<插件id>/` 前缀下，动态注册，互不冲突。
+
 `GET /api/tools` 返回结构示例：
 
 ```json
@@ -192,6 +207,63 @@ config/tools.json ──注册──▶ plugins/<id>/manifest.json（改名字/�
 | `status` | HTTP 状态码 |
 | `cost_ms` | 请求处理耗时（毫秒） |
 | `ua` | 客户端 User-Agent（截断 120 字符） |
+
+---
+
+## 并发与性能优化
+
+针对并发评估发现的瓶颈，已完成四项优化（本分支合入 main 的内容）：
+
+### 1. LLM 调用异步化（最大瓶颈）
+
+人物关系星图的长耗时大模型调用**不再占用 HTTP worker 线程**：
+
+- `POST /api/character-graph/analyze` 毫秒级返回 `task_id`，文档解析 + 大模型调用放入后台线程池（`ANALYZE_WORKERS = 2`，见 `plugins/character-graph/backend/routes.py`）。
+- 新增 `GET /api/character-graph/result/<task_id>` 轮询状态（`pending / running / done / error`），任务结果保留 30 分钟自动清理防内存泄漏。
+- API Key 前置校验，避免无效提交白白排入队列。
+
+### 2. gzip 压缩
+
+- HTML / JS / CSS / JSON 等文本响应在客户端声明 `Accept-Encoding: gzip` 时压缩（`app.py` 的 `_compress_response` 中间件），响应附带压缩前大小阈值过滤（<256B 不压缩）。
+- 流式响应（`send_file` 大文件，`direct_passthrough` 模式）跳过压缩，避免序列化错误。
+
+### 3. 静态资源缓存
+
+- `.js/.css/.json/.png/...` → `Cache-Control: public, max-age=86400`（1 天）。
+- `.html` → `no-cache`，配合 ETag 做协商缓存（`_static_cache` 中间件，覆盖 Flask debug 默认的 no-cache）。
+
+### 4. 异步日志
+
+- 日志经内存队列（容量 2000）由后台线程批量落盘（`QueueHandler` + `QueueListener`），HTTP 线程零写盘阻塞；队列满时丢弃最旧日志，防止日志拖垮站点。
+
+### 实测性能参考
+
+| 场景 | 并发 | 总请求 | 成功率 | 平均响应 |
+| --- | --- | --- | --- | --- |
+| 常规读接口 | 200 | 14000 | 100% | 28-49ms |
+| gzip 开启 | 200 | 14000 | 100% | 40-67ms |
+| 压力边界 | 300 | 16800 | 88%（连接排队/拒绝，非应用异常） | — |
+
+> 300 并发以上的上限源于 Flask 开发服务器单进程线程模型。生产部署建议使用 **Gunicorn 多进程 + Nginx 反向代理**（静态资源分发、gzip、负载均衡），可彻底消除该瓶颈。
+
+---
+
+## 健壮性与安全
+
+### 安全防护
+
+- **目录穿越拦截**：插件 ID 仅允许 `[A-Za-z0-9_-]`，`send_from_directory` 安全控制路径，`..`、`%2f`、`%5c` 等 6 种穿越变体均已验证拦截。
+- **敏感信息不入库**：`.gitignore` 排除插件运行配置（`plugins/character-graph/backend/config.json`，含大模型 API Key）与运行时文件（`logs/`、`.server.*`、`__pycache__`）。
+- **HTML 转义**：map-marker 等插件对使用者输入进行 XSS 转义。
+
+### 健壮性测试覆盖
+
+已通过 28 项健壮性测试：目录穿越、非法 ID、错误方法（405）、非法 JSON 宽容处理、超长 URL、编码注入、空/坏/超大文件（10MB）、畸形 task_id、20 并发 analyze 无崩溃等，全部通过。
+
+### 已知修复：Windows 跨天日志轮转
+
+- **症状**：服务长期运行跨过午夜后，`TimedRotatingFileHandler` 的 `os.rename` 因文件被占用抛 `WinError 32`（PermissionError），随后日志静默丢失。
+- **修复**：`WindowsSafeTimedRotatingFileHandler`（`app.py`）在改名失败时退回「复制 + 截断」（copytruncate）策略，归档完整、写入不断，跨天零日志丢失。
 
 ---
 
