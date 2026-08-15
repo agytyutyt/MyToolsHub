@@ -1,0 +1,9 @@
+{
+  "id": "color-picker",
+  "name": "取色器",
+  "description": "选择颜色，实时生成 HEX、RGB、HSL 等多种格式并一键复制。",
+  "icon": "🎨",
+  "accent": "#EA4335",
+  "entry": "index.html",
+  "features": ["HEX", "RGB", "HSL", "一键复制"]
+}

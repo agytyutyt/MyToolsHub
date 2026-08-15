@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>工具</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+</head>
+<body>
+  <header class="app-bar">
+    <button class="back-btn" onclick="history.back()" title="返回">←</button>
+    <a href="/" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title">JZ 工具箱</span>
+    </a>
+    <div class="spacer"></div>
+  </header>
+
+  <main class="tool-shell">
+    <div class="tool-head">
+      <div class="tool-icon" id="tool-icon">🧩</div>
+      <div>
+        <div class="tool-title" id="tool-title">加载中…</div>
+        <div class="tool-desc" id="tool-desc"></div>
+      </div>
+    </div>
+    <iframe class="tool-frame" id="tool-frame" title="工具内容"></iframe>
+  </main>
+
+  <footer class="footer">JZToolsHub · 一切皆插件</footer>
+
+  <script src="/static/js/tool.js"></script>
+</body>
+</html>

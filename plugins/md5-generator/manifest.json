@@ -1,0 +1,9 @@
+{
+  "id": "md5-generator",
+  "name": "MD5 生成器",
+  "description": "计算与校验 MD5 值，支持文本/文件与 HMAC-MD5，实时计算一键复制。",
+  "icon": "#️⃣",
+  "accent": "#FBBC05",
+  "entry": "index.html",
+  "features": ["计算", "校验", "HMAC", "文件"]
+}

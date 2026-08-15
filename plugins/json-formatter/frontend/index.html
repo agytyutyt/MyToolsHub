@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSON 格式化</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, sans-serif;
+    color: #202124; padding: 24px; max-width: 1000px; margin: 0 auto;
+  }
+  .bar { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid #dadce0; background: #fff; color: #1a73e8;
+    padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: background .2s, box-shadow .2s;
+  }
+  .btn:hover { background: #f1f5fd; box-shadow: 0 1px 2px rgba(60,64,67,.3); }
+  .btn.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .btn.primary:hover { background: #1967d2; }
+  textarea {
+    width: 100%; height: 240px; padding: 14px; font-family: "Roboto Mono", Consolas, monospace;
+    font-size: 13px; border: 1px solid #dadce0; border-radius: 12px; resize: vertical;
+    outline: none; background: #fff; line-height: 1.6;
+  }
+  textarea:focus { border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,.2); }
+  .label { font-size: 13px; color: #5f6368; margin: 4px 0 8px; }
+  .indent { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+  .indent select {
+    padding: 8px 12px; border: 1px solid #dadce0; border-radius: 8px;
+    font-size: 13px; background: #fff; color: #202124; outline: none;
+  }
+  .status { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; font-size: 13px; }
+  .status .ok { color: #188038; }
+  .status .err { color: #d93025; }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: #202124; color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="label">输入 JSON</div>
+  <textarea id="input" placeholder='{"hello": "world", "list": [1, 2, 3]}'></textarea>
+  <div class="indent">
+    <label style="font-size:13px;color:#5f6368;">缩进：</label>
+    <select id="indent">
+      <option value="2">2 空格</option>
+      <option value="4">4 空格</option>
+      <option value="tab">Tab</option>
+    </select>
+    <span style="font-size:13px;color:#5f6368;" id="sort-hint"></span>
+  </div>
+  <div class="bar">
+    <button class="btn primary" id="format">格式化 ▸</button>
+    <button class="btn" id="minify">压缩</button>
+    <button class="btn" id="copy">复制结果</button>
+    <button class="btn" id="clear">清空</button>
+  </div>
+  <div class="label">输出结果</div>
+  <textarea id="output" readonly></textarea>
+  <div class="status"><span id="st-msg"></span><span id="st-info"></span></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+  const input = document.getElementById('input');
+  const output = document.getElementById('output');
+  const stMsg = document.getElementById('st-msg');
+  const stInfo = document.getElementById('st-info');
+  const toast = document.getElementById('toast');
+
+  function notify(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1500);
+  }
+
+  function indentation() {
+    return document.getElementById('indent').value === 'tab' ? '\t' : ' '.repeat(Number(document.getElementById('indent').value));
+  }
+
+  document.getElementById('format').addEventListener('click', () => {
+    try {
+      const json = JSON.parse(input.value);
+      const pretty = JSON.stringify(json, null, indentation());
+      output.value = pretty;
+      stMsg.innerHTML = '<span class="ok">✅ 校验通过</span>';
+      stInfo.textContent = `${pretty.length} 字符 · 共 ${pretty.split('\n').length} 行`;
+    } catch (e) {
+      stMsg.innerHTML = `<span class="err">❌ ${e.message}</span>`;
+      stInfo.textContent = '';
+    }
+  });
+
+  document.getElementById('minify').addEventListener('click', () => {
+    try {
+      const json = JSON.parse(input.value);
+      const min = JSON.stringify(json);
+      output.value = min;
+      stMsg.innerHTML = '<span class="ok">✅ 校验通过</span>';
+      stInfo.textContent = `${min.length} 字符`;
+    } catch (e) {
+      stMsg.innerHTML = `<span class="err">❌ ${e.message}</span>`;
+      stInfo.textContent = '';
+    }
+  });
+
+  document.getElementById('copy').addEventListener('click', () => {
+    if (!output.value) return;
+    navigator.clipboard.writeText(output.value).then(() => notify('已复制'));
+  });
+
+  document.getElementById('clear').addEventListener('click', () => {
+    input.value = output.value = '';
+    stMsg.innerHTML = '';
+    stInfo.textContent = '';
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "id": "base64",
+  "name": "Base64 编解码",
+  "description": "对文本进行 Base64 编码与解码，支持 UTF-8 中文，实时双向转换。",
+  "icon": "🔐",
+  "accent": "#4285F4",
+  "entry": "index.html",
+  "features": ["编码", "解码", "UTF-8"]
+}

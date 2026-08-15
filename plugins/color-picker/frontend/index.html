@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>取色器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, sans-serif;
+    color: #202124; padding: 24px; max-width: 720px; margin: 0 auto;
+  }
+  .picker-row { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  #picker {
+    width: 150px; height: 150px; border: none; border-radius: 16px;
+    background: #efefef; cursor: pointer; padding: 0;
+    box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+  }
+  .preview {
+    width: 120px; height: 120px; border-radius: 16px; border: 1px solid #dadce0;
+    box-shadow: 0 1px 3px rgba(60,64,67,.3);
+  }
+  .values { flex: 1; min-width: 200px; }
+  .value-row {
+    display: flex; align-items: center; gap: 12px; margin: 8px 0;
+    padding: 10px 14px; background: #f8f9fa; border-radius: 12px;
+    border: 1px solid #e8eaed;
+  }
+  .value-row label { width: 44px; font-size: 12px; color: #5f6368; font-weight: 600; }
+  .value-row code { flex: 1; font-size: 13px; word-break: break-all; }
+  .btn {
+    border: none; background: #1a73e8; color: #fff; padding: 8px 14px;
+    border-radius: 8px; font-size: 13px; cursor: pointer;
+    transition: filter .2s, box-shadow .2s;
+  }
+  .btn:hover { box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 2px 6px 2px rgba(60,64,67,.15); }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: #202124; color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="picker-row">
+    <label for="picker" style="display:contents; cursor:pointer;">
+      <input type="color" id="picker" value="#ea4335" style="position:absolute; opacity:0; width:0; height:0;">
+      <div class="preview" id="preview"></div>
+    </label>
+    <div class="values" id="values"></div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+<script>
+  const picker = document.getElementById('picker');
+  const preview = document.getElementById('preview');
+  const values = document.getElementById('values');
+  const toast = document.getElementById('toast');
+
+  function hexToRgb(hex) {
+    const m = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+  }
+  function rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > .5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+  }
+
+  function copy(text, label) {
+    navigator.clipboard.writeText(text).then(() => {
+      toast.textContent = label + ' 已复制';
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 1500);
+    });
+  }
+
+  function render() {
+    const hex = picker.value;
+    preview.style.background = hex;
+    const { r, g, b } = hexToRgb(hex);
+    const { h, s, l } = rgbToHsl(r, g, b);
+    const items = [
+      ['HEX', hex.toUpperCase()],
+      ['RGB', `rgb(${r}, ${g}, ${b})`],
+      ['HSL', `hsl(${h}, ${s}%, ${l}%)`],
+    ];
+    values.innerHTML = items.map(([label, val]) => `
+      <div class="value-row">
+        <label>${label}</label>
+        <code>${val}</code>
+        <button class="btn" data-v="${val}">复制</button>
+      </div>`).join('');
+    values.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => copy(btn.dataset.v, btn.previousElementSibling.textContent));
+    });
+  }
+
+  picker.addEventListener('input', render);
+  render();
+</script>
+</body>
+</html>

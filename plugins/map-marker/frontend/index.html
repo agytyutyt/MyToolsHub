@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地图标点</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, sans-serif;
+    color: #202124; height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid #dadce0;
+    background: #fff; flex-wrap: wrap;
+  }
+  .header h1 { font-size: 18px; font-weight: 500; margin-right: auto; }
+  .field { display: flex; align-items: center; gap: 6px; }
+  .field label { font-size: 12px; color: #5f6368; }
+  .field input {
+    width: 100px; padding: 7px 10px; border: 1px solid #dadce0;
+    border-radius: 8px; font-size: 13px; outline: none;
+  }
+  .field input:focus { border-color: #4285F4; box-shadow: 0 0 0 3px rgba(66,133,244,.2); }
+  .btn {
+    border: 1px solid #dadce0; background: #fff; color: #1a73e8;
+    padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: background .2s, box-shadow .2s;
+  }
+  .btn:hover { background: #f1f5fd; box-shadow: 0 1px 2px rgba(60,64,67,.3); }
+  .btn.primary { background: #4285F4; color: #fff; border-color: #4285F4; }
+  .btn.primary:hover { background: #1a73e8; }
+  .btn.danger { color: #d93025; }
+  .main { flex: 1; display: flex; min-height: 0; }
+  #map { flex: 1; height: 100%; }
+  .panel {
+    width: 300px; border-left: 1px solid #dadce0; background: #fafafa;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel .tabs { display: flex; border-bottom: 1px solid #dadce0; background: #fff; }
+  .panel .tabs button {
+    flex: 1; padding: 10px 0; border: none; background: transparent;
+    font-size: 13px; color: #5f6368; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  .panel .tabs button.active { color: #4285F4; border-bottom-color: #4285F4; font-weight: 500; }
+  .panel .tab-body { flex: 1; overflow-y: auto; padding: 14px; display: none; }
+  .panel .tab-body.active { display: block; }
+  .panel textarea {
+    width: 100%; height: 170px; padding: 10px; font-family: "Roboto Mono", Consolas, monospace;
+    font-size: 12px; border: 1px solid #dadce0; border-radius: 8px; resize: vertical;
+    outline: none; line-height: 1.6; background: #fff;
+  }
+  .panel textarea:focus { border-color: #4285F4; box-shadow: 0 0 0 3px rgba(66,133,244,.2); }
+  .hint { font-size: 12px; color: #5f6368; margin: 8px 0; }
+  .marker-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+    background: #fff; border: 1px solid #dadce0; border-radius: 10px;
+    margin-bottom: 8px; cursor: pointer; transition: box-shadow .2s;
+  }
+  .marker-item:hover { box-shadow: 0 1px 3px rgba(60,64,67,.25); }
+  .marker-item .dot {
+    width: 12px; height: 12px; border-radius: 50%; background: #4285F4; flex-shrink: 0;
+  }
+  .marker-item .info { flex: 1; min-width: 0; }
+  .marker-item .name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .marker-item .coord { font-size: 11px; color: #5f6368; }
+  .marker-item .del {
+    border: none; background: transparent; color: #5f6368; font-size: 16px;
+    cursor: pointer; padding: 2px 6px; border-radius: 50%;
+  }
+  .marker-item .del:hover { background: #fce8e6; color: #d93025; }
+  .empty { font-size: 13px; color: #9aa0a6; text-align: center; margin-top: 30px; }
+  .status { font-size: 12px; color: #5f6368; padding: 8px 14px; border-top: 1px solid #dadce0; background: #fff; }
+  .status.error { color: #d93025; }
+  .toast {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(20px);
+    background: #202124; color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 999;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    width: 460px; max-width: 92vw; background: #fff; border-radius: 16px;
+    padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
+  }
+  .modal h2 { font-size: 18px; font-weight: 500; margin-bottom: 6px; }
+  .modal p { font-size: 13px; color: #5f6368; margin-bottom: 14px; line-height: 1.7; }
+  .modal .field { margin-bottom: 12px; }
+  .modal .field input { width: 100%; }
+  .modal .bar { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  code { background: #f1f3f4; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>🗺️ 地图标点</h1>
+    <div class="field">
+      <label>经度</label><input id="lng" type="number" step="0.000001" placeholder="116.397">
+    </div>
+    <div class="field">
+      <label>纬度</label><input id="lat" type="number" step="0.000001" placeholder="39.909">
+    </div>
+    <div class="field">
+      <label>名称</label><input id="name" type="text" placeholder="标记名称（可选）" style="width:140px;">
+    </div>
+    <button class="btn primary" id="add">添加标点</button>
+    <button class="btn" id="settings">⚙️ 配置</button>
+  </div>
+  <div class="main">
+    <div id="map"></div>
+    <div class="panel">
+      <div class="tabs">
+        <button class="active" data-tab="list">标记列表</button>
+        <button data-tab="batch">批量导入</button>
+      </div>
+      <div class="tab-body active" id="tab-list">
+        <div id="marker-list"></div>
+        <div class="empty" id="empty">暂无标记<br>输入经纬度或点击地图添加</div>
+        <div style="margin-top:10px;">
+          <button class="btn danger" id="clear-all" style="width:100%;">清除全部标记</button>
+        </div>
+      </div>
+      <div class="tab-body" id="tab-batch">
+        <div class="hint">每行一条：<code>名称,经度,纬度</code> 或 <code>经度,纬度</code></div>
+        <textarea id="batch-input" placeholder="示例：
+天安门,116.397,39.909
+东方明珠,121.499,31.240"></textarea>
+        <div style="margin-top:10px; display:flex; gap:10px;">
+          <button class="btn primary" id="batch-add" style="flex:1;">导入</button>
+          <button class="btn" id="batch-clear">清空</button>
+        </div>
+      </div>
+      <div class="status" id="status">正在初始化…</div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <div class="modal-mask" id="config-mask">
+    <div class="modal">
+      <h2>高德地图配置</h2>
+      <p>本工具由 <b>高德地图 JS API v2.0</b> 提供地图服务。请前往 <b>高德开放平台</b>（console.amap.com）创建 Web 端（JS API）应用，并如实填写下方信息：</p>
+      <div class="field"><label>Key</label><input id="cfg-key" type="text" placeholder="粘贴高德 JS API Key"></div>
+      <div class="field"><label>安全密钥 securityJsCode（可选，已开启安全密钥时必填）</label><input id="cfg-secret" type="text" placeholder="粘贴安全密钥"></div>
+      <div class="bar">
+        <button class="btn" id="config-cancel">取消</button>
+        <button class="btn primary" id="config-save">保存并重载地图</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ==================== 页面元素引用 ====================
+  // 地图容器、底部状态栏、浮动提示框的三个 DOM 引用
+  const mapEl = document.getElementById('map');
+  const statusEl = document.getElementById('status');
+  const toastEl = document.getElementById('toast');
+
+  // ==================== 全局状态 ====================
+  let map = null;          // 高德地图实例
+  let markers = [];        // 当前地图上的标记数组
+  let markerColor = 0;     // 标记配色游标（用于循环取色）
+  const COLORS = ['#4285F4', '#EA4335', '#F9AB00', '#34A853', '#24C1E0', '#A142F4'];
+
+  const STORAGE_KEY = 'mapMarkerConfig';   // localStorage 中保存高德 Key 的键名
+
+  // ==================== 配置读写（localStorage） ====================
+  // 读取已保存的高德 Key / 安全密钥，解析失败则返回空对象
+  function loadConfig() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch (e) { return {}; }
+  }
+  // 将高德 Key / 安全密钥持久化到 localStorage
+  function saveConfig(cfg) { localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); }
+
+  // ==================== 通知 / 状态栏 ====================
+  // 底部浮动提示：显示 1.8 秒后自动淡出
+  function notify(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+  // 状态栏文案，isError 为真时显示为红色错误样式
+  function setStatus(msg, isError) {
+    statusEl.textContent = msg;
+    statusEl.classList.toggle('error', !!isError);
+  }
+
+  // ==================== 加载高德地图脚本 ====================
+  function loadMap() {
+    const cfg = loadConfig();
+    // 未配置 Key：提示并弹出配置弹窗
+    if (!cfg.key) {
+      setStatus('请先点击右上角「配置」填写高德 Key', true);
+      document.getElementById('config-mask').classList.add('show');
+      return;
+    }
+
+    // 地图脚本已加载过，直接初始化
+    if (window.AMap) { initMap(cfg); return; }
+
+    // 若开启了高德安全密钥，需先挂载全局安全配置对象
+    if (cfg.secret) {
+      window._AMapSecurityConfig = { securityJsCode: cfg.secret };
+    }
+    // 动态注入高德 JS API v2.0 脚本，并声明需要的插件
+    const script = document.createElement('script');
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(cfg.key)}&plugin=AMap.Scale,AMap.ToolBar,AMap.MapType`;
+    script.onload = () => {
+      if (window.AMap) initMap(cfg);
+      else setStatus('地图加载失败：Key 无效或未启用 Web 服务', true);
+    };
+    script.onerror = () => setStatus('地图脚本加载失败，请检查网络或 Key', true);
+    document.head.appendChild(script);
+  }
+
+  // ==================== 初始化地图 ====================
+  function initMap(cfg) {
+    // 创建地图实例：默认中心为中国、缩放级别 5、2D 视图
+    map = new AMap.Map(mapEl, {
+      zoom: 5,
+      center: [104.1954, 35.8617],
+      viewMode: '2D',
+    });
+    // 加载并添加比例尺、工具栏、地图类型切换控件
+    map.plugin(['AMap.Scale', 'AMap.ToolBar', 'AMap.MapType'], () => {
+      map.addControl(new AMap.Scale());
+      map.addControl(new AMap.ToolBar());
+      map.addControl(new AMap.MapType());
+    });
+    // 点击地图任意位置 => 在该经纬度添加一个无名标点
+    // （排除点击到地图控件的情况，避免误加标记）
+    map.on('click', e => {
+      if (e.originEvent && (e.originEvent.target && e.originEvent.target._amap_ctrl_type)) return;
+      addMarker(e.lnglat.lng, e.lnglat.lat, '');
+    });
+    setStatus('地图已就绪，共 ' + markers.length + ' 个标记');
+    restoreMarkers();
+  }
+
+  // ==================== 添加单个标点 ====================
+  function addMarker(lng, lat, name) {
+    // 经纬度合法性校验：必须是有限数字且在合理范围内
+    const isValid = isFinite(lng) && isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90;
+    if (!isValid) { notify('经纬度无效'); return; }
+
+    // 循环取色，让每个标点颜色不同
+    const color = COLORS[markerColor % COLORS.length];
+    markerColor++;
+
+    // 创建高德 Marker，位置 = 经纬度，上方显示名称标签
+    const marker = new AMap.Marker({
+      position: [lng, lat],
+      label: {
+        content: `<div style="background:${color};color:#fff;padding:3px 8px;border-radius:6px;font-size:12px;white-space:nowrap;">${escapeHtml(name || '标点 ' + markerColor)}</div>`,
+        direction: 'top',
+        offset: new AMap.Pixel(0, -6),
+      },
+      title: name || '标点',
+    });
+    // 保存标点业务数据（坐标/名称/颜色/序号），供列表与事件使用
+    marker._data = { lng, lat, name, color, index: markerColor };
+    // 点击地图上的标点 => 回填顶部经纬度输入框并居中地图
+    marker.on('click', () => {
+      if (marker._data) {
+        document.getElementById('lng').value = marker._data.lng;
+        document.getElementById('lat').value = marker._data.lat;
+        document.getElementById('name').value = marker._data.name || '';
+        map.setCenter([marker._data.lng, marker._data.lat]);
+      }
+    });
+    marker.setMap(map);        // 挂载到地图
+    markers.push(marker);      // 加入内存数组
+    renderList();              // 刷新侧边列表
+    setStatus('已添加：' + (name || `标点 ${markerColor}`) + `（${lng}, ${lat}），共 ${markers.length} 个标记`);
+  }
+
+  // ==================== HTML 转义 ====================
+  // 防止用户输入的名称被当作 HTML 注入（XSS 防护）
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  // ==================== 删除单个标点 ====================
+  function removeMarker(marker) {
+    marker.setMap(null);              // 从地图移除
+    const idx = markers.indexOf(marker);
+    if (idx > -1) markers.splice(idx, 1);   // 从数组移除
+    renderList();
+  }
+
+  // ==================== 渲染标记列表 ====================
+  function renderList() {
+    const listEl = document.getElementById('marker-list');
+    const emptyEl = document.getElementById('empty');
+    listEl.innerHTML = '';
+    emptyEl.style.display = markers.length ? 'none' : 'block';   // 无标记时展示占位文案
+    markers.forEach((m, i) => {
+      const d = m._data;
+      const item = document.createElement('div');
+      item.className = 'marker-item';
+      item.innerHTML = `
+        <div class="dot" style="background:${d.color}"></div>
+        <div class="info">
+          <div class="name">${escapeHtml(d.name || '标点 ' + d.index)}</div>
+          <div class="coord">${d.lng}, ${d.lat}</div>
+        </div>
+        <button class="del" title="删除">✕</button>`;
+      // 列表项内的删除按钮 => 删除对应标点（阻止冒泡，避免触发居中）
+      item.querySelector('.del').addEventListener('click', e => {
+        e.stopPropagation();
+        removeMarker(m);
+      });
+      // 点击列表项 => 地图居中到该标点
+      item.addEventListener('click', () => map.setCenter([d.lng, d.lat]));
+      listEl.appendChild(item);
+    });
+  }
+
+  // ==================== 恢复历史标点（本地持久化） ====================
+  // 刷新后从 localStorage 读取上次的点，重新添加到地图
+  function restoreMarkers() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('mapMarkerPoints')) || [];
+      saved.forEach(p => addMarker(p.lng, p.lat, p.name));
+      if (saved.length) {
+        map.setFitView(markers, false, [80, 80, 80, 80]);   // 自适应视野包住所有标点
+      }
+    } catch (e) {}
+  }
+
+  // ==================== 持久化标点 ====================
+  // 将当前标记数据序列化并写入 localStorage
+  function persistPoints() {
+    localStorage.setItem('mapMarkerPoints', JSON.stringify(markers.map(m => m._data)));
+  }
+
+  // ==================== 事件绑定 ====================
+  // 【添加】按钮：读取输入框的经/纬度/名称并添加标点
+  document.getElementById('add').addEventListener('click', () => {
+    const lng = parseFloat(document.getElementById('lng').value);
+    const lat = parseFloat(document.getElementById('lat').value);
+    const name = document.getElementById('name').value.trim();
+    if (!isFinite(lng) || !isFinite(lat)) { notify('请先填写经度、纬度'); return; }
+    addMarker(lng, lat, name);
+  });
+
+  // 【清空全部】按钮：移除地图上所有标记
+  document.getElementById('clear-all').addEventListener('click', () => {
+    if (!markers.length) return;
+    markers.forEach(m => m.setMap(null));
+    markers = [];
+    renderList();
+    setStatus('已清除全部标记');
+  });
+
+  // 【页签切换】：在"标记列表"与"批量导入"之间切换
+  document.querySelectorAll('.tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-body').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    });
+  });
+
+  // 【批量导入】按钮：按格式逐行解析并批量添加标点
+  document.getElementById('batch-add').addEventListener('click', () => {
+    const text = document.getElementById('batch-input').value.trim();
+    if (!text) { notify('请输入批量数据'); return; }
+    const before = markers.length;
+    text.split(/\r?\n/).forEach(line => {   // 按行拆分
+      line = line.trim();
+      if (!line) return;
+      const parts = line.split(/[,\s，]+/).filter(Boolean);   // 按逗号/空格/中文逗号拆分
+      let name = '', lng, lat;
+      if (parts.length >= 3) {      // 格式：名称,经度,纬度
+        name = parts[0];
+        lng = parseFloat(parts[1]);
+        lat = parseFloat(parts[2]);
+      } else if (parts.length === 2) {   // 格式：经度,纬度
+        lng = parseFloat(parts[0]);
+        lat = parseFloat(parts[1]);
+      }
+      if (isFinite(lng) && isFinite(lat)) addMarker(lng, lat, name);
+    });
+    const added = markers.length - before;
+    notify(`已导入 ${added} 个标记`);
+  });
+
+  // 【清空】按钮：清空批量导入文本框
+  document.getElementById('batch-clear').addEventListener('click', () => {
+    document.getElementById('batch-input').value = '';
+  });
+
+  // ==================== 配置弹窗 ====================
+  const mask = document.getElementById('config-mask');
+  // 【⚙️ 配置】按钮：打开弹窗并回填已保存的 Key / 安全密钥
+  document.getElementById('settings').addEventListener('click', () => {
+    const cfg = loadConfig();
+    document.getElementById('cfg-key').value = cfg.key || '';
+    document.getElementById('cfg-secret').value = cfg.secret || '';
+    mask.classList.add('show');
+  });
+  // 【取消】按钮：关闭弹窗
+  document.getElementById('config-cancel').addEventListener('click', () => mask.classList.remove('show'));
+  // 【保存】按钮：校验 Key 非空，保存配置并重载页面以重新初始化地图
+  document.getElementById('config-save').addEventListener('click', () => {
+    const key = document.getElementById('cfg-key').value.trim();
+    const secret = document.getElementById('cfg-secret').value.trim();
+    if (!key) { notify('Key 不能为空'); return; }
+    saveConfig({ key, secret });
+    mask.classList.remove('show');
+    location.reload();
+  });
+
+  // ==================== 标点自动持久化 ====================
+  // 包装 renderList：每次列表渲染后顺手保存标点快照
+  const origRender = renderList;
+  renderList = function() {
+    origRender();
+    persistPoints();
+  };
+
+  // ==================== 启动 ====================
+  loadMap();
+</script>
+</body>
+</html>

@@ -1,0 +1,304 @@
+:root {
+  --md-primary: #4285F4;
+  --md-primary-rgb: 66, 133, 244;
+  --md-on-primary: #ffffff;
+  --md-surface: #ffffff;
+  --md-surface-dim: #f8f9fa;
+  --md-surface-container: #f1f3f4;
+  --md-on-surface: #202124;
+  --md-on-surface-variant: #5f6368;
+  --md-outline: #dadce0;
+  --md-outline-variant: #e8eaed;
+  --md-error: #d93025;
+  --md-shadow-1: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
+  --md-shadow-2: 0 1px 3px rgba(60, 64, 67, .3), 0 4px 8px 3px rgba(60, 64, 67, .15);
+  --md-shadow-3: 0 2px 6px rgba(60, 64, 67, .3), 0 8px 16px 4px rgba(60, 64, 67, .15);
+  --md-radius-s: 8px;
+  --md-radius-m: 16px;
+  --md-radius-l: 24px;
+  --md-transition: 200ms cubic-bezier(.2, 0, 0, 1);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--md-surface-dim);
+  color: var(--md-on-surface);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- App bar ---------- */
+.app-bar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 24px;
+  background: var(--md-surface);
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.app-bar .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.app-bar .logo-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: conic-gradient(#4285F4 0 25%, #EA4335 0 50%, #FBBC05 0 75%, #34A853 0 100%);
+  box-shadow: var(--md-shadow-1);
+}
+
+.app-bar .logo-title {
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: .1px;
+}
+
+.app-bar .back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--md-on-surface);
+  font-size: 22px;
+  cursor: pointer;
+  transition: background var(--md-transition);
+}
+
+.app-bar .back-btn:hover {
+  background: rgba(60, 64, 67, .08);
+}
+
+.app-bar .spacer {
+  flex: 1;
+}
+
+/* ---------- Hero ---------- */
+.hero {
+  padding: 48px 24px 8px;
+  text-align: center;
+}
+
+.hero h1 {
+  font-size: 44px;
+  font-weight: 500;
+  letter-spacing: -.5px;
+  background: linear-gradient(90deg, #4285F4, #EA4335, #FBBC05, #34A853);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero p {
+  margin-top: 12px;
+  font-size: 18px;
+  color: var(--md-on-surface-variant);
+}
+
+/* ---------- Content ---------- */
+.content {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* ---------- Section / category ---------- */
+.category {
+  margin-top: 32px;
+}
+
+.category:first-child {
+  margin-top: 8px;
+}
+
+.category h2 {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--md-on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  margin: 0 8px 16px;
+}
+
+/* ---------- Tool grid ---------- */
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: var(--md-surface);
+  border-radius: var(--md-radius-m);
+  box-shadow: var(--md-shadow-1);
+  border: 1px solid var(--md-outline-variant);
+  text-decoration: none;
+  color: inherit;
+  transition: transform var(--md-transition), box-shadow var(--md-transition);
+  position: relative;
+  overflow: hidden;
+}
+
+.tool-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--tool-accent, var(--md-primary));
+}
+
+.tool-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--md-shadow-2);
+}
+
+.tool-card .tool-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--md-radius-m);
+  background: rgba(var(--tool-accent-rgb, 66, 133, 244), .12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+}
+
+.tool-card .tool-name {
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.tool-card .tool-desc {
+  font-size: 14px;
+  color: var(--md-on-surface-variant);
+  line-height: 1.5;
+  flex: 1;
+}
+
+.tool-card .tool-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: var(--md-surface-container);
+  color: var(--md-on-surface-variant);
+}
+
+/* ---------- Tool detail page ---------- */
+.tool-shell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.tool-shell .tool-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.tool-shell .tool-head .tool-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--md-radius-m);
+  background: rgba(var(--tool-accent-rgb, 66, 133, 244), .12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+}
+
+.tool-shell .tool-head .tool-title {
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.tool-shell .tool-head .tool-desc {
+  font-size: 14px;
+  color: var(--md-on-surface-variant);
+  margin-top: 2px;
+}
+
+.tool-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 640px;
+  border: none;
+  border-radius: var(--md-radius-m);
+  background: var(--md-surface);
+  box-shadow: var(--md-shadow-1);
+}
+
+/* ---------- Footer ---------- */
+.footer {
+  padding: 20px 24px 28px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+}
+
+/* ---------- States & misc ---------- */
+.loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 0;
+  color: var(--md-on-surface-variant);
+}
+
+.skeleton {
+  height: 180px;
+  border-radius: var(--md-radius-m);
+  background: linear-gradient(90deg, #f1f3f4 25%, #e8eaed 37%, #f1f3f4 63%);
+  background-size: 400% 100%;
+  animation: shimmer 1.4s ease infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media (max-width: 600px) {
+  .hero h1 { font-size: 32px; }
+  .hero p { font-size: 15px; }
+  .tool-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+  .tool-card { padding: 16px; }
+}

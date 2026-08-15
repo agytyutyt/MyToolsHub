@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Base64 编解码</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, sans-serif;
+    color: #202124; padding: 24px; max-width: 900px; margin: 0 auto;
+  }
+  .bar { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .btn {
+    border: 1px solid #dadce0; background: #fff; color: #1a73e8;
+    padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: 500;
+    cursor: pointer; transition: background .2s, box-shadow .2s;
+  }
+  .btn:hover { background: #f1f5fd; box-shadow: 0 1px 2px rgba(60,64,67,.3); }
+  .btn.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+  .btn.primary:hover { background: #1967d2; }
+  textarea {
+    width: 100%; height: 180px; padding: 14px; font-family: "Roboto Mono", Consolas, monospace;
+    font-size: 13px; border: 1px solid #dadce0; border-radius: 12px; resize: vertical;
+    outline: none; background: #fff; line-height: 1.6;
+  }
+  textarea:focus { border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,.2); }
+  .label { font-size: 13px; color: #5f6368; margin: 4px 0 8px; }
+  .status { font-size: 13px; color: #5f6368; margin-top: 10px; }
+  .status.error { color: #d93025; }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: #202124; color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="label">输入文本（支持中文）</div>
+  <textarea id="input" placeholder="在此输入要编码或解码的文本…"></textarea>
+  <div class="bar">
+    <button class="btn primary" id="encode">编码 ▸ Base64</button>
+    <button class="btn" id="decode">解码 ▸ 文本</button>
+    <button class="btn" id="clear">清空</button>
+  </div>
+  <div class="label">输出结果</div>
+  <textarea id="output" placeholder="结果将显示在这里…" readonly></textarea>
+  <button class="btn" id="copy" style="margin-top: 12px;">复制结果</button>
+  <div class="status" id="status"></div>
+  <div class="toast" id="toast"></div>
+
+<script>
+  const input = document.getElementById('input');
+  const output = document.getElementById('output');
+  const status = document.getElementById('status');
+  const toast = document.getElementById('toast');
+
+  const utf8Encode = s => new TextEncoder().encode(s);
+  const utf8Decode = bytes => new TextDecoder('utf-8').decode(bytes);
+
+  function bytesToBase64(bytes) {
+    let bin = '';
+    bytes.forEach(b => bin += String.fromCharCode(b));
+    return btoa(bin);
+  }
+  function base64ToBytes(b64) {
+    const bin = atob(b64.replace(/\s+/g, ''));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function notify(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1500);
+  }
+
+  document.getElementById('encode').addEventListener('click', () => {
+    try {
+      output.value = bytesToBase64(utf8Encode(input.value));
+      status.textContent = `已编码，长度 ${output.value.length} 字符`;
+      status.classList.remove('error');
+    } catch (e) { status.textContent = '编码失败'; status.classList.add('error'); }
+  });
+
+  document.getElementById('decode').addEventListener('click', () => {
+    try {
+      output.value = utf8Decode(base64ToBytes(input.value));
+      status.textContent = '解码成功';
+      status.classList.remove('error');
+    } catch (e) {
+      status.textContent = '解码失败：输入不是合法的 Base64';
+      status.classList.add('error');
+    }
+  });
+
+  document.getElementById('clear').addEventListener('click', () => {
+    input.value = output.value = '';
+    status.textContent = '';
+  });
+
+  document.getElementById('copy').addEventListener('click', () => {
+    if (!output.value) return;
+    navigator.clipboard.writeText(output.value).then(() => notify('已复制'));
+  });
+</script>
+</body>
+</html>

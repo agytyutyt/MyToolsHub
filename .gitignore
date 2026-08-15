@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 运行时日志与进程文件
+logs/
+.server.*
+*.log
+*.pid
+
+# 插件本地运行配置（含密钥，勿提交）
+plugins/character-graph/backend/config.json
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 环境变量
+.env

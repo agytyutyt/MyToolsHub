@@ -1,0 +1,52 @@
+{
+  "site": {
+    "title": "JZ 工具箱",
+    "subtitle": "一切皆插件 · 配置驱动的工具集合",
+    "footer": "JZToolsHub · 基于 Flask + 配置驱动插件机制",
+    "logging": true
+  },
+  "categories": [
+    { "id": "dev", "name": "开发者工具" },
+    { "id": "design", "name": "设计工具" },
+    { "id": "ai", "name": "AI 智能工具" },
+    { "id": "maps", "name": "地图工具" }
+  ],
+  "tools": [
+    {
+      "id": "json-formatter",
+      "category": "dev",
+      "enabled": true,
+      "order": 1
+    },
+    {
+      "id": "base64",
+      "category": "dev",
+      "enabled": true,
+      "order": 2
+    },
+    {
+      "id": "color-picker",
+      "category": "design",
+      "enabled": true,
+      "order": 3
+    },
+    {
+      "id": "md5-generator",
+      "category": "dev",
+      "enabled": true,
+      "order": 3
+    },
+    {
+      "id": "character-graph",
+      "category": "ai",
+      "enabled": true,
+      "order": 4
+    },
+    {
+      "id": "map-marker",
+      "category": "maps",
+      "enabled": true,
+      "order": 5
+    }
+  ]
+}

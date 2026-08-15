@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MD5 生成器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --primary: #4285F4; --primary-rgb: 66,133,244;
+    --accent: #FBBC05; --surface: #ffffff; --surface-dim: #f8f9fa;
+    --on-surface: #202124; --on-surface-variant: #5f6368; --outline: #dadce0;
+    --ok: #188038; --err: #d93025; --radius: 12px;
+  }
+  body {
+    font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, sans-serif;
+    background: var(--surface-dim); color: var(--on-surface);
+    padding: 20px; max-width: 860px; margin: 0 auto;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: var(--on-surface-variant); margin-bottom: 16px; }
+
+  /* 页签 */
+  .tabs { display: flex; gap: 6px; background: #eef0f4; padding: 4px; border-radius: 999px; margin-bottom: 18px; width: min(360px, 100%); }
+  .tabs button {
+    flex: 1; padding: 9px 0; border: none; border-radius: 999px;
+    background: transparent; font-size: 14px; font-weight: 500; color: var(--on-surface-variant);
+    cursor: pointer; transition: all .18s;
+  }
+  .tabs button.active { background: var(--surface); color: var(--on-surface); box-shadow: 0 1px 2px rgba(60,64,67,.3); }
+  .pane { display: none; }
+  .pane.active { display: block; }
+
+  .card { background: var(--surface); border: 1px solid var(--outline); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; }
+  .card h2 { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .field { flex: 1; min-width: 180px; }
+  label { display: block; font-size: 12px; color: var(--on-surface-variant); margin-bottom: 6px; }
+
+  input[type="text"], textarea, select {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--outline);
+    border-radius: 8px; font-size: 14px; outline: none; background: var(--surface);
+    color: var(--on-surface); font-family: inherit;
+  }
+  input[type="text"]:focus, textarea:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--primary-rgb), .18); }
+  textarea { min-height: 88px; resize: vertical; font-family: "Roboto Mono", Consolas, monospace; font-size: 13px; }
+
+  /* 计算方式分段按钮 */
+  .seg { display: flex; background: #f1f3f4; border-radius: 8px; padding: 3px; }
+  .seg button {
+    flex: 1; padding: 7px 12px; border: none; border-radius: 6px; background: transparent;
+    font-size: 13px; color: var(--on-surface-variant); cursor: pointer; transition: all .15s;
+  }
+  .seg button.active { background: var(--surface); color: var(--primary); font-weight: 600; box-shadow: 0 1px 2px rgba(60,64,67,.25); }
+
+  /* 结果 */
+  .result {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    background: #f8f9fa; border: 1px solid #e8eaed; border-radius: 8px; margin-top: 8px;
+  }
+  .result .label { flex-shrink: 0; font-size: 12px; color: var(--on-surface-variant); width: 42px; font-weight: 600; }
+  .result .value { flex: 1; font-family: "Roboto Mono", Consolas, monospace; font-size: 13px; word-break: break-all; user-select: all; }
+  .btn {
+    border: 1px solid var(--outline); background: var(--surface); color: var(--primary);
+    padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: background .18s, box-shadow .18s;
+  }
+  .btn:hover { background: rgba(var(--primary-rgb), .06); box-shadow: 0 1px 2px rgba(60,64,67,.3); }
+  .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .btn.primary:hover { background: #3367d6; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  .hint { font-size: 12px; color: var(--on-surface-variant); margin-top: 8px; }
+
+  /* 校验结果 */
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 10px; }
+  .badge.ok { background: rgba(24,128,56,.1); color: var(--ok); }
+  .badge.err { background: rgba(217,48,37,.1); color: var(--err); }
+
+  /* 拖拽区 */
+  .dropzone {
+    border: 1.5px dashed #bdc1c6; border-radius: 8px; padding: 18px; text-align: center;
+    font-size: 13px; color: var(--on-surface-variant); cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.dragover { border-color: var(--primary); background: rgba(var(--primary-rgb), .05); }
+  .file-meta { font-size: 12px; color: var(--on-surface-variant); margin-top: 8px; word-break: break-all; }
+
+  .meta-row { display: flex; gap: 16px; font-size: 12px; color: var(--on-surface-variant); margin-top: 10px; flex-wrap: wrap; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: #202124; color: #fff; padding: 10px 16px; border-radius: 8px;
+    font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 99;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <h1>MD5 生成器</h1>
+  <p class="sub">支持文本与文件 · 可选 Hash / HMAC-MD5 · 实时计算与校验</p>
+
+  <div class="tabs">
+    <button id="tabCalc" class="active">计算</button>
+    <button id="tabVerify">校验</button>
+  </div>
+
+  <!-- ==================== 计算 ==================== -->
+  <section class="pane active" id="calcPane">
+    <div class="card">
+      <h2>计算方式</h2>
+      <div class="row">
+        <div class="seg" style="flex:1;">
+          <button id="modeHash" class="active">Hash</button>
+          <button id="modeHmac">HMAC-Auth</button>
+        </div>
+        <div class="field" id="keyField" style="display:none; min-width:220px;">
+          <label>密钥 (Key)</label>
+          <input type="text" id="hashKey" placeholder="输入 HMAC 密钥" autocomplete="off">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="inputTitle">文本输入</h2>
+      <div class="seg" style="width: 200px; margin-bottom: 12px;">
+        <button id="srcText" class="active">文本</button>
+        <button id="srcFile">文件</button>
+      </div>
+      <div id="textWrap">
+        <textarea id="calcText" placeholder="在此输入文本，实时显示 MD5 值…"></textarea>
+      </div>
+      <div id="fileWrap" style="display:none;">
+        <div class="dropzone" id="calcDrop">
+          <p>拖拽文件到此处，或点击选择文件</p>
+        </div>
+        <input type="file" id="calcFile" hidden>
+        <div class="file-meta" id="calcFileMeta"></div>
+      </div>
+      <div id="calcResults"></div>
+    </div>
+
+    <div class="hint">💡 计算结果实时刷新 · Ctrl+Enter 也可触发计算</div>
+  </section>
+
+  <!-- ==================== 校验 ==================== -->
+  <section class="pane" id="verifyPane">
+    <div class="card">
+      <h2>计算方式</h2>
+      <div class="row">
+        <div class="seg" style="flex:1;">
+          <button id="vModeHash" class="active">Hash</button>
+          <button id="vModeHmac">HMAC-Auth</button>
+        </div>
+        <div class="field" id="vKeyField" style="display:none; min-width:220px;">
+          <label>密钥 (Key)</label>
+          <input type="text" id="vKey" placeholder="输入 HMAC 密钥" autocomplete="off">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>待校验内容</h2>
+      <div class="seg" style="width: 200px; margin-bottom: 12px;">
+        <button id="vSrcText" class="active">文本</button>
+        <button id="vSrcFile">文件</button>
+      </div>
+      <div id="vTextWrap">
+        <textarea id="verifyText" placeholder="输入原文/原文件内容…"></textarea>
+      </div>
+      <div id="vFileWrap" style="display:none;">
+        <div class="dropzone" id="verifyDrop">
+          <p>拖拽文件到此处，或点击选择文件</p>
+        </div>
+        <input type="file" id="verifyFile" hidden>
+        <div class="file-meta" id="verifyFileMeta"></div>
+      </div>
+      <div style="margin-top:12px;"></div>
+      <label>期望 MD5 值</label>
+      <input type="text" id="expectMd5" placeholder="输入要校验的 MD5（32 位十六进制）" autocomplete="off" spellcheck="false">
+      <div style="margin-top:12px;">
+        <button class="btn primary" id="verifyBtn" disabled>校验</button>
+      </div>
+      <div id="verifyResult"></div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="md5.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function toast(msg) {
+      const t = $("toast");
+      t.textContent = msg;
+      t.classList.add("show");
+      setTimeout(() => t.classList.remove("show"), 1500);
+    }
+
+    function copy(text) {
+      if (!text) return false;
+      navigator.clipboard.writeText(text).then(() => toast("已复制"));
+      return true;
+    }
+
+    /* ---------- 计算参数 ---------- */
+    let calcMode = "hash";   // hash | hmac
+    let calcSrc = "text";    // text | file
+    let calcFileBytes = null;
+
+    /* ---------- 校验参数 ---------- */
+    let verifyMode = "hash";
+    let verifySrc = "text";
+    let verifyFileBytes = null;
+
+    /* ---------- 页签 ---------- */
+    $("tabCalc").onclick = () => switchTab("calc");
+    $("tabVerify").onclick = () => switchTab("verify");
+    function switchTab(name) {
+      $("tabCalc").classList.toggle("active", name === "calc");
+      $("tabVerify").classList.toggle("active", name === "verify");
+      $("calcPane").classList.toggle("active", name === "calc");
+      $("verifyPane").classList.toggle("active", name === "verify");
+      if (name === "calc") calc();
+      else refreshVerify();
+    }
+
+    /* ---------- 计算方式切换 ---------- */
+    $("modeHash").onclick = () => { calcMode = "hash"; $("modeHash").classList.add("active"); $("modeHmac").classList.remove("active"); $("keyField").style.display = "none"; calc(); };
+    $("modeHmac").onclick = () => { calcMode = "hmac"; $("modeHmac").classList.add("active"); $("modeHash").classList.remove("active"); $("keyField").style.display = ""; calc(); };
+    $("vModeHash").onclick = () => { verifyMode = "hash"; $("vModeHash").classList.add("active"); $("vModeHmac").classList.remove("active"); $("vKeyField").style.display = "none"; refreshVerify(); };
+    $("vModeHmac").onclick = () => { verifyMode = "hmac"; $("vModeHmac").classList.add("active"); $("vModeHash").classList.remove("active"); $("vKeyField").style.display = ""; refreshVerify(); };
+
+    /* ---------- 输入来源切换 ---------- */
+    $("srcText").onclick = () => { calcSrc = "text"; $("srcText").classList.add("active"); $("srcFile").classList.remove("active"); $("inputTitle").textContent = "文本输入"; $("textWrap").style.display = ""; $("fileWrap").style.display = "none"; calc(); };
+    $("srcFile").onclick = () => { calcSrc = "file"; $("srcFile").classList.add("active"); $("srcText").classList.remove("active"); $("inputTitle").textContent = "文件输入"; $("textWrap").style.display = "none"; $("fileWrap").style.display = ""; calc(); };
+    $("vSrcText").onclick = () => { verifySrc = "text"; $("vSrcText").classList.add("active"); $("vSrcFile").classList.remove("active"); $("vTextWrap").style.display = ""; $("vFileWrap").style.display = "none"; refreshVerify(); };
+    $("vSrcFile").onclick = () => { verifySrc = "file"; $("vSrcFile").classList.add("active"); $("vSrcText").classList.remove("active"); $("vTextWrap").style.display = "none"; $("vFileWrap").style.display = ""; refreshVerify(); };
+
+    /* ---------- 文本输入绑定 ---------- */
+    $("calcText").addEventListener("input", calc);
+    $("hashKey").addEventListener("input", calc);
+    $("vKey").addEventListener("input", refreshVerify);
+    $("expectMd5").addEventListener("input", refreshVerify);
+
+    /* ---------- 文件选择/拖拽 ---------- */
+    function bindFile(btn, input, drop, meta, onChange) {
+      // 点击选择
+      $(btn).addEventListener("click", (e) => { e.stopPropagation(); $(input).click(); });
+      $(drop).addEventListener("click", () => $(input).click());
+      $(input).addEventListener("change", () => {
+        const f = $(input).files[0];
+        onChange(f);
+        $(meta).textContent = f ? `${f.name} · ${(f.size / 1024).toFixed(1)} KB` : "";
+      });
+      ["dragenter", "dragover"].forEach((ev) => $(drop).addEventListener(ev, (e) => { e.preventDefault(); $(drop).classList.add("dragover"); }));
+      ["dragleave", "drop"].forEach((ev) => $(drop).addEventListener(ev, (e) => { e.preventDefault(); $(drop).classList.remove("dragover"); }));
+      $(drop).addEventListener("drop", (e) => {
+        const f = e.dataTransfer.files[0];
+        if (!f) return;
+        const dt = new DataTransfer();
+        dt.items.add(f);
+        $(input).files = dt.files;
+        $(input).dispatchEvent(new Event("change"));
+      });
+    }
+
+    function readFileBytes(file, cb) {
+      if (!file) { cb(null); return; }
+      const r = new FileReader();
+      r.onload = () => cb(new Uint8Array(r.result));
+      r.onerror = () => cb(null);
+      r.readAsArrayBuffer(file);
+    }
+
+    bindFile("calcDrop", "calcFile", "calcDrop", "calcFileMeta", (f) => {
+      readFileBytes(f, (bytes) => { calcFileBytes = bytes; calc(); });
+    });
+    bindFile("verifyDrop", "verifyFile", "verifyDrop", "verifyFileMeta", (f) => {
+      readFileBytes(f, (bytes) => { verifyFileBytes = bytes; refreshVerify(); });
+    });
+
+    /* ---------- 计算 ---------- */
+    function getCalcInput() {
+      if (calcSrc === "text") {
+        const s = $("calcText").value.trim();
+        return { type: "bytes", bytes: new TextEncoder().encode(s), label: "文本", chars: s.length };
+      }
+      return { type: "bytes", bytes: calcFileBytes, label: "文件", chars: calcFileBytes ? calcFileBytes.length : 0 };
+    }
+
+    function calc() {
+      const wrap = $("calcResults");
+      const input = calcSrc === "text" ? $("calcText").value.trim() : calcFileBytes;
+      if (calcSrc === "file" && !calcFileBytes) { wrap.innerHTML = '<div class="hint">请先选择文件</div>'; return; }
+      if (calcSrc === "text" && !input) { wrap.innerHTML = '<div class="hint">输入内容后自动计算</div>'; return; }
+
+      let md5, hmac = null, bytes = null;
+      if (calcSrc === "text") bytes = new TextEncoder().encode(input);
+      else bytes = calcFileBytes;
+
+      if (calcMode === "hash") {
+        md5 = MD5.md5HexOfBytes(bytes);
+      } else {
+        const key = $("hashKey").value;
+        if (!key) { wrap.innerHTML = '<div class="hint">请输入 HMAC 密钥</div>'; return; }
+        const keyBytes = new TextEncoder().encode(key);
+        hmac = MD5.md5HexOfBytes(MD5.raw.hmacBytes(keyBytes, bytes));
+      }
+
+      const items = [["MD5", md5 || hmac]].filter(([, v]) => v);
+
+      const html = items.map(([l, v]) => {
+        const lower = v.toLowerCase();
+        const upper = v.toUpperCase();
+        return `
+          <div class="result" style="flex-direction:column; align-items:stretch; gap:8px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span class="label">${l}</span>
+              <span class="value">${lower}</span>
+              <button class="btn" data-act="copy" data-val="${lower}">复制</button>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span class="label">&nbsp;</span>
+              <span class="value" style="color:var(--on-surface-variant);">${upper}</span>
+              <button class="btn" data-act="copy" data-val="${upper}">复制</button>
+            </div>
+          </div>`;
+      }).join("");
+
+      wrap.innerHTML = html;
+      const bytesLen = bytes.length;
+      const charInfo = calcSrc === "text" ? `${bytesLen} 字节` : `${(bytesLen / 1024).toFixed(1)} KB`;
+      const info = document.createElement("div");
+      info.className = "meta-row";
+      info.textContent = `${charInfo} · ${calcMode === "hash" ? "Hash 模式" : "HMAC-Auth 模式"}`;
+      wrap.appendChild(info);
+
+      wrap.querySelectorAll("[data-act=copy]").forEach((b) => b.addEventListener("click", () => copy(b.dataset.val)));
+    }
+    $("calcText").addEventListener("keydown", (e) => { if (e.ctrlKey && e.key === "Enter") calc(); });
+
+    /* ---------- 校验 ---------- */
+    function getVerifyInput() {
+      if (verifySrc === "text") {
+        return new TextEncoder().encode($("verifyText").value);
+      }
+      return verifyFileBytes;
+    }
+
+    function refreshVerify() {
+      const btn = $("verifyBtn");
+      const expectVal = $("expectMd5").value.trim();
+      const hasInput = verifySrc === "text" ? $("verifyText").value.length > 0 : !!verifyFileBytes;
+      btn.disabled = !(hasInput && expectVal.length > 0);
+      renderVerifyResult();
+    }
+    $("verifyText").addEventListener("input", refreshVerify);
+
+    function renderVerifyResult() {
+      const result = $("verifyResult");
+      const hasInput = verifySrc === "text" ? $("verifyText").value.length > 0 : !!verifyFileBytes;
+      const expectVal = $("expectMd5").value.trim();
+      if (!hasInput || !expectVal) { result.innerHTML = ""; return; }
+      const bytes = getVerifyInput();
+      let actual = null;
+      if (verifyMode === "hash") actual = MD5.md5HexOfBytes(bytes);
+      else {
+        const key = $("vKey").value;
+        if (!key) { result.innerHTML = '<div class="hint">请输入密钥后校验</div>'; return; }
+        actual = MD5.md5HexOfBytes(MD5.raw.hmacBytes(new TextEncoder().encode(key), bytes));
+      }
+      const ok = actual.toLowerCase() === expectVal.toLowerCase();
+      const msg = `${(verifySrc === "text" ? "文本" : "文件")}实际值：${actual}`;
+      result.innerHTML = `
+        <div class="badge ${ok ? "ok" : "err"}">${ok ? "✓ 校验通过，MD5 匹配" : "✗ 校验失败，MD5 不一致"}</div>
+        <div style="margin-top:8px; font-size:12px; color:var(--on-surface-variant); word-break:break-all;">${msg}</div>`;
+      result.innerHTML += ` <button class="btn" data-act="copy-log">复制实际值</button>`;
+      result.querySelector("[data-act=copy-log]").addEventListener("click", () => copy(actual));
+    }
+
+    $("verifyBtn").addEventListener("click", () => { renderVerifyResult(); });
+
+    // 初始化
+    calc();
+  </script>
+</body>
+</html>
