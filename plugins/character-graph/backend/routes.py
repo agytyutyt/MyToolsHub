@@ -3,10 +3,20 @@
 将原项目(character-graph)的 FastAPI 后端移植为 Flask 路由，
 复用同目录下的 llm_client.py / document_reader.py（未修改）。
 所有接口挂在 /api/character-graph 前缀下，与主应用其他工具隔离。
+
+并发设计：
+- /analyze 仅做文件接收与参数校验，立即返回 task_id（毫秒级），
+  长耗时的文档解析 + 大模型调用放到后台线程池执行，
+  不再占用 HTTP worker —— 避免多个并发分析拖垮整个站点。
+- 前端通过 GET /result/<task_id> 轮询任务状态。
 """
 
 import json
 import os
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import jsonify, request
 
@@ -16,6 +26,16 @@ PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
 PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
 API_PREFIX = "/api/character-graph"
+
+# 后台分析线程池：限制并发 LLM 任务数，防止大模型调用耗尽资源
+ANALYZE_WORKERS = 2
+_analyze_executor = ThreadPoolExecutor(max_workers=ANALYZE_WORKERS)
+
+# 任务状态存储：task_id -> {status, filename, ...}
+# status: pending -> running -> done / error
+TASKS = {}
+TASKS_LOCK = threading.Lock()
+TASK_TTL_SECONDS = 30 * 60  # 任务结果保留 30 分钟
 
 DEFAULT_CONFIG = {
     "ui": {"api_source": "web"},
@@ -80,6 +100,69 @@ def ensure_config_files() -> None:
             json.dump(DEFAULT_PROMPT, f, ensure_ascii=False, indent=2)
 
 
+def set_task(task_id: str, **kwargs) -> None:
+    with TASKS_LOCK:
+        TASKS[task_id] = {**TASKS.get(task_id, {}), **kwargs}
+
+
+def get_task(task_id: str):
+    with TASKS_LOCK:
+        return TASKS.get(task_id)
+
+
+def cleanup_tasks() -> None:
+    """清理过期任务，避免内存无限增长。"""
+    now = time.time()
+    with TASKS_LOCK:
+        expired = [
+            tid for tid, t in TASKS.items()
+            if t.get("created_at", 0) < now - TASK_TTL_SECONDS
+        ]
+        for tid in expired:
+            TASKS.pop(tid, None)
+
+
+def create_task(filename: str, created_at: float) -> str:
+    tid = uuid.uuid4().hex[:12]
+    set_task(tid, status="pending", filename=filename, created_at=created_at)
+    return tid
+
+
+def _run_analysis(task_id: str, filename: str, raw: bytes,
+                  base_url: str, api_key: str, model: str, prompt: dict) -> None:
+    """后台线程执行：文档解析 + 大模型关系抽取。"""
+    try:
+        set_task(task_id, status="running")
+
+        text = document_reader.extract_text(filename, raw)
+        if len(text.strip()) < 5:
+            raise ValueError("文档中提取不到可用文本（PDF 可能是扫描件）")
+
+        if len(text) > 120000:
+            text = text[:120000] + "\n...（文档过长，已截断）"
+
+        graph = llm_client.extract_graph(
+            text, base_url, api_key, model, prompt=prompt
+        )
+        set_task(task_id, status="done", filename=filename, graph=graph)
+    except Exception as e:
+        detail = str(e)
+        if not isinstance(e, llm_client.LLMError):
+            detail = f"分析失败：{detail}"
+        set_task(task_id, status="error", filename=filename, detail=detail)
+
+
+def _submit_analysis(filename: str, raw: bytes,
+                     base_url: str, api_key: str, model: str, prompt: dict) -> str:
+    """提交后台分析任务，返回 task_id。"""
+    task_id = create_task(filename, time.time())
+    cleanup_tasks()  # 顺带清理过期任务
+    _analyze_executor.submit(
+        _run_analysis, task_id, filename, raw, base_url, api_key, model, prompt
+    )
+    return task_id
+
+
 def register(app) -> None:
     """插件入口：由 JZToolsHub 主应用在启动时调用。"""
     ensure_config_files()
@@ -110,6 +193,7 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/analyze")
     def cg_analyze():
+        """接收文件，提交后台任务，立即返回 task_id（不占用 HTTP worker）。"""
         if "file" not in request.files:
             return jsonify({"detail": "缺少文件"}), 400
         file = request.files["file"]
@@ -120,16 +204,7 @@ def register(app) -> None:
         if not raw:
             return jsonify({"detail": "文件为空"}), 400
 
-        try:
-            text = document_reader.extract_text(file.filename, raw)
-        except ValueError as e:
-            return jsonify({"detail": str(e)}), 400
-        except Exception as e:
-            return jsonify({"detail": f"读取文档失败：{e}"}), 500
-
-        if len(text.strip()) < 5:
-            return jsonify({"detail": "文档中提取不到可用文本（PDF 可能是扫描件）"}), 400
-
+        # 前置校验：先检查是否已配置 API Key，避免提交后白等
         cfg = load_config()
         base_url = request.form.get("base_url") or cfg["llm"]["base_url"]
         api_key = request.form.get("api_key") or cfg["llm"]["api_key"]
@@ -140,14 +215,23 @@ def register(app) -> None:
                 "detail": "尚未配置 API Key，请先填写大模型信息（网页模式保存，或编辑 config.json）"
             }), 400
 
-        if len(text) > 120000:
-            text = text[:120000] + "\n...（文档过长，已截断）"
+        task_id = _submit_analysis(
+            file.filename, raw, base_url, api_key, model, load_prompt()
+        )
+        return jsonify({"ok": True, "task_id": task_id})
 
-        try:
-            graph = llm_client.extract_graph(
-                text, base_url, api_key, model, prompt=load_prompt()
-            )
-        except llm_client.LLMError as e:
-            return jsonify({"detail": str(e)}), 502
-
-        return jsonify({"ok": True, "filename": file.filename, "graph": graph})
+    @app.get(f"{API_PREFIX}/result/<task_id>")
+    def cg_result(task_id):
+        """轮询任务状态：pending / running / done / error"""
+        task = get_task(task_id)
+        if not task:
+            return jsonify({"detail": "任务不存在或已过期"}), 404
+        payload = {
+            "status": task.get("status"),
+            "filename": task.get("filename", ""),
+        }
+        if task.get("status") == "done":
+            payload["graph"] = task.get("graph")
+        if task.get("status") == "error":
+            payload["detail"] = task.get("detail", "分析失败")
+        return jsonify(payload)

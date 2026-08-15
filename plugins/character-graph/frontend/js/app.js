@@ -604,15 +604,39 @@ $("analyzeBtn").addEventListener("click", async () => {
 
   const btn = $("analyzeBtn");
   btn.disabled = true;
-  btn.textContent = "分析中…";
-  log(`开始分析《${file.name}》，正在调用大模型…`);
+  btn.textContent = "提交中…";
+  log(`开始分析《${file.name}》，正在提交任务…`);
 
   try {
     const r = await fetch(API_BASE + "/analyze", { method: "POST", body: formData });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "分析失败");
-    currentGraph = data.graph;
-    buildGraph(data.graph);
+    if (!r.ok) throw new Error(data.detail || "提交失败");
+
+    /* 异步任务：轮询 result 接口直到完成 */
+    const taskId = data.task_id;
+    log(`任务已提交（${taskId}），正在调用大模型…`);
+    btn.textContent = "分析中…";
+
+    let graph = null;
+    for (let i = 0; i < 600; i++) {
+      await new Promise((res) => setTimeout(res, 2000));
+      const resp = await fetch(`${API_BASE}/result/${encodeURIComponent(taskId)}`);
+      const task = await resp.json();
+      if (!resp.ok) throw new Error(task.detail || "查询任务失败");
+
+      if (task.status === "done") {
+        graph = task.graph;
+        break;
+      }
+      if (task.status === "error") {
+        throw new Error(task.detail || "分析失败");
+      }
+      /* 仍在运行中，继续等待 */
+    }
+
+    if (!graph) throw new Error("分析超时，请稍后重试");
+    currentGraph = graph;
+    buildGraph(graph);
   } catch (e) {
     log("分析失败：" + e.message, "err");
   } finally {

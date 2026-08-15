@@ -1,9 +1,12 @@
 import importlib
 import importlib.util
+import gzip
+import io
 import json
 import logging
 import logging.handlers
 import os
+import queue
 import re
 import sys
 import time
@@ -20,25 +23,43 @@ LOG_FILE = os.path.join(LOG_DIR, "access.log")
 # 插件 ID 只允许出现在目录名中，防止目录穿越
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
+# 可压缩的内容类型（gzip 白名单）
+COMPRESSIBLE_TYPES = (
+    "text/plain", "text/html", "text/css", "text/javascript",
+    "application/javascript", "application/json", "application/xml",
+    "image/svg+xml", "application/x-javascript",
+)
+# 静态资源缓存策略（按扩展名）
+CACHE_LONG_EXT = {".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".gif",
+                  ".svg", ".webp", ".woff", ".woff2", ".ttf", ".ico", ".map"}
+CACHE_NOCACHE_EXT = {".html"}
+
 # 访问日志记录器（模块级单例，register_access_logging 时初始化）
 access_logger = logging.getLogger("jztools.access")
 
 app = Flask(__name__)
 
 
-# ===================== 访问日志 =====================
+# ===================== 访问日志（异步） =====================
+
+# 后台日志监听器（模块级单例）
+_log_queue = None
+_log_listener = None
+
 
 def setup_access_logging(app):
-    """初始化访问日志：按天滚动写入 logs/access.log，保留最近 30 天。
+    """初始化异步访问日志：按天滚动写入 logs/access.log，保留最近 30 天。
 
+    记录通过内存队列 + 后台 QueueListener 异步落盘，HTTP 线程只入队不阻塞 I/O。
     记录字段：时间 / 客户端 IP / HTTP 方法 / 功能（工具或插件）/ 路径 / 状态码 / 耗时 / UA。
     """
-    global access_logger
+    global access_logger, _log_queue, _log_listener
     if config_logging_enabled() is False:
         return  # 配置中显式关闭日志
 
     os.makedirs(LOG_DIR, exist_ok=True)
     access_logger.setLevel(logging.INFO)
+    access_logger.propagate = False
 
     # 已挂 handler 则跳过，避免 debug 模式下重复注册
     if access_logger.handlers:
@@ -50,8 +71,21 @@ def setup_access_logging(app):
     handler.setFormatter(logging.Formatter(
         "%(asctime)s\t%(levelname)s\t%(message)s"
     ))
-    access_logger.addHandler(handler)
-    access_logger.propagate = False
+
+    # 内存队列 1（容量 ~2000 条），超出时丢弃旧日志，保证写盘永不阻塞请求线程
+    _log_queue = queue.Queue(maxsize=2000)
+    _log_listener = logging.handlers.QueueListener(_log_queue, handler)
+    access_logger.addHandler(logging.handlers.QueueHandler(_log_queue))
+    _log_listener.start()
+    app.logger.info("异步访问日志已启动：%s", LOG_FILE)
+
+
+def shutdown_access_logging():
+    """优雅停止后台日志监听器（flush 剩余日志）。"""
+    global _log_listener
+    if _log_listener is not None:
+        _log_listener.stop()
+        _log_listener = None
 
 
 def config_logging_enabled():
@@ -107,10 +141,65 @@ def _log_start():
     request.environ["_req_start"] = time.perf_counter()
 
 
+def _should_compress(response):
+    """判断响应是否适合 gzip 压缩。"""
+    if response.status_code < 200 or response.status_code == 204 or response.status_code == 304:
+        return False
+    if response.headers.get("Content-Encoding"):
+        return False  # 已压缩过
+    if not response.direct_passthrough and len(response.get_data()) < 256:
+        return False  # 小响应不压缩
+    ct = response.content_type or ""
+    if not any(ct.startswith(t) for t in COMPRESSIBLE_TYPES):
+        return False
+    ae = (request.headers.get("Accept-Encoding", "") or "").lower()
+    return "gzip" in ae
+
+
+@app.after_request
+def _compress_response(response):
+    """gzip 压缩：仅当客户端声明支持 gzip 且响应为可压缩文本。"""
+    if not _should_compress(response):
+        return response
+
+    data = response.get_data()
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+        gz.write(data)
+    response.set_data(buf.getvalue())
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Vary"] = "Accept-Encoding"
+    return response
+
+
+@app.after_request
+def _static_cache(response):
+    """静态资源缓存策略：长缓存静态资产、HTML 协商缓存。
+
+    Flask debug 模式下 send_file 会自动加 no-cache，这里强制覆盖为统一策略。
+    """
+    path = request.path
+    if not (path.startswith("/static/") or path.startswith("/plugin/")):
+        return response
+    ext = os.path.splitext(path)[1].lower()
+    if ext in CACHE_LONG_EXT:
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    elif ext in CACHE_NOCACHE_EXT or not ext:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 @app.after_request
 def _log_response(response):
-    """记录本次请求：IP / 方法 / 功能 / 路径 / 状态 / 耗时 / UA。"""
-    if config_logging_enabled() is False or not access_logger.handlers:
+    """记录本次请求：IP / 方法 / 功能 / 路径 / 状态 / 耗时 / UA。
+
+    注意：after_request 按注册逆序执行，本函数最后注册，会先于 gzip/缓存中间件
+    被调用，因此日志记录的是压缩前的原始耗时与状态，不影响正确性。
+    """
+    if config_logging_enabled() is False:
+        return response
+    # 日志队列尚未初始化（例如关闭日志时）则跳过
+    if not access_logger.handlers:
         return response
 
     start = request.environ.pop("_req_start", None)
@@ -272,4 +361,7 @@ def api_tool(tool_id):
 if __name__ == "__main__":
     setup_access_logging(app)
     register_plugin_backends(app)
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    try:
+        app.run(host="0.0.0.0", port=5000, debug=True)
+    finally:
+        shutdown_access_logging()
