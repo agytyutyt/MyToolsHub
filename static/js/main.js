@@ -8,6 +8,8 @@
 const grid = document.getElementById('tool-grid');
 // 分类分区块容器
 const content = document.getElementById('content');
+// 右侧分类快速定位标签容器
+const catNav = document.getElementById('cat-nav');
 
 // 把十六进制颜色转成 "r, g, b" 字符串，供 CSS 变量 --tool-accent-rgb 使用（实现悬停高亮）
 function hexToRgb(hex) {
@@ -53,19 +55,68 @@ async function render() {
 
     // 按分类分组渲染；分类下无工具则跳过该区块
     content.innerHTML = '';
+    const renderedCats = [];
     for (const cat of data.categories || []) {
       const catTools = tools.filter(t => t.category_id === cat.id);
       if (catTools.length === 0) continue;
 
       const section = document.createElement('section');
       section.className = 'category';
+      section.id = 'cat-' + cat.id;
       section.innerHTML = `
         <h2>${cat.name}</h2>
         <div class="tool-grid">${catTools.map(toolCard).join('')}</div>`;
       content.appendChild(section);
+      renderedCats.push(cat);
     }
+
+    // 渲染右侧快速定位标签，并启用滚动高亮
+    buildCatNav(renderedCats);
+    window.addEventListener('scroll', spyActiveCategory, { passive: true });
+    spyActiveCategory();
   } catch (err) {
     grid.innerHTML = `<div class="loading">加载失败：${err.message}</div>`;
+  }
+}
+
+// 生成右侧快速定位标签：每个分类一个标点，单击平滑滚动到对应分类区块
+function buildCatNav(categories) {
+  catNav.innerHTML = '';
+  for (const cat of categories) {
+    const dot = document.createElement('button');
+    dot.type = 'button';
+    dot.className = 'cat-nav-dot';
+    dot.dataset.target = 'cat-' + cat.id;
+    dot.dataset.name = cat.name;
+    dot.setAttribute('aria-label', '定位到 ' + cat.name);
+    dot.addEventListener('click', () => {
+      document.getElementById(dot.dataset.target)
+        .scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    catNav.appendChild(dot);
+  }
+}
+
+// 滚动监听：高亮当前浏览区域对应的分类标点
+function spyActiveCategory() {
+  const dots = catNav.querySelectorAll('.cat-nav-dot');
+  const sections = content.querySelectorAll('.category');
+  let current = null;
+  // 视窗处于最下方时：最后分类默认高亮（此时页面无法再滚动，末分类无法越过阈值线）
+  if (sections.length &&
+      window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) {
+    current = sections[sections.length - 1];
+  } else {
+    for (const section of sections) {
+      const r = section.getBoundingClientRect();
+      if (r.top <= 120 && r.bottom > 120) {
+        current = section;
+        break;
+      }
+    }
+  }
+  for (const dot of dots) {
+    dot.classList.toggle('active', dot.dataset.target === (current && current.id));
   }
 }
 

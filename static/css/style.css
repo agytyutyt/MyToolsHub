@@ -127,6 +127,8 @@ body {
 /* ---------- Section / category ---------- */
 .category {
   margin-top: 32px;
+  /* 滚动定位时预留顶部栏高度，避免标题被 sticky 顶栏遮挡 */
+  scroll-margin-top: 76px;
 }
 
 .category:first-child {
@@ -215,6 +217,64 @@ body {
   border-radius: 999px;
   background: var(--md-surface-container);
   color: var(--md-on-surface-variant);
+}
+
+/* ---------- 右侧分类快速定位标签 ---------- */
+.cat-nav {
+  position: fixed;
+  top: 50%;
+  right: 18px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  z-index: 40;
+}
+
+.cat-nav-dot {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--md-outline);
+  cursor: pointer;
+  transition: background var(--md-transition), transform var(--md-transition);
+}
+
+.cat-nav-dot:hover,
+.cat-nav-dot.active {
+  background: var(--md-primary);
+  transform: scale(1.25);
+}
+
+.cat-nav-dot::after {
+  content: attr(data-name);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  transform: translateY(-50%);
+  padding: 5px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--md-on-surface);
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-radius-s);
+  box-shadow: var(--md-shadow-1);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--md-transition);
+}
+
+.cat-nav-dot:hover::after {
+  opacity: 1;
+}
+
+@media (max-width: 600px) {
+  .cat-nav { right: 10px; }
+  .cat-nav-dot { width: 12px; height: 12px; }
 }
 
 /* ---------- Tool detail page ---------- */
