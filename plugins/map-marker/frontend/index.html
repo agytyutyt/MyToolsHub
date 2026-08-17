@@ -243,6 +243,8 @@
   let map = null;          // 高德地图实例
   let markers = [];        // 当前地图上的标记数组
   let markerColor = 0;     // 标记配色游标（用于循环取色）
+  let markerInfo = null;        // 普通标点的悬浮信息窗
+  let markerInfoTimer = null;   // 普通标点信息窗关闭防抖定时器
   const COLORS = ['#4285F4', '#EA4335', '#F9AB00', '#34A853', '#24C1E0', '#A142F4'];
 
   const STORAGE_KEY = 'mapMarkerConfig';   // localStorage 中保存高德 Key 的键名
@@ -331,14 +333,11 @@
     const color = COLORS[markerColor % COLORS.length];
     markerColor++;
 
-    // 创建高德 Marker，位置 = 经纬度，上方显示名称标签
+    // 创建圆点标点：默认不显示文字标签，悬浮时才展示名称与坐标
     const marker = new AMap.Marker({
       position: [lng, lat],
-      label: {
-        content: `<div style="background:${color};color:#fff;padding:3px 8px;border-radius:6px;font-size:12px;white-space:nowrap;">${escapeHtml(name || '标点 ' + markerColor)}</div>`,
-        direction: 'top',
-        offset: new AMap.Pixel(0, -6),
-      },
+      content: dotContent(color),
+      anchor: 'center',
       title: name || '标点',
     });
     // 保存标点业务数据（坐标/名称/颜色/序号），供列表与事件使用
@@ -352,6 +351,26 @@
         map.setCenter([marker._data.lng, marker._data.lat]);
       }
     });
+    // 悬浮标点 => 信息窗展示名称与坐标
+    if (!markerInfo) {
+      markerInfo = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -10), autoMove: true });
+    }
+    marker.on('mouseover', () => {
+      if (markerInfoTimer) { clearTimeout(markerInfoTimer); markerInfoTimer = null; }
+      markerInfo.setContent(
+        `<div style="font-size:12px;color:#202124;line-height:1.6;">` +
+        `<b>${escapeHtml(name || '标点 ' + markerColor)}</b><br>` +
+        `<span style="color:#5f6368;">${lng}, ${lat}</span></div>`
+      );
+      markerInfo.open(map, [lng, lat]);
+    });
+    marker.on('mousemove', () => {
+      if (markerInfoTimer) { clearTimeout(markerInfoTimer); markerInfoTimer = null; }
+    });
+    marker.on('mouseout', () => {
+      if (markerInfoTimer) clearTimeout(markerInfoTimer);
+      markerInfoTimer = setTimeout(() => { markerInfo.close(); markerInfoTimer = null; }, 250);
+    });
     marker.setMap(map);        // 挂载到地图
     markers.push(marker);      // 加入内存数组
     renderList();              // 刷新侧边列表
@@ -364,6 +383,12 @@
     return String(s).replace(/[&<>"']/g, c => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[c]));
+  }
+
+  // ==================== 圆点样式 ====================
+  // 生成标点圆点的 HTML：小尺寸圆形，带白色描边与轻微阴影
+  function dotContent(color) {
+    return `<div style="width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3);cursor:pointer;"></div>`;
   }
 
   // ==================== 删除单个标点 ====================
@@ -436,6 +461,7 @@
     if (!markers.length) return;
     markers.forEach(m => m.setMap(null));
     markers = [];
+    if (markerInfo) markerInfo.close();
     renderList();
     setStatus('已清除全部标记');
   });
@@ -640,17 +666,14 @@
     });
     trackLine.setMap(map);
 
-    // 每个点按时间标点；悬浮标点时用 InfoWindow 展示完整时间（含日期）
-    trackInfo = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -6), autoMove: true });
+    // 每个点以圆点标点；默认不显示时间，悬浮标点时才展示完整时间（含日期）
+    trackInfo = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -10), autoMove: true });
     trackMarkers = trackPoints.map((p, i) => {
       const baseColor = i === 0 ? '#34A853' : (i === n - 1 ? '#EA4335' : '#4285F4');
       const m = new AMap.Marker({
         position: [p.lng, p.lat],
-        label: {
-          content: `<div style="background:${baseColor};color:#fff;padding:2px 7px;border-radius:6px;font-size:11px;white-space:nowrap;">${escapeHtml(p.label)}</div>`,
-          direction: 'top',
-          offset: new AMap.Pixel(0, -6),
-        },
+        content: dotContent(baseColor),
+        anchor: 'center',
         title: p.label,
       });
       m._data = { lng: p.lng, lat: p.lat, name: p.label, color: baseColor, index: i + 1, baseColor };
@@ -772,11 +795,7 @@
     trackMarkers.forEach((m, i) => {
       const d = m._data;
       const color = i === idx ? '#D93025' : d.baseColor;
-      m.setLabel({
-        content: `<div style="background:${color};color:#fff;padding:2px 7px;border-radius:6px;font-size:11px;white-space:nowrap;">${escapeHtml(trackPoints[i].label)}</div>`,
-        direction: 'top',
-        offset: new AMap.Pixel(0, -6),
-      });
+      m.setContent(dotContent(color));
     });
   }
 

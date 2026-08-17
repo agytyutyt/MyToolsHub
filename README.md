@@ -24,8 +24,9 @@
     - [7.4 注册插件到首页](#74-注册插件到首页)
     - [7.5 常见约定与注意事项](#75-常见约定与注意事项)
 11. [内置插件一览](#内置插件一览)
-12. [故障排查](#故障排查)
-13. [后期接入真实后端](#后期接入真实后端)
+12. [轨迹数据与二维码闭环](#轨迹数据与二维码闭环)
+13. [故障排查](#故障排查)
+14. [后期接入真实后端](#后期接入真实后端)
 
 ---
 
@@ -52,7 +53,7 @@ python app.py
 | 后端 | Python 3.8 · Flask 3.0 |
 | 前端 | 原生 HTML / CSS / JS（Material Design 风格） |
 | 插件机制 | 目录扫描 + 配置文件驱动，前端 iframe 隔离，后端按需动态加载 |
-| 依赖 | 见 `requirements.txt`（Flask / requests / python-docx / pypdf） |
+| 依赖 | 见 `requirements.txt`（Flask / requests / python-docx / pypdf / openpyxl / xlrd / qrcode / zfec / numpy / opencv-python） |
 
 ```bash
 # 依赖安装（Python 3.8）
@@ -76,11 +77,13 @@ JZToolsHub/
 │   ├── json-formatter/       #   示例插件：JSON 格式化（纯前端）
 │   ├── color-picker/         #   示例插件：取色器（纯前端）
 │   ├── md5-generator/        #   示例插件：MD5 生成器（纯前端）
-│   ├── map-marker/           #   示例插件：地图标点（高德地图，纯前端）
-│   └── character-graph/      #   示例插件：人物关系立体星图（前后端一体）
-│       ├── manifest.json
-│       ├── frontend/         #   前端入口 + Three.js 资源
-│       └── backend/          #   Python 后端（routes.py 等）
+│   ├── map-marker/           #   插件：地图标点（高德地图 + 二维码识别回放）
+│   ├── character-graph/      #   插件：人物关系立体星图（前后端一体）
+│   │   ├── manifest.json
+│   │   ├── frontend/         #   前端入口 + Three.js 资源
+│   │   └── backend/          #   Python 后端（routes.py 等）
+│   ├── trajectory-convert/   #   插件：轨迹转换（Excel → 二维码视频流 / 静态二维码）
+│   └── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
 ├── static/
 │   ├── index.html            # 首页（大方块展示）
 │   ├── tool.html             # 工具外壳页（加载插件 iframe）
@@ -121,7 +124,7 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 
 ## 交互流程说明
 
-1. 用户访问首页 `/`：`static/js/main.js` 请求 `/api/tools`，按分类渲染工具卡片。
+1. 用户访问首页 `/`：`static/js/main.js` 请求 `/api/tools`，按分类渲染工具卡片；同时在页面**右侧生成分类快速定位标签**（每个分类一个标点，悬浮显示分类名，单击平滑滚动定位，随滚动自动高亮当前分类）。
 2. 点击卡片进入外壳页 `/tool/<id>`：`static/js/tool.js` 请求 `/api/tools/<id>` 获取工具元信息，并将 iframe 指向 `/plugin/<id>/<entry>`。
 3. `/plugin/<id>/<path>` 路由将 `plugins/<id>/frontend/` 下的文件作为静态资源返回。
 4. 若插件含后端，后端路由已在启动时注册到同一 Flask 应用（如 `/api/character-graph/...`）。
@@ -149,6 +152,26 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /api/character-graph/result/<task_id>` | 轮询分析任务状态与结果 |
 
 > 各插件后端路由统一挂在 `/api/<插件id>/` 前缀下，动态注册，互不冲突。
+
+**trajectory-convert 插件后端接口**（Excel 轨迹表 → 二维码视频流 / 静态二维码）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/trajectory-convert/config` | 读取抽样/解析配置 |
+| `GET /api/trajectory-convert/status` | 依赖可用性检查（openpyxl / xlrd / qrcode / zfec / cv2 / numpy） |
+| `POST /api/trajectory-convert/convert` | 上传 Excel（`.xlsx`/`.xls`）与参数（时间间隔 / 二维码版本 / 模式），**异步执行返回 `task_id`** |
+| `GET /api/trajectory-convert/status/<task_id>` | 轮询转换进度与结果 |
+| `GET /api/trajectory-convert/download/<task_id>/<filename>` | 下载产物：二维码视频 `.mp4` / 单张静态图 `.png` / 多张静态图 ZIP |
+| `GET /api/trajectory-convert/image/<task_id>/<index>` | 预览某一张静态二维码图片（`index` 从 1 开始） |
+| `POST /api/trajectory-convert/download-selected` | 把勾选的多张静态二维码打包为 ZIP（`{task_id, indices}`） |
+
+**qr-video-decode 插件后端接口**（二维码视频流解码）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/qr-video-decode/status` | 依赖可用性检查（zfec / jsQR） |
+| `POST /api/qr-video-decode/reassemble` | 提交前端逐帧识别出的分块数据，**异步 zfec 前向纠错重组，返回 `task_id`** |
+| `GET /api/qr-video-decode/reassemble/<task_id>` | 轮询重组进度与恢复结果 |
 
 `GET /api/tools` 返回结构示例：
 
@@ -427,9 +450,45 @@ def register(app):
 | base64 | dev | ✅ | - | Base64 编解码（UTF-8 中文） |
 | color-picker | design | ✅ | - | 取色器 |
 | md5-generator | dev | ✅ | - | MD5 摘要生成 |
-| map-marker | maps | ✅ | - | 高德地图经纬度标点（需自备高德 Key） |
+| map-marker | maps | ✅ | - | 高德地图经纬度标点（需自备高德 Key），支持二维码识别还原轨迹、批量导入、按时间移动轨迹回放 |
 | character-graph | ai | ✅ | ✅ | 上传文档 → 大模型提取人物关系 → 3D 星图展示 |
-| trajectory-convert | dev | ✅ | ✅ | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → QR-transfer 二维码视频流 |
+| trajectory-convert | dev | ✅ | ✅ | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → 生成二维码视频流，或静态二维码图片（单张/多张） |
+| qr-video-decode | dev | ✅ | ✅ | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
+
+---
+
+## 轨迹数据与二维码闭环
+
+「轨迹转换」「QR 视频流解码」「地图标点」三个插件组成一条完整的**轨迹数据 ↔ 二维码**闭环，数据格式统一为键值对 JSON（`key` 为时间，`value` 为经纬度 `[经度, 纬度]`）。
+
+```
+Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / 静态二维码
+                                              │
+        恢复的轨迹 JSON ◀── [qr-video-decode] ◀┘
+                        │
+                        └──▶ [map-marker] 扫码识别 → 地图标点 + 移动轨迹回放
+```
+
+### trajectory-convert（轨迹转换）
+
+- 上传 `.xlsx` / `.xls` 轨迹表，按后端配置的字段名自动解析（时间 / 经度 / 纬度），按时间间隔抽样。
+- **视频模式（默认）**：将 JSON 切块 + zfec 前向纠错，编码为 QR-transfer 二维码视频流（H.264，浏览器可直接预览），供 qr-video-decode 解码。
+- **静态模式**：输出可直接扫码的静态二维码图片。
+  - 数据能装下时输出**单张 PNG**，内容为完整可读 JSON；
+  - 装不下时**自动按点位拆分多张 PNG** 并打包为 ZIP，每张都是独立可读的 JSON 子集（`{时间: [经度, 纬度]}`），**可直接扫码导入「地图标点」**查看对应片段；页面支持逐张放大预览、勾选部分下载。
+- 后端任务异步执行，前端轮询进度；二维码版本 1-40 可调（版本越大单码容量越大）。
+
+### qr-video-decode（QR 视频流解码）
+
+- 前端 Web Worker 中用 jsQR **逐帧识别**二维码视频帧，收集分块与帧头（序号 / 总帧数 / 纠错参数）。
+- 后端按帧头信息执行 zfec 前向纠错**重组**原始数据，支持进度轮询与结果下载预览。
+- 可与 trajectory-convert 视频模式对接，恢复原始轨迹 JSON；也支持地图标点生成的二维码轨迹回放数据。
+
+### map-marker（地图标点）
+
+- 高德地图输入经纬度标点（需自备高德 Key），支持批量导入、点地图添加。
+- **二维码识别**：上传二维码图片，jsQR 识别并解析轨迹 JSON（兼容 `[{"时间": "经度,纬度"}]`、`{时间: [经度,纬度]}` 等形态），确认后按时间在地图上**标点并生成移动轨迹**。
+- **轨迹回放**：生成轨迹折线与时间标点，进度条可非线性步进，时间压缩让长跨度的轨迹在约 20 秒内播完，支持播放/暂停/进度跳转，播放时同步高亮当前点。
 
 ---
 
@@ -441,6 +500,9 @@ def register(app):
 | 工具卡片点击后显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 对应文件是否存在于 `frontend/` |
 | `/api/tools` 返回但页面空白 | 刷新浏览器缓存；确认 `static/js/main.js` 正常加载 |
 | 后端接口 404 | 确认插件目录下有 `backend/__init__.py` 与 `backend/routes.py`，且 `register(app)` 已导出 |
+| 轨迹转换报缺依赖 | 确认已安装 `openpyxl / xlrd / qrcode / zfec / numpy / opencv-python`；`GET /api/trajectory-convert/status` 可查看各依赖可用性 |
+| 静态二维码扫描报"缺少时间/经纬度" | 若为多张静态二维码中的一张，其内容是该段的 JSON 子集，可导入地图标点查看对应片段；完整轨迹请用「二维码视频流」模式 |
+| 地图标点空白/地图不显示 | 在「⚙️ 配置」中填写有效的高德 Web 服务 Key 并保存 |
 | 端口被占用 | 修改 `app.py` 末尾 `port=5000`，或先停止旧进程再启动 |
 
 ---

@@ -89,6 +89,55 @@
   .status.ok { color: var(--primary-dark); }
   .muted { color: var(--muted); font-size: 13px; margin-top: 8px; }
   video { width: 100%; border-radius: 8px; margin-top: 10px; background: #000; }
+  #imageGrid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px; margin-top: 10px;
+  }
+  #imageGrid .cell { text-align: center; }
+  #imageGrid .thumb { position: relative; }
+  #imageGrid .thumb img {
+    width: 100%; border-radius: 8px; background: #fff;
+    border: 1px solid var(--border); cursor: zoom-in; display: block;
+  }
+  #imageGrid .sel-check {
+    position: absolute; top: 8px; left: 8px; z-index: 2;
+    width: 18px; height: 18px; cursor: pointer; accent-color: var(--primary);
+  }
+  #imageGrid .qr-cap { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  #imageTools { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  #imageTools .sel-count { font-size: 12px; color: var(--muted); }
+  #zoomModal .modal {
+    width: fit-content;
+    min-width: 260px;
+    max-width: min(92vw, 860px);
+    max-height: 90vh;
+    align-items: center;
+  }
+  #zoomImg {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    border-radius: 8px;
+    margin-top: 10px;
+    background: #fff;
+    border: 1px solid var(--border);
+  }
+  .switch-row { display: flex; align-items: flex-start; gap: 12px; margin-top: 14px; }
+  .switch {
+    position: relative; width: 44px; height: 24px; flex-shrink: 0; margin-top: 1px;
+    appearance: none; -webkit-appearance: none; background: #c8c8c8;
+    border-radius: 999px; cursor: pointer; outline: none; transition: background .2s;
+  }
+  .switch::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px;
+    background: #fff; border-radius: 50%; transition: transform .2s;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  }
+  .switch:checked { background: var(--primary); }
+  .switch:checked::after { transform: translateX(20px); }
+  .switch-tip .t { font-size: 13px; color: var(--text); font-weight: 500; }
+  .switch-tip .h { font-size: 12px; color: var(--muted); margin-top: 2px; }
   [hidden] { display: none !important; }
 
   /* 原始数据浮窗 */
@@ -168,6 +217,14 @@
       </label>
     </div>
 
+    <div class="switch-row">
+      <input type="checkbox" id="staticOnly" class="switch" />
+      <div class="switch-tip">
+        <div class="t">仅转换为静态二维码（单张 PNG 图片）</div>
+        <div class="h">开启后不生成视频，直接输出一张包含全部轨迹数据的静态二维码图片；数据过大时应调大二维码版本，或关闭此开关使用二维码视频流</div>
+      </div>
+    </div>
+
     <div class="row">
       <button id="convertBtn" class="primary" disabled>开始转换</button>
     </div>
@@ -182,8 +239,15 @@
   <div class="card" id="result" hidden>
     <h2>2. 转换结果</h2>
     <p id="resultSummary" class="muted"></p>
-    <p class="muted" style="margin-top:8px;">二维码视频预览（H.264，可直接在浏览器播放，也可用「QR 视频流解码」模块还原数据）</p>
+    <p id="resultHint" class="muted" style="margin-top:8px;"></p>
     <video id="videoPreview" controls playsinline></video>
+    <div id="imageTools" hidden>
+      <button id="selAll" class="secondary">全选</button>
+      <button id="selNone" class="secondary">取消全选</button>
+      <button id="downloadSel" class="primary" disabled>下载所选（0）</button>
+      <span class="sel-count">点击图片可放大预览</span>
+    </div>
+    <div id="imageGrid" hidden></div>
     <div class="row">
       <button id="downloadBtn" class="primary">下载二维码视频</button>
       <button id="showData" class="secondary">展示原始数据</button>
@@ -207,9 +271,19 @@
   </div>
 </div>
 
+<div id="zoomModal" class="modal-overlay" hidden>
+  <div class="modal modal-zoom">
+    <div class="modal-head">
+      <h2 id="zoomTitle">二维码预览</h2>
+      <button id="zoomClose" class="modal-x" title="关闭">&times;</button>
+    </div>
+    <img id="zoomImg" alt="二维码预览" />
+  </div>
+</div>
+
 <script>
   const $ = (id) => document.getElementById(id);
-  const state = { file: null, taskId: null, dataJson: "", videoName: "", videoUrl: "" };
+  const state = { file: null, taskId: null, dataJson: "", fileName: "", fileUrl: "", imageCount: 0, selIndices: new Set() };
 
   function setStatus(text, isError) {
     $("status").textContent = text;
@@ -222,9 +296,9 @@
     $("progressText").textContent = text;
   }
 
-  function buildVideoUrl(taskId, videoName) {
-    // URL 以 .mp4 结尾，保证右键另存为时文件名正确带后缀
-    const safe = encodeURIComponent(videoName || "trajectory.mp4");
+  function buildFileUrl(taskId, fileName) {
+    // URL 以 .mp4/.png 结尾，保证右键另存为时文件名正确带后缀
+    const safe = encodeURIComponent(fileName || "trajectory.mp4");
     return `/api/trajectory-convert/download/${taskId}/${safe}`;
   }
 
@@ -238,6 +312,8 @@
     $("convertBtn").disabled = true;
     $("result").hidden = true;
     $("videoPreview").removeAttribute("src");
+    $("imageGrid").innerHTML = "";
+    $("imageGrid").hidden = true;
     setStatus("");
     showProgress(0, "正在上传文件…");
 
@@ -245,6 +321,7 @@
     fd.append("file", state.file);
     fd.append("interval_minutes", $("interval").value);
     fd.append("qr_version", $("qrVersion").value);
+    fd.append("mode", $("staticOnly").checked ? "static" : "video");
 
     try {
       const r = await fetch("/api/trajectory-convert/convert", { method: "POST", body: fd });
@@ -291,18 +368,169 @@
 
   function renderResult(s) {
     state.dataJson = s.data_json || "";
-    state.videoName = s.video_name || "trajectory.mp4";
-    state.videoUrl = buildVideoUrl(state.taskId, state.videoName);
+    const isStatic = s.output_type === "static";
+    state.imageCount = isStatic ? (s.image_count || 1) : 0;
+    if (isStatic && state.imageCount > 1) {
+      state.fileName = s.zip_name || "trajectory.zip";
+    } else {
+      state.fileName = isStatic ? (s.image_name || "trajectory.png") : (s.video_name || "trajectory.mp4");
+    }
+    state.fileUrl = buildFileUrl(state.taskId, state.fileName);
 
     let summary = `共 ${s.rows} 行有效轨迹数据，已抽样 ${state.dataJson ? countSample(state.dataJson) : "—"} 条，`;
-    summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}），`;
-    summary += `体积 ${(s.video_size / 1048576).toFixed(2)} MB，文件名：${state.videoName}`;
+    if (isStatic) {
+      if (state.imageCount > 1) {
+        summary += `已生成 ${state.imageCount} 张静态二维码图片，已打包为 ZIP（${(s.zip_size / 1024).toFixed(1)} KB），文件名：${state.fileName}`;
+      } else {
+        summary += `已生成静态二维码图片，体积 ${(s.image_size / 1024).toFixed(1)} KB，文件名：${state.fileName}`;
+      }
+    } else {
+      summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}），`;
+      summary += `体积 ${(s.video_size / 1048576).toFixed(2)} MB，文件名：${state.fileName}`;
+    }
     $("resultSummary").textContent = summary;
+    $("resultHint").textContent = isStatic
+      ? (state.imageCount > 1
+        ? "数据超过单张容量已拆分：每张都含可用点位 JSON，可分别扫码导入「地图标点」查看对应片段；完整轨迹请用「二维码视频流」模式"
+        : "静态二维码可直接打印或发送，扫描后得到完整轨迹 JSON 数据")
+      : "二维码视频预览（H.264，可直接在浏览器播放，也可用「QR 视频流解码」模块还原数据）";
+    $("downloadBtn").textContent = isStatic
+      ? (state.imageCount > 1 ? "下载全部二维码（ZIP）" : "下载二维码图片")
+      : "下载二维码视频";
 
     $("result").hidden = false;
-    $("videoPreview").src = state.videoUrl;
+    if (isStatic) {
+      $("videoPreview").removeAttribute("src");
+      $("videoPreview").style.display = "none";
+      $("imageTools").hidden = state.imageCount <= 1;
+      renderStaticImages(s);
+    } else {
+      $("imageTools").hidden = true;
+      $("imageGrid").innerHTML = "";
+      $("imageGrid").hidden = true;
+      $("videoPreview").style.display = "block";
+      $("videoPreview").src = state.fileUrl;
+    }
 
-    setStatus("转换完成 ✔ 可点击「下载二维码视频」获取视频，或「展示原始数据」查看抽样结果");
+    setStatus(isStatic
+      ? (state.imageCount > 1
+        ? `转换完成 ✔ 共 ${state.imageCount} 张二维码图片，可下载 ZIP 或逐张预览`
+        : "转换完成 ✔ 可点击「下载二维码图片」获取图片，或「展示原始数据」查看抽样结果")
+      : "转换完成 ✔ 可点击「下载二维码视频」获取视频，或「展示原始数据」查看抽样结果");
+  }
+
+  // 渲染静态二维码图片（单张或网格，支持勾选与放大预览）
+  function renderStaticImages(s) {
+    const grid = $("imageGrid");
+    grid.innerHTML = "";
+    grid.hidden = false;
+    state.selIndices.clear();
+    const count = state.imageCount;
+    for (let i = 1; i <= count; i++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      const thumb = document.createElement("div");
+      thumb.className = "thumb";
+      const src = `/api/trajectory-convert/image/${state.taskId}/${i}`;
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = `二维码 ${i}/${count}`;
+      img.loading = "lazy";
+      img.addEventListener("click", () => openZoom(src));
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "sel-check";
+      check.title = "勾选后可用于部分下载";
+      check.addEventListener("change", () => {
+        if (check.checked) state.selIndices.add(i); else state.selIndices.delete(i);
+        updateSel();
+      });
+      thumb.appendChild(check);
+      thumb.appendChild(img);
+      cell.appendChild(thumb);
+      if (count > 1) {
+        const cap = document.createElement("div");
+        cap.className = "qr-cap";
+        cap.textContent = `${i}/${count}`;
+        cell.appendChild(cap);
+      }
+      grid.appendChild(cell);
+    }
+    updateSel();
+  }
+
+  // 更新"下载所选"按钮状态与数量
+  function updateSel() {
+    const n = state.selIndices.size;
+    const btn = $("downloadSel");
+    btn.disabled = n === 0;
+    btn.textContent = n ? `下载所选（${n}）` : "下载所选（0）";
+  }
+
+  function openZoom(src) {
+    $("zoomTitle").textContent = "二维码预览";
+    const img = $("zoomImg");
+    img.onload = fitZoom;
+    img.src = src;
+    $("zoomModal").hidden = false;
+    fitZoom();
+  }
+
+  // 根据屏幕可视区域自动缩放预览图：等比缩放，确保图片 + 浮窗整体都不超出
+  // 视口，且不超过浮窗底板的可用区域（不穿模）。
+  function fitZoom() {
+    const img = $("zoomImg");
+    const nw = img.naturalWidth, nh = img.naturalHeight;
+    if (!nw || !nh) return;
+    const modal = $("zoomModal").querySelector(".modal");
+    const cs = getComputedStyle(modal);
+    const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const margin = parseFloat(getComputedStyle(img).marginTop) || 10;
+    const head = modal.querySelector(".modal-head") ? modal.querySelector(".modal-head").offsetHeight : 40;
+    // 可用视口高度 = 9 成屏高 − 浮窗其余部件；宽度 = 9 成屏宽（不放大超过原始尺寸）
+    const maxW = window.innerWidth * 0.9;
+    const maxH = window.innerHeight * 0.9 - pad - head - margin;
+    const scale = Math.min(maxW / nw, maxH / nh, 1);
+    img.style.width = Math.max(1, Math.round(nw * scale)) + "px";
+    img.style.height = "auto";
+  }
+
+  function closeZoom() {
+    $("zoomModal").hidden = true;
+    $("zoomImg").removeAttribute("src");
+  }
+
+  // 勾选的部分下载：打包所选图片为 ZIP
+  async function downloadSelected() {
+    const indices = [...state.selIndices].sort((a, b) => a - b);
+    if (!indices.length) return;
+    setStatus("正在打包所选二维码…");
+    try {
+      const r = await fetch("/api/trajectory-convert/download-selected", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ task_id: state.taskId, indices }),
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setStatus(d.detail || "打包失败", true);
+        return;
+      }
+      const blob = await r.blob();
+      let name = "二维码所选.zip";
+      const cd = r.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+      if (m) name = decodeURIComponent(m[1]);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 100);
+      setStatus(`已下载所选 ${indices.length} 张二维码图片（ZIP）`);
+    } catch (e) {
+      setStatus("网络错误：" + e.message, true);
+    }
   }
 
   function countSample(jsonStr) {
@@ -311,8 +539,8 @@
 
   function downloadVideo() {
     const a = document.createElement("a");
-    a.href = state.videoUrl;
-    a.download = state.videoName;
+    a.href = state.fileUrl;
+    a.download = state.fileName;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => document.body.removeChild(a), 100);
@@ -358,12 +586,19 @@
     $("result").hidden = true;
     $("progressWrap").hidden = true;
     $("videoPreview").removeAttribute("src");
+    $("imageGrid").innerHTML = "";
+    $("imageGrid").hidden = true;
+    $("imageTools").hidden = true;
+    closeZoom();
     $("dataModal").hidden = true;
     setStatus("");
     state.taskId = null;
     state.dataJson = "";
-    state.videoName = "";
-    state.videoUrl = "";
+    state.fileName = "";
+    state.fileUrl = "";
+    state.imageCount = 0;
+    state.selIndices.clear();
+    updateSel();
     state.file = null;
     $("fileName").textContent = "";
     $("convertBtn").disabled = true;
@@ -396,6 +631,29 @@
     $("showData").addEventListener("click", showDataModal);
     $("reChoose").addEventListener("click", () => { reset(); input.click(); });
 
+    // 静态二维码工具条
+    $("selAll").addEventListener("click", () => {
+      if (!state.imageCount) return;
+      state.selIndices = new Set(Array.from({ length: state.imageCount }, (_, i) => i + 1));
+      document.querySelectorAll("#imageGrid .sel-check").forEach(c => { c.checked = true; });
+      updateSel();
+    });
+    $("selNone").addEventListener("click", () => {
+      state.selIndices.clear();
+      document.querySelectorAll("#imageGrid .sel-check").forEach(c => { c.checked = false; });
+      updateSel();
+    });
+    $("downloadSel").addEventListener("click", downloadSelected);
+
+    // 放大预览浮窗
+    $("zoomClose").addEventListener("click", closeZoom);
+    $("zoomModal").addEventListener("click", (e) => {
+      if (e.target === $("zoomModal")) closeZoom();
+    });
+    window.addEventListener("resize", () => {
+      if (!$("zoomModal").hidden) fitZoom();
+    });
+
     // 浮窗交互
     $("modalClose").addEventListener("click", closeDataModal);
     $("modalCloseBtn").addEventListener("click", closeDataModal);
@@ -404,7 +662,9 @@
       if (e.target === $("dataModal")) closeDataModal();
     });
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !$("dataModal").hidden) closeDataModal();
+      if (e.key !== "Escape") return;
+      if (!$("dataModal").hidden) closeDataModal();
+      if (!$("zoomModal").hidden) closeZoom();
     });
   }
 

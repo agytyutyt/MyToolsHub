@@ -18,6 +18,7 @@
 """
 
 import base64
+import io
 import json
 import math
 import os
@@ -25,6 +26,7 @@ import re
 import threading
 import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -70,6 +72,7 @@ TIME_FORMATS = (
 try:
     import qrcode
     from qrcode import constants as qrcode_constants
+    from qrcode.exceptions import DataOverflowError as QR_OVERFLOW
     QRCODE_AVAILABLE = True
 except Exception:  # pragma: no cover
     qrcode = None
@@ -160,8 +163,13 @@ def cleanup_tasks():
             TASKS.pop(tid, None)
 
 
-def _task_file(task_id):
-    return os.path.join(_TASK_DIR, f"{task_id}.mp4")
+def _task_file(task_id, ext=".mp4"):
+    return os.path.join(_TASK_DIR, f"{task_id}{ext}")
+
+
+def _static_image_file(task_id, index):
+    """第 index（1 起）张静态二维码图片的缓存路径。"""
+    return os.path.join(_TASK_DIR, f"{task_id}_{index:02d}.png")
 
 
 def _clean_task_files():
@@ -323,6 +331,9 @@ def parse_trajectory(rows, cfg):
             lat = _to_float(lat_cell, cfg["lat_field"])
         except ValueError:
             continue
+        # 经纬度均为 0 视为脏数据，排除
+        if lng == 0 and lat == 0:
+            continue
         points.append((dt, lng, lat, _format_time(t_cell, dt)))
     if not points:
         raise ValueError(
@@ -333,12 +344,44 @@ def parse_trajectory(rows, cfg):
     return points
 
 
+# ===================== 脏数据过滤 =====================
+
+EARTH_RADIUS_KM = 6371.0   # 地球平均半径（公里）
+MAX_SPEED_KMH = 120.0      # 移动速度阈值，超过视为脏数据
+
+
+def haversine_km(lng1, lat1, lng2, lat2):
+    """通过经纬度计算两点间的球面（大圆）距离，单位公里。"""
+    lat1, lng1, lat2, lng2 = map(math.radians, (lat1, lng1, lat2, lng2))
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
+
+
+def is_excessive_speed(prev, cur):
+    """判断两点间移动速度是否超过 120km/h（结合距离与时间差），视为脏数据。
+
+    prev/cur 为 (dt, lng, lat, time_text)。时间差不大于 0（无法计算速度）
+    或距离过小（<1m，坐标噪声抖动）时不判脏。
+    """
+    hours = (cur[0] - prev[0]).total_seconds() / 3600.0
+    if hours <= 0:
+        return False
+    dist = haversine_km(prev[1], prev[2], cur[1], cur[2])
+    if dist < 0.001:
+        return False
+    return dist / hours > MAX_SPEED_KMH
+
+
 # ===================== 时间抽样 =====================
 
 def sample_points(points, interval_minutes):
     """从最早时间起每隔 interval 分钟取一条：取距离目标时刻最近的数据。
 
-    最后一行必定被包含（最后一个采样点推进到覆盖末条记录的整倍间隔）。
+    末尾目标时刻推进到覆盖末条记录的整倍间隔，以保证末条记录附近必有采样点。
+    取点过程中结合时间差计算相邻两点的距离与移动速度，速度超过 120km/h 的
+    点位视为脏数据，排除（首点始终保留）。
     返回 (sampled, n_rows)。sampled 元素为原始行。
     """
     times = [p[0] for p in points]
@@ -364,7 +407,15 @@ def sample_points(points, interval_minutes):
                     best = idx
         return points[best]
 
-    sampled = [nearest(t) for t in targets]
+    sampled = []
+    last = None
+    for t in targets:
+        pt = nearest(t)
+        # 与上一个保留点比较：移动速度超过 120km/h 视为脏数据，排除
+        if last is not None and is_excessive_speed(last, pt):
+            continue
+        sampled.append(pt)
+        last = pt
     return sampled, len(times)
 
 
@@ -486,9 +537,75 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
     return total, k, m
 
 
+def _render_qr_image(data_bytes, version, err, out_path):
+    """按固定版本把字节数据渲染为一张二维码 PNG 图片。"""
+    qr = qrcode.QRCode(version=version, error_correction=err, box_size=BOX_SIZE, border=4)
+    qr.add_data(data_bytes, optimize=0)
+    qr.make(fit=False)
+    img = qr.make_image(fill_color="black", back_color="white")
+    img.save(out_path)
+    return out_path
+
+
+def _static_json_chunks(payload, version, err):
+    """把键值对数据拆分为多份可直接读取的 JSON（每份单张二维码可容纳）。
+
+    按点位顺序累加，每份编码后的字节数不超该二维码版本的容量。
+    """
+    try:
+        capacity = qrcode.util.BIT_LIMIT_TABLE[err][version] // 8
+    except KeyError:
+        capacity = 800
+    budget = max(48, capacity - 16)   # 预留花括号等结构开销与安全余量
+    chunks, cur = [], {}
+    cur_size = 2   # "{}"
+    for k, v in payload.items():
+        item = json.dumps({k: v}, ensure_ascii=False, separators=(",", ":"))
+        item_bytes = ("," + item[1:-1]).encode("utf-8")
+        if cur and cur_size + len(item_bytes) > budget:
+            chunks.append(cur)
+            cur, cur_size = {}, 2
+        cur[k] = v
+        cur_size += len(item_bytes)
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def encode_static_output(payload, version, out_dir, prefix):
+    """生成静态二维码图片文件，返回文件路径列表。
+
+    数据能放进单张时输出 1 张：内容为整份 JSON，任何扫码器均可直接读取，
+    也可直接导入「地图标点」模块识别出全部轨迹点；
+    放不下时按点位顺序拆分为多张，每张都是独立可读的 JSON 子集
+    （可直接导入「地图标点」识别其中的点位）。
+    文件命名：{prefix}_01.png（单张）、{prefix}_01.png … {prefix}_NN.png（多张）。
+    """
+    if not QRCODE_AVAILABLE:
+        raise RuntimeError("后端缺少 qrcode 依赖，请先安装：pip install qrcode")
+    err = qrcode_constants.ERROR_CORRECT_L
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    single = os.path.join(out_dir, f"{prefix}_01.png")
+    try:
+        _render_qr_image(raw, version, err, single)
+        return [single]
+    except QR_OVERFLOW:
+        pass
+    chunks = _static_json_chunks(payload, version, err)
+    if len(chunks) <= 1:
+        raise ValueError("数据无法拆分为多张静态二维码，请调大二维码版本或改用「二维码视频流」模式")
+    paths = []
+    for i, chunk in enumerate(chunks):
+        b = json.dumps(chunk, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        p = os.path.join(out_dir, f"{prefix}_{i + 1:02d}.png")
+        _render_qr_image(b, version, err, p)
+        paths.append(p)
+    return paths
+
+
 # ===================== 后台转换任务 =====================
 
-def _run_convert(task_id, filename, file_bytes, interval_minutes, qr_version, cfg):
+def _run_convert(task_id, filename, file_bytes, interval_minutes, qr_version, cfg, mode="video"):
     try:
         set_task(task_id, status="running", created_at=time.time())
         tmp_xlsx = os.path.join(_TASK_DIR, f"{task_id}_in{os.path.splitext(filename)[1] or '.xlsx'}")
@@ -505,21 +622,53 @@ def _run_convert(task_id, filename, file_bytes, interval_minutes, qr_version, cf
         sampled, total_rows = sample_points(points, interval_minutes)
         payload = wrap_json(sampled, cfg, interval_minutes)
         payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        base_name = os.path.splitext(filename)[0] or "轨迹"
+
+        if mode == "static":
+            # 生成静态二维码：单张能装下则一张，装不下自动拆分为多张
+            img_paths = encode_static_output(payload, qr_version, _TASK_DIR, task_id)
+            count = len(img_paths)
+            if count == 1:
+                single = _task_file(task_id, ".png")
+                os.replace(img_paths[0], single)
+                size = os.path.getsize(single) if os.path.exists(single) else 0
+                set_task(task_id, status="done", progress=1.0,
+                         output_type="static", rows=len(points),
+                         base_name=base_name,
+                         image_count=1,
+                         image_size=size,
+                         image_name=f"{base_name}二维码.png",
+                         data_json=json.dumps(payload, ensure_ascii=False))
+            else:
+                zip_path = _task_file(task_id, ".zip")
+                with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for i, p in enumerate(img_paths):
+                        zf.write(p, f"{base_name}_第{i + 1}张（共{count}张）.png")
+                size = os.path.getsize(zip_path) if os.path.exists(zip_path) else 0
+                set_task(task_id, status="done", progress=1.0,
+                         output_type="static", rows=len(points),
+                         base_name=base_name,
+                         image_count=count,
+                         zip_size=size,
+                         zip_name=f"{base_name}二维码（共{count}张）.zip",
+                         data_json=json.dumps(payload, ensure_ascii=False))
+            return
 
         def progress(done, total, _code):
             # 解析+抽样约 12%，编码视频 12%→100%
             set_task(task_id, progress=round(0.12 + 0.88 * done / total, 4),
                      stage=f"QR 编码 {done}/{total} 帧")
 
-        out_path = _task_file(task_id)
+        out_path = _task_file(task_id, ".mp4")
         nframes, k, m = encode_to_video(payload_bytes, qr_version, out_path,
                                         progress_cb=progress)
         size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
 
         set_task(task_id, status="done", progress=1.0,
+                 output_type="video", rows=len(points),
                  nframes=nframes, k=k, m=m,
                  video_size=size,
-                 video_name=f"轨迹转换二维码视频_v{qr_version}_{nframes}帧.mp4",
+                 video_name=f"{base_name}二维码流.mp4",
                  data_json=json.dumps(payload, ensure_ascii=False))
     except ValueError as e:
         set_task(task_id, status="error", detail=str(e))
@@ -582,13 +731,17 @@ def register(app) -> None:
         if not 1 <= version <= 40:
             return jsonify({"ok": False, "detail": "二维码版本须在 1-40 之间"}), 400
 
+        mode = request.form.get("mode", "video")
+        if mode not in ("video", "static"):
+            mode = "video"
+
         task_id = uuid.uuid4().hex[:12]
         cleanup_tasks()
         _clean_task_files()
         set_task(task_id, status="pending", progress=0.0, created_at=time.time())
         filename = os.path.basename(f.filename or "trajectory.xlsx")
         file_bytes = f.read()
-        _executor.submit(_run_convert, task_id, filename, file_bytes, interval, version, cfg)
+        _executor.submit(_run_convert, task_id, filename, file_bytes, interval, version, cfg, mode)
         return jsonify({"ok": True, "task_id": task_id})
 
     @app.get(f"{API_PREFIX}/status/<task_id>")
@@ -604,12 +757,18 @@ def register(app) -> None:
         }
         if task.get("status") == "done":
             payload.update({
+                "output_type": task.get("output_type", "video"),
                 "rows": task.get("rows", 0),
                 "nframes": task.get("nframes", 0),
                 "k": task.get("k"),
                 "m": task.get("m"),
                 "video_size": task.get("video_size", 0),
+                "image_count": task.get("image_count", 0),
+                "image_size": task.get("image_size", 0),
+                "zip_size": task.get("zip_size", 0),
                 "video_name": task.get("video_name", "trajectory.mp4"),
+                "image_name": task.get("image_name", "trajectory.png"),
+                "zip_name": task.get("zip_name", "trajectory.zip"),
                 "data_json": task.get("data_json", ""),
             })
         if task.get("status") == "error":
@@ -619,16 +778,37 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/download/<task_id>")
     @app.get(f"{API_PREFIX}/download/<task_id>/<path:filename>")
     def tc_download(task_id, filename=None):
-        """返回二维码视频文件。
+        """返回生成的二维码文件（视频 / 单张静态图片 / 多张静态图片 ZIP）。
 
-        路由带 filename 时 URL 以 .mp4 结尾，浏览器右键另存为时能取到
+        路由带 filename 时 URL 以 .mp4/.png/.zip 结尾，浏览器右键另存为时能取到
         与 Content-Disposition 一致的文件名（解决「名称不一致、无后缀」问题）。
         filename 仅用于美化 URL，实际文件名以任务记录为准。
         """
         task = get_task(task_id)
         if not task or task.get("status") != "done":
             return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
-        path = _task_file(task_id)
+        if task.get("output_type") == "static":
+            if task.get("image_count", 1) > 1:
+                # 多张静态二维码：打包为 ZIP 下载
+                path = _task_file(task_id, ".zip")
+                if not os.path.isfile(path):
+                    return jsonify({"ok": False, "detail": "ZIP 文件已被清理"}), 404
+                return send_file(
+                    path,
+                    mimetype="application/zip",
+                    as_attachment=True,
+                    download_name=task.get("zip_name", "trajectory.zip"),
+                )
+            path = _task_file(task_id, ".png")
+            if not os.path.isfile(path):
+                return jsonify({"ok": False, "detail": "图片文件已被清理"}), 404
+            return send_file(
+                path,
+                mimetype="image/png",
+                as_attachment=True,
+                download_name=task.get("image_name", "trajectory.png"),
+            )
+        path = _task_file(task_id, ".mp4")
         if not os.path.isfile(path):
             return jsonify({"ok": False, "detail": "视频文件已被清理"}), 404
         return send_file(
@@ -636,4 +816,56 @@ def register(app) -> None:
             mimetype="video/mp4",
             as_attachment=True,
             download_name=task.get("video_name", "trajectory.mp4"),
+        )
+
+    @app.get(f"{API_PREFIX}/image/<task_id>/<int:index>")
+    def tc_static_image(task_id, index):
+        """返回某一张静态二维码图片（供页面预览）。index 从 1 开始。"""
+        task = get_task(task_id)
+        if (not task or task.get("status") != "done"
+                or task.get("output_type") != "static"):
+            return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
+        total = task.get("image_count", 1)
+        if not 1 <= index <= total:
+            return jsonify({"ok": False, "detail": "图片序号非法"}), 404
+        path = _static_image_file(task_id, index)
+        if not os.path.isfile(path):
+            return jsonify({"ok": False, "detail": "图片已被清理"}), 404
+        return send_file(path, mimetype="image/png")
+
+    @app.post(f"{API_PREFIX}/download-selected")
+    def tc_download_selected():
+        """把用户勾选的多张静态二维码打包为 ZIP 返回。
+
+        请求体：{"task_id": "...", "indices": [1, 3, 5]}
+        """
+        data = request.get_json(silent=True) or {}
+        task_id = data.get("task_id")
+        indices = data.get("indices")
+        task = get_task(task_id)
+        if (not task or task.get("status") != "done"
+                or task.get("output_type") != "static"):
+            return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
+        total = task.get("image_count", 1)
+        try:
+            idxs = sorted({int(i) for i in (indices or [])})
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "detail": "图片序号非法"}), 400
+        idxs = [i for i in idxs if 1 <= i <= total]
+        if not idxs:
+            return jsonify({"ok": False, "detail": "未选择图片"}), 400
+
+        base = task.get("base_name") or "轨迹"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for i in idxs:
+                p = _static_image_file(task_id, i)
+                if os.path.isfile(p):
+                    zf.write(p, f"{base}_第{i}张（共{len(idxs)}张）.png")
+        buf.seek(0)
+        return send_file(
+            buf,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"{base}二维码（所选{len(idxs)}张）.zip",
         )
