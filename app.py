@@ -38,6 +38,11 @@ CACHE_NOCACHE_EXT = {".html"}
 # 访问日志记录器（模块级单例，register_access_logging 时初始化）
 access_logger = logging.getLogger("jztools.access")
 
+# load_tool_meta 的短 TTL 缓存（仅服务日志解析，避免每请求读文件）
+_TOOL_META_TTL = 2.0  # 秒
+_tool_meta_cache = None
+_tool_meta_cache_ts = 0.0
+
 app = Flask(__name__)
 
 
@@ -145,9 +150,12 @@ def get_client_ip():
 
 
 def parse_feature():
-    """根据请求路径解析「功能」标签，映射到具体工具名/接口名。"""
+    """根据请求路径解析「功能」标签，映射到具体工具名/接口名。
+
+    工具展示名以 config/tools.json 为准（与首页一致），manifest 仅兜底。
+    """
     path = request.path
-    manifests = load_manifests()
+    meta = load_tool_meta()
 
     if path == "/":
         return "首页"
@@ -155,18 +163,18 @@ def parse_feature():
         return "API: 工具列表"
     if path.startswith("/api/tools/"):
         tool_id = path[len("/api/tools/"):].strip("/")
-        name = manifests.get(tool_id, {}).get("name", tool_id)
+        name = meta.get(tool_id, {}).get("name") or tool_id
         return f"API: 工具详情({name})"
     if path.startswith("/plugin/"):
         parts = path.strip("/").split("/")
         if len(parts) >= 2:
             tool_id = parts[1]
-            name = manifests.get(tool_id, {}).get("name", tool_id)
+            name = meta.get(tool_id, {}).get("name") or tool_id
             sub = "/".join(parts[2:]) or "入口页面"
             return f"插件({name})/frontend/{sub}"
     if path.startswith("/tool/"):
         tool_id = path[len("/tool/"):].strip("/")
-        name = manifests.get(tool_id, {}).get("name", tool_id)
+        name = meta.get(tool_id, {}).get("name") or tool_id
         return f"工具壳页({name})"
     if path.startswith("/api/"):
         return f"后端接口: {path}"
@@ -276,6 +284,43 @@ def load_manifests():
     return manifests
 
 
+def load_tool_meta():
+    """聚合「名称 / 描述」等展示元信息，生成 {插件id: {name, description}} 映射。
+
+    配置驱动原则：config/tools.json 中注册的 name / description 为权威取值，
+    插件目录的 manifest.json 仅作为缺省回退（便于插件目录跨项目迁移时自解释）。
+
+    带短 TTL 缓存：本函数被请求日志解析逐请求调用，加缓存避免每次请求都读文件；
+    缓存仅用于日志展示，不影响 /api/tools 等实时读取的接口。
+    """
+    global _tool_meta_cache, _tool_meta_cache_ts
+    now = time.time()
+    if _tool_meta_cache is not None and now - _tool_meta_cache_ts < _TOOL_META_TTL:
+        return _tool_meta_cache
+
+    meta = {}
+    try:
+        registry = load_registry()
+        for item in registry.get("tools", []):
+            # 配置文件优先；manifest 兜底
+            meta[item["id"]] = {
+                "name": item.get("name") or "",
+                "description": item.get("description") or "",
+            }
+    except Exception:
+        pass
+    for pid, manifest in load_manifests().items():
+        entry = meta.setdefault(pid, {"name": "", "description": ""})
+        if not entry["name"]:
+            entry["name"] = manifest.get("name", "") or pid
+        if not entry["description"]:
+            entry["description"] = manifest.get("description", "") or ""
+
+    _tool_meta_cache = meta
+    _tool_meta_cache_ts = now
+    return meta
+
+
 def get_plugin_dir(plugin_id):
     """校验插件 ID 并返回其绝对目录，非法 ID 返回 None。"""
     if not PLUGIN_ID_RE.match(plugin_id or ""):
@@ -287,12 +332,14 @@ def get_aggregated_tools():
     """聚合后台配置与插件清单，生成前端可用的工具列表。
 
     配置驱动注册原则：
-    - config/tools.json 决定哪些工具被展示、顺序与分类；
-    - 每个工具目录的 manifest.json 提供展示元信息与页面入口。
+    - config/tools.json 决定哪些工具被展示、展示顺序与分类，同时是
+      「名称 / 描述」的权威来源（manifest.json 仅作为缺省回退）；
+    - 每个工具目录的 manifest.json 提供图标、主题色、入口与能力标签。
     """
     registry = load_registry()
     manifests = load_manifests()
     category_map = {c["id"]: c["name"] for c in registry.get("categories", [])}
+    meta = load_tool_meta()
 
     tools = []
     for item in registry.get("tools", []):
@@ -301,10 +348,11 @@ def get_aggregated_tools():
         manifest = manifests.get(item["id"])
         if manifest is None:
             continue
+        m = meta.get(item["id"], {})
         tools.append({
             "id": manifest.get("id", item["id"]),
-            "name": manifest.get("name", item["id"]),
-            "description": manifest.get("description", ""),
+            "name": m.get("name") or manifest.get("name", item["id"]),
+            "description": m.get("description") or manifest.get("description", ""),
             "icon": manifest.get("icon", "🧩"),
             "accent": manifest.get("accent", "#4285F4"),
             "entry": manifest.get("entry", "index.html"),

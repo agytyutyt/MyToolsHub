@@ -1,7 +1,5 @@
 {
   "id": "character-graph",
-  "name": "人物关系立体星图",
-  "description": "上传文档（小说/剧本/笔录），调用大模型自动提取人物与关系，Three.js 渲染可旋转的 3D 星点图。",
   "icon": "🌌",
   "accent": "#5b8cff",
   "entry": "index.html",

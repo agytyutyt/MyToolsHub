@@ -1,12 +1,13 @@
-"""Extract plain text from uploaded documents.
+"""从用户上传的文档中抽取纯文本。
 
-Supports: .txt, .md, .json, .csv (plain text)
-          .docx (python-docx)
-          .pdf  (pypdf)
+支持：.txt / .md / .json / .csv（纯文本直接读取）
+      .docx（python-docx）
+      .pdf （pypdf）
 """
 
 from pathlib import Path
 
+# 支持的文件类型 -> 中文说明（用于错误提示）
 SUPPORTED = {
     ".txt": "文本",
     ".md": "Markdown",
@@ -18,8 +19,10 @@ SUPPORTED = {
 
 
 def extract_text(filename: str, raw: bytes) -> str:
+    """按扩展名分发解析，返回提取出的纯文本。"""
     suffix = Path(filename).suffix.lower()
     if suffix in (".txt", ".md", ".json", ".csv"):
+        # 纯文本：UTF-8 解码，非法字节用替换符兜底
         return raw.decode("utf-8", errors="replace")
     if suffix == ".docx":
         return _extract_docx(raw)
@@ -32,6 +35,7 @@ def extract_text(filename: str, raw: bytes) -> str:
 
 
 def _extract_docx(raw: bytes) -> str:
+    """解析 .docx：逐段落拼接为纯文本。"""
     try:
         import io
 
@@ -46,6 +50,7 @@ def _extract_docx(raw: bytes) -> str:
 
 
 def _extract_pdf(raw: bytes) -> str:
+    """解析 .pdf：逐页抽取文本并拼接。"""
     try:
         import io
 

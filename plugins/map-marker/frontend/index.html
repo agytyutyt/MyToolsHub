@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!-- 地图标点插件（纯前端，依赖高德地图 JS SDK）
+ * 功能：输入经纬度标点、批量导入、二维码识别、按时间生成移动轨迹。
+ * 注意：使用前需在页面设置中填入自备的高德 Key（保存在浏览器 localStorage）。
+ -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -54,6 +58,7 @@
   }
   .panel textarea:focus { border-color: #4285F4; box-shadow: 0 0 0 3px rgba(66,133,244,.2); }
   .hint { font-size: 12px; color: #5f6368; margin: 8px 0; }
+  .hint.error { color: #d93025; }
   .marker-item {
     display: flex; align-items: center; gap: 8px; padding: 9px 10px;
     background: #fff; border: 1px solid #dadce0; border-radius: 10px;
@@ -81,20 +86,58 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .modal-mask {
-    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000;
-    display: none; align-items: center; justify-content: center;
+    position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 3000;
+    display: none; align-items: center; justify-content: center; overflow-y: auto; padding: 20px;
   }
   .modal-mask.show { display: flex; }
   .modal {
-    width: 460px; max-width: 92vw; background: #fff; border-radius: 16px;
-    padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
+    width: 460px; max-width: 92vw; max-height: 88vh;
+    background: #fff; border-radius: 16px; padding: 24px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
+    display: flex; flex-direction: column; overflow: hidden;
   }
-  .modal h2 { font-size: 18px; font-weight: 500; margin-bottom: 6px; }
-  .modal p { font-size: 13px; color: #5f6368; margin-bottom: 14px; line-height: 1.7; }
-  .modal .field { margin-bottom: 12px; }
+  .modal h2 { font-size: 18px; font-weight: 500; margin-bottom: 6px; flex-shrink: 0; }
+  .modal p { font-size: 13px; color: #5f6368; margin-bottom: 14px; line-height: 1.7; flex-shrink: 0; }
+  .modal .field { margin-bottom: 12px; flex-shrink: 0; }
   .modal .field input { width: 100%; }
-  .modal .bar { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  .modal .bar { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; flex-shrink: 0; }
+  .modal .bar label.btn { display: inline-flex; align-items: center; }
   code { background: #f1f3f4; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  #scan-preview {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 10px 0 14px;
+    border: 1px solid #dadce0; border-radius: 10px; padding: 10px 12px;
+    background: #fafafa; display: none; scrollbar-gutter: stable;
+  }
+  #scan-preview.show { display: block; }
+  #scan-preview .preview-title { font-size: 13px; font-weight: 500; color: #202124; margin-bottom: 10px; }
+  #scan-preview .marker-item { margin-bottom: 6px; cursor: default; }
+  #scan-preview .marker-item:last-child { margin-bottom: 0; }
+  #scan-preview::-webkit-scrollbar { width: 8px; }
+  #scan-preview::-webkit-scrollbar-thumb { background: #c1c5cc; border-radius: 4px; }
+  #scan-preview::-webkit-scrollbar-thumb:hover { background: #9aa0a6; }
+  #scan-preview::-webkit-scrollbar-track { background: transparent; }
+  #scan-preview .marker-item { border: 1px solid #e2e4e8; border-radius: 8px; }
+  .track-wrap {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    z-index: 500; max-width: 94vw;
+  }
+  .track-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: #fff; border: 1px solid #dadce0; border-radius: 999px;
+    padding: 8px 14px; box-shadow: 0 4px 16px rgba(60,64,67,.25);
+    max-width: 88vw; flex-wrap: wrap; justify-content: center;
+  }
+  .track-bar input[type=range] { width: 180px; accent-color: #4285F4; }
+  .track-bar select {
+    padding: 5px 8px; border: 1px solid #dadce0; border-radius: 8px;
+    font-size: 12px; background: #fff; outline: none;
+  }
+  .track-time { font-size: 12px; color: #5f6368; font-family: "Roboto Mono", Consolas, monospace; min-width: 130px; text-align: center; }
+  .track-close {
+    position: absolute; top: -12px; right: -12px; z-index: 2;
+    width: 40px; height: 40px; border-radius: 50%; padding: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
+    background: #fff; border: 1px solid #dadce0; box-shadow: 0 2px 8px rgba(60,64,67,.3);
+  }
 </style>
 </head>
 <body>
@@ -110,6 +153,7 @@
       <label>名称</label><input id="name" type="text" placeholder="标记名称（可选）" style="width:140px;">
     </div>
     <button class="btn primary" id="add">添加标点</button>
+    <button class="btn" id="scan-btn">📷 二维码识别</button>
     <button class="btn" id="settings">⚙️ 配置</button>
   </div>
   <div class="main">
@@ -141,6 +185,39 @@
   </div>
   <div class="toast" id="toast"></div>
 
+  <div class="track-wrap" id="track-bar" style="display:none;">
+    <div class="track-bar">
+      <button class="btn primary" id="track-play" title="播放/暂停">▶ 播放</button>
+      <button class="btn" id="track-restart" title="回到起点">⏮</button>
+      <input id="track-progress" type="range" min="0" max="1000" value="0">
+      <span class="track-time" id="track-time">--:--:--</span>
+      <select id="track-speed" title="播放速度">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="5">5x</option>
+        <option value="10">10x</option>
+      </select>
+    </div>
+    <button class="btn track-close" id="track-clear" title="清除轨迹">✕</button>
+  </div>
+
+  <div class="modal-mask" id="scan-mask">
+    <div class="modal">
+      <h2>二维码识别</h2>
+      <p>上传包含轨迹数据的二维码图片。数据格式为键值对数组：<code>key</code> 为时间，<code>value</code> 为经纬度，例如：<code>[{"2024-01-01 12:00:00": "116.397,39.909"}, {"2024-01-01 12:10:00": "116.400,39.912"}]</code>。识别后将按时间在地图上标点并生成移动轨迹。</p>
+      <div class="field">
+        <input id="scan-file" type="file" accept="image/*">
+      </div>
+      <div class="hint" id="scan-hint">选择二维码图片后自动识别。</div>
+      <div id="scan-preview"></div>
+      <div class="bar">
+        <button class="btn" id="scan-cancel">取消</button>
+        <button class="btn primary" id="scan-confirm" disabled>标点并生成轨迹</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-mask" id="config-mask">
     <div class="modal">
       <h2>高德地图配置</h2>
@@ -154,6 +231,7 @@
     </div>
   </div>
 
+<script src="./jsqr.min.js"></script>
 <script>
   // ==================== 页面元素引用 ====================
   // 地图容器、底部状态栏、浮动提示框的三个 DOM 引用
@@ -352,8 +430,9 @@
     addMarker(lng, lat, name);
   });
 
-  // 【清空全部】按钮：移除地图上所有标记
+  // 【清空全部】按钮：移除地图上所有标记（含当前轨迹）
   document.getElementById('clear-all').addEventListener('click', () => {
+    if (trackPoints.length) clearTrack();
     if (!markers.length) return;
     markers.forEach(m => m.setMap(null));
     markers = [];
@@ -428,6 +507,449 @@
     origRender();
     persistPoints();
   };
+
+  // ==================== 二维码识别与移动轨迹 ====================
+  // 轨迹相关全局状态
+  let trackPoints = [];       // 解析后的轨迹点 [{time, lng, lat, label}]
+  let trackLine = null;       // 高德轨迹折线对象
+  let trackMarkers = [];      // 轨迹对应的标点
+  let movingMarker = null;    // 移动的"当前位置"标记
+  let trackInfo = null;       // 悬浮显示完整时间信息的 InfoWindow
+  let infoTimer = null;       // InfoWindow 关闭防抖定时器（避免鼠标微动闪烁）
+  let trackAnim = null;       // 动画定时器句柄
+  let trackPlaying = false;   // 是否播放中
+  let trackT = 0;             // 当前播放进度（相对起点的时间轴，毫秒）
+  let trackDuration = 0;      // 轨迹总时长（毫秒，相对起点）
+  let trackStart = 0;         // 首点时间的绝对时间戳
+  let trackRel = [];          // 每点的相对时间偏移（毫秒）
+  let trackCurrent = 0;       // 当前所在轨迹点的索引（进度条格子）
+  let trackScale = 1;         // 播放时间压缩系数（1x 时整段轨迹在数秒内播完）
+
+  // 解析坐标："lng,lat" / "lng, lat" / [lng, lat] / {lng,lat} / {longitude,latitude}
+  function parseCoord(v) {
+    if (Array.isArray(v)) {
+      const lng = parseFloat(v[0]), lat = parseFloat(v[1]);
+      return (isFinite(lng) && isFinite(lat)) ? [lng, lat] : null;
+    }
+    if (typeof v === 'object' && v !== null) {
+      const lng = parseFloat(v.lng ?? v.longitude ?? v.lon ?? v.Lng);
+      const lat = parseFloat(v.lat ?? v.latitude ?? v.Lat);
+      return (isFinite(lng) && isFinite(lat)) ? [lng, lat] : null;
+    }
+    const s = String(v).trim();
+    const m = s.match(/^\s*(-?[\d.]+)\s*[,，\s]\s*(-?[\d.]+)\s*$/);
+    if (!m) return null;
+    const lng = parseFloat(m[1]), lat = parseFloat(m[2]);
+    return (isFinite(lng) && isFinite(lat)) ? [lng, lat] : null;
+  }
+
+  // 解析时间为可比较的时间戳，无法解析则返回 null
+  function parseTime(v) {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number' && isFinite(v)) return v;
+    const s = String(v).trim();
+    // 纯时间（如 "08:00:00" 或 "08:00"）：锚定到今天，保证可排序
+    const tm = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (tm) {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate(),
+        +tm[1], +tm[2], +(tm[3] || 0)).getTime();
+    }
+    const d = new Date(s.replace(/-/g, '/'));
+    return isNaN(d.getTime()) ? null : d.getTime();
+  }
+
+  // 将二维码内容解析为轨迹点数组，支持多种键值对形态
+  function parseTrackData(raw) {
+    let data;
+    try { data = JSON.parse(raw); }
+    catch (e) {
+      setStatus('二维码内容不是合法的 JSON 数据', true);
+      return [];
+    }
+    let items = [];
+    // 规范化：统一收拢到 [{time, lng, lat}] 结构
+    function collect(entries) {
+      entries.forEach(en => {
+        if (Array.isArray(en)) {
+          // 形如 ["2024-01-01 12:00:00", "116.397,39.909"]
+          if (en.length >= 2) {
+            const t = en[0], c = parseCoord(en[1]);
+            if (c) items.push({ time: t, lng: c[0], lat: c[1], label: String(t) });
+          }
+        } else if (en && typeof en === 'object') {
+          // 形如 {"2024-01-01 12:00:00": "116.397,39.909"}
+          Object.keys(en).forEach(k => {
+            const c = parseCoord(en[k]);
+            if (c) items.push({ time: k, lng: c[0], lat: c[1], label: String(k) });
+          });
+        }
+      });
+    }
+    if (Array.isArray(data)) {
+      collect(data);
+    } else if (data && typeof data === 'object') {
+      collect([data]);
+    }
+    // 按时间排序（无法解析时间的点排最后）
+    items.sort((a, b) => {
+      const ta = parseTime(a.time), tb = parseTime(b.time);
+      if (ta == null && tb == null) return 0;
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return ta - tb;
+    });
+    return items;
+  }
+
+  // 将画布内容交给 jsQR 识别
+  function scanQrFromImage(img) {
+    const MAX = 1000;
+    const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const imageData = ctx.getImageData(0, 0, w, h);
+    try {
+      const code = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+      return code ? code.data : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // 生成移动轨迹：在地图上连线、添加时间标点并准备动画
+  function buildTrack(points) {
+    clearTrack();
+    if (!points.length) return;
+    trackPoints = points.slice();
+    const n = trackPoints.length;
+
+    // 轨迹折线
+    const path = trackPoints.map(p => [p.lng, p.lat]);
+    trackLine = new AMap.Polyline({
+      path: path,
+      strokeColor: '#F4511E',
+      strokeWeight: 5,
+      strokeOpacity: 0.9,
+      lineJoin: 'round',
+      lineCap: 'round',
+    });
+    trackLine.setMap(map);
+
+    // 每个点按时间标点；悬浮标点时用 InfoWindow 展示完整时间（含日期）
+    trackInfo = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -6), autoMove: true });
+    trackMarkers = trackPoints.map((p, i) => {
+      const baseColor = i === 0 ? '#34A853' : (i === n - 1 ? '#EA4335' : '#4285F4');
+      const m = new AMap.Marker({
+        position: [p.lng, p.lat],
+        label: {
+          content: `<div style="background:${baseColor};color:#fff;padding:2px 7px;border-radius:6px;font-size:11px;white-space:nowrap;">${escapeHtml(p.label)}</div>`,
+          direction: 'top',
+          offset: new AMap.Pixel(0, -6),
+        },
+        title: p.label,
+      });
+      m._data = { lng: p.lng, lat: p.lat, name: p.label, color: baseColor, index: i + 1, baseColor };
+      m.on('mouseover', () => {
+        if (infoTimer) { clearTimeout(infoTimer); infoTimer = null; }
+        trackInfo.setContent(
+          `<div style="font-size:12px;color:#202124;line-height:1.6;">` +
+          `<b>${escapeHtml(formatTimeLabel(p.time))}</b><br>` +
+          `<span style="color:#5f6368;">${p.lng}, ${p.lat}</span></div>`
+        );
+        trackInfo.open(map, [p.lng, p.lat]);
+      });
+      m.on('mousemove', () => {
+        // 在标点范围内移动时保持浮窗显示，不触发闪烁关闭
+        if (infoTimer) { clearTimeout(infoTimer); infoTimer = null; }
+      });
+      m.on('mouseout', () => {
+        // 延迟关闭：只有真正离开标点范围才收起，微动不再频繁闪烁
+        if (infoTimer) clearTimeout(infoTimer);
+        infoTimer = setTimeout(() => { trackInfo.close(); infoTimer = null; }, 250);
+      });
+      m.setMap(map);
+      return m;
+    });
+    // 同步到右侧标记列表与持久化
+    markers.push(...trackMarkers);
+    renderList();
+
+    // 移动的当前位置标记（红色圆点）
+    movingMarker = new AMap.CircleMarker({
+      center: [trackPoints[0].lng, trackPoints[0].lat],
+      radius: 10,
+      strokeColor: '#fff',
+      strokeWeight: 3,
+      fillColor: '#D93025',
+      fillOpacity: 0.95,
+    });
+    movingMarker.setMap(map);
+
+    // 计算各点的相对时间偏移（相对首点，单位毫秒），无法解析的点不参与时间插值
+    const abs = trackPoints.map(p => parseTime(p.time));
+    trackStart = abs[0] ?? 0;
+    trackRel = abs.map(x => (x != null ? x - trackStart : null));
+    // 总时长 = 最后一个有效时间点相对首点的偏移；无效则按点序等距兜底
+    let lastValid = null;
+    for (let i = trackRel.length - 1; i >= 0; i--) {
+      if (trackRel[i] != null) { lastValid = trackRel[i]; break; }
+    }
+    trackDuration = (lastValid != null && lastValid > 0) ? lastValid : Math.max(1, (n - 1) * 1000);
+    // 时间压缩：让整段轨迹在约 20 秒内播完（1x），避免跨数小时的轨迹半天不动
+    trackScale = trackDuration / 20000;
+    trackT = 0;
+    trackCurrent = 0;
+
+    // 进度条改为「标点数个格子」的非线性步进：min=0、max=点数-1、step=1
+    const pg = document.getElementById('track-progress');
+    pg.min = '0';
+    pg.max = String(n - 1);
+    pg.step = '1';
+    pg.value = '0';
+
+    // 适配视野显示全部轨迹
+    map.setFitView([trackLine, ...trackMarkers], false, [80, 80, 80, 80]);
+    const bar = document.getElementById('track-bar');
+    bar.style.display = 'block';
+    document.getElementById('track-play').textContent = '▶ 播放';
+    document.getElementById('track-time').textContent = formatTimeLabel(trackPoints[0].time);
+    setStatus(`轨迹已生成：${trackPoints.length} 个轨迹点`);
+  }
+
+  // 根据当前进度 t（相对首点的毫秒）计算位置与当前点索引
+  function positionAt(t) {
+    const n = trackPoints.length;
+    if (n === 1) return { pos: [trackPoints[0].lng, trackPoints[0].lat], idx: 0 };
+    const rel = trackRel;
+    // 寻找 t 落入的线段 [seg, seg+1]
+    let seg = 0;
+    let found = false;
+    for (let i = 0; i < n; i++) {
+      if (rel[i] == null) continue;
+      if (t >= rel[i]) { seg = i; found = true; }
+    }
+    // 若 t 超出最末有效时间，卡在最后一个点
+    if (found && seg >= n - 1) {
+      const last = trackPoints[n - 1];
+      return { pos: [last.lng, last.lat], idx: n - 1 };
+    }
+    // 找到目标线段的起点 a 与终点 b
+    let aIdx = -1, bIdx = -1;
+    if (found) {
+      aIdx = seg;
+      bIdx = seg + 1;
+      while (bIdx < n && rel[bIdx] == null) bIdx++;
+      if (bIdx >= n) bIdx = seg;
+    }
+    const a = trackPoints[aIdx === -1 ? 0 : aIdx];
+    const b = trackPoints[bIdx === -1 ? Math.min(1, n - 1) : bIdx];
+    let u;
+    if (aIdx === -1 || bIdx <= aIdx || rel[aIdx] == null || rel[bIdx] == null || rel[bIdx] <= rel[aIdx]) {
+      // 无有效时间间隔，按点索引等距插值
+      u = Math.max(0, Math.min(1, t / trackDuration));
+      const idx = Math.min(n - 2, Math.floor(u * (n - 1)));
+      const f = u * (n - 1) - idx;
+      const pa = trackPoints[idx], pb = trackPoints[idx + 1];
+      return {
+        pos: [pa.lng + (pb.lng - pa.lng) * f, pa.lat + (pb.lat - pa.lat) * f],
+        idx,
+      };
+    }
+    u = Math.max(0, Math.min(1, (t - rel[aIdx]) / (rel[bIdx] - rel[aIdx])));
+    return {
+      pos: [a.lng + (b.lng - a.lng) * u, a.lat + (b.lat - a.lat) * u],
+      idx: aIdx,
+    };
+  }
+
+  // 更新当前轨迹点的高亮颜色：当前点为红色，其余恢复默认色
+  function highlightPoint(idx) {
+    trackMarkers.forEach((m, i) => {
+      const d = m._data;
+      const color = i === idx ? '#D93025' : d.baseColor;
+      m.setLabel({
+        content: `<div style="background:${color};color:#fff;padding:2px 7px;border-radius:6px;font-size:11px;white-space:nowrap;">${escapeHtml(trackPoints[i].label)}</div>`,
+        direction: 'top',
+        offset: new AMap.Pixel(0, -6),
+      });
+    });
+  }
+
+  function formatTimeLabel(v) {
+    const t = parseTime(v);
+    if (t == null) return String(v ?? '');
+    const d = new Date(t);
+    const p = x => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
+  // 更新进度条、时间标签与移动点位置
+  function renderTrack() {
+    const { pos, idx } = positionAt(trackT);
+    movingMarker.setCenter(pos);
+    document.getElementById('track-time').textContent = formatTimeLabel(trackPoints[idx]?.time);
+    // 进度条按「点格」步进：落在某点的区间内即显示该格
+    const pg = document.getElementById('track-progress');
+    pg.value = String(idx);
+    trackCurrent = idx;
+    highlightPoint(idx);
+  }
+
+  // 播放动画：按真实时间推进，speed 倍速（trackScale 做时间压缩）
+  function playTrack() {
+    if (trackPlaying) return;
+    trackPlaying = true;
+    document.getElementById('track-play').textContent = '⏸ 暂停';
+    const speed = parseFloat(document.getElementById('track-speed').value) || 1;
+    let last = Date.now();
+    (function step() {
+      if (!trackPlaying) return;
+      const now = Date.now();
+      trackT += (now - last) * speed * trackScale;
+      last = now;
+      if (trackT >= trackDuration) {
+        trackT = trackDuration;
+        renderTrack();
+        stopTrack();
+        setStatus('轨迹播放完成');
+        return;
+      }
+      renderTrack();
+      trackAnim = requestAnimationFrame(step);
+    })();
+  }
+
+  function stopTrack() {
+    trackPlaying = false;
+    if (trackAnim) { cancelAnimationFrame(trackAnim); trackAnim = null; }
+    document.getElementById('track-play').textContent = '▶ 播放';
+  }
+
+  // 清除轨迹：移除折线、标点、移动点并同步到标记列表
+  function clearTrack() {
+    stopTrack();
+    if (infoTimer) { clearTimeout(infoTimer); infoTimer = null; }
+    if (trackInfo) { trackInfo.close(); trackInfo = null; }
+    if (trackLine) { trackLine.setMap(null); trackLine = null; }
+    if (trackMarkers.length) {
+      trackMarkers.forEach(m => m.setMap(null));
+      markers = markers.filter(m => !trackMarkers.includes(m));   // 从标记列表移除
+      trackMarkers = [];
+      renderList();
+    }
+    if (movingMarker) { movingMarker.setMap(null); movingMarker = null; }
+    trackPoints = [];
+    trackRel = [];
+    trackScale = 1;
+    trackCurrent = 0;
+    document.getElementById('track-bar').style.display = 'none';
+  }
+
+  // ==================== 二维码识别事件绑定 ====================
+  const scanMaskEl = document.getElementById('scan-mask');
+  const scanHintEl = document.getElementById('scan-hint');
+  // 【📷 二维码识别】按钮：打开上传弹窗
+  document.getElementById('scan-btn').addEventListener('click', () => {
+    scanMaskEl.classList.add('show');
+  });
+  // 【取消】按钮：关闭弹窗并清空预览
+  document.getElementById('scan-cancel').addEventListener('click', () => {
+    pendingPoints = [];
+    document.getElementById('scan-preview').classList.remove('show');
+    document.getElementById('scan-confirm').disabled = true;
+    scanHintEl.textContent = '选择二维码图片后自动识别。';
+    scanHintEl.classList.remove('error');
+    scanMaskEl.classList.remove('show');
+  });
+  let pendingPoints = [];   // 待应用的轨迹点（扫码后等待确认）
+  // 【选择文件】：识别图片中的二维码并解析轨迹数据，结果展示在弹窗中待确认
+  document.getElementById('scan-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const raw = scanQrFromImage(img);
+        if (!raw) {
+          pendingPoints = [];
+          scanHintEl.classList.add('error');
+          scanHintEl.textContent = '未识别到二维码，请确认图片清晰且二维码完整。';
+          document.getElementById('scan-preview').classList.remove('show');
+          setStatus('未识别到二维码，请确认图片清晰且二维码完整', true);
+          return;
+        }
+        const points = parseTrackData(raw);
+        if (!points.length) {
+          pendingPoints = [];
+          scanHintEl.classList.add('error');
+          scanHintEl.textContent = '二维码内容缺少可用的时间/经纬度数据。';
+          document.getElementById('scan-preview').classList.remove('show');
+          setStatus('二维码内容缺少可用的时间/经纬度数据', true);
+          return;
+        }
+        // 预览解析结果（放入可滚动区域，避免超长列表撑出弹窗）
+        pendingPoints = points;
+        const previewEl = document.getElementById('scan-preview');
+        let preview = `<div class="preview-title">识别成功，共解析出 ${points.length} 个轨迹点：</div>`;
+        points.forEach((p, i) => {
+          preview += `<div class="marker-item"><div class="dot" style="background:${COLORS[i % COLORS.length]}"></div><div class="info"><div class="name">${escapeHtml(p.label)}</div><div class="coord">${p.lng}, ${p.lat}</div></div></div>`;
+        });
+        previewEl.innerHTML = preview;
+        previewEl.classList.add('show');
+        scanHintEl.classList.remove('error');
+        scanHintEl.textContent = '';
+        document.getElementById('scan-confirm').disabled = false;
+        setStatus(`识别成功，共解析出 ${points.length} 个轨迹点，可点击「标点并生成轨迹」`);
+      };
+      img.onerror = () => setStatus('图片读取失败', true);
+      img.src = reader.result;
+    };
+    reader.onerror = () => setStatus('文件读取失败', true);
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+  // 【标点并生成轨迹】：确认后将待应用的轨迹点落到地图上
+  document.getElementById('scan-confirm').addEventListener('click', () => {
+    if (!pendingPoints.length) return;
+    buildTrack(pendingPoints);
+    pendingPoints = [];
+    scanMaskEl.classList.remove('show');
+    document.getElementById('scan-confirm').disabled = true;
+    document.getElementById('scan-preview').classList.remove('show');
+  });
+
+  // ==================== 轨迹控制栏事件绑定 ====================
+  document.getElementById('track-play').addEventListener('click', () => {
+    if (!trackPoints.length) return;
+    if (trackPlaying) { stopTrack(); return; }
+    if (trackT >= trackDuration) trackT = 0;   // 播完后再点从头播
+    playTrack();
+  });
+  document.getElementById('track-restart').addEventListener('click', () => {
+    if (!trackPoints.length) return;
+    stopTrack();
+    trackT = 0;
+    renderTrack();
+  });
+  // 进度条：非线性步进到对应轨迹点
+  document.getElementById('track-progress').addEventListener('input', e => {
+    if (!trackPoints.length) return;
+    stopTrack();
+    const idx = Math.min(parseInt(e.target.value, 10) || 0, trackPoints.length - 1);
+    const rel = trackRel[idx];
+    trackT = rel != null ? Math.max(0, Math.min(rel, trackDuration)) : (trackDuration * idx) / Math.max(1, trackPoints.length - 1);
+    renderTrack();
+  });
+  document.getElementById('track-speed').addEventListener('change', () => {
+    if (trackPlaying) { stopTrack(); playTrack(); }   // 变速时重新以新速度推进
+  });
+  document.getElementById('track-clear').addEventListener('click', clearTrack);
 
   // ==================== 启动 ====================
   loadMap();

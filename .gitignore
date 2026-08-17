@@ -14,6 +14,15 @@ logs/
 # 插件本地运行配置（含密钥，勿提交）
 plugins/character-graph/backend/config.json
 
+# 插件临时产物（轨迹转换视频任务缓存）
+plugins/*/backend/.task_cache/
+
+# 地图标点插件测试/演示产物（录制视频、模拟轨迹数据）
+plugins/map-marker/frontend/*.mp4
+plugins/map-marker/frontend/yunfu*.json
+plugins/map-marker/frontend/yunfu*.txt
+plugins/map-marker/frontend/simulate_yunfu_5min.py
+
 # 编辑器
 .vscode/
 .idea/

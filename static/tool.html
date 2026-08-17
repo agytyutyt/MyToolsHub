@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!-- JZToolsHub 工具外壳页
+ * 元信息（工具名 / 描述 / 图标）由 static/js/tool.js 通过 /api/tools/<id> 获取，
+ * 工具本体以 iframe 方式加载 /plugin/<id>/<entry>，与框架及插件之间互不污染。
+ -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -8,6 +12,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
 </head>
 <body>
+  <!-- 顶部应用栏：返回按钮 + 站点 logo -->
   <header class="app-bar">
     <button class="back-btn" onclick="history.back()" title="返回">←</button>
     <a href="/" class="logo">
@@ -17,6 +22,7 @@
     <div class="spacer"></div>
   </header>
 
+  <!-- 工具壳：头部展示元信息，下方 iframe 承载插件页面 -->
   <main class="tool-shell">
     <div class="tool-head">
       <div class="tool-icon" id="tool-icon">🧩</div>

@@ -67,10 +67,10 @@ C:\Users\yfjz\AppData\Local\Programs\Python\Python38\Scripts\pip.exe install -r 
 JZToolsHub/
 ├── app.py                    # Flask 入口 + 配置聚合 API + 插件静态/后端加载
 ├── config/
-│   └── tools.json            # ★ 后台配置：站点信息 + 分类 + 工具注册清单 + 日志开关
+│   └── tools.json            # ★ 后台配置：站点信息 + 分类 + 工具注册清单（含名称/说明/排序）+ 日志开关
 ├── plugins/                  # ★ 插件目录（一切皆插件：前端 + 后端自包含）
 │   ├── base64/               #   示例插件：Base64 编解码（纯前端）
-│   │   ├── manifest.json     #   插件清单（元信息）
+│   │   ├── manifest.json     #   插件清单（图标/主题色/入口/能力标签）
 │   │   └── frontend/         #   前端资源（iframe 静态服务）
 │   │       └── index.html
 │   ├── json-formatter/       #   示例插件：JSON 格式化（纯前端）
@@ -98,22 +98,24 @@ JZToolsHub/
 
 JZToolsHub 的核心是可插拔工具架构，一切工作围绕 **`plugins/` 下的自包含插件目录**展开：
 
-- **插件即目录**：一个插件 = `plugins/<插件id>/` 目录，内部包含 `manifest.json`（元信息）、`frontend/`（前端资源）、以及可选的 `backend/`（Python 后端）。
-- **配置即启停**：`config/tools.json` 决定哪些插件展示、展示顺序与所属分类；`enabled: false` 即可后台下线，无需删代码。
+- **插件即目录**：一个插件 = `plugins/<插件id>/` 目录，内部包含 `manifest.json`（图标/入口/能力标签等元信息）、`frontend/`（前端资源）、以及可选的 `backend/`（Python 后端）。
+- **配置即启停，也即展示**：`config/tools.json` 决定哪些插件展示、展示顺序与所属分类，同时是工具**名称 / 描述**的权威来源；`enabled: false` 即可后台下线，无需删代码。
 - **前端隔离**：工具页面通过 iframe 嵌入外壳页（`static/tool.html`），插件之间、插件与框架之间互不污染。
 - **后端自发现**：只要插件目录下存在 `backend/__init__.py` 与含 `register(app)` 的 `routes.py`，框架启动时自动导入注册，无需在配置中声明。
 
 可视化关系：
 
 ```
-config/tools.json ──注册──▶ plugins/<id>/manifest.json（改名字/图标/能力）
-        │                        │
-        │  enabled            frontend/（iframe 加载）
-        ▼                        ▼
-   首页卡片 ◀── /api/tools ── 外壳页 /tool/<id>
-                                │
-                     backend/（启动时自动注册 Flask 路由）
+config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest.json（图标/入口/能力）
+        │                                    │
+        │  enabled + name/description      frontend/（iframe 加载）
+        ▼                                    ▼
+   首页卡片 ◀── /api/tools ────────────── 外壳页 /tool/<id>
+        │                                    │
+        └─── 名称解析（日志）◀────────── backend/（启动时自动注册 Flask 路由）
 ```
+
+> **名称 / 描述优先级**：`config/tools.json` 中注册的 `name` / `description` 为权威取值；插件目录 `manifest.json` 中若也写了这两个字段，仅作为**缺省回退**（便于把插件目录整体复制到其他项目、尚未在配置中补充名称时依然可用）。
 
 ---
 
@@ -157,12 +159,12 @@ config/tools.json ──注册──▶ plugins/<id>/manifest.json（改名字/�
   "tools": [
     {
       "id": "base64",
-      "name": "Base64 编解码",
-      "description": "...",
-      "icon": "🔐",
-      "accent": "#4285F4",
-      "entry": "index.html",
-      "features": ["编码", "解码", "UTF-8"],
+      "name": "Base64 编解码",          // ← 来自 config/tools.json（配置为权威来源）
+      "description": "...",             // ← 来自 config/tools.json
+      "icon": "🔐",                     // ← 来自 manifest.json
+      "accent": "#4285F4",              // ← 来自 manifest.json
+      "entry": "index.html",            // ← 来自 manifest.json
+      "features": ["编码", "解码", "UTF-8"],   // ← 来自 manifest.json
       "category": "开发者工具",
       "category_id": "dev",
       "order": 2
@@ -285,14 +287,14 @@ plugins/my-tool/
 ```json
 {
   "id": "my-tool",
-  "name": "我的工具",
-  "description": "一句话描述这个工具能做什么",
   "icon": "🧰",
   "accent": "#4285F4",
   "entry": "index.html",
   "features": ["标签1", "标签2"]
 }
 ```
+
+> **工具的「名称 / 说明」不写在这里**，而是写在下文 7.4 的 `config/tools.json` 中 —— 它们是配置驱动的展示项（也可以不回退，直接由后台配置统一管理）。
 
 `frontend/index.html` 就是一个普通网页，可在其中引用**相对路径**的脚本、样式与图片（因为 iframe 的 src 是 `/plugin/my-tool/xxx`，同目录资源会被正确解析）：
 
@@ -355,15 +357,19 @@ def register(app):
 
 ### 7.3 插件清单字段说明
 
+`manifest.json` 描述插件**自身**的图标、入口与能力标签（属于「插件自描述」）：
+
 | 字段 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `id` | ✅ | - | 工具唯一标识，**必须与目录名一致**，仅允许 `A-Z a-z 0-9 _ -` |
-| `name` | ✅ | 同 `id` | 展示名称 |
-| `description` | - | 空 | 卡片上的描述文字 |
+| `name` | - | 同 `id` | **可选回退**：`config/tools.json` 未注册名称时使用 |
+| `description` | - | 空 | **可选回退**：`config/tools.json` 未注册说明时使用 |
 | `icon` | - | `🧩` | 卡片图标（Emoji） |
 | `accent` | - | `#4285F4` | 卡片主题色（Hex） |
 | `entry` | - | `index.html` | 前端入口页面，位于 `frontend/` 下 |
 | `features` | - | `[]` | 卡片上的能力标签（字符串数组） |
+
+> 展示用**名称 / 描述**建议统一写在 `config/tools.json`（7.4），manifest 中的这两个字段仅作为插件目录迁移到其他项目时的兜底，两者同时存在时**以配置为准**。
 
 ### 7.4 注册插件到首页
 
@@ -379,6 +385,8 @@ def register(app):
   "tools": [
     {
       "id": "my-tool",
+      "name": "我的工具",
+      "description": "一句话描述这个工具能做什么",
       "category": "mycat",
       "enabled": true,
       "order": 6
@@ -390,21 +398,24 @@ def register(app):
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `id` | ✅ | 插件 ID，与 `manifest.json` 及目录名一致 |
+| `name` | - | **展示名称**（配置为权威来源；缺省回退到 manifest，再回退到 `id`） |
+| `description` | - | **卡片说明文字**（配置为权威来源；缺省回退到 manifest） |
 | `category` | ✅ | 所属分类 ID（对应 `categories` 中的 `id`） |
 | `enabled` | - | 是否启用，`false` 时首页隐藏且后端不加载 |
 | `order` | - | 展示顺序（同分类内按此排序） |
 
-保存后刷新首页即生效，**无需重启服务、无需改框架代码**。
+保存后刷新首页即生效，**无需重启服务、无需改框架代码**。只改 `name` / `description` 即可调整前台展示文案，不动插件目录。
 
 ### 7.5 常见约定与注意事项
 
 1. **ID 规范**：`manifest.json` 的 `id`、目录名、`config/tools.json` 中的 `id` 三者必须一致。
-2. **资源隔离**：所有插件文件必须放在 `plugins/<id>/` 下，前端放 `frontend/`，后端放 `backend/`。主框架 `static/` 目录属于框架自身，不要混入插件资源。
-3. **目录穿越防护**：插件 ID 只允许 `[A-Za-z0-9_-]`，`/plugin/<id>/<path>` 由 `send_from_directory` 安全控制，不要用 `..`、`/` 等字符作 ID 或路径。
-4. **相对路径引用**：前端内部引用其他资源一律用相对路径（`./app.js`、`css/style.css`），不要硬编码 `/static/...` 之外的绝对路径。
-5. **后端前缀唯一**：多个插件可能同时注册，后端路由建议统一使用 `/api/<插件id>/` 前缀。
-6. **敏感配置**：插件内的高德 Key、大模型 Key 等前端依赖配置建议由插件页面自行管理（如保存到 localStorage），不要写死在仓库文件中。
-7. **自包含交付**：一个插件目录可以从项目复制到另一个 JZToolsHub 项目，配合一段 `tools.json` 配置即可完整迁移。
+2. **展示名集中管理**：工具在前台展示的**名称 / 说明**统一写在 `config/tools.json`（配置为准）；manifest 中的同名段仅作回退，不建议两处维护不同文案。
+3. **资源隔离**：所有插件文件必须放在 `plugins/<id>/` 下，前端放 `frontend/`，后端放 `backend/`。主框架 `static/` 目录属于框架自身，不要混入插件资源。
+4. **目录穿越防护**：插件 ID 只允许 `[A-Za-z0-9_-]`，`/plugin/<id>/<path>` 由 `send_from_directory` 安全控制，不要用 `..`、`/` 等字符作 ID 或路径。
+5. **相对路径引用**：前端内部引用其他资源一律用相对路径（`./app.js`、`css/style.css`），不要硬编码 `/static/...` 之外的绝对路径。
+6. **后端前缀唯一**：多个插件可能同时注册，后端路由建议统一使用 `/api/<插件id>/` 前缀。
+7. **敏感配置**：插件内的高德 Key、大模型 Key 等前端依赖配置建议由插件页面自行管理（如保存到 localStorage），不要写死在仓库文件中。
+8. **自包含交付**：一个插件目录可以从项目复制到另一个 JZToolsHub 项目，配合一段 `tools.json` 配置（含 `name` / `description`）即可完整迁移。
 
 ---
 
@@ -418,6 +429,7 @@ def register(app):
 | md5-generator | dev | ✅ | - | MD5 摘要生成 |
 | map-marker | maps | ✅ | - | 高德地图经纬度标点（需自备高德 Key） |
 | character-graph | ai | ✅ | ✅ | 上传文档 → 大模型提取人物关系 → 3D 星图展示 |
+| trajectory-convert | dev | ✅ | ✅ | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → QR-transfer 二维码视频流 |
 
 ---
 

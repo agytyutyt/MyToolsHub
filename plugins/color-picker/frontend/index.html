@@ -1,4 +1,7 @@
 <!DOCTYPE html>
+<!-- 取色器插件（纯前端）
+ * 基于 <input type="color"> 原生取色，实时换算 HEX / RGB / HSL 并支持一键复制。
+ -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -58,10 +61,13 @@
   const values = document.getElementById('values');
   const toast = document.getElementById('toast');
 
+  // HEX → RGB
   function hexToRgb(hex) {
     const m = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
   }
+
+  // RGB → HSL（s/l 返回百分比整数）
   function rgbToHsl(r, g, b) {
     r /= 255; g /= 255; b /= 255;
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
@@ -78,6 +84,7 @@
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
   }
 
+  // 复制并给出轻提示
   function copy(text, label) {
     navigator.clipboard.writeText(text).then(() => {
       toast.textContent = label + ' 已复制';
@@ -86,6 +93,7 @@
     });
   }
 
+  // 渲染当前颜色的 HEX / RGB / HSL，并为每个「复制」按钮绑定事件
   function render() {
     const hex = picker.value;
     preview.style.background = hex;

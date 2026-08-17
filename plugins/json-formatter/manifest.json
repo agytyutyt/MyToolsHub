@@ -1,7 +1,5 @@
 {
   "id": "json-formatter",
-  "name": "JSON 格式化",
-  "description": "对 JSON 进行格式化、压缩与校验，错误定位一键修复。",
   "icon": "🧩",
   "accent": "#34A853",
   "entry": "index.html",

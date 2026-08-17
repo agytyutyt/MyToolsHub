@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!-- JSON 格式化插件（纯前端）
+ * 基于 JSON.parse / JSON.stringify 实现格式化、压缩与语法校验，
+ * 全部处理在浏览器本地完成，不经过后端。
+ -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -72,16 +76,19 @@
   const stInfo = document.getElementById('st-info');
   const toast = document.getElementById('toast');
 
+  // 底部轻提示
   function notify(msg) {
     toast.textContent = msg;
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 1500);
   }
 
+  // 根据下拉框返回缩进字符串（Tab 或指定数量的空格）
   function indentation() {
     return document.getElementById('indent').value === 'tab' ? '\t' : ' '.repeat(Number(document.getElementById('indent').value));
   }
 
+  // 格式化：解析并美化输出，同时校验合法性
   document.getElementById('format').addEventListener('click', () => {
     try {
       const json = JSON.parse(input.value);
@@ -95,6 +102,7 @@
     }
   });
 
+  // 压缩：去掉所有空白字符
   document.getElementById('minify').addEventListener('click', () => {
     try {
       const json = JSON.parse(input.value);
@@ -108,11 +116,13 @@
     }
   });
 
+  // 复制结果
   document.getElementById('copy').addEventListener('click', () => {
     if (!output.value) return;
     navigator.clipboard.writeText(output.value).then(() => notify('已复制'));
   });
 
+  // 清空
   document.getElementById('clear').addEventListener('click', () => {
     input.value = output.value = '';
     stMsg.innerHTML = '';

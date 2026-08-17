@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<!-- QR 视频流解码插件（前端 + Python 后端）
+ * 前端逐帧扫码（Web Worker 中 jsQR），后端做 zfec 前向纠错重组。
+ * 后端接口前缀：/api/qr-video-decode
+ -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QR 视频流解码</title>
+<style>
+  :root {
+    --primary: #34A853;
+    --primary-dark: #2b8a44;
+    --bg: #f5f5f5;
+    --card: #ffffff;
+    --text: #202124;
+    --muted: #5f6368;
+    --error: #D93025;
+    --border: #dadce0;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .container { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 28px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .15s;
+    color: var(--muted);
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--primary); background: #f0faf2; }
+  .dropzone p:first-child { font-size: 15px; color: var(--text); }
+  .dropzone p:last-child { font-size: 12px; margin-top: 6px; }
+  .muted { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  video { display: none; }
+  .row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button {
+    font-family: inherit;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: filter .15s;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .primary { background: var(--primary); color: #fff; }
+  .primary:not(:disabled):hover { filter: brightness(1.08); }
+  .secondary { background: #e8f0fe; color: #1a73cf; }
+  .secondary:not(:disabled):hover { filter: brightness(.97); }
+  .progress {
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0;
+    background: var(--primary);
+    transition: width .2s;
+  }
+  #progressText { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .stage { font-size: 13px; font-weight: 600; color: var(--primary-dark); margin-top: 10px; }
+  .status { margin-top: 12px; font-size: 14px; color: var(--text); }
+  .status.error { color: var(--error); }
+  #result { margin-top: 4px; }
+  #resultSize { font-weight: 600; }
+  textarea {
+    width: 100%;
+    min-height: 160px;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    background: #fafafa;
+    resize: vertical;
+  }
+  .hidden { display: none; }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal {
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .25);
+    width: min(860px, 100%);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 20px 16px;
+  }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; }
+  .modal-head h2 { font-size: 16px; font-weight: 600; }
+  .modal-x {
+    border: none;
+    background: none;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 0 4px;
+  }
+  .modal-x:hover { color: var(--text); }
+  .modal-data {
+    flex: 1;
+    overflow: auto;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 12px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+    user-select: text;
+    min-height: 200px;
+  }
+  .modal .row { margin-top: 14px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>QR 视频流解码</h1>
+  <p class="subtitle">解码 QR-transfer 生成的动态二维码视频，经 zfec 前向纠错重组，恢复原始数据（如轨迹 JSON）</p>
+
+  <div class="card" id="inputCard">
+    <h2>1. 选择视频</h2>
+    <div id="dropZone" class="dropzone">
+      <p>拖拽 QR 视频文件到此处，或点击选择</p>
+      <p>支持 .mp4 / .webm，需为 QR-transfer 生成的二维码视频流</p>
+    </div>
+    <input id="fileInput" type="file" accept="video/*,.mp4,.webm" hidden />
+    <p id="fileName" class="muted"></p>
+    <div class="row">
+      <button id="scanBtn" class="primary" disabled>开始解码</button>
+    </div>
+
+    <div id="progressWrap" hidden>
+      <div class="progress"><div id="progressFill" class="progress-fill"></div></div>
+      <p id="progressText"></p>
+    </div>
+    <p id="stage" class="stage" hidden></p>
+    <div id="status" class="status"></div>
+    <video id="videoSrc" playsinline></video>
+  </div>
+
+  <div class="card hidden" id="result">
+    <h2>2. 解码结果</h2>
+    <p>恢复文件大小：<span id="resultSize"></span></p>
+    <p id="previewTitle" class="muted" style="margin-top:6px;"></p>
+    <textarea id="preview" readonly></textarea>
+    <div class="row">
+      <button id="downloadBtn" class="secondary">下载恢复数据</button>
+      <button id="reChoose" class="secondary">重新选择视频</button>
+    </div>
+  </div>
+</div>
+
+<div id="dataModal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h2 id="modalTitle">解码数据</h2>
+      <button id="modalClose" class="modal-x" title="关闭">&times;</button>
+    </div>
+    <p id="modalStats" class="muted"></p>
+    <pre id="modalData" class="modal-data"></pre>
+    <div class="row">
+      <button id="modalCopy" class="secondary">复制全部</button>
+      <button id="modalDownload" class="secondary">下载数据</button>
+      <button id="modalCloseBtn" class="primary">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="./jsqr.min.js?v=1"></script>
+<script src="./app.js?v=6"></script>
+</body>
+</html>

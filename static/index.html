@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!-- JZToolsHub 首页
+ * 工具卡片由 static/js/main.js 读取 /api/tools 动态渲染，
+ * 站点标题 / 副标题 / 页脚等文案均来自 config/tools.json 的 site 段。
+ -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -8,6 +12,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
 </head>
 <body>
+  <!-- 顶部应用栏 -->
   <header class="app-bar">
     <a href="/" class="logo">
       <span class="logo-mark"></span>
@@ -16,17 +21,20 @@
     <div class="spacer"></div>
   </header>
 
+  <!-- 首屏标语区 -->
   <section class="hero">
     <h1 id="hero-title">工具箱</h1>
     <p id="hero-subtitle">一切皆插件 · 配置驱动的工具集合</p>
   </section>
 
+  <!-- 主内容区：JS 按分类动态插入工具卡片 -->
   <main class="content" id="content">
     <div class="tool-grid" id="tool-grid">
       <div class="loading">加载中…</div>
     </div>
   </main>
 
+  <!-- 页脚（文案来自配置 site.footer） -->
   <footer class="footer" id="footer"></footer>
 
   <script src="/static/js/main.js"></script>

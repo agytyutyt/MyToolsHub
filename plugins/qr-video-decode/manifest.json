@@ -1,0 +1,7 @@
+{
+  "id": "qr-video-decode",
+  "icon": "📽️",
+  "accent": "#34A853",
+  "entry": "index.html",
+  "features": ["视频解码", "QR 识别", "zfec 纠错", "数据恢复"]
+}

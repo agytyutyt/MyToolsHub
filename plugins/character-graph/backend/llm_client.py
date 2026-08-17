@@ -1,7 +1,10 @@
-"""OpenAI-compatible LLM client.
+"""OpenAI 兼容的大模型客户端。
 
-Works with any API that exposes /chat/completions (OpenAI, DeepSeek,
-Qwen/DashScope compatible mode, Kimi/Moonshot, Zhipu, local Ollama, etc.).
+可对接任何暴露 /chat/completions 接口的模型服务：
+OpenAI、DeepSeek、通义千问（兼容模式）、Kimi/Moonshot、智谱、
+本地 Ollama 等。
+
+调用入口为 extract_graph()：给定文档文本，返回 {characters, relationships}。
 """
 
 import json
@@ -9,16 +12,21 @@ import re
 
 import requests
 
+# 默认接入地址与模型（未指定时使用）
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-4o-mini"
 
 
 class LLMError(Exception):
+    """大模型调用相关异常，错误信息直接展示给前端用户。"""
     pass
 
 
 def parse_model_output(text: str) -> dict:
-    """Extract a JSON object from the model reply, tolerating markdown fences."""
+    """从模型回复中解析 JSON 对象，容忍 markdown 代码围栏。
+
+    依次尝试：去掉 ``` 围栏后整体解析 → 正则抽取最外层大括号。
+    """
     if not text:
         raise LLMError("大模型返回为空")
     cleaned = text.strip()
@@ -28,6 +36,7 @@ def parse_model_output(text: str) -> dict:
         return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
+    # 兜底：从文本中抽取最外层 JSON 对象
     match = re.search(r"\{[\s\S]*\}", cleaned)
     if match:
         try:
@@ -39,7 +48,10 @@ def parse_model_output(text: str) -> dict:
 
 def chat_json(base_url: str, api_key: str, model: str, system: str, user: str,
               temperature: float = 0.2, timeout: int = 300) -> dict:
-    """Send a chat completion request and parse the JSON reply."""
+    """发送一次 chat/completions 请求并解析 JSON 回复。
+
+    base_url 允许以 /chat/completions 结尾（直接使用），否则自动拼接。
+    """
     base = (base_url or DEFAULT_BASE_URL).strip()
     if base.endswith("/chat/completions"):
         url = base
@@ -78,6 +90,7 @@ def chat_json(base_url: str, api_key: str, model: str, system: str, user: str,
     return parse_model_output(content)
 
 
+# 系统提示词：约束大模型只输出人物与关系的 JSON
 DEFAULT_SYSTEM_PROMPT = """你是一名专业的办案辅助分析助手。用户会给你一份口供笔录（或案卷材料），请从中提取人物以及人物之间的关系。
 
 要求：
@@ -100,6 +113,7 @@ DEFAULT_SYSTEM_PROMPT = """你是一名专业的办案辅助分析助手。用�
 }
 """
 
+# 用户消息模板：{document} 会被替换为实际文档文本
 DEFAULT_USER_TEMPLATE = """以下是口供笔录/案卷文档内容（可能被截断，忽略无关内容）：
 
 {document}
@@ -109,10 +123,11 @@ DEFAULT_USER_TEMPLATE = """以下是口供笔录/案卷文档内容（可能被�
 
 def extract_graph(text: str, base_url: str, api_key: str, model: str,
                   prompt=None) -> dict:
-    """调用大模型抽取人物关系。
+    """调用大模型抽取人物关系，返回 {"characters": [...], "relationships": [...]}。
 
     prompt 为可选的 prompt 配置字典：{"system": ..., "user_template": ...}。
     未提供时使用内置默认 prompt。user_template 中的 {document} 会被替换为文档文本。
+    返回前会过滤掉引用了未出现人物的关系，保证数据自洽。
     """
     prompt = prompt or {}
     system = prompt.get("system") or DEFAULT_SYSTEM_PROMPT
@@ -125,6 +140,7 @@ def extract_graph(text: str, base_url: str, api_key: str, model: str,
     if not characters:
         raise LLMError("大模型未提取到任何人物，请确认文档包含人物内容")
 
+    # 只保留 source / target 均为已识别人物的关系，且不允许自指
     names = {c.get("name", "").strip() for c in characters}
     valid_rels = []
     for r in relationships:

@@ -1,0 +1,7 @@
+{
+  "id": "trajectory-convert",
+  "icon": "🛰️",
+  "accent": "#7b1fa2",
+  "entry": "index.html",
+  "features": ["Excel 解析", "时间抽样", "JSON 封装", "QR-transfer 视频"]
+}

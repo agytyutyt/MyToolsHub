@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!-- Base64 编解码插件（纯前端）
+ * 用 TextEncoder / TextDecoder 保证 UTF-8 中文正确编解码，
+ * 全部处理都在浏览器本地完成，不经过后端。
+ -->
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -51,14 +55,17 @@
   <div class="toast" id="toast"></div>
 
 <script>
+  // 输入 / 输出 / 状态提示 / 轻提示 四个 DOM 引用
   const input = document.getElementById('input');
   const output = document.getElementById('output');
   const status = document.getElementById('status');
   const toast = document.getElementById('toast');
 
+  // UTF-8 编解码（TextEncoder 输出 Uint8Array，TextDecoder 还原字符串）
   const utf8Encode = s => new TextEncoder().encode(s);
   const utf8Decode = bytes => new TextDecoder('utf-8').decode(bytes);
 
+  // 字节数组 <-> Base64 字符串（浏览器 API 只支持 latin1 字符串，先转成字节）
   function bytesToBase64(bytes) {
     let bin = '';
     bytes.forEach(b => bin += String.fromCharCode(b));
@@ -71,12 +78,14 @@
     return bytes;
   }
 
+  // 底部轻提示
   function notify(msg) {
     toast.textContent = msg;
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 1500);
   }
 
+  // 编码：文本 → Base64
   document.getElementById('encode').addEventListener('click', () => {
     try {
       output.value = bytesToBase64(utf8Encode(input.value));
@@ -85,6 +94,7 @@
     } catch (e) { status.textContent = '编码失败'; status.classList.add('error'); }
   });
 
+  // 解码：Base64 → 文本（非法输入会抛出异常）
   document.getElementById('decode').addEventListener('click', () => {
     try {
       output.value = utf8Decode(base64ToBytes(input.value));
@@ -96,11 +106,13 @@
     }
   });
 
+  // 清空输入输出
   document.getElementById('clear').addEventListener('click', () => {
     input.value = output.value = '';
     status.textContent = '';
   });
 
+  // 复制结果
   document.getElementById('copy').addEventListener('click', () => {
     if (!output.value) return;
     navigator.clipboard.writeText(output.value).then(() => notify('已复制'));
