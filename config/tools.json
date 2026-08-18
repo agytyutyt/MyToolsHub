@@ -9,7 +9,8 @@
     { "id": "dev", "name": "开发者工具" },
     { "id": "design", "name": "设计工具" },
     { "id": "ai", "name": "AI 智能工具" },
-    { "id": "maps", "name": "地图工具" }
+    { "id": "maps", "name": "地图工具" },
+    { "id": "office", "name": "协作办公" }
   ],
   "tools": [
     {
@@ -75,6 +76,14 @@
       "category": "dev",
       "enabled": true,
       "order": 7
+    },
+    {
+      "id": "shared-docs",
+      "name": "共享文档",
+      "description": "多人共同编辑 Word 与 Excel 文档，实时同步、在线用户、版本冲突提示，支持导入/导出 .docx / .xlsx。",
+      "category": "office",
+      "enabled": true,
+      "order": 8
     }
   ]
 }

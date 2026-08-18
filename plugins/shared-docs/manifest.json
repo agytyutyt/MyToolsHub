@@ -1,0 +1,7 @@
+{
+  "id": "shared-docs",
+  "icon": "📝",
+  "accent": "#26a69a",
+  "entry": "index.html",
+  "features": ["Word 协作", "Excel 协作", "实时同步", "导入/导出"]
+}

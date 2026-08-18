@@ -84,6 +84,7 @@ JZToolsHub/
 │   │   └── backend/          #   Python 后端（routes.py 等）
 │   ├── trajectory-convert/   #   插件：轨迹转换（Excel → 二维码视频流 / 静态二维码）
 │   └── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
+│   └── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
 ├── static/
 │   ├── index.html            # 首页（大方块展示）
 │   ├── tool.html             # 工具外壳页（加载插件 iframe）
@@ -172,6 +173,25 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /api/qr-video-decode/status` | 依赖可用性检查（zfec / jsQR） |
 | `POST /api/qr-video-decode/reassemble` | 提交前端逐帧识别出的分块数据，**异步 zfec 前向纠错重组，返回 `task_id`** |
 | `GET /api/qr-video-decode/reassemble/<task_id>` | 轮询重组进度与恢复结果 |
+
+**shared-docs 插件后端接口**（共享文档协作编辑）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/shared-docs/status` | 依赖可用性检查（python-docx / openpyxl / xlrd） |
+| `GET /api/shared-docs/documents` | 文档列表（名称 / 类型 / 版本 / 更新时间） |
+| `POST /api/shared-docs/documents` | 新建文档 `{name, type}`，type 为 `word` / `excel` |
+| `GET /api/shared-docs/documents/<id>` | 文档详情（含内容、修订历史、在线用户） |
+| `POST /api/shared-docs/documents/<id>/content` | 保存内容 `{base_version, content, user}`；**乐观锁**：版本不匹配返回 409 并携带服务端最新文档 |
+| `POST /api/shared-docs/documents/<id>/presence` | 在线心跳 `{client_id, user}`，返回当前在线用户 |
+| `POST /api/shared-docs/documents/<id>/rename` | 重命名 `{name}` |
+| `DELETE /api/shared-docs/documents/<id>` | 删除文档 |
+| `GET /api/shared-docs/documents/<id>/export` | 导出真实 Office 文件（Word→`.docx`、Excel→`.xlsx`） |
+| `POST /api/shared-docs/documents/<id>/import` | 上传 `.docx` / `.xlsx` / `.xls` 导入覆盖当前文档 |
+
+> 文档数据以 JSON 文件保存在 `plugins/shared-docs/backend/data/`（已 gitignore），
+> 内容格式：Word 为块级结构（`blocks`：段落 / 标题 / 列表 + 富文本 runs），
+> Excel 为二维数组（`rows`）加可选列宽（`colWidths`，像素，0=自动）。
 
 `GET /api/tools` 返回结构示例：
 
@@ -454,6 +474,7 @@ def register(app):
 | character-graph | ai | ✅ | ✅ | 上传文档 → 大模型提取人物关系 → 3D 星图展示 |
 | trajectory-convert | dev | ✅ | ✅ | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → 生成二维码视频流，或静态二维码图片（单张/多张） |
 | qr-video-decode | dev | ✅ | ✅ | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
+| shared-docs | office | ✅ | ✅ | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、版本冲突提示、`.docx` / `.xlsx` 导入导出 |
 
 ---
 
@@ -503,6 +524,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 轨迹转换报缺依赖 | 确认已安装 `openpyxl / xlrd / qrcode / zfec / numpy / opencv-python`；`GET /api/trajectory-convert/status` 可查看各依赖可用性 |
 | 静态二维码扫描报"缺少时间/经纬度" | 若为多张静态二维码中的一张，其内容是该段的 JSON 子集，可导入地图标点查看对应片段；完整轨迹请用「二维码视频流」模式 |
 | 地图标点空白/地图不显示 | 在「⚙️ 配置」中填写有效的高德 Web 服务 Key 并保存 |
+| 共享文档导入/导出不可用 | 确认已安装 `python-docx / openpyxl`（Word/Excel）与 `xlrd`（.xls）；页面顶部依赖提示会列出缺失项 |
 | 端口被占用 | 修改 `app.py` 末尾 `port=5000`，或先停止旧进程再启动 |
 
 ---
