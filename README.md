@@ -85,6 +85,7 @@ JZToolsHub/
 │   ├── trajectory-convert/   #   插件：轨迹转换（Excel → 二维码视频流 / 静态二维码）
 │   └── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
 │   └── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
+│   └── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
 ├── static/
 │   ├── index.html            # 首页（大方块展示）
 │   ├── tool.html             # 工具外壳页（加载插件 iframe）
@@ -192,6 +193,43 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 > 文档数据以 JSON 文件保存在 `plugins/shared-docs/backend/data/`（已 gitignore），
 > 内容格式：Word 为块级结构（`blocks`：段落 / 标题 / 列表 + 富文本 runs），
 > Excel 为二维数组（`rows`）加可选列宽（`colWidths`，像素，0=自动）。
+
+**case-report 插件后端接口**（战果录入——收网情况报告要素抽取 + 本地台账）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/case-report/config` | 读取大模型配置（base_url / api_key / model）及是否已配置 |
+| `POST /api/case-report/config` | 保存大模型配置 |
+| `POST /api/case-report/parse` | 提交解析任务 `{text, base_url?, api_key?, model?}`，**立即返回 `task_id`**，后台异步执行 |
+| `GET /api/case-report/result/<task_id>` | 轮询解析结果：`fields`（五要素键值对）、`items`（缴获物品逐项拆分）、`method`（`llm` / `llm+rules` / `rules`）、`llm_error` |
+| `POST /api/case-report/items` | 把缴获物品文本拆分为单列物品 `{text}`（供前端实时预览归类/数量） |
+| `GET /api/case-report/categories` | 既有类别集合：`learned`（用户已学习的「物品名→类别」）+ `known`（可选类别列表） |
+| `POST /api/case-report/categories` | 学习一条类别 `{name, category}`，持久化后后续解析优先采用 |
+| `DELETE /api/case-report/categories/<name>` | 删除某物品名的学习类别，恢复默认判定 |
+| `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并） |
+| `GET /api/case-report/records` | 本地台账列表（按入库时间倒序） |
+| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?}`；`items` 为用户编辑后的单列明细（可省略，省略则自动拆分），保存时同步学习 `物品名→类别` |
+| `GET /api/case-report/records/<rid>` | 单条记录详情 |
+| `DELETE /api/case-report/records/<rid>` | 删除记录 |
+| `GET /api/case-report/records/<rid>/download` | 下载单条记录的键值对 JSON 文件（`case-<rid>.json`） |
+
+> 解析策略：配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全，
+> 未配置时自动回落「本地规则解析」（正则），开箱即用。
+> 台账以键值对 JSON 一记录一文件保存在 `plugins/case-report/backend/data/`（已 gitignore）。
+
+**时间规则**：仅写「月/日」（如 8月20日）时自动补当前年份；出现「昨天 / 前天 / 今天」等
+以当前年月日为基准回推；大模型与规则产出的时间统一归一化为「YYYY年M月D日」。
+
+**缴获物品规则**：除在 `fields.缴获物品` 保留原文摘要外，逐项拆分为
+`items: [{category, name, quantity, unit}]` 单列存储——如「冰毒500克、涉案手机6部」拆为
+毒品/手机两项；类似物品（如 电脑 / 笔记本电脑 / 台式电脑 / 平板）映射为同一「电脑」类别，
+可在 `GET /api/case-report/aggregate` 中跨记录按数量叠加（重量→克、货币→元，批次「一批/若干」不参与数字累加）。
+
+**类别学习（持久化）**：解析结果先在界面展示为可编辑明细（类别 / 名称 / 数量 / 单位）。
+修改类别后系统自动把「物品名→类别」写入本地类别库
+（`plugins/case-report/backend/data/item_categories.json`，已 gitignore）。
+再次解析时的类别判定优先级：**用户已学习类别 > 大模型判定 > 本地规则判定**；
+不适用既有类别的新物品由大模型单独归类（未配置大模型时用本地规则兜底）。保存记录时也会把最终明细中的类别一并学习。
 
 `GET /api/tools` 返回结构示例：
 
@@ -475,6 +513,7 @@ def register(app):
 | trajectory-convert | dev | ✅ | ✅ | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → 生成二维码视频流，或静态二维码图片（单张/多张） |
 | qr-video-decode | dev | ✅ | ✅ | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
 | shared-docs | office | ✅ | ✅ | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、版本冲突提示、`.docx` / `.xlsx` 导入导出 |
+| case-report | police | ✅ | ✅ | 输入收网情况报告 → 抽取 时间/主办大队/案件名/抓获人数/缴获物品 → 键值对 JSON 本地台账 |
 
 ---
 

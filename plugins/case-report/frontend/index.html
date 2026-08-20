@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>战果录入</title>
+  <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
+  <link rel="stylesheet" href="./style.css?v=4">
+</head>
+<body>
+  <div class="view">
+    <header class="page-head">
+      <div class="page-title">
+        <h1>📋 战果录入</h1>
+        <p class="sub">输入收网情况报告 → 抽取五要素 → 键值对 JSON 本地存档</p>
+      </div>
+    </header>
+
+    <!-- 大模型配置（可选，未配置时自动使用本地规则解析） -->
+    <details class="card config-card" id="cfgCard">
+      <summary>⚙️ 大模型解析配置（可选，未配置时使用本地规则解析）</summary>
+      <div class="cfg-grid">
+        <label>API 地址
+          <input id="baseUrl" type="text" placeholder="https://api.deepseek.com" />
+        </label>
+        <label>API Key
+          <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+        </label>
+        <label>模型名称
+          <input id="model" type="text" placeholder="deepseek-v4-flash" />
+        </label>
+        <div class="cfg-actions">
+          <button id="saveConfig" class="btn">保存配置</button>
+          <span id="configTip" class="tip"></span>
+        </div>
+      </div>
+    </details>
+
+    <!-- 输入框：收网情况报告 -->
+    <section class="card">
+      <h2>收网情况报告</h2>
+      <textarea id="reportText" rows="6" spellcheck="false"
+        placeholder="粘贴或输入公安某部门对某案件的收网情况报告，例如：&#10;2026年8月20日凌晨，刑侦一支队对“8·16”系列盗窃专案统一收网，抓获犯罪嫌疑人5名，缴获涉案手机6部、赃款8万元。"></textarea>
+      <p class="muted">报告中包含 时间 / 主办大队 / 案件名 / 抓获人数 / 缴获物品 越完整，抽取越准确。</p>
+      <div class="row-actions">
+        <button id="parseBtn" class="btn btn-primary">🔍 解析录入</button>
+        <button id="clearBtn" class="btn">清空</button>
+        <span id="parseStatus" class="toolbar-status"></span>
+      </div>
+    </section>
+
+    <!-- 抽取结果（键值对，可编辑） -->
+    <section id="resultCard" class="card hidden">
+      <div class="result-head">
+        <h2>抽取结果</h2>
+        <span id="methodBadge" class="badge hidden"></span>
+      </div>
+      <div id="fieldGrid" class="field-grid"></div>
+      <div id="itemsEditorWrap" class="items-editor hidden">
+        <h3>缴获物品明细（可修改：类别 / 名称 / 数量 / 单位）</h3>
+        <div id="itemsEditor" class="items-editor-list"></div>
+        <datalist id="catOptions"></datalist>
+        <div class="row-actions">
+          <button id="addItemBtn" class="btn">＋ 添加条目</button>
+        </div>
+        <p class="muted">修改「类别」后系统会自动记住（写入本地类别库）；再次解析时优先复用已记住的类别，
+          不适配的新物品由大模型（未配置时走本地规则）单独归类。保存后将写入台账并参与「战果汇总」累加。</p>
+      </div>
+      <p class="muted">下方字段可直接修改，确认后点击「保存入库」，将以键值对 JSON 写入本地台账。</p>
+      <div class="row-actions">
+        <button id="saveEntryBtn" class="btn btn-primary">💾 保存入库</button>
+        <button id="reparseBtn" class="btn">重新解析</button>
+      </div>
+    </section>
+
+    <!-- 战果汇总（类似物品归为统一类、数量叠加） -->
+    <section class="card">
+      <div class="record-head">
+        <h2>战果汇总</h2>
+        <span id="summaryCount" class="muted"></span>
+      </div>
+      <div id="summaryList" class="summary-list"></div>
+      <div id="summaryEmpty" class="empty hidden">暂无战果数据，保存一条战果记录后自动按类别累加。</div>
+    </section>
+
+    <!-- 本地战果台账（JSON 键值对存储） -->
+    <section class="card">
+      <div class="record-head">
+        <h2>本地战果台账</h2>
+        <span id="recordCount" class="muted"></span>
+        <div class="spacer"></div>
+        <button id="refreshRecords" class="btn">刷新</button>
+      </div>
+      <div id="recordList" class="record-list"></div>
+      <div id="emptyTip" class="empty hidden">暂无战果记录，解析后点击「保存入库」生成第一条。</div>
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="./app.js?v=4"></script>
+</body>
+</html>

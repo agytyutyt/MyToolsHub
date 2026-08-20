@@ -1,0 +1,523 @@
+"""战果录入 —— JZToolsHub 后端插件路由。
+
+功能：输入公安某部门对某案件的「收网情况报告」，抽取五要素
+（案件名 / 时间 / 主办大队 / 抓获人数 / 缴获物品），
+以「键值对」JSON 的形式本地化存档（backend/data/ 下，一记录一文件）。
+
+缴获物品：除保留原文摘要外，逐项拆分为 {category, name, quantity, unit}
+单列存储；类似物品（如电脑/笔记本）归为统一战果类别，可跨记录按
+「战果汇总」（/aggregate）做数量叠加。
+
+解析策略：
+- 配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全；
+- 未配置时自动回落「本地规则解析」（正则兜底），保证工具开箱即用。
+
+时间规则：仅写「月/日」时自动补当前年份；出现「昨天/前天/今天」等
+以当前年月日为基准回推。
+
+并发设计：解析含大模型调用，走后台线程池 + task_id 轮询，
+不占用 HTTP worker（与 character-graph 一致）。
+
+接口前缀：/api/case-report
+"""
+
+import io
+import json
+import os
+import re
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from flask import jsonify, request, send_file
+
+from . import category_kb, llm_client, parser
+
+PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
+PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
+DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+API_PREFIX = "/api/case-report"
+
+# 后台解析线程池：限制并发大模型任务数
+PARSE_WORKERS = 2
+_parse_executor = ThreadPoolExecutor(max_workers=PARSE_WORKERS)
+
+# 任务状态：task_id -> {status, ...}; pending -> running -> done / error
+TASKS = {}
+TASKS_LOCK = threading.Lock()
+TASK_TTL_SECONDS = 30 * 60
+
+# 全局文件写锁（记录读写、配置写共用）
+_LOCK = threading.RLock()
+
+RECORD_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+MAX_TEXT_LEN = 20000
+MAX_ITEM_LEN = 2000
+
+DEFAULT_CONFIG = {"llm": {"base_url": "", "api_key": "", "model": ""}}
+FIELD_KEYS = parser.FIELD_KEYS
+
+
+# ===================== 基础 IO =====================
+
+def _now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def load_config():
+    data = {}
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    llm = data.get("llm") or {}
+    return {"llm": {
+        "base_url": (llm.get("base_url") or "").strip(),
+        "api_key": (llm.get("api_key") or "").strip(),
+        "model": (llm.get("model") or "").strip(),
+    }}
+
+
+def save_config(cfg):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+
+def load_prompt():
+    data = {}
+    if os.path.exists(PROMPT_FILE):
+        try:
+            with open(PROMPT_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    return {
+        "system": data.get("system") or llm_client.DEFAULT_SYSTEM_PROMPT,
+        "user_template": data.get("user_template") or llm_client.DEFAULT_USER_TEMPLATE,
+    }
+
+
+def ensure_files():
+    """首次运行生成可编辑的默认配置文件与数据目录。"""
+    if not os.path.exists(CONFIG_FILE):
+        save_config(DEFAULT_CONFIG)
+    if not os.path.exists(PROMPT_FILE):
+        with open(PROMPT_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "system": llm_client.DEFAULT_SYSTEM_PROMPT,
+                "user_template": llm_client.DEFAULT_USER_TEMPLATE,
+            }, f, ensure_ascii=False, indent=2)
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+
+# ===================== 字段规整 =====================
+
+def normalize_fields(raw):
+    """只保留五要素，trim 长度，抓获人数转阿拉伯数字/整数，时间补全整日期。"""
+    raw = raw or {}
+    out = {}
+    for k in FIELD_KEYS:
+        v = raw.get(k)
+        if not isinstance(v, (str, int, float)):
+            v = ""
+        v = str(v).strip()
+        if len(v) > MAX_ITEM_LEN:
+            v = v[:MAX_ITEM_LEN]
+        out[k] = v
+    if out["时间"]:
+        out["时间"] = parser.normalize_time(out["时间"])
+    cnt = out["抓获人数"]
+    if cnt:
+        cnt = parser.normalize_count(cnt)
+        out["抓获人数"] = cnt
+        if cnt.isdigit():
+            out["抓获人数"] = int(cnt)
+        else:
+            out["抓获人数"] = cnt
+    return out
+
+
+# ===================== 解析任务（后台线程池） =====================
+
+def set_task(task_id, **kwargs):
+    with TASKS_LOCK:
+        TASKS[task_id] = {**TASKS.get(task_id, {}), **kwargs}
+
+
+def get_task(task_id):
+    with TASKS_LOCK:
+        return TASKS.get(task_id)
+
+
+def cleanup_tasks():
+    now = time.time()
+    with TASKS_LOCK:
+        expired = [tid for tid, t in TASKS.items()
+                   if t.get("created_at", 0) < now - TASK_TTL_SECONDS]
+        for tid in expired:
+            TASKS.pop(tid, None)
+
+
+def create_task(created_at):
+    tid = uuid.uuid4().hex[:12]
+    set_task(tid, status="pending", created_at=created_at)
+    return tid
+
+
+def _resolve_item_categories(items, llm_class):
+    """物品类别优先级：用户已学习类别 > 大模型判定 > 本地规则判定。
+
+    llm_class: {"物品名": "类别"}（由大模型对缴获物品逐项判定，可为空）。
+    """
+    overrides = category_kb.all_overrides()
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        name = (it.get("name") or "").strip()
+        if not name:
+            continue
+        learned = overrides.get(name)
+        if learned:
+            it["category"] = learned
+            continue
+        llm_cat = llm_class.get(name)
+        if llm_cat:
+            it["category"] = llm_cat
+    return items
+
+
+def _llm_class_dict(llm_class):
+    """把大模型返回的物品分类数组 [{"名称","类别"}, ...] 规整为 {"名称": "类别"}。"""
+    out = {}
+    for item in llm_class or []:
+        if isinstance(item, dict):
+            name = str(item.get("名称") or "").strip()
+            cat = str(item.get("类别") or "").strip()
+            if name and cat:
+                out[name] = cat
+    return out
+
+
+def _build_items(fields, llm_class):
+    """拆分缴获物品为单列 items，并按 学习类别 > 大模型类别 > 规则类别 赋值。"""
+    items = parser.parse_items(fields.get("缴获物品", ""))
+    items = _resolve_item_categories(items, llm_class)
+    return items
+
+
+def _run_parse(task_id, text, cfg_llm, api_key, model, prompt):
+    """后台线程执行：大模型优先 + 规则补全 + 用户类别修正。"""
+    try:
+        set_task(task_id, status="running")
+        rules = parser.parse_by_rules(text)
+
+        fields = {}
+        used = set()
+        llm_error = ""
+        llm_class = {}
+        api_key = (api_key or "").strip()
+        if api_key:
+            try:
+                llm_fields = llm_client.extract_fields(
+                    text, cfg_llm.get("base_url"), api_key,
+                    model or cfg_llm.get("model"), prompt,
+                    timeout=120,
+                )
+                llm_class = _llm_class_dict(llm_fields.get("物品分类"))
+                llm_fields = normalize_fields(llm_fields)
+                for k in FIELD_KEYS:
+                    if llm_fields.get(k):
+                        fields[k] = llm_fields[k]
+                        used.add("llm")
+            except llm_client.LLMError as e:
+                llm_error = str(e)
+            except Exception as e:
+                llm_error = f"解析异常：{e}"
+
+        for k in FIELD_KEYS:
+            if not fields.get(k) and rules.get(k):
+                fields[k] = rules[k]
+                used.add("rules")
+
+        fields = normalize_fields(fields)
+        method = "+".join(sorted(used)) or "rules"
+        set_task(task_id, status="done", fields=fields,
+                 method=method, llm_error=llm_error, rules=rules,
+                 items=_build_items(fields, llm_class))
+    except Exception as e:
+        set_task(task_id, status="error", detail=f"解析失败：{e}")
+
+
+def _submit_parse(text, cfg_llm, api_key, model, prompt):
+    task_id = create_task(time.time())
+    cleanup_tasks()
+    _parse_executor.submit(_run_parse, task_id, text, cfg_llm, api_key, model, prompt)
+    return task_id
+
+
+# ===================== 记录存储（backend/data/，一记录一 JSON 文件） =====================
+
+def _record_path(rid):
+    return os.path.join(DATA_DIR, f"{rid}.json")
+
+
+def _check_rid(rid):
+    return bool(RECORD_ID_RE.match(rid or ""))
+
+
+def _is_record(rec):
+    """记录必须含 id/fields（用于区分台账文件与 item_categories.json 等非记录文件）。"""
+    return isinstance(rec, dict) and bool(rec.get("id")) and isinstance(rec.get("fields"), dict)
+
+
+def load_record(rid):
+    if not _check_rid(rid):
+        return None
+    path = _record_path(rid)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            rec = json.load(f)
+        if not _is_record(rec):
+            return None
+        return rec
+    except Exception:
+        return None
+
+
+def save_record(rec):
+    """原子写：先写临时文件再替换，避免半截 JSON 落盘。"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    path = _record_path(rec["id"])
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rec, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def _validate_items(raw):
+    """校验并规整前端交回的单列物品明细（含用户修正后的类别）。"""
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get("name") or "").strip()
+        if not name:
+            continue
+        category = str(it.get("category") or "").strip() or "其他"
+        unit = str(it.get("unit") or "").strip()
+        q = it.get("quantity")
+        qty = None
+        if q is not None and q not in ("", []):
+            try:
+                qty = round(float(q), 2)
+            except (TypeError, ValueError):
+                qty = None
+        out.append({
+            "category": category[:20],
+            "name": name[:40],
+            "quantity": qty,
+            "unit": unit[:10],
+        })
+    return out
+
+
+def list_records():
+    """列出全部记录，按入库时间倒序。"""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    recs = []
+    for name in os.listdir(DATA_DIR):
+        if not name.endswith(".json") or name.endswith(".tmp.json"):
+            continue
+        rid = name[:-5]
+        rec = load_record(rid)
+        if rec:
+            recs.append(rec)
+    recs.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    return recs
+
+
+# ===================== 路由注册 =====================
+
+def register(app) -> None:
+    """插件入口：由 JZToolsHub 主应用在启动时调用。"""
+    ensure_files()
+
+    @app.get(f"{API_PREFIX}/config")
+    def cr_get_config():
+        cfg = load_config()
+        return jsonify({
+            "ok": True,
+            "base_url": cfg["llm"]["base_url"],
+            "api_key": cfg["llm"]["api_key"],
+            "model": cfg["llm"]["model"],
+            "llm_configured": bool(cfg["llm"]["api_key"]) and bool(cfg["llm"]["base_url"]),
+        })
+
+    @app.post(f"{API_PREFIX}/config")
+    def cr_post_config():
+        body = request.get_json(silent=True) or {}
+        merged = load_config()
+        merged["llm"]["base_url"] = (body.get("base_url") or "").strip()
+        merged["llm"]["api_key"] = (body.get("api_key") or "").strip()
+        merged["llm"]["model"] = (body.get("model") or "").strip()
+        save_config(merged)
+        return jsonify({"ok": True, "llm_configured": bool(merged["llm"]["api_key"])})
+
+    @app.post(f"{API_PREFIX}/parse")
+    def cr_parse():
+        """提交解析任务：body {text, base_url?, api_key?, model?}，立即返回 task_id。"""
+        body = request.get_json(silent=True) or {}
+        text = body.get("text")
+        if not text or not str(text).strip():
+            return jsonify({"ok": False, "detail": "请先输入收网情况报告"}), 400
+        text = str(text).strip()
+        if len(text) > MAX_TEXT_LEN:
+            return jsonify({"ok": False, "detail": f"报告过长，请控制在 {MAX_TEXT_LEN} 字以内"}), 400
+
+        cfg = load_config()
+        api_key = (body.get("api_key") or cfg["llm"]["api_key"] or "").strip()
+        base_url = (body.get("base_url") or cfg["llm"]["base_url"] or "").strip()
+        model = (body.get("model") or cfg["llm"]["model"] or "").strip()
+        cfg_llm = {"base_url": base_url, "api_key": api_key, "model": model}
+
+        task_id = _submit_parse(text, cfg_llm, api_key, model, load_prompt())
+        return jsonify({"ok": True, "task_id": task_id})
+
+    @app.get(f"{API_PREFIX}/result/<task_id>")
+    def cr_result(task_id):
+        """轮询解析状态：pending / running / done / error"""
+        task = get_task(task_id)
+        if not task:
+            return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
+        payload = {"status": task.get("status")}
+        if task.get("status") == "done":
+            payload.update({
+                "fields": task.get("fields"),
+                "method": task.get("method", "rules"),
+                "llm_error": task.get("llm_error", ""),
+                "items": task.get("items", []),
+            })
+        if task.get("status") == "error":
+            payload["detail"] = task.get("detail", "解析失败")
+        return jsonify(payload)
+
+    @app.post(f"{API_PREFIX}/items")
+    def cr_items_preview():
+        """把「缴获物品」文本拆分为单列物品（供前端实时预览归类结果）。"""
+        body = request.get_json(silent=True) or {}
+        text = body.get("text")
+        if not text:
+            return jsonify({"ok": True, "count": 0, "items": []})
+        items = parser.parse_items(str(text)[:MAX_TEXT_LEN])
+        return jsonify({"ok": True, "count": len(items), "items": items})
+
+    @app.get(f"{API_PREFIX}/aggregate")
+    def cr_aggregate():
+        """跨记录战果汇总：类似物品归为统一类别、数量叠加。"""
+        recs = list_records()
+        rows = parser.aggregate_items([r.get("items") or [] for r in recs])
+        return jsonify({"ok": True, "count": len(rows), "categories": rows})
+
+    @app.get(f"{API_PREFIX}/categories")
+    def cr_categories_list():
+        """既有类别集合：learned 为用户已学习的「物品名→类别」，known 为可选类别列表。"""
+        learned = category_kb.all_overrides()
+        builtin = set(parser.known_categories())
+        used = set(learned.values())
+        for rec in list_records():
+            for it in rec.get("items") or []:
+                if it.get("category"):
+                    used.add(it["category"])
+        known = sorted(builtin | used, key=lambda s: (s == "其他", s))
+        return jsonify({"ok": True, "count": len(learned), "learned": learned, "known": known})
+
+    @app.post(f"{API_PREFIX}/categories")
+    def cr_categories_learn():
+        """学习一条「物品名→类别」，持久化供后续解析优先采用。"""
+        body = request.get_json(silent=True) or {}
+        name = str(body.get("name") or "").strip()
+        category = str(body.get("category") or "").strip()
+        if not name or not category:
+            return jsonify({"ok": False, "detail": "需要同时提供 name 与 category"}), 400
+        category_kb.set_override(name[:40], category[:20])
+        return jsonify({"ok": True, "learned": category_kb.all_overrides()})
+
+    @app.delete(f"{API_PREFIX}/categories/<item_name>")
+    def cr_categories_forget(item_name):
+        """删除某物品名的学习类别，恢复默认判定。"""
+        category_kb.remove_override(item_name)
+        return jsonify({"ok": True, "learned": category_kb.all_overrides()})
+
+    @app.get(f"{API_PREFIX}/records")
+    def cr_list():
+        recs = list_records()
+        return jsonify({"ok": True, "count": len(recs), "records": recs})
+
+    @app.post(f"{API_PREFIX}/records")
+    def cr_create():
+        """保存一条战果记录：body {fields, source_text, items?}。
+
+        items 可选：由前端把可编辑的物品明细（含用户修正后的类别）传回，
+        未传时按缴获物品字段自动拆分。保存的同时将「物品名→类别」学习入库。
+        """
+        body = request.get_json(silent=True) or {}
+        fields = normalize_fields(body.get("fields"))
+        if not any(fields.get(k) for k in FIELD_KEYS):
+            return jsonify({"ok": False, "detail": "没有任何要素可保存，请先解析或补充字段"}), 400
+        source_text = (body.get("source_text") or "")
+        if isinstance(source_text, str) and len(source_text) > MAX_TEXT_LEN:
+            source_text = source_text[:MAX_TEXT_LEN]
+        items = _validate_items(body.get("items")) or _build_items(fields, {})
+        with _LOCK:
+            rec = {
+                "id": uuid.uuid4().hex[:12],
+                "fields": fields,
+                "items": items,
+                "source_text": source_text,
+                "created_at": _now(),
+            }
+            save_record(rec)
+        for it in items:
+            if it.get("category") and it.get("name"):
+                category_kb.set_override(it["name"], it["category"])
+        return jsonify({"ok": True, "record": rec})
+
+    @app.get(f"{API_PREFIX}/records/<rid>")
+    def cr_get(rid):
+        rec = load_record(rid)
+        if not rec:
+            return jsonify({"ok": False, "detail": "记录不存在"}), 404
+        return jsonify({"ok": True, "record": rec})
+
+    @app.delete(f"{API_PREFIX}/records/<rid>")
+    def cr_delete(rid):
+        with _LOCK:
+            rec = load_record(rid)
+            if not rec:
+                return jsonify({"ok": False, "detail": "记录不存在"}), 404
+            try:
+                os.remove(_record_path(rid))
+            except OSError:
+                return jsonify({"ok": False, "detail": "删除失败"}), 500
+        return jsonify({"ok": True})
+
+    @app.get(f"{API_PREFIX}/records/<rid>/download")
+    def cr_download(rid):
+        """下载单条记录的键值对 JSON 文件。"""
+        rec = load_record(rid)
+        if not rec:
+            return jsonify({"ok": False, "detail": "记录不存在"}), 404
+        data = json.dumps(rec, ensure_ascii=False, indent=2).encode("utf-8")
+        buf = io.BytesIO(data)
+        return send_file(buf, as_attachment=True,
+                         download_name=f"case-{rid}.json",
+                         mimetype="application/json")

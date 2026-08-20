@@ -1,0 +1,7 @@
+{
+  "id": "case-report",
+  "icon": "📋",
+  "accent": "#3949ab",
+  "entry": "index.html",
+  "features": ["报告抽取", "键值对 JSON", "本地存档", "规则/大模型"]
+}

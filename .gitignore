@@ -20,6 +20,10 @@ plugins/*/backend/.task_cache/
 # 共享文档插件运行时数据（用户创建的文档）
 plugins/shared-docs/backend/data/
 
+# 战果录入插件运行时数据（本地台账 JSON）与配置（含大模型密钥）
+plugins/case-report/backend/data/
+plugins/case-report/backend/config.json
+
 # 地图标点插件测试/演示产物（录制视频、模拟轨迹数据）
 plugins/map-marker/frontend/*.mp4
 plugins/map-marker/frontend/yunfu*.json

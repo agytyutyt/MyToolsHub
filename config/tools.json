@@ -84,6 +84,14 @@
       "category": "office",
       "enabled": true,
       "order": 8
+    },
+    {
+      "id": "case-report",
+      "name": "战果录入",
+      "description": "输入公安某部门某案件的收网情况报告，自动提取时间/主办大队/案件名/抓获人数/缴获物品，以键值对 JSON 本地化存档。",
+      "category": "office",
+      "enabled": true,
+      "order": 9
     }
   ]
 }
