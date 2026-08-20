@@ -69,6 +69,20 @@ _CH_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四":
               "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 
 
+# 案件名规整：去掉引号/书名号/空白，用于识别「同一案件不同写法」的实体对齐
+# （如 “2.11”开设赌场案 与 2.11开设赌场案 视为同一案件）
+_CASE_QUOTE_RE = re.compile(r"[\u201c\u201d\u2018\u2019\"'`「」『』《》]+")
+_CASE_WS_RE = re.compile(r"\s+")
+
+
+def normalize_case_name(name):
+    """规整案件名以便比较：去引号/书名号/空格（含全角空格）。"""
+    n = (name or "").strip()
+    n = _CASE_QUOTE_RE.sub("", n)
+    n = _CASE_WS_RE.sub("", n)
+    return n
+
+
 def normalize_count(text):
     """把「两名 / 5名 / 二十三 / ２人」等计数规整为阿拉伯数字字符串；失败则原样返回。
 
@@ -336,16 +350,22 @@ _MONEY_TO_YUAN = {"元": 1.0, "块": 1.0, "千元": 1000.0, "万": 10000.0, "万
 _FORMAT_UNIT = {"克": "克", "元": "元"}
 
 
-def aggregate_items(record_items):
+def aggregate_items(record_items, case_keys=None):
     """跨记录汇总战果：按类别归组、同类数量累加。
 
     record_items: [[{category,name,quantity,unit}, ...], ...]（每条记录一个列表）。
+    case_keys（可选）：与 record_items 等长的案件标识列表（同一案件共用同一标识），
+    用于统计「涉及 N 起」时按案件去重；不传时退化为按记录去重。
     单位统一规则：重量类归并到「克」，货币类归并到「元」，其余仅同单位累加；
-    quantity 为 None 的笼统量（一批/若干）不计入数字，仅记录出现记录数。
+    quantity 为 None 的笼统量（一批/若干）不计入数字，仅记录出现的案件/记录数。
     返回 [{category, quantity, unit, records, unknown}]，按 records 降序。
     """
-    buckets = {}  # category -> {unit: {"sum": float, "records": set, "unknown": int}}
+    buckets = {}  # category -> {unit: {"sum": float, "records": set, "unknown": int}}（records 存案件/记录标识）
     for rec_index, items in enumerate(record_items):
+        case_id = rec_index
+        if case_keys is not None:
+            ck = case_keys[rec_index] if rec_index < len(case_keys) else ""
+            case_id = ck or str(rec_index)
         for it in items or []:
             if not isinstance(it, dict):
                 continue
@@ -353,7 +373,7 @@ def aggregate_items(record_items):
             unit = (it.get("unit") or "").strip() or "-"
             b = buckets.setdefault(cat, {})
             u = b.setdefault(unit, {"sum": 0.0, "records": set(), "unknown": 0})
-            u["records"].add(rec_index)
+            u["records"].add(case_id)
             q = it.get("quantity")
             if q is None:
                 u["unknown"] += 1

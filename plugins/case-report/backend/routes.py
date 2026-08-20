@@ -57,6 +57,21 @@ RECORD_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 MAX_TEXT_LEN = 20000
 MAX_ITEM_LEN = 2000
 
+
+def _case_sort_key(name):
+    """中文案件名的拼音排序键（零依赖）。
+
+    GB2312/GBK 一级常用汉字按拼音排序，直接比较其 GBK 编码即可近似拼音序；
+    数字/字母/标点（ASCII）排在中文前，无法用 GBK 编码的生僻字排最后。
+    """
+    n = (name or "").strip()
+    if not n:
+        return (0, b"")
+    try:
+        return (0, n.encode("gbk"))
+    except UnicodeEncodeError:
+        return (1, n)
+
 DEFAULT_CONFIG = {"llm": {"base_url": "", "api_key": "", "model": ""}}
 FIELD_KEYS = parser.FIELD_KEYS
 
@@ -301,6 +316,22 @@ def save_record(rec):
     os.replace(tmp, path)
 
 
+def _find_case_matches(case_name):
+    """查找与指定规整案件名相同的既有记录（用于入库时的同案合并提示）。"""
+    out = []
+    for rec in list_records():
+        rn = parser.normalize_case_name((rec.get("fields") or {}).get("案件名"))
+        if rn and rn == case_name:
+            out.append({
+                "id": rec["id"],
+                "name": (rec.get("fields") or {}).get("案件名") or "",
+                "created_at": rec.get("created_at") or "",
+                "items": len(rec.get("items") or []),
+            })
+    out.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return out
+
+
 def _validate_items(raw):
     """校验并规整前端交回的单列物品明细（含用户修正后的类别）。"""
     if not isinstance(raw, list):
@@ -422,10 +453,42 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/aggregate")
     def cr_aggregate():
-        """跨记录战果汇总：类似物品归为统一类别、数量叠加。"""
+        """跨记录战果汇总：类似物品归为统一类别、数量叠加；
+        「涉及 N 起」按规整后的案件名去重（同一案件多条记录只计一起）。
+        支持 ?case=<案件名> 仅统计该案件的记录。"""
+        case_name = parser.normalize_case_name(request.args.get("case") or "")
         recs = list_records()
-        rows = parser.aggregate_items([r.get("items") or [] for r in recs])
+        if case_name:
+            recs = [r for r in recs
+                    if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
+            # 单案视角：同案多条记录视为同一案件（涉及 N 起 = 1）
+            case_keys = [case_name] * len(recs)
+        else:
+            case_keys = [
+                parser.normalize_case_name((r.get("fields") or {}).get("案件名")) or r.get("id")
+                for r in recs
+            ]
+        rows = parser.aggregate_items([r.get("items") or [] for r in recs], case_keys)
         return jsonify({"ok": True, "count": len(rows), "categories": rows})
+
+    @app.get(f"{API_PREFIX}/cases")
+    def cr_cases():
+        """既有案件列表（按规整案件名去重、拼音排序），供下拉筛选/入库合并/改案件名选择。"""
+        groups = {}
+        for rec in list_records():
+            cn = parser.normalize_case_name((rec.get("fields") or {}).get("案件名"))
+            if not cn:
+                continue
+            g = groups.setdefault(cn, {"name": "", "latest": "", "records": 0})
+            g["records"] += 1
+            created = rec.get("created_at") or ""
+            if created >= g["latest"]:
+                g["latest"] = created
+                g["name"] = (rec.get("fields") or {}).get("案件名") or cn
+        out = [{"name": g["name"], "records": g["records"], "normalized": cn}
+               for cn, g in groups.items()]
+        out.sort(key=lambda x: _case_sort_key(x["name"]))
+        return jsonify({"ok": True, "count": len(out), "cases": out})
 
     @app.get(f"{API_PREFIX}/categories")
     def cr_categories_list():
@@ -459,15 +522,25 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/records")
     def cr_list():
+        """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录。"""
+        case_name = parser.normalize_case_name(request.args.get("case") or "")
         recs = list_records()
+        if case_name:
+            recs = [r for r in recs
+                    if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
         return jsonify({"ok": True, "count": len(recs), "records": recs})
 
     @app.post(f"{API_PREFIX}/records")
     def cr_create():
-        """保存一条战果记录：body {fields, source_text, items?}。
+        """保存一条战果记录：body {fields, source_text, items?, merge_mode?, merge_case?}。
 
         items 可选：由前端把可编辑的物品明细（含用户修正后的类别）传回，
         未传时按缴获物品字段自动拆分。保存的同时将「物品名→类别」学习入库。
+
+        同案检测：默认 merge_mode=auto，若规整后的案件名已存在于既有台账，
+        则不落盘、返回 duplicate=true + matches（供前端提示是否合并）；
+        merge_mode=merge 时将本次记录并入 matches 中指定（merge_case）的既有案件；
+        merge_mode=new 时跳过同案提示、直接新增为一条新记录。
         """
         body = request.get_json(silent=True) or {}
         fields = normalize_fields(body.get("fields"))
@@ -477,6 +550,28 @@ def register(app) -> None:
         if isinstance(source_text, str) and len(source_text) > MAX_TEXT_LEN:
             source_text = source_text[:MAX_TEXT_LEN]
         items = _validate_items(body.get("items")) or _build_items(fields, {})
+
+        # 规整案件名（去引号/空白），保证同一案件不同写法在对齐与存储上一致
+        if fields.get("案件名"):
+            fields["案件名"] = parser.normalize_case_name(fields["案件名"])
+        case_name = fields.get("案件名") or ""
+        merge_mode = (body.get("merge_mode") or "auto").strip()
+        if merge_mode == "merge":
+            target = (body.get("merge_case") or "").strip()
+            if target:
+                fields["案件名"] = parser.normalize_case_name(target)
+                case_name = fields["案件名"]
+
+        if merge_mode == "auto" and case_name:
+            matches = _find_case_matches(case_name)
+            if matches:
+                return jsonify({
+                    "ok": True,
+                    "duplicate": True,
+                    "case_name": fields["案件名"],
+                    "matches": matches,
+                })
+
         with _LOCK:
             rec = {
                 "id": uuid.uuid4().hex[:12],
@@ -496,6 +591,24 @@ def register(app) -> None:
         rec = load_record(rid)
         if not rec:
             return jsonify({"ok": False, "detail": "记录不存在"}), 404
+        return jsonify({"ok": True, "record": rec})
+
+    @app.put(f"{API_PREFIX}/records/<rid>/case")
+    def cr_update_case(rid):
+        """修改某条台账记录的「案件名」：可输入新案件名，或改为既有案件的名称
+        （选择既有案件时即并入该案，战果汇总「涉及 N 起」会随之按案件去重重算）。"""
+        body = request.get_json(silent=True) or {}
+        new_name = parser.normalize_case_name((body.get("case_name") or "").strip())
+        if not new_name:
+            return jsonify({"ok": False, "detail": "案件名不能为空"}), 400
+        new_name = new_name[:MAX_ITEM_LEN]
+        with _LOCK:
+            rec = load_record(rid)
+            if not rec:
+                return jsonify({"ok": False, "detail": "记录不存在"}), 404
+            rec["fields"] = rec.get("fields") or {}
+            rec["fields"]["案件名"] = new_name
+            save_record(rec)
         return jsonify({"ok": True, "record": rec})
 
     @app.delete(f"{API_PREFIX}/records/<rid>")

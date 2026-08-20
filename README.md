@@ -206,16 +206,26 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /api/case-report/categories` | 既有类别集合：`learned`（用户已学习的「物品名→类别」）+ `known`（可选类别列表） |
 | `POST /api/case-report/categories` | 学习一条类别 `{name, category}`，持久化后后续解析优先采用 |
 | `DELETE /api/case-report/categories/<name>` | 删除某物品名的学习类别，恢复默认判定 |
-| `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并） |
-| `GET /api/case-report/records` | 本地台账列表（按入库时间倒序） |
-| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?}`；`items` 为用户编辑后的单列明细（可省略，省略则自动拆分），保存时同步学习 `物品名→类别` |
+| `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并）；「涉及 N 起」按规整后案件名去重（同一案件多条记录只计 1 起）。支持 `?case=<案件名>` 仅统计该案件（涉及 N 起 = 1） |
+| `GET /api/case-report/cases` | 既有案件列表（按规整后案件名去重、**拼音排序**，含各案件记录条数与 `normalized` 规整名），供筛选侧边栏 / 入库合并 / 改案件名选择 |
+| `GET /api/case-report/records` | 本地台账列表（按入库时间倒序），支持 `?case=<案件名>` 仅返回该案件的记录 |
+| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?, merge_mode?, merge_case?}`；`items` 为用户编辑后的单列明细（可省略，省略则自动拆分），保存时同步学习 `物品名→类别`。案件名保存前自动规整（去引号/空白）。`merge_mode=auto`（默认）时若规整后案件名已存在则**不落盘**、返回 `duplicate:true + matches`（同案合并提示）；`merge_mode=merge` 时并入既有案件（`merge_case` 指定归入的目标案件名）；`merge_mode=new` 时跳过同案提示直接新增 |
 | `GET /api/case-report/records/<rid>` | 单条记录详情 |
+| `PUT /api/case-report/records/<rid>/case` | 修改记录的案件名 `{case_name}`（可新建案件名，或改为既有案件名即并入该案）；改后「战果汇总 涉及 N 起」按案件自动重算 |
 | `DELETE /api/case-report/records/<rid>` | 删除记录 |
 | `GET /api/case-report/records/<rid>/download` | 下载单条记录的键值对 JSON 文件（`case-<rid>.json`） |
 
 > 解析策略：配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全，
 > 未配置时自动回落「本地规则解析」（正则），开箱即用。
 > 台账以键值对 JSON 一记录一文件保存在 `plugins/case-report/backend/data/`（已 gitignore）。
+> **案件名实体对齐**：同一案件可能因写法差异出现不同名称（如 `"2.11"开设赌场案` 与
+> `2.11开设赌场案`）。保存/比较前会规整案件名（去掉引号、书名号、空白）；
+> 入库时自动检测同名案件并提示「并入 / 作为新案件保存」；
+> 台账里可随时修改某条记录的案件名（新建案件或并入既有案件），
+> 「战果汇总」的「涉及 N 起」按案件去重统计。
+> **案件筛选侧边栏**：战果汇总与台账左侧提供「案件」侧边栏（**拼音排序**汇总所有案件），
+> 选中后右侧战果汇总与下方台账联动只展示该案件数据；保存 / 删除 / 改名后侧边栏自动重建
+> 并保持选中（选中案件消失时自动回落「全部案件」）。
 
 **时间规则**：仅写「月/日」（如 8月20日）时自动补当前年份；出现「昨天 / 前天 / 今天」等
 以当前年月日为基准回推；大模型与规则产出的时间统一归一化为「YYYY年M月D日」。

@@ -19,6 +19,8 @@
     sourceText: "",
     currentFields: {},
     records: [],
+    caseNorm: "",   // 当前筛选案件（规整名），空串=全部案件
+    caseName: "",   // 当前筛选案件的展示名
   };
 
   function esc(s) {
@@ -59,6 +61,25 @@
     el.className = "toast" + (kind ? " " + kind : "");
     if (toastTimer) clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { el.classList.add("hidden"); }, 2600);
+  }
+
+  /* ==================== 通用对话框 ==================== */
+  function openDialog(title, bodyHtml, actions) {
+    $("#dialogTitle").textContent = title;
+    $("#dialogBody").innerHTML = bodyHtml;
+    var box = $("#dialogActions");
+    box.innerHTML = "";
+    (actions || []).forEach(function (a) {
+      box.appendChild(btn(a.label, a.handler, a.primary ? "btn btn-primary" : "btn"));
+    });
+    $("#dialog").classList.remove("hidden");
+    var first = box.querySelector("button");
+    if (first) first.focus();
+  }
+
+  function closeDialog() {
+    $("#dialog").classList.add("hidden");
+    $("#dialogBody").innerHTML = "";
   }
 
   /* ==================== 大模型配置 ==================== */
@@ -253,27 +274,61 @@
     return fields;
   }
 
-  /* ==================== 保存入库 ==================== */
+  /* ==================== 保存入库（含同案合并检测） ==================== */
   function saveEntry() {
     var fields = collectFields();
     var has = FIELD_KEYS.some(function (k) { return fields[k]; });
     if (!has) { toast("没有任何要素，请先解析或补充字段", "err"); return; }
+    doSave("auto");
+  }
+
+  function doSave(mode, matched) {
     var btn = $("#saveEntryBtn");
     btn.disabled = true;
-    postJSON("/api/case-report/records", {
-      fields: fields,
+    var body = {
+      fields: collectFields(),
       source_text: state.sourceText,
       items: collectItems(),
-    }).then(function (data) {
-      toast("已入库：" + (data.record.fields["案件名"] || "战果记录"), "ok");
-      refreshRecords();
-      refreshSummary();
+    };
+    if (mode === "merge") {
+      body.merge_mode = "merge";
+      body.merge_case = matched.name;
+    } else if (mode === "new") {
+      body.merge_mode = "new";
+    }
+    postJSON("/api/case-report/records", body).then(function (data) {
+      if (data.duplicate && data.matches && data.matches.length) {
+        btn.disabled = false;
+        showMergeDialog(data.matches);
+        return;
+      }
+      if (mode === "merge") {
+        toast("战果已并入案件「" + (data.record.fields["案件名"] || "") + "」", "ok");
+      } else {
+        toast("已入库：" + (data.record.fields["案件名"] || "战果记录"), "ok");
+      }
+      syncCaseView();
       loadCategories();
     }).catch(function (e) {
       toast("保存失败：" + e.message, "err");
     }).then(function () {
       btn.disabled = false;
     });
+  }
+
+  /* 同案合并确认：后端检测到规整后案件名已存在时弹出 */
+  function showMergeDialog(matches) {
+    var m = matches[0] || {};
+    var name = m.name || "";
+    var body = "<p class='merge-tip'>检测到台账中已存在相同案件「<b>" + esc(name) + "</b>」（" +
+      matches.length + " 条已入库记录，最近一条：" + esc(m.created_at || "") + "）。" +
+      "</p><p class='merge-tip'>选择<b>并入</b>后，本次战果归入该案件，战果汇总「涉及 N 起」按案件去重计算；" +
+      "选择<b>作为新案件</b>则保留为一条独立台账记录。</p>";
+    openDialog("检测到相同案件", body, [
+      { label: "并入该案件", primary: true, handler: function () { closeDialog(); doSave("merge", m); } },
+      { label: "作为新案件保存", handler: function () { closeDialog(); doSave("new"); } },
+      { label: "取消", handler: closeDialog },
+    ]);
   }
 
   /* ==================== 数值/战果显示 ==================== */
@@ -434,11 +489,16 @@
 
   /* ==================== 战果汇总 ==================== */
   function refreshSummary() {
-    api("/api/case-report/aggregate").then(function (data) {
+    api("/api/case-report/aggregate" + caseQuery()).then(function (data) {
       var rows = data.categories || [];
       var list = $("#summaryList");
       list.innerHTML = "";
-      $("#summaryCount").textContent = rows.length ? "共 " + rows.length + " 类" : "";
+      var scope = state.caseName
+        ? "案件「" + state.caseName + "」 · "
+        : "全部案件 · ";
+      $("#summaryCount").textContent = rows.length
+        ? scope + "共 " + rows.length + " 类"
+        : scope + "暂无数据";
       $("#summaryEmpty").classList.toggle("hidden", rows.length > 0);
       rows.forEach(function (r) {
         var el = document.createElement("div");
@@ -462,9 +522,74 @@
     }).catch(function () {});
   }
 
-  /* ==================== 台账列表 ==================== */
+  /* ==================== 台账列表（可按案件筛选） ==================== */
+  function caseQuery() {
+    return state.caseNorm ? "?case=" + encodeURIComponent(state.caseNorm) : "";
+  }
+
+  /* 重建左侧案件侧边栏（后端已按拼音排序），并保持当前选中高亮 */
+  function refreshCases() {
+    return api("/api/case-report/cases").then(function (data) {
+      var box = $("#caseList");
+      box.innerHTML = "";
+      box.appendChild(buildCaseItem("全部案件", "", 0));
+      (data.cases || []).forEach(function (c) {
+        box.appendChild(buildCaseItem(c.name, c.normalized || c.name, c.records));
+      });
+      // 若选中案件已不存在（记录被删/改名），回落「全部案件」
+      if (state.caseNorm) {
+        var still = Array.prototype.some.call(box.children, function (ch) {
+          return ch.dataset.norm === state.caseNorm;
+        });
+        if (!still) {
+          state.caseNorm = "";
+          state.caseName = "";
+          var all = box.querySelector(".case-item");
+          Array.prototype.forEach.call(box.children, function (ch) {
+            ch.classList.toggle("active", ch === all);
+          });
+        }
+      }
+    });
+  }
+
+  function buildCaseItem(label, norm, records) {
+    var el = document.createElement("button");
+    el.type = "button";
+    el.className = "case-item";
+    el.dataset.norm = norm || "";
+    var name = document.createElement("span");
+    name.className = "ci-name";
+    name.textContent = label;
+    var cnt = document.createElement("span");
+    cnt.className = "ci-count";
+    cnt.textContent = records ? records + " 条" : "";
+    el.appendChild(name);
+    el.appendChild(cnt);
+    var isActive = function () { return state.caseNorm === (norm || ""); };
+    el.classList.toggle("active", isActive());
+    el.addEventListener("click", function () {
+      state.caseNorm = norm || "";
+      state.caseName = label === "全部案件" ? "" : label;
+      Array.prototype.forEach.call(el.parentNode.children, function (ch) {
+        ch.classList.toggle("active", ch === el);
+      });
+      refreshRecords();
+      refreshSummary();
+    });
+    return el;
+  }
+
+  /* 重建侧边栏后再刷新台账与汇总（保存/删除/改名后用） */
+  function syncCaseView() {
+    return refreshCases().then(function () {
+      refreshRecords();
+      refreshSummary();
+    });
+  }
+
   function refreshRecords() {
-    api("/api/case-report/records").then(function (data) {
+    api("/api/case-report/records" + caseQuery()).then(function (data) {
       state.records = data.records || [];
       renderRecords();
     }).catch(function () {});
@@ -474,7 +599,9 @@
     var box = $("#recordList");
     box.innerHTML = "";
     var count = $("#recordCount");
-    count.textContent = state.records.length ? "共 " + state.records.length + " 条" : "";
+    count.textContent = state.records.length
+      ? (state.caseName ? "案件「" + state.caseName + "」共 " : "共 ") + state.records.length + " 条"
+      : "";
     $("#emptyTip").classList.toggle("hidden", state.records.length > 0);
 
     state.records.forEach(function (rec) {
@@ -541,6 +668,7 @@
       actions.className = "record-actions";
       actions.appendChild(btn("复制 JSON", function () { copyJSON(rec); }));
       actions.appendChild(btn("导出 JSON", function () { exportJSON(rec.id); }));
+      actions.appendChild(btn("修改案件名", function () { editCaseName(rec); }));
       actions.appendChild(btn("删除", function () { deleteRecord(rec); }, "btn btn-danger"));
       card.appendChild(actions);
 
@@ -583,14 +711,62 @@
     a.remove();
   }
 
+  /* ==================== 台账改案件名（新建案件 / 并入既有案件） ==================== */
+  function editCaseName(rec) {
+    api("/api/case-report/cases").then(function (data) {
+      var cases = data.cases || [];
+      var opts = cases.map(function (c) {
+        return "<option value='" + esc(c.name) + "'>" + esc(c.name) + "（" + c.records + " 条）</option>";
+      }).join("");
+      var cur = rec.fields["案件名"] || "";
+      var body = "<p class='merge-tip' style='margin-top:0'>从既有案件中选择并入，或输入新案件名新建案件。" +
+        "改后「战果汇总」的 涉及 N 起 会按案件自动重算。" +
+        "</p>" +
+        "<div class='dl-body'>" +
+        "<div><div class='dl-label'>既有案件（选择后自动填入）</div>" +
+        "<select id='dlCasePick'><option value=''>— 输入新案件名 —</option>" + opts + "</select></div>" +
+        "<div><div class='dl-label'>案件名</div>" +
+        "<input id='dlCaseInput' value='" + esc(cur) + "' placeholder='如：2.11开设赌场案' /></div>" +
+        "</div>";
+      openDialog("修改案件名", body, [
+        { label: "保存", primary: true, handler: function () { doSaveCaseName(rec.id); } },
+        { label: "取消", handler: closeDialog },
+      ]);
+      var pick = $("#dlCasePick");
+      var inp = $("#dlCaseInput");
+      pick.addEventListener("change", function () {
+        if (pick.value) inp.value = pick.value;
+      });
+      inp.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); doSaveCaseName(rec.id); }
+      });
+      inp.focus();
+    }).catch(function () {});
+  }
+
+  function doSaveCaseName(rid) {
+    var name = $("#dlCaseInput").value.trim();
+    if (!name) { toast("请输入案件名或选择既有案件", "err"); return; }
+    api("/api/case-report/records/" + rid + "/case", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ case_name: name }),
+    }).then(function (data) {
+      toast("已修改案件名：「" + (data.record.fields["案件名"] || "") + "」", "ok");
+      closeDialog();
+      syncCaseView();
+    }).catch(function (e) {
+      toast("修改失败：" + e.message, "err");
+    });
+  }
+
   function deleteRecord(rec) {
     var name = (rec.fields && rec.fields["案件名"]) || rec.id;
     if (!confirm("确定删除战果记录「" + name + "」？该操作不可恢复。")) return;
     api("/api/case-report/records/" + rec.id, { method: "DELETE" })
       .then(function () {
         toast("已删除", "ok");
-        refreshRecords();
-        refreshSummary();
+        syncCaseView();
       })
       .catch(function (e) { toast("删除失败：" + e.message, "err"); });
   }
@@ -628,6 +804,15 @@
       if (!input) return;
       if (input.dataset.field === "缴获物品") scheduleItemsPreview();
     });
+
+    // 对话框：点遮罩或按 Esc 关闭
+    var dialog = $("#dialog");
+    dialog.addEventListener("mousedown", function (e) {
+      if (e.target === dialog) closeDialog();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !dialog.classList.contains("hidden")) closeDialog();
+    });
   }
 
   /* ==================== 初始化 ==================== */
@@ -635,7 +820,6 @@
     bindEvents();
     loadConfig();
     loadCategories();
-    refreshRecords();
-    refreshSummary();
+    syncCaseView();
   });
 })();

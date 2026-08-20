@@ -219,6 +219,54 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
 .record-head h2 { margin: 0; }
 .spacer { flex: 1; }
 
+/* ==================== 案件筛选侧边栏 ==================== */
+.case-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 4px;
+}
+.case-sidebar {
+  flex: 0 0 200px;
+  position: sticky;
+  top: 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 12px 12px;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+.case-sidebar h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }
+.case-list { display: flex; flex-direction: column; gap: 2px; }
+.case-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.4;
+}
+.case-item:hover { background: var(--accent-light); }
+.case-item.active {
+  background: var(--accent-light);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+.case-item .ci-name { word-break: break-all; min-width: 0; }
+.case-item .ci-count { font-size: 11px; color: var(--text-2); white-space: nowrap; flex: none; }
+.sidebar-tip { margin-top: 10px; padding: 0 4px; }
+.case-main { flex: 1 1 auto; min-width: 0; }
+
 .record-list { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }
 .record-card {
   border: 1px solid var(--border);
@@ -299,4 +347,53 @@ input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px
   .cfg-grid { grid-template-columns: 1fr; }
   .field-row { grid-template-columns: 1fr; }
   .field-row .key { text-align: left; }
+  .case-layout { flex-direction: column; }
+  .case-sidebar { position: static; max-height: none; flex-basis: auto; }
 }
+
+/* ==================== 对话框（同案合并 / 改案件名） ==================== */
+.dialog-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 30, 50, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.dialog {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+  padding: 20px 22px;
+  width: min(460px, 92vw);
+  max-height: 80vh;
+  overflow: auto;
+}
+.dialog h3 { margin: 0 0 10px; font-size: 16px; color: var(--text); }
+.dialog .dl-body { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.dialog .dl-body input,
+.dialog .dl-body select {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  padding: 0 12px;
+  background: var(--card);
+  color: var(--text);
+}
+.dialog .dl-body select:focus, .dialog .dl-body input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+  outline: none;
+}
+.dialog .dl-label { font-size: 13px; color: var(--text-2); font-weight: 600; }
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.dialog .merge-tip { font-size: 13px; color: var(--text-2); line-height: 1.7; }
