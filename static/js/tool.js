@@ -45,3 +45,4 @@ async function loadTool() {
 }
 
 loadTool();
+window.AdminCommon.renderUserMenu(document.getElementById('user-slot'));

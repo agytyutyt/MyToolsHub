@@ -39,6 +39,13 @@ python app.py
 
 浏览器访问 <http://localhost:5000> 即可看到首页。
 
+> **默认管理员账号：** `admin` / `admin123`，首次启动自动生成（`config/admin.json`）。
+> 登录后可访问管理后台 `/admin`，进行部门、人员、权限管理。
+> 登录状态在首页顶栏右侧显示，未登录时「编辑位置」「隐藏工具」等管理操作会引导至登录页。
+> **敏感数据加密：** 账号密码、身份证号、大模型 API Key 等以 Fernet 对称加密密文
+> 存入 `config/admin.json`（加密密钥保存在 `config/.admin_key`，两者均已 gitignore）；
+> 该文件不存在时首次启动自动生成，请勿提交仓库。
+
 > 本仓库开发目标环境为 **Python 3.8**（`requirements.txt` 已将 Flask 锁定在 `>=3.0,<3.1`，兼容 3.8）。若使用本机安装的 3.8，启动命令为：
 > ```bash
 > C:\Users\yfjz\AppData\Local\Programs\Python\Python38\python.exe app.py
@@ -83,9 +90,13 @@ JZToolsHub/
 │   │   ├── frontend/         #   前端入口 + Three.js 资源
 │   │   └── backend/          #   Python 后端（routes.py 等）
 │   ├── trajectory-convert/   #   插件：轨迹转换（Excel → 二维码视频流 / 静态二维码）
-│   └── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
-│   └── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
-│   └── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
+│   ├── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
+│   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
+│   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
+│   └── admin/                #   核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
+│       ├── manifest.json
+│       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
+│       └── backend/          #   routes.py：鉴权、后台接口、加密存储、工具访问拦截
 ├── static/
 │   ├── index.html            # 首页（大方块展示）
 │   ├── tool.html             # 工具外壳页（加载插件 iframe）
@@ -104,9 +115,10 @@ JZToolsHub/
 JZToolsHub 的核心是可插拔工具架构，一切工作围绕 **`plugins/` 下的自包含插件目录**展开：
 
 - **插件即目录**：一个插件 = `plugins/<插件id>/` 目录，内部包含 `manifest.json`（图标/入口/能力标签等元信息）、`frontend/`（前端资源）、以及可选的 `backend/`（Python 后端）。
-- **配置即启停，也即展示**：`config/tools.json` 决定哪些插件展示、展示顺序与所属分类，同时是工具**名称 / 描述**的权威来源；`enabled: false` 即可后台下线，无需删代码。
+- **配置即启停，也即展示**：`config/tools.json` 决定哪些插件展示、展示顺序与所属分类，同时是工具**名称 / 描述**的权威来源；`enabled: false` 即可后台下线，无需删代码；`hidden: true` 的插件（如 `admin`）只注册后端、不展示为首页卡片。
 - **前端隔离**：工具页面通过 iframe 嵌入外壳页（`static/tool.html`），插件之间、插件与框架之间互不污染。
 - **后端自发现**：只要插件目录下存在 `backend/__init__.py` 与含 `register(app)` 的 `routes.py`，框架启动时自动导入注册，无需在配置中声明。
+- **核心插件始终加载**：`admin`（管理后台）为基础设施插件，`register_plugin_backends()` 对其无条件加载（不随 `enabled` 启停），保证登录鉴权、后台接口与工具访问控制一直可用。
 
 可视化关系：
 
@@ -149,6 +161,34 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `POST /api/tools/reorder` | 保存首页布局：请求体 `{categories: [分类id按显示顺序], tools: {分类id: [工具id…]}}`，按分类顺序重排 `categories`、按位置重写各工具的 `category` 与 `order` 并写回 `config/tools.json` |
 | `GET /api/tools/visibility` | 返回全部分类与工具及启用状态（`enabled`），供「隐藏工具」浮窗使用（含已隐藏项） |
 | `POST /api/tools/visibility` | 切换启用：`{type: 'tool'\|'category', id, enabled}`，写回 `config/tools.json`（分类/工具各支持 `enabled` 字段） |
+
+**登录 / 管理后台接口**（由 `admin` 插件提供，`config/admin.json` 存储单位 / 部门 / 人员 / 角色，层级：**单位(units) → 部门(departments) → 用户(users)**）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /login` | 登录页 |
+| `POST /api/login` | 登录 `{username, password}`，成功写入 session |
+| `POST /api/logout` | 退出登录，清空 session |
+| `GET /api/session` | 当前登录状态：`{user: {username, name, role, modules, unit, department}\|null}` |
+| `GET /admin` | 管理后台首页（需登录） |
+| `GET /admin/unit\|/admin/department\|/admin/user\|/admin/permission` | 四个管理模块页（需登录） |
+| `GET /api/admin/summary` | 后台总览：各模块名称 / 记录数 / 当前账号是否可访问（需登录） |
+| `GET\|POST /api/admin/units`、`PUT\|DELETE /api/admin/units/<id>` | 单位管理 CRUD（需 `unit` 权限）；删除前需清空其下部门 |
+| `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门管理 CRUD（需 `department` 权限）；创建/编辑需指定 `unit_id`；删除前需清空其下人员 |
+| `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员管理 CRUD（需 `user` 权限）；支持字段：`username`、`name`、`password`、`unit_id`、`department_id`、`role`、`idcard`（身份证号）、`permissions`（权限点 = tools.json 插件 ID 数组）、`llm`（`{base_url, api_key, model}`）；密码/身份证/API Key 以 Fernet 加密存储；密码为空时保持不变，删除当前登录账号会被拒绝。权限点不在 Web 界面展示，仅后端读取并据此拦截工具访问 |
+| `GET\|POST /api/admin/permissions`、`PUT\|DELETE /api/admin/permissions/<id>` | 权限（角色）管理 CRUD（需 `permission` 权限），可勾选模块为 `unit` / `department` / `user` / `permission` |
+
+> **权限点与工具访问控制**：账号的 `permissions` 字段为 `config/tools.json` 中插件 ID 的列表，
+> 不随 Web 界面展示。已登录的非超级管理员账号只能访问权限点内的工具：
+> `GET /tool/<id>`、`GET /plugin/<id>/...` 返回 403，`/api/tools` 列表自动过滤，`/api/tools/<id>` 返回 404；
+> 拥有全部管理模块（单位/部门/人员/权限）的角色视为超级管理员，默认可访问全部工具；匿名访问不拦截。
+> 权限点需通过后端 API（`POST/PUT /api/admin/users`）或直接编辑 `config/admin.json` 配置，非法 ID 会被拒绝。
+
+> 以上接口均由 `plugins/admin/backend/routes.py`（admin 插件）提供，贯彻「一切皆插件」理念。
+> 未登录访问后台接口返回 401，页面重定向到 `/login`；无模块权限返回 403 / 重定向回 `/admin`。
+> 首页「编辑位置」「隐藏工具」等写操作同样需要登录（由 admin 插件的 `before_request` 保护）。
+> 权限数据模型：**角色（permissions）→ 可访问的管理模块列表**；人员归属单位下的部门并绑定一个角色。
+> 内置管理员角色（`role-admin`）默认拥有全部 4 个模块，升版时自动补齐新模块，保证超级管理员始终可访问全部工具。
 
 **character-graph 插件后端接口**（演示含后端插件的 API 模式）：
 

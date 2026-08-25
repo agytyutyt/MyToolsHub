@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<!-- JZToolsHub 管理后台首页（admin 插件）：沿用主界面方格布局展示三个管理模块 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 · JZ 工具箱</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+</head>
+<body>
+  <header class="app-bar">
+    <a href="/" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title">JZ 工具箱 · 管理后台</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="user-menu" id="user-slot"></div>
+  </header>
+
+  <main class="admin-content">
+    <div class="admin-head">
+      <div>
+        <h1>管理后台</h1>
+        <div class="admin-sub">部门、人员与权限统一管理</div>
+      </div>
+      <a class="admin-btn" href="/">← 返回工具箱</a>
+    </div>
+
+    <div class="tool-grid" id="admin-grid">
+      <div class="loading">加载中…</div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/plugin/admin/js/admin-common.js"></script>
+  <script src="/plugin/admin/js/admin.js"></script>
+</body>
+</html>

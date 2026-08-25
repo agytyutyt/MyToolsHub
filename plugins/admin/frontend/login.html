@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!-- JZToolsHub 登录页（admin 插件） -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 · JZ 工具箱</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="login-logo"></div>
+    <h1>JZ 工具箱</h1>
+    <p class="login-sub">请登录后进入管理后台</p>
+    <form id="login-form">
+      <div class="field">
+        <label for="username">用户名</label>
+        <input class="admin-input" type="text" id="username" name="username" autocomplete="username" autofocus>
+      </div>
+      <div class="field">
+        <label for="password">密码</label>
+        <input class="admin-input" type="password" id="password" name="password" autocomplete="current-password">
+      </div>
+      <div class="login-error" id="login-error"></div>
+      <button class="admin-btn primary" type="submit" id="login-btn" style="width:100%;justify-content:center;">登 录</button>
+    </form>
+    <div style="margin-top:16px;text-align:center;">
+      <a href="/" style="font-size:13px;color:var(--md-primary);text-decoration:none;">← 返回工具箱</a>
+    </div>
+  </div>
+
+  <script src="/plugin/admin/js/login.js"></script>
+</body>
+</html>

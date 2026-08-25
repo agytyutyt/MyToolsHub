@@ -193,12 +193,25 @@ fabPop.addEventListener('click', (e) => {
   const item = e.target.closest('.fab-pop-item');
   if (!item) return;
   const action = item.dataset.action;
-  if (action === 'edit') {
-    editing ? exitEditMode() : enterEditMode();
-  } else if (action === 'hide') {
-    openHideModal();
+  if (action === 'edit' || action === 'hide') {
+    // 布局修改属管理操作，未登录先跳登录页
+    window.AdminCommon.getSession().then(user => {
+      if (!user) {
+        showToast('请先登录后操作');
+        window.location.href = '/login?next=/';
+        return;
+      }
+      if (action === 'edit') {
+        editing ? exitEditMode() : enterEditMode();
+      } else if (action === 'hide') {
+        openHideModal();
+      }
+    });
   }
 });
+
+// 顶部用户菜单：未登录显示「登录」，已登录显示用户名 + 管理后台入口
+window.AdminCommon.renderUserMenu(document.getElementById('user-slot'));
 
 // ===================== 浮窗：隐藏工具 =====================
 

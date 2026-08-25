@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!-- JZToolsHub 管理后台 · 权限管理（admin 插件） -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>权限管理 · JZ 工具箱</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=9">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+</head>
+<body>
+  <header class="app-bar">
+    <button class="back-btn" onclick="history.back()" title="返回">←</button>
+    <a href="/admin" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title">权限管理</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="user-menu" id="user-slot"></div>
+  </header>
+
+  <main class="admin-content">
+    <div class="admin-head">
+      <div>
+        <h1>权限管理</h1>
+        <div class="admin-sub">定义角色及其可访问的管理模块</div>
+      </div>
+      <button class="admin-btn primary" type="button" id="btn-new">＋ 新建角色</button>
+    </div>
+
+    <div class="data-list" id="perm-list">
+      <div class="loading">加载中…</div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/plugin/admin/js/admin-common.js"></script>
+  <script src="/plugin/admin/js/admin-perm.js"></script>
+</body>
+</html>

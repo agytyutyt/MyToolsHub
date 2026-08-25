@@ -1,0 +1,375 @@
+/* ===================== 登录页 ===================== */
+body.login-body {
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #e8f0fe 0%, var(--md-surface-dim) 60%);
+}
+
+.login-card {
+  width: 380px;
+  max-width: 92vw;
+  padding: 40px 36px 32px;
+  background: var(--md-surface);
+  border-radius: var(--md-radius-l);
+  box-shadow: var(--md-shadow-3);
+  border: 1px solid var(--md-outline-variant);
+}
+
+.login-card .login-logo {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: conic-gradient(#4285F4 0 25%, #EA4335 0 50%, #FBBC05 0 75%, #34A853 0 100%);
+  box-shadow: var(--md-shadow-1);
+}
+
+.login-card h1 {
+  text-align: center;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: .1px;
+  margin-bottom: 4px;
+}
+
+.login-card .login-sub {
+  text-align: center;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+  margin-bottom: 24px;
+}
+
+.login-card .field {
+  margin-bottom: 16px;
+}
+
+.login-card .field label {
+  display: block;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+  margin-bottom: 6px;
+}
+
+.login-card .login-error {
+  min-height: 20px;
+  font-size: 13px;
+  color: var(--md-error);
+  margin-bottom: 8px;
+}
+
+/* ===================== 通用控件 ===================== */
+.admin-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--md-on-surface);
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-radius-s);
+  outline: none;
+  transition: border-color var(--md-transition), box-shadow var(--md-transition);
+}
+
+.admin-input:focus {
+  border-color: var(--md-primary);
+  box-shadow: 0 0 0 2px rgba(var(--md-primary-rgb), .15);
+}
+
+select.admin-input {
+  cursor: pointer;
+}
+
+.admin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: inherit;
+  color: var(--md-on-surface);
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline);
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--md-transition), box-shadow var(--md-transition);
+}
+
+.admin-btn:hover {
+  background: var(--md-surface-container);
+}
+
+.admin-btn.primary {
+  color: var(--md-on-primary);
+  background: var(--md-primary);
+  border-color: transparent;
+  box-shadow: var(--md-shadow-1);
+}
+
+.admin-btn.primary:hover {
+  background: #3b78e7;
+  box-shadow: var(--md-shadow-2);
+}
+
+.admin-btn.danger {
+  color: var(--md-error);
+  border-color: rgba(217, 48, 37, .4);
+}
+
+.admin-btn.danger:hover {
+  background: rgba(217, 48, 37, .08);
+}
+
+.admin-btn.small {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.admin-btn.text {
+  border: none;
+  background: transparent;
+  color: var(--md-primary);
+}
+
+.admin-btn.text:hover {
+  background: rgba(var(--md-primary-rgb), .1);
+}
+
+.admin-btn[disabled] {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* ===================== 管理后台布局 ===================== */
+.admin-content {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.admin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.admin-head h1 {
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.admin-head .admin-sub {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--md-on-surface-variant);
+}
+
+/* 管理后台模块卡片：沿用主界面方格布局（.tool-grid / .tool-card） */
+.admin-module-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--md-radius-m);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+}
+
+.admin-module-count {
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+}
+
+/* ===================== 顶部用户菜单 ===================== */
+.user-menu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border-radius: 999px;
+  background: var(--md-surface-container);
+  font-size: 13px;
+  color: var(--md-on-surface);
+  cursor: default;
+}
+
+.user-chip .avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ===================== 数据列表 ===================== */
+.data-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.data-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-radius-m);
+  box-shadow: var(--md-shadow-1);
+  transition: box-shadow var(--md-transition);
+}
+
+.data-row:hover {
+  box-shadow: var(--md-shadow-2);
+}
+
+.data-row .row-main {
+  min-width: 0;
+}
+
+.data-row .row-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.data-row .row-title .chip {
+  font-weight: 400;
+}
+
+.data-row .row-desc {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+  line-height: 1.5;
+}
+
+.data-row .row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===================== 表格 ===================== */
+.data-table-wrap {
+  overflow-x: auto;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-radius-m);
+  box-shadow: var(--md-shadow-1);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--md-outline-variant);
+  white-space: nowrap;
+}
+
+.data-table th {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--md-on-surface-variant);
+  background: var(--md-surface-container);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+  background: rgba(var(--md-primary-rgb), .04);
+}
+
+/* ===================== 表单浮窗 ===================== */
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-grid .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-grid .field label {
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+}
+
+.form-grid .field .field-hint {
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+}
+
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* 权限模块勾选 */
+.module-check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-radius-s);
+}
+
+.module-check label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.module-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--md-primary);
+  cursor: pointer;
+}
+
+/* ===================== 空状态 ===================== */
+.empty-state {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--md-on-surface-variant);
+  font-size: 14px;
+}

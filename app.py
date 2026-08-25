@@ -44,6 +44,9 @@ _tool_meta_cache = None
 _tool_meta_cache_ts = 0.0
 
 app = Flask(__name__)
+# 会话密钥兜底：admin 插件 register() 时会被 config/admin.json 中的持久化密钥覆盖
+app.config["SECRET_KEY"] = __import__("secrets").token_hex(32)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 
 class WindowsSafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
@@ -354,6 +357,8 @@ def get_aggregated_tools():
     for item in registry.get("tools", []):
         if not item.get("enabled", True):
             continue
+        if item.get("hidden"):  # 隐藏（如管理后台插件）不展示为工具卡片
+            continue
         if item.get("category") in hidden_cats:
             continue
         manifest = manifests.get(item["id"])
@@ -400,22 +405,36 @@ def _load_backend_module(plugin_id):
 
 
 def register_plugin_backends(app):
-    """动态注册已启用工具所声明的 Python 后端插件。
+    """动态注册插件后端。
 
     每个插件在 plugins/<插件id>/backend/ 下提供 __init__.py 与 routes.py，
     后端代码随插件整体打包、随 enabled 配置启停 —— 一切皆插件。
+
+    admin（管理后台）为核心基础设施插件：不随 enabled 启停，始终加载，
+    保证登录鉴权 / 后台接口 / 工具访问控制一直可用。
     """
     registry = load_registry()
-    for item in registry.get("tools", []):
-        if not item.get("enabled", True):
-            continue
-        routes = _load_backend_module(item["id"])
+    tools = list(registry.get("tools", []))
+
+    def load_routes(plugin_id):
+        routes = _load_backend_module(plugin_id)
         if routes is None:
-            continue
+            return False
         register = getattr(routes, "register", None)
         if callable(register):
             register(app)
-            app.logger.info(f"已注册后端插件：{item['id']}")
+            app.logger.info(f"已注册后端插件：{plugin_id}")
+            return True
+        return False
+
+    # 管理后台：始终加载（即使 tools.json 中未注册或 enabled=false）
+    if not load_routes("admin"):
+        app.logger.warning("核心插件 admin 未加载，登录鉴权 / 工具访问控制将不可用")
+
+    for item in tools:
+        if item["id"] == "admin" or not item.get("enabled", True):
+            continue
+        load_routes(item["id"])
 
 
 @app.route("/")
@@ -444,17 +463,33 @@ def api_tools():
     return jsonify({
         "site": registry.get("site", {}),
         "categories": categories,
-        "tools": get_aggregated_tools(),
+        "tools": _filter_visible_tools(get_aggregated_tools()),
     })
 
 
 @app.route("/api/tools/<tool_id>")
 def api_tool(tool_id):
-    tools = get_aggregated_tools()
+    tools = _filter_visible_tools(get_aggregated_tools())
     for tool in tools:
         if tool["id"] == tool_id:
             return jsonify(tool)
     return jsonify({"error": "tool not found"}), 404
+
+
+def _filter_visible_tools(tools):
+    """按当前登录用户的权限点过滤可见工具；匿名或超级管理员不限制。
+
+    get_session_user 由 admin 插件（jztools_admin）提供，未加载时不做过滤。
+    """
+    try:
+        from jztools_admin.routes import get_session_user
+    except Exception:
+        return tools
+    info = get_session_user()
+    if info is None or info.get("super_admin"):
+        return tools
+    allowed = set(info.get("permissions") or [])
+    return [t for t in tools if t["id"] in allowed]
 
 
 @app.post("/api/tools/reorder")
@@ -548,6 +583,7 @@ def api_tools_visibility_save():
 
 if __name__ == "__main__":
     setup_access_logging(app)
+    # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
     try:
         app.run(host="0.0.0.0", port=5000, debug=True)
