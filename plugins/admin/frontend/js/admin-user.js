@@ -1,12 +1,22 @@
-/* 人员管理：列表表格、新建/编辑浮窗（单位→部门级联、身份证、大模型配置）、删除确认 */
+/* 人员管理：列表表格、新建/编辑浮窗（单位→部门级联、身份证、大模型配置）、
+ * 按人分配工具权限（权限弹窗）、角色管理（原权限管理模块并入本页）、删除确认 */
 (function () {
   const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog } = window.AdminCommon;
 
   const wrapEl = document.getElementById('user-wrap');
+  const roleListEl = document.getElementById('role-list');
   let units = [];
   let depts = [];
   let roles = [];
+  let allUsers = [];
   let userMap = {}; // username -> 完整用户数据（供编辑浮窗回填）
+
+  const MODULE_OPTIONS = [
+    { id: 'unit', name: '单位管理' },
+    { id: 'department', name: '部门管理' },
+    { id: 'user', name: '人员管理' },
+    { id: 'permission', name: '权限管理' },
+  ];
 
   async function load() {
     try {
@@ -14,9 +24,11 @@
       units = data.units || [];
       depts = data.departments || [];
       roles = data.permissions || [];
+      allUsers = data.users || [];
       userMap = {};
-      (data.users || []).forEach(u => { userMap[u.username] = u; });
-      renderList(data.users || []);
+      allUsers.forEach(u => { userMap[u.username] = u; });
+      renderList(allUsers);
+      renderRoles();
     } catch (err) {
       wrapEl.innerHTML = `<div class="loading">加载失败：${esc(err.message)}</div>`;
     }
@@ -72,6 +84,7 @@
               <td>${esc(maskIdcard(u.idcard))}</td>
               <td>${llmStatus(u)}</td>
               <td style="text-align:right;white-space:nowrap;">
+                <button class="admin-btn text small" type="button" data-act="perm">权限</button>
                 <button class="admin-btn text small" type="button" data-act="edit">编辑</button>
                 <button class="admin-btn text small" type="button" data-act="del">删除</button>
               </td>
@@ -212,7 +225,9 @@
     if (!btn) return;
     const tr = btn.closest('tr');
     const username = tr.dataset.username;
-    if (btn.dataset.act === 'edit') {
+    if (btn.dataset.act === 'perm') {
+      openPermModal(userMap[username] || { username });
+    } else if (btn.dataset.act === 'edit') {
       openForm(userMap[username] || { username });
     } else if (btn.dataset.act === 'del') {
       confirmDialog(`确定删除人员「${username}」吗？其登录账号将立即失效。`, async () => {
@@ -228,6 +243,162 @@
   });
 
   document.getElementById('btn-new').addEventListener('click', () => openForm(null));
+
+  /* ==================== 权限设置（按人勾选可访问的功能模块） ==================== */
+  async function openPermModal(user) {
+    let tools;
+    try {
+      const data = await api('/api/tools/visibility');
+      tools = (data.tools || []).slice();
+    } catch (e) {
+      showToast('加载功能模块失败：' + e.message, true);
+      return;
+    }
+    const superAdmin = !!user.super_admin;
+    // 管理员展示全部模块（含管理后台）；办案员等其他角色不展示「管理后台」
+    const list = superAdmin ? tools : tools.filter(function (t) { return t.id !== 'admin'; });
+    const checkedSet = new Set(user.permissions || []);
+    const rows = list.map(function (t) {
+      var checked = superAdmin ? 'checked disabled' : (checkedSet.has(t.id) ? 'checked' : '');
+      return '<label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;padding:4px 0;">' +
+        '<input type="checkbox" value="' + esc(t.id) + '" ' + checked + '>' +
+        esc(t.name || t.id) +
+        (t.enabled === false ? ' <span style="color:var(--md-on-surface-variant);font-size:12px;">（已停用）</span>' : '') +
+        '</label>';
+    }).join('');
+
+    openModal('权限设置 — ' + user.name, '' +
+      '<div class="form-grid">' +
+      (superAdmin
+        ? '<div style="font-size:13px;color:var(--md-on-surface-variant);">该人员为管理员，拥有全部功能模块权限，无需调整。</div>'
+        : '<div style="font-size:13px;color:var(--md-on-surface-variant);">勾选该人员可访问的功能模块（管理后台不开放）。</div>') +
+      '<div class="module-check">' + rows + '</div>' +
+      (superAdmin ? '' : '<div class="modal-foot"><button class="admin-btn" type="button" data-close>取消</button>' +
+        '<button class="admin-btn primary" type="button" id="perm-save">保存</button></div>') +
+      '</div>', function (wrap) {
+      var saveBtn = wrap.querySelector('#perm-save');
+      if (!saveBtn) return;
+      saveBtn.addEventListener('click', async function () {
+        var selected = [...wrap.querySelectorAll('.module-check input:checked')].map(function (i) { return i.value; });
+        saveBtn.disabled = true;
+        try {
+          await api('/api/admin/users/' + encodeURIComponent(user.username), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: user.name || '', permissions: selected }),
+          });
+          wrap.querySelector('[data-close]').click();
+          showToast('权限已保存');
+          load();
+        } catch (err) {
+          saveBtn.disabled = false;
+          showToast('保存失败：' + err.message, true);
+        }
+      });
+    });
+  }
+
+  /* ==================== 角色管理（权限管理已并入人员管理） ==================== */
+  function renderRoles() {
+    if (!roleListEl) return;
+    if (roles.length === 0) {
+      roleListEl.innerHTML = '<div class="empty-state">暂无角色，点击右上角「新建角色」添加。</div>';
+      return;
+    }
+    var usage = {};
+    allUsers.forEach(function (u) { usage[u.role] = (usage[u.role] || 0) + 1; });
+    roleListEl.innerHTML = roles.map(function (r) {
+      var chips = (r.modules || []).map(function (m) {
+        var opt = MODULE_OPTIONS.find(function (o) { return o.id === m; });
+        return opt ? '<span class="chip">' + esc(opt.name) + '</span>' : '';
+      }).join('');
+      return '<div class="data-row" data-id="' + esc(r.id) + '">' +
+        '<div class="row-main">' +
+        '<div class="row-title"><span>' + esc(r.name) + '</span>' + chips + '</div>' +
+        '<div class="row-desc">' + esc(r.description || '暂无描述') + ' · 已分配 ' + (usage[r.id] || 0) + ' 人</div>' +
+        '</div>' +
+        '<div class="row-actions">' +
+        '<button class="admin-btn text small" type="button" data-act="edit">编辑</button>' +
+        '<button class="admin-btn text small" type="button" data-act="del">删除</button>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function moduleChecksHtml(selected) {
+    return MODULE_OPTIONS.map(function (o) {
+      return '<label><input type="checkbox" value="' + o.id + '" ' +
+        ((selected || []).includes(o.id) ? 'checked' : '') + '> ' + o.name + '</label>';
+    }).join('');
+  }
+
+  function openRoleForm(role) {
+    openModal(role ? '编辑角色' : '新建角色', '' +
+      '<div class="form-grid">' +
+      '<div class="field"><label for="rf-name">角色名称</label>' +
+      '<input class="admin-input" type="text" id="rf-name" value="' + esc(role?.name || '') + '" placeholder="如：办案员"></div>' +
+      '<div class="field"><label for="rf-desc">描述（可选）</label>' +
+      '<input class="admin-input" type="text" id="rf-desc" value="' + esc(role?.description || '') + '"></div>' +
+      '<div class="field"><label>可访问的管理模块（不勾选则为纯工具使用者，如办案员）</label>' +
+      '<div class="module-check" id="rf-modules">' + moduleChecksHtml(role?.modules) + '</div></div>' +
+      '<div class="modal-foot"><button class="admin-btn" type="button" data-close>取消</button>' +
+      '<button class="admin-btn primary" type="button" id="role-save">保存</button></div>' +
+      '</div>', function (wrap) {
+      wrap.querySelector('#rf-name').focus();
+      wrap.querySelector('#role-save').addEventListener('click', async function () {
+        var name = wrap.querySelector('#rf-name').value.trim();
+        var description = wrap.querySelector('#rf-desc').value.trim();
+        var modules = [...wrap.querySelectorAll('#rf-modules input:checked')].map(function (i) { return i.value; });
+        if (!name) { showToast('角色名称不能为空', true); return; }
+        var payload = { name: name, description: description, modules: modules };
+        try {
+          if (role) {
+            await api('/api/admin/permissions/' + encodeURIComponent(role.id), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+          } else {
+            await api('/api/admin/permissions', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+          }
+          wrap.querySelector('[data-close]').click();
+          showToast('已保存');
+          load();
+        } catch (err) {
+          showToast('保存失败：' + err.message, true);
+        }
+      });
+    });
+  }
+
+  // 角色列表的操作按钮（编辑/删除）
+  if (roleListEl) {
+    roleListEl.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-act]');
+      if (!btn) return;
+      var row = btn.closest('.data-row');
+      var id = row.dataset.id;
+      if (btn.dataset.act === 'edit') {
+        openRoleForm(roles.find(function (r) { return r.id === id; }) || { id: id });
+      } else if (btn.dataset.act === 'del') {
+        confirmDialog('确定删除该角色吗？此操作不可恢复。', async function () {
+          try {
+            await api('/api/admin/permissions/' + encodeURIComponent(id), { method: 'DELETE' });
+            showToast('已删除');
+            load();
+          } catch (err) {
+            showToast('删除失败：' + err.message, true);
+          }
+        });
+      }
+    });
+  }
+
+  var btnNewRole = document.getElementById('btn-new-role');
+  if (btnNewRole) btnNewRole.addEventListener('click', function () { openRoleForm(null); });
 
   (async () => {
     const ok = await requireModule('user');

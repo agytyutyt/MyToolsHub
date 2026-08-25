@@ -32,6 +32,11 @@ from datetime import datetime, timedelta
 
 from flask import jsonify, request, send_file
 
+try:
+    from jztools_admin.routes import get_session_user
+except Exception:  # admin 插件缺失时兜底（理论上不会发生）
+    get_session_user = None
+
 API_PREFIX = "/api/trajectory-convert"
 
 # ---- 基础量（与 QR-transfer 参考实现一致） ----
@@ -165,6 +170,31 @@ def cleanup_tasks():
 
 def _task_file(task_id, ext=".mp4"):
     return os.path.join(_TASK_DIR, f"{task_id}{ext}")
+
+
+def _tc_viewer():
+    """当前登录用户上下文；未登录返回 None。"""
+    if get_session_user is None:
+        return None
+    try:
+        return get_session_user()
+    except Exception:
+        return None
+
+
+def _task_owned_by(task, user):
+    """任务归属校验：任务元数据记录过创建者时，非创建者（且非超管）视为不存在（404）。
+
+    任务 ID 为随机 UUID + TTL 定期清理，本身已难猜测；此校验是纵深防御（R6）。
+    """
+    owner = task.get("created_by")
+    if not owner:
+        return True
+    if user is None:
+        return False
+    if user.get("super_admin"):
+        return True
+    return owner == user.get("username")
 
 
 def _static_image_file(task_id, index):
@@ -738,7 +768,9 @@ def register(app) -> None:
         task_id = uuid.uuid4().hex[:12]
         cleanup_tasks()
         _clean_task_files()
-        set_task(task_id, status="pending", progress=0.0, created_at=time.time())
+        viewer = _tc_viewer()
+        set_task(task_id, status="pending", progress=0.0, created_at=time.time(),
+                 created_by=(viewer or {}).get("username", ""))
         filename = os.path.basename(f.filename or "trajectory.xlsx")
         file_bytes = f.read()
         _executor.submit(_run_convert, task_id, filename, file_bytes, interval, version, cfg, mode)
@@ -748,6 +780,8 @@ def register(app) -> None:
     def tc_convert_status(task_id):
         task = get_task(task_id)
         if not task:
+            return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
+        if not _task_owned_by(task, _tc_viewer()):
             return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
         payload = {
             "ok": True,
@@ -787,6 +821,8 @@ def register(app) -> None:
         task = get_task(task_id)
         if not task or task.get("status") != "done":
             return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
+        if not _task_owned_by(task, _tc_viewer()):
+            return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
         if task.get("output_type") == "static":
             if task.get("image_count", 1) > 1:
                 # 多张静态二维码：打包为 ZIP 下载
@@ -825,6 +861,8 @@ def register(app) -> None:
         if (not task or task.get("status") != "done"
                 or task.get("output_type") != "static"):
             return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
+        if not _task_owned_by(task, _tc_viewer()):
+            return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
         total = task.get("image_count", 1)
         if not 1 <= index <= total:
             return jsonify({"ok": False, "detail": "图片序号非法"}), 404
@@ -845,6 +883,8 @@ def register(app) -> None:
         task = get_task(task_id)
         if (not task or task.get("status") != "done"
                 or task.get("output_type") != "static"):
+            return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
+        if not _task_owned_by(task, _tc_viewer()):
             return jsonify({"ok": False, "detail": "任务不存在或未完成"}), 404
         total = task.get("image_count", 1)
         try:

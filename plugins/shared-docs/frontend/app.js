@@ -25,7 +25,8 @@
     conflict: false,
     serverDoc: null,        // 冲突时服务端最新文档
     clientId: localStorage.getItem("sd_client_id") || genId(),
-    userName: localStorage.getItem("sd_user") || "",
+    user: null,             // 当前登录用户（AdminCommon.getSession() 取，服务端权威）
+    activeLevel: "unit",    // 列表当前 Tab：unit / department / private
     matrix: [],             // Excel 编辑中的二维数组
     saveTimer: null,
     pollTimer: null,
@@ -48,6 +49,13 @@
     options.headers = options.headers || {};
     return fetch(url, options).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
+        if (res.status === 401) {
+          // iframe 场景要跳顶层窗口，否则登录页会嵌在小框框里
+          window.top.location.href = '/login?next=' + encodeURIComponent(window.top.location.pathname);
+          var err = new Error(data.detail || '未登录或登录已过期');
+          err.status = 401;
+          throw err;
+        }
         if (!res.ok) {
           var err = new Error(data.detail || ("请求失败 " + res.status));
           err.status = res.status;
@@ -108,6 +116,7 @@
   function refreshList() {
     api("/api/shared-docs/documents").then(function (data) {
       state.docs = data.documents || [];
+      renderTabs();
       renderList();
     }).catch(function (e) {
       alert("加载文档列表失败：" + e.message);
@@ -116,43 +125,94 @@
 
   function typeIcon(t) { return t === "word" ? "📄" : "📊"; }
 
+  function scopeLabel(level) {
+    if (level === "unit") return "单位";
+    if (level === "department") return "部门";
+    return "私人";
+  }
+
+  /* 三个 Tab 的数量徽标：按文档 scope.level 分组 */
+  function renderTabs() {
+    var unit = 0, dept = 0, mine = 0;
+    state.docs.forEach(function (d) {
+      var lv = (d.scope && d.scope.level) || "private";
+      if (lv === "unit") unit++;
+      else if (lv === "department") dept++;
+      else mine++;
+    });
+    $("#count-unit").textContent = unit;
+    $("#count-dept").textContent = dept;
+    $("#count-mine").textContent = mine;
+  }
+
   function renderList() {
+    var level = state.activeLevel;
+    var docs = state.docs.filter(function (d) {
+      return ((d.scope && d.scope.level) || "private") === level;
+    });
     var box = $("#doc-list");
     box.innerHTML = "";
-    $("#empty-tip").classList.toggle("hidden", state.docs.length > 0);
-    state.docs.forEach(function (d) {
+    $("#empty-tip").classList.toggle("hidden", docs.length > 0);
+    docs.forEach(function (d) {
       var card = document.createElement("div");
       card.className = "doc-card";
       var meta = "更新于 " + (d.updated_at || "-") + " · 版本 " + (d.version || 0);
       if (d.updated_by) meta += " · " + esc(d.updated_by);
+      var lv = (d.scope && d.scope.level) || "private";
+      var canManage = !!(state.user && (state.user.super_admin || d.created_by === state.user.username));
       card.innerHTML =
         '<div class="doc-card-head">' +
           '<span class="doc-icon">' + typeIcon(d.type) + "</span>" +
           '<h3 title="' + esc(d.name) + '">' + esc(d.name) + "</h3>" +
         "</div>" +
-        '<div class="doc-meta"><span class="tag">' + (d.type === "word" ? "Word" : "Excel") + "</span>" + meta + "</div>" +
+        '<div class="doc-meta">' +
+          '<span class="tag">' + (d.type === "word" ? "Word" : "Excel") + "</span>" +
+          '<span class="tag scope-tag scope-' + esc(lv) + '">' + esc(scopeLabel(lv)) + "</span>" +
+          (d.created_by_name ? '<span class="owner">' + esc(d.created_by_name) + "</span>" : "") +
+          "<br>" + meta +
+        "</div>" +
         '<div class="doc-actions">' +
           '<button class="btn btn-primary" data-act="open">打开</button>' +
-          '<button class="btn" data-act="rename">重命名</button>' +
           '<button class="btn" data-act="export">导出</button>' +
-          '<button class="btn danger" data-act="del">删除</button>' +
+          (canManage ? '<button class="btn" data-act="rename">重命名</button>' : "") +
+          (canManage ? '<button class="btn" data-act="scope">调整挂靠</button>' : "") +
+          (canManage ? '<button class="btn danger" data-act="del">删除</button>' : "") +
         "</div>";
       card.querySelector('[data-act="open"]').addEventListener("click", function () { openDoc(d.id); });
-      card.querySelector('[data-act="rename"]').addEventListener("click", function () { renameDoc(d.id); });
       card.querySelector('[data-act="export"]').addEventListener("click", function () { exportDoc(d.id, d.name, d.type); });
-      card.querySelector('[data-act="del"]').addEventListener("click", function () { deleteDoc(d.id); });
+      if (canManage) {
+        card.querySelector('[data-act="rename"]').addEventListener("click", function () { renameDoc(d.id); });
+        card.querySelector('[data-act="scope"]').addEventListener("click", function () { openScopeModal(d.id); });
+        card.querySelector('[data-act="del"]').addEventListener("click", function () { deleteDoc(d.id); });
+      }
       box.appendChild(card);
     });
   }
 
-  function createDoc() {
-    var name = prompt("请输入文档名称：");
-    if (!name) return;
-    name = name.trim();
-    if (!name) return;
-    var type = $("#new-type").value;
-    postJSON("/api/shared-docs/documents", { name: name, type: type })
+  function openCreateModal() {
+    $("#create-modal").classList.remove("hidden");
+    var hint = $("#create-level-hint");
+    hint.classList.toggle("hidden", !(state.user && state.user.super_admin));
+    if (state.user && state.user.super_admin) {
+      hint.textContent = "管理员创建的单位/部门文档，挂靠在您所属的单位/部门下";
+    }
+    var nameInput = $("#create-name");
+    nameInput.value = "";
+    nameInput.focus();
+  }
+
+  function closeCreateModal() {
+    $("#create-modal").classList.add("hidden");
+  }
+
+  function submitCreate() {
+    var name = $("#create-name").value.trim();
+    if (!name) { alert("请输入文档名称"); return; }
+    var type = $("#create-type").value;
+    var level = $("#create-level").value;
+    postJSON("/api/shared-docs/documents", { name: name, type: type, level: level })
       .then(function (data) {
+        closeCreateModal();
         refreshList();
         openDoc(data.document.id);
       })
@@ -176,6 +236,29 @@
     api("/api/shared-docs/documents/" + id, { method: "DELETE" })
       .then(function () { refreshList(); })
       .catch(function (e) { alert("删除失败：" + e.message); });
+  }
+
+  var scopeDocId = null;
+
+  function openScopeModal(id) {
+    scopeDocId = id;
+    var d = state.docs.filter(function (x) { return x.id === id; })[0];
+    var cur = (d.scope && d.scope.level) || "private";
+    $("#scope-level").value = cur;
+    $("#scope-modal").classList.remove("hidden");
+  }
+
+  function submitScope() {
+    var id = scopeDocId;
+    var level = $("#scope-level").value;
+    if (!id) return;
+    postJSON("/api/shared-docs/documents/" + id + "/scope", { level: level })
+      .then(function () {
+        $("#scope-modal").classList.add("hidden");
+        scopeDocId = null;
+        refreshList();
+      })
+      .catch(function (e) { alert("调整挂靠失败：" + e.message); });
   }
 
   function exportDoc(id, name, type) {
@@ -458,7 +541,6 @@
     postJSON("/api/shared-docs/documents/" + state.current.id + "/content", {
       base_version: state.baseVersion,
       content: buildContent(),
-      user: state.userName || "匿名用户",
     }).then(function (data) {
       state.baseVersion = data.document.version;
       state.current.updated_at = data.document.updated_at;
@@ -524,7 +606,6 @@
     if (!state.current) return;
     postJSON("/api/shared-docs/documents/" + state.current.id + "/presence", {
       client_id: state.clientId,
-      user: state.userName || "匿名用户",
     }).then(function (data) {
       renderUsers(data.users || []);
     }).catch(function () {});
@@ -608,13 +689,40 @@
 
   /* ==================== 事件绑定 ==================== */
   function bindEvents() {
-    $("#btn-create").addEventListener("click", createDoc);
+    $("#btn-create").addEventListener("click", openCreateModal);
+    $("#create-cancel").addEventListener("click", closeCreateModal);
+    $("#create-ok").addEventListener("click", submitCreate);
+    $("#create-name").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); submitCreate(); }
+    });
+    $("#scope-cancel").addEventListener("click", function () {
+      $("#scope-modal").classList.add("hidden");
+      scopeDocId = null;
+    });
+    $("#scope-ok").addEventListener("click", submitScope);
 
-    $("#user-name").value = state.userName;
-    $("#user-name").addEventListener("change", function () {
-      state.userName = this.value.trim();
-      localStorage.setItem("sd_user", state.userName);
-      heartbeat();
+    // 三个 Tab：本单位 / 本部门 / 我的（服务端已过滤，此处只是 UI 分组）
+    $("#doc-tabs").addEventListener("click", function (e) {
+      var tab = e.target.closest(".doc-tab");
+      if (!tab) return;
+      state.activeLevel = tab.dataset.level;
+      $$("#doc-tabs .doc-tab").forEach(function (t) {
+        t.classList.toggle("active", t === tab);
+      });
+      renderList();
+    });
+
+    // 弹窗：点遮罩或 Esc 关闭
+    ["#create-modal", "#scope-modal"].forEach(function (sel) {
+      var m = $(sel);
+      m.addEventListener("mousedown", function (e) {
+        if (e.target === m) m.classList.add("hidden");
+      });
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      $("#create-modal").classList.add("hidden");
+      $("#scope-modal").classList.add("hidden");
     });
 
     $("#btn-back").addEventListener("click", showList);
@@ -693,6 +801,14 @@
   document.addEventListener("DOMContentLoaded", function () {
     bindEvents();
     checkDeps();
+    // 当前登录用户（服务端权威）；用于卡片菜单权限显隐与创建弹窗提示
+    if (window.AdminCommon && window.AdminCommon.getSession) {
+      window.AdminCommon.getSession().then(function (u) {
+        state.user = u;
+        renderTabs();
+        renderList();
+      }).catch(function () {});
+    }
     refreshList();
   });
 })();

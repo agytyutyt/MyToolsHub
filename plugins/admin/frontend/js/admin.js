@@ -39,7 +39,8 @@
       renderUserMenu(document.getElementById('user-slot'));
 
       const data = await api('/api/admin/summary');
-      const modules = (data.modules || []).filter(m => m.allowed);
+      // 权限管理暂时屏蔽（已并入「人员管理」），后台首页不展示独立模块卡片
+      const modules = (data.modules || []).filter(m => m.allowed && m.id !== 'permission');
       if (modules.length === 0) {
         grid.innerHTML = '<div class="loading">当前账号无任何管理模块权限。</div>';
         return;

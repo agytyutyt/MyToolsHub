@@ -26,6 +26,11 @@ from datetime import datetime
 
 from flask import jsonify, request, send_file
 
+try:
+    from jztools_admin.routes import get_session_user as _get_session_user
+except Exception:  # admin 插件缺失时兜底（理论上不会发生）
+    _get_session_user = None
+
 API_PREFIX = "/api/shared-docs"
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +50,44 @@ MAX_WORD_BLOCKS = 5000
 MAX_EXCEL_ROWS = 1000
 MAX_EXCEL_COLS = 100
 MAX_HISTORY = 100
+
+
+def _viewer():
+    """当前登录用户上下文；未登录返回 None。"""
+    if _get_session_user is None:
+        return None
+    try:
+        return _get_session_user()
+    except Exception:
+        return None
+
+
+def _can_view(user, doc):
+    """按可见性规则判定 user 是否可见 doc（3.2-③）。
+
+    - unit 级：同单位可见；department 级：同部门可见；private：仅创建者；
+    - 超级管理员可见全部。
+    """
+    if user is None:
+        return False
+    if user.get("super_admin"):
+        return True
+    scope = doc.get("scope") or {}
+    level = scope.get("level", "private")
+    if level == "unit":
+        return scope.get("unit_id") == user.get("unit_id")
+    if level == "department":
+        return scope.get("department_id") == user.get("department_id")
+    return scope.get("owner") == user.get("username")
+
+
+def _can_manage(user, doc):
+    """重命名/删除/改挂靠：仅创建者或超级管理员。"""
+    if user is None:
+        return False
+    if user.get("super_admin"):
+        return True
+    return (doc.get("created_by") or "") == user.get("username")
 
 try:
     from docx import Document
@@ -129,6 +172,30 @@ def list_docs():
     return docs
 
 
+def migrate_doc_scope():
+    """给没有 scope 的历史文档补默认归属：私有，创建者 admin。
+
+    历史文档无法追溯创建人与受众，默认划给超管 admin 最安全；
+    现场需要老文档全员共享时由管理员在前端改成「单位」层级即可。
+    """
+    changed = False
+    for doc in list_docs():
+        if doc.get("scope"):
+            continue
+        doc["created_by"] = doc.get("created_by") or "admin"
+        doc["created_by_name"] = doc.get("created_by_name") or "系统管理员"
+        doc["scope"] = {
+            "level": "private",
+            "owner": "admin",
+            "owner_name": "系统管理员",
+            "unit_id": "",
+            "department_id": "",
+        }
+        save_doc(doc)
+        changed = True
+    return changed
+
+
 def _public_doc(doc, with_content=False, with_presence=False):
     payload = {
         "id": doc["id"],
@@ -138,6 +205,9 @@ def _public_doc(doc, with_content=False, with_presence=False):
         "created_at": doc.get("created_at", ""),
         "updated_at": doc.get("updated_at", ""),
         "updated_by": doc.get("updated_by", ""),
+        "created_by": doc.get("created_by", ""),
+        "created_by_name": doc.get("created_by_name", ""),
+        "scope": doc.get("scope") or {},
     }
     if with_content:
         payload["content"] = doc.get("content", {})
@@ -412,6 +482,9 @@ def import_excel(file_storage, filename):
 
 def register(app) -> None:
     """插件入口：由 JZToolsHub 主应用在启动时调用。"""
+    # 存量文档归属迁移（一次性、幂等）：给历史文档补默认归属
+    with _LOCK:
+        migrate_doc_scope()
 
     @app.get(f"{API_PREFIX}/status")
     def sd_status():
@@ -424,11 +497,17 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/documents")
     def sd_list():
-        docs = list_docs()
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        docs = [d for d in list_docs() if _can_view(user, d)]
         return jsonify({"ok": True, "documents": [_public_doc(d) for d in docs]})
 
     @app.post(f"{API_PREFIX}/documents")
     def sd_create():
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         doc_type = data.get("type")
@@ -438,6 +517,10 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": f"文档名称不能超过 {MAX_DOC_NAME} 个字符"}), 400
         if doc_type not in ("word", "excel"):
             return jsonify({"ok": False, "detail": "文档类型必须为 word 或 excel"}), 400
+        # 挂靠层级只能三选一，组织信息一律取自 session（不信前端）
+        level = (data.get("level") or "private").strip()
+        if level not in ("unit", "department", "private"):
+            return jsonify({"ok": False, "detail": "挂靠层级必须为 unit / department / private"}), 400
         doc = {
             "id": uuid.uuid4().hex[:12],
             "name": name,
@@ -446,29 +529,43 @@ def register(app) -> None:
             "content": {"blocks": []} if doc_type == "word" else {"rows": [[""]]},
             "created_at": _now(),
             "updated_at": _now(),
-            "updated_by": "",
+            "updated_by": user["name"],
             "history": [],
+            "created_by": user["username"],
+            "created_by_name": user["name"],
+            "scope": {
+                "level": level,
+                "owner": user["username"],
+                "owner_name": user["name"],
+                "unit_id": user.get("unit_id", ""),
+                "department_id": user.get("department_id", ""),
+            },
         }
         save_doc(doc)
         return jsonify({"ok": True, "document": _public_doc(doc, with_content=True)})
 
     @app.get(f"{API_PREFIX}/documents/<doc_id>")
     def sd_get(doc_id):
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         doc = load_doc(doc_id)
-        if not doc:
-            return jsonify({"ok": False, "detail": "文档不存在"}), 404
+        if not doc or not _can_view(user, doc):
+            return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
         return jsonify({"ok": True, "document": _public_doc(doc, with_content=True, with_presence=True)})
 
     @app.post(f"{API_PREFIX}/documents/<doc_id>/content")
     def sd_save_content(doc_id):
         """保存内容（乐观锁）：base_version 与当前版本不一致时返回 409。"""
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         data = request.get_json(silent=True) or {}
         base_version = data.get("base_version")
-        user = (data.get("user") or "").strip() or "匿名用户"
         with _LOCK:
             doc = load_doc(doc_id)
-            if not doc:
-                return jsonify({"ok": False, "detail": "文档不存在"}), 404
+            if not doc or not _can_view(user, doc):
+                return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
             if not isinstance(base_version, int) or base_version != doc.get("version", 0):
                 return jsonify({
                     "ok": False,
@@ -482,9 +579,9 @@ def register(app) -> None:
             doc["version"] = doc.get("version", 0) + 1
             doc["content"] = content
             doc["updated_at"] = _now()
-            doc["updated_by"] = user
+            doc["updated_by"] = user["name"]
             history = doc.setdefault("history", [])
-            history.append({"version": doc["version"], "time": doc["updated_at"], "by": user})
+            history.append({"version": doc["version"], "time": doc["updated_at"], "by": user["name"]})
             if len(history) > MAX_HISTORY:
                 doc["history"] = history[-MAX_HISTORY:]
             save_doc(doc)
@@ -492,20 +589,31 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/documents/<doc_id>/presence")
     def sd_presence(doc_id):
-        """在线心跳：前端定时调用，返回当前文档在线用户。"""
+        """在线心跳：前端定时调用，返回当前文档在线用户。
+
+        在线用户身份只认 session（忽略前端自报昵称），防冒名顶替。
+        """
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         data = request.get_json(silent=True) or {}
         client_id = (data.get("client_id") or "unknown")[:64]
-        user = (data.get("user") or "匿名用户").strip()[:50]
         with _LOCK:
-            if not load_doc(doc_id):
-                return jsonify({"ok": False, "detail": "文档不存在"}), 404
+            doc = load_doc(doc_id)
+            if not doc or not _can_view(user, doc):
+                return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
             now = time.time()
-            PRESENCE.setdefault(doc_id, {})[client_id] = {"user": user, "last_seen": now}
+            PRESENCE.setdefault(doc_id, {})[client_id] = {
+                "user": user["name"], "username": user["username"], "last_seen": now,
+            }
             users = presence_users(doc_id)
         return jsonify({"ok": True, "users": users})
 
     @app.post(f"{API_PREFIX}/documents/<doc_id>/rename")
     def sd_rename(doc_id):
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -514,30 +622,64 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": f"文档名称不能超过 {MAX_DOC_NAME} 个字符"}), 400
         with _LOCK:
             doc = load_doc(doc_id)
-            if not doc:
-                return jsonify({"ok": False, "detail": "文档不存在"}), 404
+            if not doc or not _can_view(user, doc):
+                return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
+            if not _can_manage(user, doc):
+                return jsonify({"ok": False, "detail": "仅创建者或管理员可执行此操作"}), 403
             doc["name"] = name
             save_doc(doc)
         return jsonify({"ok": True, "document": _public_doc(doc)})
 
     @app.delete(f"{API_PREFIX}/documents/<doc_id>")
     def sd_delete(doc_id):
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         with _LOCK:
             doc = load_doc(doc_id)
-            if not doc:
-                return jsonify({"ok": False, "detail": "文档不存在"}), 404
+            if not doc or not _can_view(user, doc):
+                return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
+            if not _can_manage(user, doc):
+                return jsonify({"ok": False, "detail": "仅创建者或管理员可执行此操作"}), 403
             try:
                 os.remove(_doc_path(doc_id))
             except OSError:
                 return jsonify({"ok": False, "detail": "删除失败"}), 500
         return jsonify({"ok": True})
 
+    @app.post(f"{API_PREFIX}/documents/<doc_id>/scope")
+    def sd_change_scope(doc_id):
+        """调整文档挂靠层级（unit / department / private）：仅创建者或超级管理员。
+
+        只改 level，保留原始 owner/unit/dept 组织信息（语义是「调整共享范围」，
+        而不是「把文档搬到别的单位」）。
+        """
+        body = request.get_json(silent=True) or {}
+        level = (body.get("level") or "").strip()
+        if level not in ("unit", "department", "private"):
+            return jsonify({"ok": False, "detail": "挂靠层级不合法"}), 400
+        with _LOCK:
+            user = _viewer()
+            if user is None:
+                return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+            doc = load_doc(doc_id)
+            if not doc or not _can_view(user, doc):
+                return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
+            if not _can_manage(user, doc):
+                return jsonify({"ok": False, "detail": "仅创建者或管理员可调整挂靠"}), 403
+            doc.setdefault("scope", {})["level"] = level
+            save_doc(doc)
+        return jsonify({"ok": True, "document": _public_doc(doc)})
+
     @app.get(f"{API_PREFIX}/documents/<doc_id>/export")
     def sd_export(doc_id):
         """导出为真实 Office 文件（.docx / .xlsx）。"""
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         doc = load_doc(doc_id)
-        if not doc:
-            return jsonify({"ok": False, "detail": "文档不存在"}), 404
+        if not doc or not _can_view(user, doc):
+            return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
         try:
             if doc["type"] == "word":
                 buf, name = export_word(doc)
@@ -555,15 +697,21 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/documents/<doc_id>/import")
     def sd_import(doc_id):
-        """从 .docx / .xlsx / .xls 导入内容，覆盖当前文档。"""
+        """从 .docx / .xlsx / .xls 导入内容，覆盖当前文档。
+
+        可见即可编辑：能看到的单位/部门/私人文档（本人）均可导入覆盖。
+        """
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         f = request.files.get("file")
         if not f or not f.filename:
             return jsonify({"ok": False, "detail": "请选择文件"}), 400
         ext = f.filename.lower().rsplit(".", 1)[-1]
         with _LOCK:
             doc = load_doc(doc_id)
-            if not doc:
-                return jsonify({"ok": False, "detail": "文档不存在"}), 404
+            if not doc or not _can_view(user, doc):
+                return jsonify({"ok": False, "detail": "文档不存在或无权访问"}), 404
             if doc["type"] == "word" and ext != "docx":
                 return jsonify({"ok": False, "detail": "Word 文档仅支持导入 .docx"}), 400
             if doc["type"] == "excel" and ext not in ("xlsx", "xls"):
@@ -579,7 +727,7 @@ def register(app) -> None:
             doc["version"] = doc.get("version", 0) + 1
             doc["content"] = content
             doc["updated_at"] = _now()
-            doc["updated_by"] = "导入文件"
+            doc["updated_by"] = user["name"]
             history = doc.setdefault("history", [])
             history.append({"version": doc["version"], "time": doc["updated_at"], "by": doc["updated_by"]})
             if len(history) > MAX_HISTORY:

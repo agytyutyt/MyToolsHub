@@ -35,6 +35,11 @@ from flask import jsonify, request, send_file
 
 from . import category_kb, llm_client, parser
 
+try:
+    from jztools_admin.routes import get_session_user as _get_session_user
+except Exception:  # admin 插件缺失时兜底（理论上不会发生）
+    _get_session_user = None
+
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
 PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
@@ -316,10 +321,14 @@ def save_record(rec):
     os.replace(tmp, path)
 
 
-def _find_case_matches(case_name):
-    """查找与指定规整案件名相同的既有记录（用于入库时的同案合并提示）。"""
+def _find_case_matches(case_name, recs):
+    """在指定记录集中查找与规整案件名相同的既有记录（用于同案合并提示）。
+
+    recs 由调用方传入已按归属过滤的记录集：默认传 scoped_records(user, "mine")，
+    保证同案合并目标始终是自己可管理的记录，不会把战果并入他人案件。
+    """
     out = []
-    for rec in list_records():
+    for rec in recs:
         rn = parser.normalize_case_name((rec.get("fields") or {}).get("案件名"))
         if rn and rn == case_name:
             out.append({
@@ -376,11 +385,80 @@ def list_records():
     return recs
 
 
+# ===================== 数据归属与可见性 =====================
+
+def _cr_viewer():
+    """当前登录用户上下文；未登录返回 None。"""
+    if _get_session_user is None:
+        return None
+    try:
+        return _get_session_user()
+    except Exception:
+        return None
+
+
+def scoped_records(user, scope):
+    """按查看范围过滤台账记录。
+
+    scope: mine=我的(默认)；dept=同部门；all=全站(仅超管可用)
+    """
+    recs = list_records()
+    if scope == "all" and user.get("super_admin"):
+        return recs
+    if scope == "dept":
+        return [
+            r for r in recs
+            if r.get("created_by") == user["username"]
+            or (r.get("department_id") == user.get("department_id")
+                and r.get("unit_id") == user.get("unit_id"))
+        ]
+    return [r for r in recs if r.get("created_by") == user["username"]]
+
+
+def _record_readable(user, rec):
+    """读权限：超管 / 本人 / 同部门（部门+单位双重比对）。"""
+    if user.get("super_admin"):
+        return True
+    if rec.get("created_by") == user["username"]:
+        return True
+    return (rec.get("department_id") == user.get("department_id")
+            and rec.get("unit_id") == user.get("unit_id"))
+
+
+def _record_manageable(user, rec):
+    """写权限（改案件名 / 删除）：仅本人或超管。"""
+    if user.get("super_admin"):
+        return True
+    return rec.get("created_by") == user["username"]
+
+
+def migrate_record_owner():
+    """给历史记录补归属：录入人 admin。
+
+    历史 records 的 unit/department 留空：admin 是超管走 super_admin 分支可见，
+    不依赖这两个字段；空值也不会意外匹配到任何人的 department_id。
+    """
+    changed = False
+    for rec in list_records():
+        if rec.get("created_by"):
+            continue
+        rec["created_by"] = "admin"
+        rec["created_by_name"] = "系统管理员"
+        rec["unit_id"] = ""
+        rec["department_id"] = ""
+        save_record(rec)
+        changed = True
+    return changed
+
+
 # ===================== 路由注册 =====================
 
 def register(app) -> None:
     """插件入口：由 JZToolsHub 主应用在启动时调用。"""
     ensure_files()
+    # 存量记录归属迁移（一次性、幂等）：给历史记录补默认录入人 admin
+    with _LOCK:
+        migrate_record_owner()
 
     @app.get(f"{API_PREFIX}/config")
     def cr_get_config():
@@ -455,9 +533,15 @@ def register(app) -> None:
     def cr_aggregate():
         """跨记录战果汇总：类似物品归为统一类别、数量叠加；
         「涉及 N 起」按规整后的案件名去重（同一案件多条记录只计一起）。
-        支持 ?case=<案件名> 仅统计该案件的记录。"""
+        支持 ?case=<案件名> 仅统计该案件的记录；支持 ?scope=mine|dept|all（默认 mine）按范围过滤。"""
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        scope = (request.args.get("scope") or "mine").strip()
+        if scope == "all" and not user.get("super_admin"):
+            return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         case_name = parser.normalize_case_name(request.args.get("case") or "")
-        recs = list_records()
+        recs = scoped_records(user, scope)
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
@@ -473,9 +557,16 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/cases")
     def cr_cases():
-        """既有案件列表（按规整案件名去重、拼音排序），供下拉筛选/入库合并/改案件名选择。"""
+        """既有案件列表（按规整案件名去重、拼音排序），供下拉筛选/入库合并/改案件名选择。
+        跟随 ?scope=mine|dept|all 过滤：切到「本部门」时，下拉里出现的就是本部门所有人的案件。"""
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        scope = (request.args.get("scope") or "mine").strip()
+        if scope == "all" and not user.get("super_admin"):
+            return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         groups = {}
-        for rec in list_records():
+        for rec in scoped_records(user, scope):
             cn = parser.normalize_case_name((rec.get("fields") or {}).get("案件名"))
             if not cn:
                 continue
@@ -522,9 +613,16 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/records")
     def cr_list():
-        """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录。"""
+        """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录；
+        支持 ?scope=mine|dept|all（默认 mine）按范围过滤。"""
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        scope = (request.args.get("scope") or "mine").strip()
+        if scope == "all" and not user.get("super_admin"):
+            return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         case_name = parser.normalize_case_name(request.args.get("case") or "")
-        recs = list_records()
+        recs = scoped_records(user, scope)
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
@@ -562,8 +660,13 @@ def register(app) -> None:
                 fields["案件名"] = parser.normalize_case_name(target)
                 case_name = fields["案件名"]
 
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+
+        # 同案检测只在自己的记录里查：合并目标必须是自己可管理的记录
         if merge_mode == "auto" and case_name:
-            matches = _find_case_matches(case_name)
+            matches = _find_case_matches(case_name, scoped_records(user, "mine"))
             if matches:
                 return jsonify({
                     "ok": True,
@@ -579,6 +682,10 @@ def register(app) -> None:
                 "items": items,
                 "source_text": source_text,
                 "created_at": _now(),
+                "created_by": user["username"],
+                "created_by_name": user["name"],
+                "unit_id": user.get("unit_id", ""),
+                "department_id": user.get("department_id", ""),
             }
             save_record(rec)
         for it in items:
@@ -588,15 +695,22 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/records/<rid>")
     def cr_get(rid):
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         rec = load_record(rid)
-        if not rec:
-            return jsonify({"ok": False, "detail": "记录不存在"}), 404
+        if not rec or not _record_readable(user, rec):
+            return jsonify({"ok": False, "detail": "记录不存在或无权访问"}), 404
         return jsonify({"ok": True, "record": rec})
 
     @app.put(f"{API_PREFIX}/records/<rid>/case")
     def cr_update_case(rid):
         """修改某条台账记录的「案件名」：可输入新案件名，或改为既有案件的名称
-        （选择既有案件时即并入该案，战果汇总「涉及 N 起」会随之按案件去重重算）。"""
+        （选择既有案件时即并入该案，战果汇总「涉及 N 起」会随之按案件去重重算）。
+        仅录入人本人或超级管理员可操作。"""
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         body = request.get_json(silent=True) or {}
         new_name = parser.normalize_case_name((body.get("case_name") or "").strip())
         if not new_name:
@@ -604,8 +718,10 @@ def register(app) -> None:
         new_name = new_name[:MAX_ITEM_LEN]
         with _LOCK:
             rec = load_record(rid)
-            if not rec:
-                return jsonify({"ok": False, "detail": "记录不存在"}), 404
+            if not rec or not _record_readable(user, rec):
+                return jsonify({"ok": False, "detail": "记录不存在或无权访问"}), 404
+            if not _record_manageable(user, rec):
+                return jsonify({"ok": False, "detail": "仅录入人本人或管理员可修改"}), 403
             rec["fields"] = rec.get("fields") or {}
             rec["fields"]["案件名"] = new_name
             save_record(rec)
@@ -613,10 +729,15 @@ def register(app) -> None:
 
     @app.delete(f"{API_PREFIX}/records/<rid>")
     def cr_delete(rid):
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         with _LOCK:
             rec = load_record(rid)
-            if not rec:
-                return jsonify({"ok": False, "detail": "记录不存在"}), 404
+            if not rec or not _record_readable(user, rec):
+                return jsonify({"ok": False, "detail": "记录不存在或无权访问"}), 404
+            if not _record_manageable(user, rec):
+                return jsonify({"ok": False, "detail": "仅录入人本人或管理员可删除"}), 403
             try:
                 os.remove(_record_path(rid))
             except OSError:
@@ -626,9 +747,12 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/records/<rid>/download")
     def cr_download(rid):
         """下载单条记录的键值对 JSON 文件。"""
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         rec = load_record(rid)
-        if not rec:
-            return jsonify({"ok": False, "detail": "记录不存在"}), 404
+        if not rec or not _record_readable(user, rec):
+            return jsonify({"ok": False, "detail": "记录不存在或无权访问"}), 404
         data = json.dumps(rec, ensure_ascii=False, indent=2).encode("utf-8")
         buf = io.BytesIO(data)
         return send_file(buf, as_attachment=True,

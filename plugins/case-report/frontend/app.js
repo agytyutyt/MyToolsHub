@@ -9,6 +9,7 @@
   "use strict";
 
   var $ = function (s) { return document.querySelector(s); };
+  var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
 
   var FIELD_KEYS = ["案件名", "时间", "主办大队", "抓获人数", "缴获物品"];
   var POLL_MS = 1200;
@@ -21,6 +22,8 @@
     records: [],
     caseNorm: "",   // 当前筛选案件（规整名），空串=全部案件
     caseName: "",   // 当前筛选案件的展示名
+    scope: "mine",  // 查看范围：mine=我的战果 / dept=本部门 / all=全部(仅超管)
+    user: null,     // 当前登录用户（AdminCommon.getSession() 取）
   };
 
   function esc(s) {
@@ -34,6 +37,13 @@
     options.headers = options.headers || {};
     return fetch(url, options).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
+        if (res.status === 401) {
+          // iframe 场景要跳顶层窗口，否则登录页会嵌在小框框里
+          window.top.location.href = '/login?next=' + encodeURIComponent(window.top.location.pathname);
+          var err = new Error(data.detail || '未登录或登录已过期');
+          err.status = 401;
+          throw err;
+        }
         if (!res.ok) {
           var err = new Error(data.detail || ("请求失败 " + res.status));
           err.status = res.status;
@@ -524,7 +534,10 @@
 
   /* ==================== 台账列表（可按案件筛选） ==================== */
   function caseQuery() {
-    return state.caseNorm ? "?case=" + encodeURIComponent(state.caseNorm) : "";
+    var parts = [];
+    if (state.caseNorm) parts.push("case=" + encodeURIComponent(state.caseNorm));
+    if (state.scope && state.scope !== "mine") parts.push("scope=" + state.scope);
+    return parts.length ? "?" + parts.join("&") : "";
   }
 
   /* 重建左侧案件侧边栏（后端已按拼音排序），并保持当前选中高亮 */
@@ -631,6 +644,12 @@
         chip.innerHTML = "<b>" + esc(pair[1]) + "：</b><span class='v'>" + esc(v) + "</span>";
         chips.appendChild(chip);
       });
+      if (rec.created_by_name) {
+        var chip = document.createElement("span");
+        chip.className = "kv-chip";
+        chip.innerHTML = "<b>录入人：</b><span class='v'>" + esc(rec.created_by_name) + "</span>";
+        chips.appendChild(chip);
+      }
       // 缴获物品逐项单列（类似物品归类）
       var items = rec.items || [];
       if (items.length) {
@@ -668,8 +687,12 @@
       actions.className = "record-actions";
       actions.appendChild(btn("复制 JSON", function () { copyJSON(rec); }));
       actions.appendChild(btn("导出 JSON", function () { exportJSON(rec.id); }));
-      actions.appendChild(btn("修改案件名", function () { editCaseName(rec); }));
-      actions.appendChild(btn("删除", function () { deleteRecord(rec); }, "btn btn-danger"));
+      // 「删除」「改案件名」仅录入人本人或超管可用（前端显隐只是体验，后端有 403 兜底）
+      var canManage = !!(state.user && (state.user.super_admin || rec.created_by === state.user.username));
+      if (canManage) {
+        actions.appendChild(btn("修改案件名", function () { editCaseName(rec); }));
+        actions.appendChild(btn("删除", function () { deleteRecord(rec); }, "btn btn-danger"));
+      }
       card.appendChild(actions);
 
       box.appendChild(card);
@@ -713,7 +736,7 @@
 
   /* ==================== 台账改案件名（新建案件 / 并入既有案件） ==================== */
   function editCaseName(rec) {
-    api("/api/case-report/cases").then(function (data) {
+    api("/api/case-report/cases" + caseQuery()).then(function (data) {
       var cases = data.cases || [];
       var opts = cases.map(function (c) {
         return "<option value='" + esc(c.name) + "'>" + esc(c.name) + "（" + c.records + " 条）</option>";
@@ -805,6 +828,23 @@
       if (input.dataset.field === "缴获物品") scheduleItemsPreview();
     });
 
+    // 作用域切换：我的战果 / 本部门 / 全部（仅超管显示「全部」）
+    $("#scope-toggle").addEventListener("click", function (e) {
+      var btn = e.target.closest(".scope-btn");
+      if (!btn) return;
+      state.scope = btn.dataset.scope;
+      $$(".scope-btn").forEach(function (b) {
+        b.classList.toggle("active", b === btn);
+      });
+      state.caseNorm = "";
+      state.caseName = "";
+      // 重建案件侧边栏与台账/汇总
+      refreshCases().then(function () {
+        refreshRecords();
+        refreshSummary();
+      });
+    });
+
     // 对话框：点遮罩或按 Esc 关闭
     var dialog = $("#dialog");
     dialog.addEventListener("mousedown", function (e) {
@@ -820,6 +860,19 @@
     bindEvents();
     loadConfig();
     loadCategories();
+    // 当前登录用户（服务端权威）：决定「全部」范围可见性与台账操作按钮显隐
+    if (window.AdminCommon && window.AdminCommon.getSession) {
+      window.AdminCommon.getSession().then(function (u) {
+        state.user = u;
+        var allBtn = $("#scope-all");
+        if (u && u.super_admin) {
+          allBtn.classList.remove("hidden");
+        } else {
+          allBtn.classList.add("hidden");
+        }
+        refreshRecords();
+      }).catch(function () {});
+    }
     syncCaseView();
   });
 })();

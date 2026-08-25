@@ -41,7 +41,13 @@ python app.py
 
 > **默认管理员账号：** `admin` / `admin123`，首次启动自动生成（`config/admin.json`）。
 > 登录后可访问管理后台 `/admin`，进行部门、人员、权限管理。
-> 登录状态在首页顶栏右侧显示，未登录时「编辑位置」「隐藏工具」等管理操作会引导至登录页。
+> 登录状态在首页顶栏右侧显示；顶部用户菜单内可直接「修改密码」（原密码 + 新密码 ≥6 位）。
+> **强制登录（R2）**：未登录访问任意页面一律重定向到 `/login?next=…`，登录后原路返回；
+> 未登录调用任意 `/api/*` 一律返回 401 JSON（白名单仅保留 `/login`、`/api/login`、
+> `/api/logout`、`/api/session`、`/favicon.ico` 与无业务数据的静态资源）。
+> **会话超时（R1）**：连续 `session.idle_minutes` 分钟（默认 30）无任何请求，或登录满
+> `session.absolute_hours` 小时（默认 12）自动登出；可在 `config/admin.json` 顶层 `session`
+> 节调整（首启自动生成，缺省即上述默认值）。页面每 60 秒心跳探测一次登录状态，过期自动跳登录。
 > **敏感数据加密：** 账号密码、身份证号、大模型 API Key 等以 Fernet 对称加密密文
 > 存入 `config/admin.json`（加密密钥保存在 `config/.admin_key`，两者均已 gitignore）；
 > 该文件不存在时首次启动自动生成，请勿提交仓库。
@@ -167,28 +173,36 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | 接口 | 说明 |
 | --- | --- |
 | `GET /login` | 登录页 |
-| `POST /api/login` | 登录 `{username, password}`，成功写入 session |
+| `POST /api/login` | 登录 `{username, password}`，成功写入 session（含 `login_at` / `last_active` 时间戳） |
 | `POST /api/logout` | 退出登录，清空 session |
-| `GET /api/session` | 当前登录状态：`{user: {username, name, role, modules, unit, department}\|null}` |
+| `GET /api/session` | 当前登录状态：`{user: {username, name, role, unit, unit_id, department, department_id, modules, super_admin, permissions}\|null}`（匿名返回 `user: null`，用于前端心跳探测） |
+| `POST /api/account/password` | 自助修改密码 `{old_password, new_password}`：新密码 ≥6 位且不得与旧密码相同；成功后当前会话保持有效 |
 | `GET /admin` | 管理后台首页（需登录） |
-| `GET /admin/unit\|/admin/department\|/admin/user\|/admin/permission` | 四个管理模块页（需登录） |
-| `GET /api/admin/summary` | 后台总览：各模块名称 / 记录数 / 当前账号是否可访问（需登录） |
+| `GET /admin/unit\|/admin/department\|/admin/user` | 三个管理模块页（需登录）；`/admin/permission` 暂时屏蔽（权限管理已并入「人员管理」，直接访问返回 404） |
+| `GET /api/admin/summary` | 后台总览：各模块名称 / 记录数 / 当前账号是否可访问（需登录）；不含「权限管理」卡片 |
 | `GET\|POST /api/admin/units`、`PUT\|DELETE /api/admin/units/<id>` | 单位管理 CRUD（需 `unit` 权限）；删除前需清空其下部门 |
 | `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门管理 CRUD（需 `department` 权限）；创建/编辑需指定 `unit_id`；删除前需清空其下人员 |
-| `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员管理 CRUD（需 `user` 权限）；支持字段：`username`、`name`、`password`、`unit_id`、`department_id`、`role`、`idcard`（身份证号）、`permissions`（权限点 = tools.json 插件 ID 数组）、`llm`（`{base_url, api_key, model}`）；密码/身份证/API Key 以 Fernet 加密存储；密码为空时保持不变，删除当前登录账号会被拒绝。权限点不在 Web 界面展示，仅后端读取并据此拦截工具访问 |
-| `GET\|POST /api/admin/permissions`、`PUT\|DELETE /api/admin/permissions/<id>` | 权限（角色）管理 CRUD（需 `permission` 权限），可勾选模块为 `unit` / `department` / `user` / `permission` |
+| `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员管理 CRUD（需 `user` 权限）；支持字段：`username`、`name`、`password`、`unit_id`、`department_id`、`role`、`idcard`（身份证号）、`permissions`（权限点 = tools.json 插件 ID 数组）、`llm`（`{base_url, api_key, model}`）；密码/身份证/API Key 以 Fernet 加密存储；密码为空时保持不变，删除当前登录账号会被拒绝。返回的用户条目含 `super_admin` 标记（前端据此区分角色）。权限点不在 Web 界面展示，仅后端读取并据此拦截工具访问 |
+| `GET\|POST /api/admin/permissions`、`PUT\|DELETE /api/admin/permissions/<id>` | 权限（角色）管理 CRUD（需 `user` 权限，**已并入「人员管理」模块**），可勾选模块为 `unit` / `department` / `user` / `permission`；`modules` 可为空（纯工具角色，如办案员） |
 
 > **权限点与工具访问控制**：账号的 `permissions` 字段为 `config/tools.json` 中插件 ID 的列表，
 > 不随 Web 界面展示。已登录的非超级管理员账号只能访问权限点内的工具：
 > `GET /tool/<id>`、`GET /plugin/<id>/...` 返回 403，`/api/tools` 列表自动过滤，`/api/tools/<id>` 返回 404；
-> 拥有全部管理模块（单位/部门/人员/权限）的角色视为超级管理员，默认可访问全部工具；匿名访问不拦截。
+> 拥有全部管理模块（单位/部门/人员/权限）的角色视为超级管理员，默认可访问全部工具。
+> 未登录（匿名）访问任何页面/接口一律被拦截（302 到 `/login` / 401 JSON），不再放行。
 > 权限点需通过后端 API（`POST/PUT /api/admin/users`）或直接编辑 `config/admin.json` 配置，非法 ID 会被拒绝。
 
 > 以上接口均由 `plugins/admin/backend/routes.py`（admin 插件）提供，贯彻「一切皆插件」理念。
 > 未登录访问后台接口返回 401，页面重定向到 `/login`；无模块权限返回 403 / 重定向回 `/admin`。
 > 首页「编辑位置」「隐藏工具」等写操作同样需要登录（由 admin 插件的 `before_request` 保护）。
 > 权限数据模型：**角色（permissions）→ 可访问的管理模块列表**；人员归属单位下的部门并绑定一个角色。
+> 内置角色：**管理员**（`role-admin`，拥有全部 4 个模块，即超级管理员）与 **办案员**
+> （`role-case-handler`，无管理模块，仅可被分配工具权限点，不含「管理后台」）。
 > 内置管理员角色（`role-admin`）默认拥有全部 4 个模块，升版时自动补齐新模块，保证超级管理员始终可访问全部工具。
+> **按人分配工具权限**：人员管理列表「操作」列的「权限」按钮以浮窗展示系统中全部功能模块
+> （来源于 `/api/tools/visibility`）。管理员角色显示全部模块（含管理后台，只读）；办案员等其他角色
+> 不展示「管理后台」，可勾选该人员可访问的工具后保存（写回该用户的 `permissions` 字段）。
+> 新建办案员账号默认授予全部工具（不含管理后台），管理员可在「权限」浮窗中再调整。
 
 **character-graph 插件后端接口**（演示含后端插件的 API 模式）：
 
@@ -222,24 +236,27 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `POST /api/qr-video-decode/reassemble` | 提交前端逐帧识别出的分块数据，**异步 zfec 前向纠错重组，返回 `task_id`** |
 | `GET /api/qr-video-decode/reassemble/<task_id>` | 轮询重组进度与恢复结果 |
 
-**shared-docs 插件后端接口**（共享文档协作编辑）：
+**shared-docs 插件后端接口**（共享文档协作编辑，**数据按「单位 / 部门 / 私人」三级隔离**）：
 
 | 接口 | 说明 |
 | --- | --- |
 | `GET /api/shared-docs/status` | 依赖可用性检查（python-docx / openpyxl / xlrd） |
-| `GET /api/shared-docs/documents` | 文档列表（名称 / 类型 / 版本 / 更新时间） |
-| `POST /api/shared-docs/documents` | 新建文档 `{name, type}`，type 为 `word` / `excel` |
-| `GET /api/shared-docs/documents/<id>` | 文档详情（含内容、修订历史、在线用户） |
-| `POST /api/shared-docs/documents/<id>/content` | 保存内容 `{base_version, content, user}`；**乐观锁**：版本不匹配返回 409 并携带服务端最新文档 |
-| `POST /api/shared-docs/documents/<id>/presence` | 在线心跳 `{client_id, user}`，返回当前在线用户 |
-| `POST /api/shared-docs/documents/<id>/rename` | 重命名 `{name}` |
-| `DELETE /api/shared-docs/documents/<id>` | 删除文档 |
+| `GET /api/shared-docs/documents` | 文档列表 —— 仅返回当前用户可见的文档（超管可见全部；单位级同单位可见、部门级同部门可见、私人仅本人可见）；条目含 `created_by` / `created_by_name` / `scope{level,owner,owner_name,unit_id,department_id}` |
+| `POST /api/shared-docs/documents` | 新建文档 `{name, type, level?}`，type 为 `word` / `excel`；`level` 为 `unit` / `department` / `private`（默认 `private`）。创建人、单位/部门 ID 一律取自 session，不接受前端传入 |
+| `GET /api/shared-docs/documents/<id>` | 文档详情（含内容、修订历史、在线用户）；对「存在但无权访问」的文档返回 **404** |
+| `POST /api/shared-docs/documents/<id>/content` | 保存内容 `{base_version, content}`（**可见即可编辑**）；**乐观锁**：版本不匹配返回 409 并携带服务端最新文档 |
+| `POST /api/shared-docs/documents/<id>/presence` | 在线心跳 `{client_id}`（身份只认 session，忽略前端自报昵称），返回当前在线用户真实姓名 |
+| `POST /api/shared-docs/documents/<id>/rename` | 重命名 `{name}` —— 仅创建者或超管（其余 **403**） |
+| `POST /api/shared-docs/documents/<id>/scope` | 调整挂靠层级 `{level}` —— 仅创建者或超管（其余 403）；只改 level，保留原 owner/unit/dept |
+| `DELETE /api/shared-docs/documents/<id>` | 删除文档 —— 仅创建者或超管（其余 403） |
 | `GET /api/shared-docs/documents/<id>/export` | 导出真实 Office 文件（Word→`.docx`、Excel→`.xlsx`） |
-| `POST /api/shared-docs/documents/<id>/import` | 上传 `.docx` / `.xlsx` / `.xls` 导入覆盖当前文档 |
+| `POST /api/shared-docs/documents/<id>/import` | 上传 `.docx` / `.xlsx` / `.xls` 导入覆盖当前文档（可见即可编辑） |
 
 > 文档数据以 JSON 文件保存在 `plugins/shared-docs/backend/data/`（已 gitignore），
 > 内容格式：Word 为块级结构（`blocks`：段落 / 标题 / 列表 + 富文本 runs），
 > Excel 为二维数组（`rows`）加可选列宽（`colWidths`，像素，0=自动）。
+> **历史文档迁移**：启动时自动给没有 `scope` 的存量文档补「私人 + 创建者 admin」，
+> 默认仅超管可见；需要老文档共享时由管理员在前端改成「单位」层级即可（幂等，重复启动不重复迁移）。
 
 **case-report 插件后端接口**（战果录入——收网情况报告要素抽取 + 本地台账）：
 
@@ -253,14 +270,14 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /api/case-report/categories` | 既有类别集合：`learned`（用户已学习的「物品名→类别」）+ `known`（可选类别列表） |
 | `POST /api/case-report/categories` | 学习一条类别 `{name, category}`，持久化后后续解析优先采用 |
 | `DELETE /api/case-report/categories/<name>` | 删除某物品名的学习类别，恢复默认判定 |
-| `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并）；「涉及 N 起」按规整后案件名去重（同一案件多条记录只计 1 起）。支持 `?case=<案件名>` 仅统计该案件（涉及 N 起 = 1） |
-| `GET /api/case-report/cases` | 既有案件列表（按规整后案件名去重、**拼音排序**，含各案件记录条数与 `normalized` 规整名），供筛选侧边栏 / 入库合并 / 改案件名选择 |
-| `GET /api/case-report/records` | 本地台账列表（按入库时间倒序），支持 `?case=<案件名>` 仅返回该案件的记录 |
-| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?, merge_mode?, merge_case?}`；`items` 为用户编辑后的单列明细（可省略，省略则自动拆分），保存时同步学习 `物品名→类别`。案件名保存前自动规整（去引号/空白）。`merge_mode=auto`（默认）时若规整后案件名已存在则**不落盘**、返回 `duplicate:true + matches`（同案合并提示）；`merge_mode=merge` 时并入既有案件（`merge_case` 指定归入的目标案件名）；`merge_mode=new` 时跳过同案提示直接新增 |
-| `GET /api/case-report/records/<rid>` | 单条记录详情 |
-| `PUT /api/case-report/records/<rid>/case` | 修改记录的案件名 `{case_name}`（可新建案件名，或改为既有案件名即并入该案）；改后「战果汇总 涉及 N 起」按案件自动重算 |
-| `DELETE /api/case-report/records/<rid>` | 删除记录 |
-| `GET /api/case-report/records/<rid>/download` | 下载单条记录的键值对 JSON 文件（`case-<rid>.json`） |
+| `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并）；「涉及 N 起」按规整后案件名去重（同一案件多条记录只计 1 起）。支持 `?case=<案件名>` 仅统计该案件（涉及 N 起 = 1）；支持 `?scope=mine\|dept\|all`（默认 mine）按范围过滤 |
+| `GET /api/case-report/cases` | 既有案件列表（按规整后案件名去重、**拼音排序**，含各案件记录条数与 `normalized` 规整名），供筛选侧边栏 / 入库合并 / 改案件名选择；**跟随 `?scope=` 过滤**（切到「本部门」时下拉为部门内所有人案件） |
+| `GET /api/case-report/records` | 本地台账列表（按入库时间倒序），支持 `?case=<案件名>` 仅返回该案件的记录；支持 `?scope=mine\|dept\|all`（默认 mine）：mine=本人、dept=本人+同部门（部门+单位双重比对）、all=全站（仅超管，普通账号传 `scope=all` 返回 403） |
+| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?, merge_mode?, merge_case?}`；`items` 为用户编辑后的单列明细（可省略，省略则自动拆分），保存时同步学习 `物品名→类别`。案件名保存前自动规整（去引号/空白）。**服务端自动打归属标签**（`created_by` / `created_by_name` / `unit_id` / `department_id`，取自 session）；`merge_mode=auto`（默认）时**只在自己可管理的记录里**检测同名案件（不落盘、返回 `duplicate:true + matches`）；`merge_mode=merge` 时并入既有案件（`merge_case` 指定归入的目标案件名）；`merge_mode=new` 时跳过同案提示直接新增 |
+| `GET /api/case-report/records/<rid>` | 单条记录详情 —— 本人或同部门可读，其余 **404** |
+| `PUT /api/case-report/records/<rid>/case` | 修改记录的案件名 `{case_name}`（可新建案件名，或改为既有案件名即并入该案）—— 仅录入人本人或超管（其余 **403**） |
+| `DELETE /api/case-report/records/<rid>` | 删除记录 —— 仅录入人本人或超管（其余 403） |
+| `GET /api/case-report/records/<rid>/download` | 下载单条记录的键值对 JSON 文件（`case-<rid>.json`）—— 本人或同部门可读，其余 404 |
 
 > 解析策略：配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全，
 > 未配置时自动回落「本地规则解析」（正则），开箱即用。
@@ -554,6 +571,43 @@ def register(app):
 6. **后端前缀唯一**：多个插件可能同时注册，后端路由建议统一使用 `/api/<插件id>/` 前缀。
 7. **敏感配置**：插件内的高德 Key、大模型 Key 等前端依赖配置建议由插件页面自行管理（如保存到 localStorage），不要写死在仓库文件中。
 8. **自包含交付**：一个插件目录可以从项目复制到另一个 JZToolsHub 项目，配合一段 `tools.json` 配置（含 `name` / `description`）即可完整迁移。
+
+### 7.6 插件数据归属规范
+
+凡是插件持久化"用户产生的数据"，必须遵守以下两条铁规矩：
+
+> **规范一（归属标签）**：落盘 JSON 必须含 `created_by` / `created_by_name` / `unit_id` / `department_id` 四个字段（创建时从 `get_session_user()` 取，**不从请求体取**）。
+
+> **规范二（读取必过滤）**：任何返回这些数据的接口，第一步取用户上下文（`get_session_user()`，None 即 401），第二步按以下可见性规则过滤后才允许序列化返回；单条读写按「读=可见性规则、写=本人或超管」控制。
+
+**可见性规则**（记当前用户为 U，一条数据为 X）：
+
+| 数据 | 可见条件（满足其一） |
+| --- | --- |
+| 共享文档 · 单位级 | U 是超管，或 `X.unit_id == u(U)` |
+| 共享文档 · 部门级 | U 是超管，或 `X.department_id == d(U)` |
+| 共享文档 · 私人 | U 是超管，或 `X.created_by == n(U)` |
+| 战果记录（本人视图） | U 是超管，或 `X.created_by == n(U)` |
+| 战果记录（本部门视图） | 本人视图全部 + `X.department_id == d(U)` 且 `X.unit_id == u(U)` |
+
+**写操作约束**：重命名 / 删除 / 改归属等管理操作仅创建者或超级管理员；协作编辑内容（共享文档内容保存）"可见即可编辑"。
+
+**标准取用样板**：
+
+```python
+from flask import jsonify
+
+try:
+    from jztools_admin.routes import get_session_user
+except Exception:
+    get_session_user = None
+
+
+def current_user_or_none():
+    if get_session_user is None:
+        return None
+    return get_session_user()
+```
 
 ---
 

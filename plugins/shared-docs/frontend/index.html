@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>共享文档</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=4">
+  <link rel="stylesheet" href="./style.css?v=5">
 </head>
 <body>
   <!-- ==================== 文档列表视图 ==================== -->
@@ -16,18 +16,18 @@
         <p class="sub">多人共同编辑 Word 与 Excel 文档，实时同步、在线协作</p>
       </div>
       <div class="head-actions">
-        <input id="user-name" class="input" maxlength="20" placeholder="你的昵称" title="协作时显示的昵称" />
-        <select id="new-type" class="select" title="新建文档类型">
-          <option value="word">Word 文档</option>
-          <option value="excel">Excel 表格</option>
-        </select>
         <button id="btn-create" class="btn btn-primary">＋ 新建</button>
       </div>
     </header>
 
     <div id="deps" class="deps hidden"></div>
+    <div class="doc-tabs" id="doc-tabs">
+      <button type="button" class="doc-tab active" data-level="unit">本单位 <span class="tab-count" id="count-unit">0</span></button>
+      <button type="button" class="doc-tab" data-level="department">本部门 <span class="tab-count" id="count-dept">0</span></button>
+      <button type="button" class="doc-tab" data-level="private">我的 <span class="tab-count" id="count-mine">0</span></button>
+    </div>
     <div id="doc-list" class="doc-list"></div>
-    <div id="empty-tip" class="empty hidden">还没有文档，点击「＋ 新建」开始协作编辑</div>
+    <div id="empty-tip" class="empty hidden">该范围下还没有文档，点击「＋ 新建」开始协作编辑</div>
   </div>
 
   <!-- ==================== 编辑器视图 ==================== -->
@@ -90,6 +90,60 @@
     <input type="file" id="file-input" class="hidden" accept=".docx,.xlsx,.xls" />
   </div>
 
-  <script src="./app.js?v=4"></script>
+  <!-- ==================== 新建文档弹窗（名称 / 类型 / 挂靠层级） ==================== -->
+  <div id="create-modal" class="dialog-mask hidden">
+    <div class="dialog">
+      <h3>新建文档</h3>
+      <div class="dl-body">
+        <div>
+          <div class="dl-label">文档名称</div>
+          <input id="create-name" placeholder="如：值班表" />
+        </div>
+        <div>
+          <div class="dl-label">文档类型</div>
+          <select id="create-type">
+            <option value="word">Word 文档</option>
+            <option value="excel">Excel 表格</option>
+          </select>
+        </div>
+        <div>
+          <div class="dl-label">挂靠层级</div>
+          <select id="create-level">
+            <option value="private">私人（仅自己可见）</option>
+            <option value="department">本部门（部门内可见）</option>
+            <option value="unit">本单位（单位内可见）</option>
+          </select>
+          <p class="muted hidden" id="create-level-hint"></p>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn" id="create-cancel">取消</button>
+        <button class="btn btn-primary" id="create-ok">创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 调整挂靠弹窗 ==================== -->
+  <div id="scope-modal" class="dialog-mask hidden">
+    <div class="dialog">
+      <h3>调整挂靠层级</h3>
+      <div class="dl-body">
+        <div class="dl-label">挂靠层级</div>
+        <select id="scope-level">
+          <option value="private">私人（仅自己可见）</option>
+          <option value="department">本部门（部门内可见）</option>
+          <option value="unit">本单位（单位内可见）</option>
+        </select>
+        <p class="muted">只调整共享范围，不改动文档所属单位/部门；私人文档改为部门/单位级后，对应范围内成员即可见。</p>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn" id="scope-cancel">取消</button>
+        <button class="btn btn-primary" id="scope-ok">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/plugin/admin/js/admin-common.js"></script>
+  <script src="./app.js?v=5"></script>
 </body>
 </html>

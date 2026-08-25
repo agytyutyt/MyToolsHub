@@ -59,7 +59,8 @@
       }
       container.innerHTML = `
         <div class="user-chip"><span class="avatar">${esc(user.name.slice(0, 1))}</span>${esc(user.name)}</div>
-        <a class="admin-btn small" href="/admin">管理后台</a>
+        ${(user.modules && user.modules.length) ? '<a class="admin-btn small" href="/admin">管理后台</a>' : ''}
+        <button type="button" class="admin-btn small" id="btn-chg-pwd">修改密码</button>
         <button type="button" class="admin-btn small" id="btn-logout">退出登录</button>`;
       const btn = container.querySelector('#btn-logout');
       btn.addEventListener('click', async () => {
@@ -69,7 +70,76 @@
         } catch (e) { /* 已跳转登录 */ }
         window.location.href = '/';
       });
+      container.querySelector('#btn-chg-pwd').addEventListener('click', openChangePasswordModal);
     });
+
+    // 会话心跳：每 60 秒确认一次登录状态，过期则整页跳登录（R1 前端侧）
+    if (!window.__sessionPoller) {
+      window.__sessionPoller = setInterval(async () => {
+        try {
+          const res = await fetch('/api/session', { credentials: 'same-origin' });
+          const data = await res.json().catch(() => ({}));
+          if (!data.user) {
+            clearInterval(window.__sessionPoller);
+            alert('登录已过期，请重新登录');
+            window.location.href = '/login?next=' + encodeURIComponent(location.pathname);
+          }
+        } catch (e) { /* 网络抖动忽略，等下一轮 */ }
+      }, 60000);
+    }
+  }
+
+  // 修改密码：旧密码 + 新密码（≥6 位，不得与旧密码相同），成功后保持当前会话
+  function openChangePasswordModal() {
+    const wrap = openModal('修改密码', `
+      <div class="form-grid">
+        <div class="field">
+          <label for="pwd-old">原密码</label>
+          <input class="admin-input" type="password" id="pwd-old" autocomplete="current-password">
+        </div>
+        <div class="field">
+          <label for="pwd-new">新密码（至少 6 位）</label>
+          <input class="admin-input" type="password" id="pwd-new" minlength="6" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label for="pwd-confirm">确认新密码</label>
+          <input class="admin-input" type="password" id="pwd-confirm" minlength="6" autocomplete="new-password">
+        </div>
+        <div class="field" id="pwd-error" style="font-size:13px;color:var(--md-error);min-height:18px;"></div>
+        <div class="modal-foot">
+          <button class="admin-btn" type="button" data-close>取消</button>
+          <button class="admin-btn primary" type="button" id="pwd-save">保存</button>
+        </div>
+      </div>`, (w) => {
+      const errEl = w.querySelector('#pwd-error');
+      const oldEl = w.querySelector('#pwd-old');
+      const newEl = w.querySelector('#pwd-new');
+      const confirmEl = w.querySelector('#pwd-confirm');
+      const saveBtn = w.querySelector('#pwd-save');
+      const submit = async () => {
+        errEl.textContent = '';
+        const oldPwd = oldEl.value;
+        const newPwd = newEl.value;
+        if (newPwd !== confirmEl.value) { errEl.textContent = '两次输入的新密码不一致'; return; }
+        saveBtn.disabled = true;
+        try {
+          await api('/api/account/password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }),
+          });
+          w.querySelector('[data-close]').click();
+          showToast('密码已修改');
+        } catch (err) {
+          errEl.textContent = err.message;
+          saveBtn.disabled = false;
+        }
+      };
+      saveBtn.addEventListener('click', submit);
+      newEl.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+      oldEl.focus();
+    });
+    return wrap;
   }
 
   // 管理页鉴权：未登录跳登录，无权限跳 /admin

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>战果录入</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=7">
+  <link rel="stylesheet" href="./style.css?v=8">
 </head>
 <body>
   <div class="view">
@@ -98,6 +98,11 @@
             <h2>本地战果台账</h2>
             <span id="recordCount" class="muted"></span>
             <div class="spacer"></div>
+            <div class="scope-toggle" id="scope-toggle">
+              <button type="button" class="scope-btn active" data-scope="mine">我的战果</button>
+              <button type="button" class="scope-btn" data-scope="dept">本部门</button>
+              <button type="button" class="scope-btn" data-scope="all" id="scope-all">全部</button>
+            </div>
             <button id="refreshRecords" class="btn">刷新</button>
           </div>
           <div id="recordList" class="record-list"></div>
@@ -117,6 +122,7 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="./app.js?v=7"></script>
+  <script src="/plugin/admin/js/admin-common.js"></script>
+  <script src="./app.js?v=8"></script>
 </body>
 </html>

@@ -122,9 +122,19 @@ select.admin-input {
   background: rgba(217, 48, 37, .08);
 }
 
+/* 顶部用户菜单小按钮（管理后台/修改密码/退出登录）：无圆框，悬浮用阴影凸显 */
 .admin-btn.small {
   padding: 5px 12px;
   font-size: 13px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  transition: box-shadow var(--md-transition);
+}
+
+.admin-btn.small:hover {
+  background: transparent;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
 }
 
 .admin-btn.text {
@@ -198,17 +208,32 @@ select.admin-input {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px 6px 6px;
+  width: 28px;              /* 默认只露出蓝色圆（头像） */
+  height: 40px;             /* 固定高度：悬浮展开胶囊时顶栏高度不变，页面不抖动 */
+  flex-shrink: 0;           /* 防止被父级 flex 挤压变形 */
+  padding: 0;
+  overflow: hidden;
   border-radius: 999px;
-  background: var(--md-surface-container);
+  background: transparent;
   font-size: 13px;
+  line-height: 1;
   color: var(--md-on-surface);
   cursor: default;
+  white-space: nowrap;
+  transition: width 0.22s ease, padding 0.22s ease, background 0.22s ease;
+}
+
+/* 悬浮：蓝色圆左移，向右伸出胶囊并展示完整名称 */
+.user-chip:hover {
+  width: auto;
+  padding: 6px 14px 6px 6px;
+  background: var(--md-surface-container);
 }
 
 .user-chip .avatar {
   width: 28px;
   height: 28px;
+  flex-shrink: 0;           /* 头像永远不压缩，保证折叠时是完整蓝圆 */
   border-radius: 50%;
   background: var(--md-primary);
   color: var(--md-on-primary);

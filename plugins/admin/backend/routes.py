@@ -21,12 +21,18 @@ import json
 import os
 import re
 import secrets
+import time
 import uuid
+from datetime import timedelta
 from functools import wraps
 
 from cryptography.fernet import Fernet
 from flask import jsonify, redirect, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
+
+# 会话超时默认值（config/admin.json 的 session 节可覆盖）
+SESSION_IDLE_MINUTES = 30    # 空闲超时：连续这么久没有任何请求，自动登出
+SESSION_ABSOLUTE_HOURS = 12  # 绝对有效期：登录满这么久必须重新登录
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_DIR = os.path.join(PLUGIN_DIR, "frontend")
@@ -67,6 +73,7 @@ def ensure_admin_config():
     os.makedirs(os.path.dirname(ADMIN_CONFIG_PATH), exist_ok=True)
     default = {
         "secret_key": secrets.token_hex(32),
+        "session": {"idle_minutes": SESSION_IDLE_MINUTES, "absolute_hours": SESSION_ABSOLUTE_HOURS},
         "units": [
             {
                 "id": "unit-management",
@@ -98,7 +105,13 @@ def ensure_admin_config():
                 "name": "管理员",
                 "description": "拥有管理后台全部模块的权限",
                 "modules": ["unit", "department", "user", "permission"],
-            }
+            },
+            {
+                "id": "role-case-handler",
+                "name": "办案员",
+                "description": "日常办案工具使用者（不含管理后台）",
+                "modules": [],
+            },
         ],
     }
     with open(ADMIN_CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -118,6 +131,20 @@ def save_admin_config(cfg):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     os.replace(tmp, ADMIN_CONFIG_PATH)
+
+
+def _session_settings(cfg):
+    """读取会话超时配置，返回 (idle_minutes, absolute_hours)。"""
+    s = cfg.get("session") or {}
+    try:
+        idle = int(s.get("idle_minutes") or SESSION_IDLE_MINUTES)
+    except (TypeError, ValueError):
+        idle = SESSION_IDLE_MINUTES
+    try:
+        absolute = int(s.get("absolute_hours") or SESSION_ABSOLUTE_HOURS)
+    except (TypeError, ValueError):
+        absolute = SESSION_ABSOLUTE_HOURS
+    return max(1, idle), max(1, absolute)
 
 
 # ===================== 层级遍历 =====================
@@ -280,6 +307,32 @@ def migrate_admin_roles(cfg):
     return changed
 
 
+def migrate_admin_case_handler_role(cfg):
+    """确保内置「办案员」角色（role-case-handler）存在，供人员管理选择。
+
+    幂等：每次启动执行，缺失才补齐。办案员无管理模块（modules=[]），
+    可被管理员分配工具权限点（不含管理后台），不属于超级管理员。
+    """
+    changed = False
+    roles = cfg.setdefault("permissions", [])
+    if not any(r.get("id") == "role-case-handler" for r in roles):
+        roles.append({
+            "id": "role-case-handler",
+            "name": "办案员",
+            "description": "日常办案工具使用者（不含管理后台）",
+            "modules": [],
+        })
+        changed = True
+    return changed
+
+
+def _role_super_admin(cfg, role_id):
+    """判断角色是否为超级管理员（拥有全部管理模块）。"""
+    role = next((r for r in cfg.get("permissions", []) if r.get("id") == role_id), None)
+    modules = (role or {}).get("modules", [])
+    return set(modules) == set(ADMIN_MODULES) and bool(modules)
+
+
 def migrate_admin_hierarchy(cfg):
     """把旧平铺结构（顶层 departments / users）迁移为 单位→部门→用户 层级。
 
@@ -338,14 +391,16 @@ def get_session_user():
     unit, dept, user = found
     role = next((r for r in cfg.get("permissions", []) if r["id"] == user.get("role")), None)
     modules = (role or {}).get("modules", [])
-    super_admin = set(modules) == set(ADMIN_MODULES) and bool(modules)
+    super_admin = _role_super_admin(cfg, user.get("role"))
     permissions = sorted(_registered_tool_ids()) if super_admin else list(user.get("permissions", []))
     return {
         "username": user["username"],
         "name": user.get("name") or user["username"],
         "role": (role or {}).get("name", ""),
         "unit": unit.get("name", ""),
+        "unit_id": unit.get("id", ""),
         "department": dept.get("name", ""),
+        "department_id": dept.get("id", ""),
         "modules": modules,
         "super_admin": super_admin,
         "permissions": permissions,
@@ -403,6 +458,50 @@ def permission_required(module):
             return f(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def make_session_guard(idle_minutes, absolute_hours):
+    """生成会话守卫：空闲超时 / 绝对超时则强制登出，否则滑动续期。
+
+    - 空闲超时：连续 idle_minutes 分钟没有任何请求（含轮询），自动登出；
+    - 绝对有效期：登录满 absolute_hours 小时必须重新登录（防止轮询永续）。
+    - 请求本身算"活动"，活跃用户的空闲计时会被滑动归零。
+    """
+    def guard():
+        if not session.get("user"):
+            return None
+        now = time.time()
+        expired = (
+            now - session.get("last_active", 0) > idle_minutes * 60
+            or now - session.get("login_at", now) > absolute_hours * 3600
+        )
+        if expired:
+            session.clear()
+            return None
+        session["last_active"] = now   # 滑动续期：活跃用户的空闲计时归零
+        return None
+    return guard
+
+
+# R2 强制登录白名单：只放行登录闭环自身必需的路径与无业务数据的静态资源
+PUBLIC_PATHS = ("/login", "/api/login", "/api/logout", "/api/session", "/favicon.ico")
+PUBLIC_PREFIXES = ("/static/", "/plugin/admin/css/", "/plugin/admin/js/")
+
+
+def _enforce_login():
+    """R2 强制登录：白名单之外的路径一律要求已登录。
+
+    - API 请求返回 401 JSON（前端 AdminCommon.api 会自动跳登录页）；
+    - 页面请求 302 到 /login 并携带 next 参数，登录后原路返回。
+    """
+    path = request.path
+    if path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES):
+        return None
+    if get_session_user() is None:
+        if path.startswith("/api/"):
+            return jsonify({"error": "未登录或登录已过期"}), 401
+        return redirect(url_for("admin_login", next=request.full_path))
+    return None
 
 
 def _enforce_tool_access():
@@ -465,9 +564,15 @@ def register(app):
     if not cfg.get("secret_key") or cfg.get("secret_key") == "replace-on-first-startup":
         cfg["secret_key"] = secrets.token_hex(32)
         save_admin_config(cfg)
+    # 会话配置：旧文件缺失 session 节时自动补齐（读取处也有默认值兜底）
+    if not isinstance(cfg.get("session"), dict):
+        cfg["session"] = {"idle_minutes": SESSION_IDLE_MINUTES, "absolute_hours": SESSION_ABSOLUTE_HOURS}
+        save_admin_config(cfg)
     if migrate_admin_hierarchy(cfg):
         save_admin_config(cfg)
     if migrate_admin_roles(cfg):
+        save_admin_config(cfg)
+    if migrate_admin_case_handler_role(cfg):
         save_admin_config(cfg)
     if migrate_admin_encryption(cfg):
         save_admin_config(cfg)
@@ -476,7 +581,17 @@ def register(app):
     app.config["SECRET_KEY"] = cfg["secret_key"]
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
-    # 全局拦截：工具访问权限 + 首页布局写操作登录保护
+    # 会话超时：读取 session 节配置（缺省 30 分钟空闲 / 12 小时绝对）
+    idle_minutes, absolute_hours = _session_settings(cfg)
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=absolute_hours)
+
+    # 全局拦截（注册顺序即执行顺序，必须先超时守卫、再登录拦截）：
+    #   1. make_session_guard    空闲/绝对超时登出 + 滑动续期（R1）
+    #   2. _enforce_login        白名单外一律要求登录（R2）
+    #   3. _protect_admin_ops    首页布局写操作需登录（保留，语义已被 2 覆盖）
+    #   4. _enforce_tool_access  非超管按权限点拦工具（保持不变）
+    app.before_request(make_session_guard(idle_minutes, absolute_hours))
+    app.before_request(_enforce_login)
     app.before_request(_protect_admin_ops)
     app.before_request(_enforce_tool_access)
 
@@ -501,8 +616,12 @@ def register(app):
         if found is None or not check_password_hash(decrypt_field(found[2].get("password")), password):
             return jsonify({"error": "用户名或密码错误"}), 401
 
+        now = time.time()
+        session.clear()               # 先清空再写入，防会话固定攻击
         session.permanent = True
         session["user"] = found[2]["username"]
+        session["login_at"] = now     # 绝对有效期基准
+        session["last_active"] = now  # 空闲超时基准
         return jsonify({"ok": True, "user": get_session_user()})
 
     @app.post("/api/logout")
@@ -516,6 +635,32 @@ def register(app):
         """返回当前登录状态，供前端渲染登录 / 用户菜单。"""
         return jsonify({"user": get_session_user()})
 
+    @app.post("/api/account/password")
+    @login_required
+    def account_change_password():
+        """自助修改密码：校验旧密码 → 新密码 ≥6 位且不得与旧密码相同。
+
+        修改后保持当前会话有效（session 只存 username，不存密码指纹），不强制重登。
+        """
+        data = request.get_json(silent=True) or {}
+        old_pwd = data.get("old_password") or ""
+        new_pwd = data.get("new_password") or ""
+        if len(new_pwd) < 6:
+            return jsonify({"error": "新密码长度不能少于 6 位"}), 400
+        cfg = load_admin_config()
+        info = get_session_user()
+        found = find_user(cfg, info["username"])
+        if found is None:
+            return jsonify({"error": "账号不存在"}), 404
+        _unit, _dept, user = found
+        if not check_password_hash(decrypt_field(user.get("password")), old_pwd):
+            return jsonify({"error": "原密码错误"}), 400
+        if old_pwd == new_pwd:
+            return jsonify({"error": "新密码不能与原密码相同"}), 400
+        user["password"] = encrypt_field(generate_password_hash(new_pwd))
+        save_admin_config(cfg)
+        return jsonify({"ok": True})
+
     # ---------------- 管理后台页面 ----------------
 
     @app.get("/admin")
@@ -528,6 +673,9 @@ def register(app):
     def admin_module_page(module):
         if module not in ADMIN_MODULES:
             return jsonify({"error": "unknown admin module"}), 404
+        if module == "permission":
+            # 权限管理暂时屏蔽：已并入「人员管理」模块
+            return jsonify({"error": "权限管理已并入「人员管理」模块，暂不单独开放"}), 404
         return send_from_directory(FRONTEND_DIR, f"admin-{module}.html")
 
     # ---------------- 后台总览 ----------------
@@ -543,6 +691,8 @@ def register(app):
             "user": count_users(cfg),
             "permission": len(cfg.get("permissions", [])),
         }
+        # 权限管理已并入「人员管理」，后台首页不再展示独立模块卡片（暂时屏蔽）
+        visible_modules = [m for m in ADMIN_MODULES if m != "permission"]
         return jsonify({
             "modules": [
                 {
@@ -551,7 +701,7 @@ def register(app):
                     "count": counts[m],
                     "allowed": m in info["modules"],
                 }
-                for m in ADMIN_MODULES
+                for m in visible_modules
             ],
             "user": info,
         })
@@ -734,6 +884,7 @@ def register(app):
                 "department_name": dept["name"],
                 "role": user.get("role", ""),
                 "role_name": role_map.get(user.get("role", ""), ""),
+                "super_admin": _role_super_admin(cfg, user.get("role")),
                 "idcard": decrypt_field(user.get("idcard")),
                 "permissions": user.get("permissions", []),
                 "llm": {
@@ -777,15 +928,24 @@ def register(app):
         llm = data.get("llm") or {}
         if not isinstance(llm, dict):
             llm = {}
-        permissions, perr = _normalize_permission_points(data.get("permissions"))
-        if perr:
-            return jsonify({"error": perr}), 400
+        role_id = (data.get("role") or "").strip()
+        if "permissions" in data:
+            permissions, perr = _normalize_permission_points(data.get("permissions"))
+            if perr:
+                return jsonify({"error": perr}), 400
+        else:
+            # 未显式指定权限点时：管理员（超管）不依赖权限点；普通角色（办案员等）
+            # 默认授予全部工具（不含管理后台），管理员可在「权限」弹窗中再调整。
+            if _role_super_admin(cfg, role_id):
+                permissions = []
+            else:
+                permissions = sorted(_registered_tool_ids() - {"admin"})
         user = {
             "username": username,
             "password": encrypt_field(generate_password_hash(password)),
             "name": name,
             "idcard": encrypt_field(data.get("idcard") or ""),
-            "role": (data.get("role") or "").strip(),
+            "role": role_id,
             "permissions": permissions,
             "llm": {
                 "base_url": (llm.get("base_url") or "").strip(),
@@ -862,10 +1022,10 @@ def register(app):
         save_admin_config(cfg)
         return jsonify({"ok": True})
 
-    # ---------------- 权限（角色）管理 ----------------
+    # ---------------- 权限（角色）管理（已并入人员管理，gate 用 user 模块） ----------------
 
     @app.get("/api/admin/permissions")
-    @permission_required("permission")
+    @permission_required("user")
     def admin_api_permissions():
         cfg = load_admin_config()
         role_usage = {}
@@ -881,7 +1041,7 @@ def register(app):
         return jsonify({"permissions": permissions})
 
     @app.post("/api/admin/permissions")
-    @permission_required("permission")
+    @permission_required("user")
     def admin_api_permissions_create():
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
@@ -905,7 +1065,7 @@ def register(app):
         return jsonify({"ok": True, "permission": role})
 
     @app.put("/api/admin/permissions/<role_id>")
-    @permission_required("permission")
+    @permission_required("user")
     def admin_api_permissions_update(role_id):
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
@@ -927,7 +1087,7 @@ def register(app):
         return jsonify({"ok": True})
 
     @app.delete("/api/admin/permissions/<role_id>")
-    @permission_required("permission")
+    @permission_required("user")
     def admin_api_permissions_delete(role_id):
         cfg = load_admin_config()
         if any(u.get("role") == role_id for _u, _d, u in iter_users(cfg)):
@@ -938,3 +1098,4 @@ def register(app):
         cfg["permissions"] = [r for r in roles if r["id"] != role_id]
         save_admin_config(cfg)
         return jsonify({"ok": True})
+
