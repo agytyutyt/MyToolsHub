@@ -126,10 +126,14 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 
 ## 交互流程说明
 
-1. 用户访问首页 `/`：`static/js/main.js` 请求 `/api/tools`，按分类渲染工具卡片；同时在页面**右侧生成分类快速定位标签**（每个分类一个标点，悬浮显示分类名，单击平滑滚动定位，随滚动自动高亮当前分类）。
+1. 用户访问首页 `/`：`static/js/main.js` 请求 `/api/tools`，按分类渲染工具卡片（**每行固定最多 4 个**）；同时在页面**右侧生成分类快速定位标签**（每个分类一个标点，悬浮显示分类名，单击平滑滚动定位，随滚动自动高亮当前分类）。
 2. 点击卡片进入外壳页 `/tool/<id>`：`static/js/tool.js` 请求 `/api/tools/<id>` 获取工具元信息，并将 iframe 指向 `/plugin/<id>/<entry>`。
 3. `/plugin/<id>/<path>` 路由将 `plugins/<id>/frontend/` 下的文件作为静态资源返回。
 4. 若插件含后端，后端路由已在启动时注册到同一 Flask 应用（如 `/api/character-graph/...`）。
+5. **右下角「更多」悬浮球（⋮）**：悬浮展开菜单，含三个工具——
+   - **编辑位置**：进入「编辑位置」模式。**插件卡片**采用 Android 桌面式拖拽：按住图标拖起后图标放大悬停跟随光标，拖动到目标槽位时该位置实时生成该图标的**半透明虚影**，沿途卡片顺序让位，松手落位即自动调用 `POST /api/tools/reorder` 保存（Esc 取消）。**分类区块**可直接拖动标题调整上下顺序。编辑模式下点击卡片不会跳转，再次点「完成编辑」退出。
+   - **隐藏工具**：浮窗内以开关切换**分类 / 插件**的显示与隐藏，实时调用 `POST /api/tools/visibility` 写回 `config/tools.json`，隐藏的分类与插件即刻从首页消失。
+   - 各插件的大模型 API 配置请在对应插件页面内完成（如「人物关系立体星图」「战果录入」）。
 
 ---
 
@@ -142,6 +146,9 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /plugin/<id>/<path>` | 插件前端静态资源（映射到 `plugins/<id>/frontend/`），目录穿越已拦截 |
 | `GET /api/tools` | 聚合后的工具列表（站点信息 + 分类 + 工具清单） |
 | `GET /api/tools/<id>` | 单个工具信息，不存在返回 404 |
+| `POST /api/tools/reorder` | 保存首页布局：请求体 `{categories: [分类id按显示顺序], tools: {分类id: [工具id…]}}`，按分类顺序重排 `categories`、按位置重写各工具的 `category` 与 `order` 并写回 `config/tools.json` |
+| `GET /api/tools/visibility` | 返回全部分类与工具及启用状态（`enabled`），供「隐藏工具」浮窗使用（含已隐藏项） |
+| `POST /api/tools/visibility` | 切换启用：`{type: 'tool'\|'category', id, enabled}`，写回 `config/tools.json`（分类/工具各支持 `enabled` 字段） |
 
 **character-graph 插件后端接口**（演示含后端插件的 API 模式）：
 

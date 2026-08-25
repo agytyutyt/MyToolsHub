@@ -6,11 +6,26 @@
     "logging": true
   },
   "categories": [
-    { "id": "dev", "name": "开发者工具" },
-    { "id": "design", "name": "设计工具" },
-    { "id": "ai", "name": "AI 智能工具" },
-    { "id": "maps", "name": "地图工具" },
-    { "id": "office", "name": "协作办公" }
+    {
+      "id": "office",
+      "name": "协作办公"
+    },
+    {
+      "id": "dev",
+      "name": "开发者工具"
+    },
+    {
+      "id": "ai",
+      "name": "AI 智能工具"
+    },
+    {
+      "id": "design",
+      "name": "设计工具"
+    },
+    {
+      "id": "maps",
+      "name": "地图工具"
+    }
   ],
   "tools": [
     {
@@ -43,13 +58,13 @@
       "description": "计算与校验 MD5 值，支持文本/文件与 HMAC-MD5，实时计算一键复制。",
       "category": "dev",
       "enabled": true,
-      "order": 3
+      "order": 2
     },
     {
       "id": "character-graph",
       "name": "人物关系立体星图",
       "description": "上传文档（笔录/报告），调用大模型自动提取人物与关系，生成 3D 星点图。",
-      "category": "ai",
+      "category": "office",
       "enabled": true,
       "order": 4
     },
@@ -57,9 +72,9 @@
       "id": "map-marker",
       "name": "地图标点",
       "description": "基于高德地图，输入经纬度在地图上标点，支持二维码识别、批量导入、按时间生成移动轨迹。",
-      "category": "maps",
-      "enabled": true,
-      "order": 5
+      "category": "office",
+      "enabled": false,
+      "order": 3
     },
     {
       "id": "qr-video-decode",
@@ -67,7 +82,7 @@
       "description": "解码动态二维码视频流，包含前向纠错(zfec)重组，恢复其中的原始数据。",
       "category": "dev",
       "enabled": true,
-      "order": 6
+      "order": 3
     },
     {
       "id": "trajectory-convert",
@@ -75,7 +90,7 @@
       "description": "读取轨迹，压缩、封装，编码生成二维码视频流，支持EXCEL表格。",
       "category": "dev",
       "enabled": true,
-      "order": 7
+      "order": 1
     },
     {
       "id": "shared-docs",
@@ -83,7 +98,7 @@
       "description": "多人共同编辑 Word 与 Excel 文档，实时同步、在线用户、版本冲突提示，支持导入/导出 .docx / .xlsx。",
       "category": "office",
       "enabled": true,
-      "order": 8
+      "order": 1
     },
     {
       "id": "case-report",
@@ -91,7 +106,7 @@
       "description": "输入公安某部门某案件的收网情况报告，自动提取时间/主办大队/案件名/抓获人数/缴获物品，以键值对 JSON 本地化存档。",
       "category": "office",
       "enabled": true,
-      "order": 9
+      "order": 2
     }
   ]
 }

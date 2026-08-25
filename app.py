@@ -271,6 +271,14 @@ def load_registry():
         return json.load(f)
 
 
+def save_registry(registry):
+    """原子写入 config/tools.json，先写临时文件再 rename。"""
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(registry, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIG_PATH)
+
+
 def load_manifests():
     """扫描 plugins/ 下所有插件目录，读取各自 manifest.json。"""
     manifests = {}
@@ -338,12 +346,15 @@ def get_aggregated_tools():
     """
     registry = load_registry()
     manifests = load_manifests()
+    hidden_cats = {c["id"] for c in registry.get("categories", []) if not c.get("enabled", True)}
     category_map = {c["id"]: c["name"] for c in registry.get("categories", [])}
     meta = load_tool_meta()
 
     tools = []
     for item in registry.get("tools", []):
         if not item.get("enabled", True):
+            continue
+        if item.get("category") in hidden_cats:
             continue
         manifest = manifests.get(item["id"])
         if manifest is None:
@@ -429,9 +440,10 @@ def plugin_assets(plugin_id, filename):
 @app.route("/api/tools")
 def api_tools():
     registry = load_registry()
+    categories = [c for c in registry.get("categories", []) if c.get("enabled", True)]
     return jsonify({
         "site": registry.get("site", {}),
-        "categories": registry.get("categories", []),
+        "categories": categories,
         "tools": get_aggregated_tools(),
     })
 
@@ -443,6 +455,95 @@ def api_tool(tool_id):
         if tool["id"] == tool_id:
             return jsonify(tool)
     return jsonify({"error": "tool not found"}), 404
+
+
+@app.post("/api/tools/reorder")
+def api_tools_reorder():
+    """接收前端拖拽排序后的布局，写回 config/tools.json。
+
+    请求体：{ categories: [id, …], tools: { catId: [toolId, …], … } }
+    - categories 为分类数组（按显示顺序）
+    - tools 为每个分类下的工具 ID 数组
+    """
+    data = request.get_json(silent=True) or {}
+    categories_order = data.get("categories")
+    tools_order = data.get("tools")
+    if not isinstance(categories_order, list) or not isinstance(tools_order, dict):
+        return jsonify({"error": "invalid payload"}), 400
+
+    registry = load_registry()
+    cat_ids = {c["id"] for c in registry.get("categories", [])}
+    tool_map = {t["id"]: t for t in registry.get("tools", [])}
+
+    for cid in categories_order:
+        if cid not in cat_ids:
+            return jsonify({"error": f"unknown category: {cid}"}), 400
+    for cid, tool_ids in tools_order.items():
+        if cid not in cat_ids:
+            return jsonify({"error": f"unknown category: {cid}"}), 400
+        if not isinstance(tool_ids, list):
+            return jsonify({"error": "tools must be a list"}), 400
+        for tid in tool_ids:
+            if tid not in tool_map:
+                return jsonify({"error": f"unknown tool: {tid}"}), 400
+
+    cat_map = {c["id"]: c for c in registry["categories"]}
+    new_cats = [cat_map[cid] for cid in categories_order]
+    for c in registry["categories"]:
+        if c["id"] not in {x["id"] for x in new_cats}:
+            new_cats.append(c)
+    registry["categories"] = new_cats
+
+    for cid, tool_ids in tools_order.items():
+        for pos, tid in enumerate(tool_ids):
+            tool_map[tid]["category"] = cid
+            tool_map[tid]["order"] = pos + 1
+
+    save_registry(registry)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/tools/visibility")
+def api_tools_visibility():
+    """返回全部分类与工具及其启用状态，供「隐藏工具」浮窗使用（含已隐藏项）。"""
+    registry = load_registry()
+    return jsonify({
+        "categories": [
+            {"id": c["id"], "name": c["name"], "enabled": c.get("enabled", True)}
+            for c in registry.get("categories", [])
+        ],
+        "tools": [
+            {"id": t["id"], "name": t.get("name") or t["id"], "enabled": t.get("enabled", True)}
+            for t in registry.get("tools", [])
+        ],
+    })
+
+
+@app.post("/api/tools/visibility")
+def api_tools_visibility_save():
+    """切换分类 / 工具是否启用：{type: 'tool'|'category', id, enabled}。"""
+    data = request.get_json(silent=True) or {}
+    typ = data.get("type")
+    tid = data.get("id")
+    if typ not in ("tool", "category") or not isinstance(tid, str) or not tid:
+        return jsonify({"error": "invalid payload"}), 400
+    enabled = bool(data.get("enabled"))
+
+    registry = load_registry()
+    if typ == "tool":
+        for t in registry.get("tools", []):
+            if t["id"] == tid:
+                t["enabled"] = enabled
+                save_registry(registry)
+                return jsonify({"ok": True})
+        return jsonify({"error": "tool not found"}), 404
+    else:
+        for c in registry.get("categories", []):
+            if c["id"] == tid:
+                c["enabled"] = enabled
+                save_registry(registry)
+                return jsonify({"ok": True})
+        return jsonify({"error": "category not found"}), 404
 
 
 if __name__ == "__main__":

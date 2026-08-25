@@ -8,7 +8,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JZ 工具箱</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=2">
+  <link rel="stylesheet" href="/static/css/style.css?v=8">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
 </head>
 <body>
@@ -40,6 +40,39 @@
   <!-- 页脚（文案来自配置 site.footer） -->
   <footer class="footer" id="footer"></footer>
 
-  <script src="/static/js/main.js?v=3"></script>
+  <!-- 右下角悬浮球（⋮ 更多）：悬浮展开菜单 → 编辑位置 / 隐藏工具 -->
+  <div class="fab-menu" id="fab-menu">
+    <div class="fab-pop" id="fab-pop" role="menu">
+      <button type="button" class="fab-pop-item" data-action="edit" id="fab-act-edit">✏️ 编辑位置</button>
+      <button type="button" class="fab-pop-item" data-action="hide">🙈 隐藏工具</button>
+    </div>
+    <button class="fab" id="edit-fab" type="button" title="更多" aria-label="更多" aria-haspopup="true">
+      <span class="fab-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+    </button>
+  </div>
+  <div class="edit-hint" id="edit-hint" hidden>编辑模式：按住插件拖起调整顺序（分类可拖标题），自动保存；点 ⋮ → 完成编辑 退出</div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <!-- 浮窗：隐藏工具 -->
+  <div class="modal" id="modal-hide" hidden>
+    <div class="modal-panel">
+      <div class="modal-head">
+        <span class="modal-title">隐藏工具</span>
+        <button type="button" class="modal-close" data-close aria-label="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="hide-group">
+          <div class="hide-group-title">分类</div>
+          <div class="hide-list" id="hide-cats"></div>
+        </div>
+        <div class="hide-group">
+          <div class="hide-group-title">插件</div>
+          <div class="hide-list" id="hide-tools"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/main.js?v=8"></script>
 </body>
 </html>
