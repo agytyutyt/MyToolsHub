@@ -96,7 +96,11 @@
   function loadConfig() {
     api("/api/case-report/config").then(function (data) {
       $("#baseUrl").value = data.base_url || "";
-      $("#apiKey").value = data.api_key || "";
+      // 安全：Key 不回传明文，仅展示掩码；输入框留空 = 保存时沿用原值
+      $("#apiKey").value = "";
+      $("#apiKey").placeholder = data.api_key_set
+        ? ("已设置（" + (data.api_key_masked || "****") + "），留空则不修改")
+        : "sk-...";
       $("#model").value = data.model || "";
       if (data.llm_configured) {
         $("#configTip").textContent = "✓ 已配置大模型，解析将优先走大模型";
@@ -116,6 +120,10 @@
     }).then(function (data) {
       toast(data.llm_configured ? "配置已保存，将优先使用大模型解析" : "配置已保存，当前使用本地规则解析", "ok");
       $("#configTip").textContent = data.llm_configured ? "✓ 已配置大模型" : "使用本地规则解析";
+      if (data.llm_configured) {
+        $("#apiKey").value = "";
+        $("#apiKey").placeholder = "已设置，留空则不修改";
+      }
     }).catch(function (e) {
       toast("保存配置失败：" + e.message, "err");
     }).then(function () {

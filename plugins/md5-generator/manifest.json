@@ -1,7 +1,15 @@
 {
-  "id": "md5-generator",
-  "icon": "#️⃣",
-  "accent": "#FBBC05",
-  "entry": "index.html",
-  "features": ["计算", "校验", "HMAC", "文件"]
+    "id":  "md5-generator",
+    "icon":  "#️⃣",
+    "accent":  "#FBBC05",
+    "entry":  "index.html",
+    "features":  [
+                     "计算",
+                     "校验",
+                     "HMAC",
+                     "文件"
+                 ],
+    "version":  "1.0.0",
+    "author":  "JZToolsHub 团队",
+    "form":  "source"
 }

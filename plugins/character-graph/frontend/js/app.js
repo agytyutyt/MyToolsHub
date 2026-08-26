@@ -526,11 +526,14 @@ async function loadConfig() {
       return;
     }
 
-    /* web 模式：自动读取上次保存的 API 配置 */
+    /* web 模式：自动读取上次保存的 API 配置（Key 不回传明文，仅掩码提示） */
     apiFormSection.style.display = "";
     apiNotice.hidden = true;
     baseUrl.value = cfg.base_url || "";
-    apiKey.value = cfg.api_key || "";
+    apiKey.value = "";
+    apiKey.placeholder = cfg.api_key_set
+      ? `已设置（${cfg.api_key_masked || "****"}），留空则不修改`
+      : "sk-...";
     model.value = cfg.model || "";
     log("已读取上次保存的大模型配置", "ok");
   } catch (e) {
@@ -548,12 +551,14 @@ $("saveConfig").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         base_url: baseUrl.value.trim(),
-        api_key: apiKey.value.trim(),
+        api_key: apiKey.value.trim(), // 留空 = 沿用已保存的 Key
         model: model.value.trim(),
       }),
     });
     if (!r.ok) throw new Error((await r.json()).detail || "保存失败");
     tip.textContent = "✓ 配置已保存";
+    apiKey.value = "";
+    apiKey.placeholder = "已设置，留空则不修改";
   } catch (e) {
     tip.textContent = "✗ " + e.message;
   }

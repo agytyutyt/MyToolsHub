@@ -40,6 +40,13 @@ try:
 except Exception:  # admin 插件缺失时兜底（理论上不会发生）
     _get_session_user = None
 
+try:
+    import requests  # noqa: F401  大模型 HTTP 调用依赖
+    REQUESTS_AVAILABLE = True
+except Exception:
+    requests = None
+    REQUESTS_AVAILABLE = False
+
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
 PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
@@ -257,7 +264,7 @@ def _run_parse(task_id, text, cfg_llm, api_key, model, prompt):
             except llm_client.LLMError as e:
                 llm_error = str(e)
             except Exception as e:
-                llm_error = f"解析异常：{e}"
+                llm_error = f"大模型调用异常（{type(e).__name__}），已改用规则解析"
 
         for k in FIELD_KEYS:
             if not fields.get(k) and rules.get(k):
@@ -269,8 +276,11 @@ def _run_parse(task_id, text, cfg_llm, api_key, model, prompt):
         set_task(task_id, status="done", fields=fields,
                  method=method, llm_error=llm_error, rules=rules,
                  items=_build_items(fields, llm_class))
+    except (ValueError, RuntimeError) as e:
+        set_task(task_id, status="error", detail=str(e))
     except Exception as e:
-        set_task(task_id, status="error", detail=f"解析失败：{e}")
+        # SEC-5：非预期异常不向前端透出内部细节（堆栈/路径等）
+        set_task(task_id, status="error", detail=f"解析失败（{type(e).__name__}）")
 
 
 def _submit_parse(text, cfg_llm, api_key, model, prompt):
@@ -462,24 +472,37 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/config")
     def cr_get_config():
+        """读取展示配置。API Key 不回传明文，仅返回掩码（SEC-2/F-4）。"""
         cfg = load_config()
+        key = cfg["llm"]["api_key"]
+        masked = (key[:3] + "****" + key[-4:]) if len(key) > 8 else ("已设置" if key else "")
         return jsonify({
             "ok": True,
             "base_url": cfg["llm"]["base_url"],
-            "api_key": cfg["llm"]["api_key"],
+            "api_key_set": bool(key),
+            "api_key_masked": masked,
             "model": cfg["llm"]["model"],
-            "llm_configured": bool(cfg["llm"]["api_key"]) and bool(cfg["llm"]["base_url"]),
+            "llm_configured": bool(key) and bool(cfg["llm"]["base_url"]),
         })
 
     @app.post(f"{API_PREFIX}/config")
     def cr_post_config():
+        """保存展示配置；api_key 留空表示沿用原值，避免明文回显后空写覆盖。"""
         body = request.get_json(silent=True) or {}
         merged = load_config()
         merged["llm"]["base_url"] = (body.get("base_url") or "").strip()
-        merged["llm"]["api_key"] = (body.get("api_key") or "").strip()
+        new_key = (body.get("api_key") or "").strip()
+        if new_key:
+            merged["llm"]["api_key"] = new_key
         merged["llm"]["model"] = (body.get("model") or "").strip()
         save_config(merged)
         return jsonify({"ok": True, "llm_configured": bool(merged["llm"]["api_key"])})
+
+    @app.get(f"{API_PREFIX}/status")
+    def cr_status():
+        """依赖自检：缺依赖时优雅降级（B-4）。"""
+        deps = {"requests": REQUESTS_AVAILABLE}
+        return jsonify({"ok": all(deps.values()), "dependencies": deps})
 
     @app.post(f"{API_PREFIX}/parse")
     def cr_parse():

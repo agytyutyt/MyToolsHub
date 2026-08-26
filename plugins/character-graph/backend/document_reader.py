@@ -7,6 +7,21 @@
 
 from pathlib import Path
 
+# 依赖可用性标志（供 GET /status 自检）
+try:
+    import docx  # noqa: F401
+    DOCX_AVAILABLE = True
+except Exception:
+    docx = None
+    DOCX_AVAILABLE = False
+
+try:
+    import pypdf  # noqa: F401
+    PDF_AVAILABLE = True
+except Exception:
+    pypdf = None
+    PDF_AVAILABLE = False
+
 # 支持的文件类型 -> 中文说明（用于错误提示）
 SUPPORTED = {
     ".txt": "文本",
@@ -45,8 +60,9 @@ def _extract_docx(raw: bytes) -> str:
         return "\n".join(p.text for p in doc.paragraphs)
     except ImportError:
         raise ValueError("读取 .docx 需要安装 python-docx：pip install python-docx")
-    except Exception as e:
-        raise ValueError(f"解析 .docx 失败：{e}")
+    except Exception:
+        # SEC-5：不向前端透出解析库内部异常细节
+        raise ValueError("解析 .docx 失败，请确认文件未损坏且为有效的 Word 文档")
 
 
 def _extract_pdf(raw: bytes) -> str:
@@ -60,5 +76,6 @@ def _extract_pdf(raw: bytes) -> str:
         return "\n".join((page.extract_text() or "") for page in reader.pages)
     except ImportError:
         raise ValueError("读取 .pdf 需要安装 pypdf：pip install pypdf")
-    except Exception as e:
-        raise ValueError(f"解析 .pdf 失败：{e}")
+    except Exception:
+        # SEC-5：不向前端透出解析库内部异常细节
+        raise ValueError("解析 .pdf 失败，请确认文件未损坏且非扫描件")

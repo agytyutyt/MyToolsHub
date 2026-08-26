@@ -1,7 +1,14 @@
 {
-  "id": "base64",
-  "icon": "🔐",
-  "accent": "#4285F4",
-  "entry": "index.html",
-  "features": ["编码", "解码", "UTF-8"]
+    "id":  "base64",
+    "icon":  "🔐",
+    "accent":  "#4285F4",
+    "entry":  "index.html",
+    "features":  [
+                     "编码",
+                     "解码",
+                     "UTF-8"
+                 ],
+    "version":  "1.0.0",
+    "author":  "JZToolsHub 团队",
+    "form":  "source"
 }

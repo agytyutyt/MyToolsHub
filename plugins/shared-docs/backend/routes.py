@@ -77,7 +77,9 @@ def _can_view(user, doc):
     if level == "unit":
         return scope.get("unit_id") == user.get("unit_id")
     if level == "department":
-        return scope.get("department_id") == user.get("department_id")
+        # 部门级：部门 + 单位双重比对（规范 9.3）
+        return (scope.get("department_id") == user.get("department_id")
+                and scope.get("unit_id") == user.get("unit_id"))
     return scope.get("owner") == user.get("username")
 
 

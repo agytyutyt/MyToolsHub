@@ -97,7 +97,12 @@
       stMsg.innerHTML = '<span class="ok">✅ 校验通过</span>';
       stInfo.textContent = `${pretty.length} 字符 · 共 ${pretty.split('\n').length} 行`;
     } catch (e) {
-      stMsg.innerHTML = `<span class="err">❌ ${e.message}</span>`;
+      // F-3：错误消息含用户输入片段，必须经 DOM API 渲染防 XSS
+      const span = document.createElement('span');
+      span.className = 'err';
+      span.textContent = `❌ ${e.message}`;
+      stMsg.innerHTML = '';
+      stMsg.appendChild(span);
       stInfo.textContent = '';
     }
   });
@@ -111,7 +116,11 @@
       stMsg.innerHTML = '<span class="ok">✅ 校验通过</span>';
       stInfo.textContent = `${min.length} 字符`;
     } catch (e) {
-      stMsg.innerHTML = `<span class="err">❌ ${e.message}</span>`;
+      const span = document.createElement('span');
+      span.className = 'err';
+      span.textContent = `❌ ${e.message}`;
+      stMsg.innerHTML = '';
+      stMsg.appendChild(span);
       stInfo.textContent = '';
     }
   });

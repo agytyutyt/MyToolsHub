@@ -1,7 +1,14 @@
 {
-  "id": "json-formatter",
-  "icon": "🧩",
-  "accent": "#34A853",
-  "entry": "index.html",
-  "features": ["格式化", "压缩", "校验"]
+    "id":  "json-formatter",
+    "icon":  "🧩",
+    "accent":  "#34A853",
+    "entry":  "index.html",
+    "features":  [
+                     "格式化",
+                     "压缩",
+                     "校验"
+                 ],
+    "version":  "1.0.1",
+    "author":  "JZToolsHub 团队",
+    "form":  "source"
 }

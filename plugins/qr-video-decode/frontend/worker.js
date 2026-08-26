@@ -1,7 +1,7 @@
 /* QR 视频流解码 —— Web Worker
  * 在独立线程中用 jsQR 解码单帧 QR，避免阻塞主线程（主线程负责取帧与进度 UI）。
  */
-importScripts("./jsqr.min.js");
+importScripts("./jsqr.min.js?v=1");
 
 function decodeIndex(b64) {
   const bin = atob(b64);

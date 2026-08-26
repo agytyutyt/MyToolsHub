@@ -1,7 +1,17 @@
 {
-  "id": "admin",
-  "icon": "⚙️",
-  "accent": "#4285F4",
-  "entry": "admin.html",
-  "features": ["登录鉴权", "单位管理", "部门管理", "人员管理", "权限管理", "工具访问控制"]
+    "id":  "admin",
+    "icon":  "⚙️",
+    "accent":  "#4285F4",
+    "entry":  "admin.html",
+    "features":  [
+                     "登录鉴权",
+                     "单位管理",
+                     "部门管理",
+                     "人员管理",
+                     "权限管理",
+                     "工具访问控制"
+                 ],
+    "version":  "1.1.0",
+    "author":  "JZToolsHub 团队",
+    "form":  "source"
 }

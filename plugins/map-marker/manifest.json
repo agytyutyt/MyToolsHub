@@ -1,7 +1,15 @@
 {
-  "id": "map-marker",
-  "icon": "🗺️",
-  "accent": "#4285F4",
-  "entry": "index.html",
-  "features": ["高德地图", "经纬度标点", "二维码识别", "移动轨迹"]
+    "id":  "map-marker",
+    "icon":  "🗺️",
+    "accent":  "#4285F4",
+    "entry":  "index.html",
+    "features":  [
+                     "高德地图",
+                     "经纬度标点",
+                     "二维码识别",
+                     "移动轨迹"
+                 ],
+    "version":  "1.0.0",
+    "author":  "JZToolsHub 团队",
+    "form":  "source"
 }

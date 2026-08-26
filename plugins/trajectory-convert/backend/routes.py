@@ -185,11 +185,12 @@ def _tc_viewer():
 def _task_owned_by(task, user):
     """任务归属校验：任务元数据记录过创建者时，非创建者（且非超管）视为不存在（404）。
 
+    无归属记录的旧任务（升级前创建）仅超管可见 —— 收紧而非放行。
     任务 ID 为随机 UUID + TTL 定期清理，本身已难猜测；此校验是纵深防御（R6）。
     """
     owner = task.get("created_by")
     if not owner:
-        return True
+        return bool(user and user.get("super_admin"))
     if user is None:
         return False
     if user.get("super_admin"):
@@ -705,7 +706,9 @@ def _run_convert(task_id, filename, file_bytes, interval_minutes, qr_version, cf
     except RuntimeError as e:
         set_task(task_id, status="error", detail=str(e))
     except Exception as e:
-        set_task(task_id, status="error", detail=f"转换失败：{e}")
+        # SEC-5：非预期异常不向前端透出内部细节（堆栈/路径等）
+        set_task(task_id, status="error",
+                 detail=f"转换失败（{type(e).__name__}）")
     finally:
         try:
             os.remove(tmp_xlsx)

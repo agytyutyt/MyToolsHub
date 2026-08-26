@@ -10,7 +10,12 @@ OpenAI、DeepSeek、通义千问（兼容模式）、Kimi/Moonshot、智谱、
 import json
 import re
 
-import requests
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except Exception:
+    requests = None
+    REQUESTS_AVAILABLE = False
 
 # 默认接入地址与模型（未指定时使用）
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -73,20 +78,21 @@ def chat_json(base_url: str, api_key: str, model: str, system: str, user: str,
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
     except requests.RequestException as e:
-        raise LLMError(f"无法连接大模型服务：{e}") from e
+        raise LLMError(f"无法连接大模型服务，请检查网络与接口地址（{type(e).__name__}）") from e
 
     if resp.status_code >= 400:
         try:
             detail = resp.json()
+            detail = json.dumps(detail, ensure_ascii=False)[:300]
         except Exception:
-            detail = resp.text[:500]
+            detail = (resp.text or "")[:300]
         raise LLMError(f"大模型接口返回错误（HTTP {resp.status_code}）：{detail}")
 
     data = resp.json()
     try:
         content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as e:
-        raise LLMError(f"大模型返回结构异常：{data}") from e
+    except (KeyError, IndexError, TypeError):
+        raise LLMError("大模型返回结构异常，请检查模型名称是否正确")
     return parse_model_output(content)
 
 

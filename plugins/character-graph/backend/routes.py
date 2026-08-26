@@ -22,6 +22,11 @@ from flask import jsonify, request
 
 from . import document_reader, llm_client
 
+try:
+    from jztools_admin.routes import get_session_user as _get_session_user
+except Exception:  # admin 插件缺失时兜底（理论上不会发生）
+    _get_session_user = None
+
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
 PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
@@ -122,9 +127,10 @@ def cleanup_tasks() -> None:
             TASKS.pop(tid, None)
 
 
-def create_task(filename: str, created_at: float) -> str:
+def create_task(filename: str, created_at: float, created_by: str = "") -> str:
     tid = uuid.uuid4().hex[:12]
-    set_task(tid, status="pending", filename=filename, created_at=created_at)
+    set_task(tid, status="pending", filename=filename,
+             created_at=created_at, created_by=created_by)
     return tid
 
 
@@ -145,17 +151,48 @@ def _run_analysis(task_id: str, filename: str, raw: bytes,
             text, base_url, api_key, model, prompt=prompt
         )
         set_task(task_id, status="done", filename=filename, graph=graph)
+    except llm_client.LLMError as e:
+        # 大模型错误信息为面向用户的业务文案，保留原文
+        set_task(task_id, status="error", filename=filename, detail=str(e))
+    except (ValueError, RuntimeError) as e:
+        set_task(task_id, status="error", filename=filename, detail=str(e))
     except Exception as e:
-        detail = str(e)
-        if not isinstance(e, llm_client.LLMError):
-            detail = f"分析失败：{detail}"
-        set_task(task_id, status="error", filename=filename, detail=detail)
+        # SEC-5：非预期异常不向前端透出内部细节（堆栈/路径等）
+        set_task(task_id, status="error", filename=filename,
+                 detail=f"分析失败（{type(e).__name__}）")
+
+
+def _task_owned_by(task, user):
+    """任务归属校验：非创建者（且非超管）视为任务不存在（404，纵深防御）。
+
+    与 trajectory-convert 插件的同名机制保持一致。
+    """
+    owner = task.get("created_by")
+    if not owner:
+        return True  # 兼容升级前创建的旧任务
+    if user is None:
+        return False
+    if user.get("super_admin"):
+        return True
+    return owner == user.get("username")
+
+
+def _viewer():
+    """当前登录用户上下文；未登录返回 None。"""
+    if _get_session_user is None:
+        return None
+    try:
+        return _get_session_user()
+    except Exception:
+        return None
 
 
 def _submit_analysis(filename: str, raw: bytes,
                      base_url: str, api_key: str, model: str, prompt: dict) -> str:
     """提交后台分析任务，返回 task_id。"""
-    task_id = create_task(filename, time.time())
+    user = _viewer()
+    task_id = create_task(filename, time.time(),
+                          created_by=(user or {}).get("username", ""))
     cleanup_tasks()  # 顺带清理过期任务
     _analyze_executor.submit(
         _run_analysis, task_id, filename, raw, base_url, api_key, model, prompt
@@ -169,27 +206,47 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/config")
     def cg_get_config():
+        """读取展示配置。API Key 不回传明文，仅返回掩码（SEC-2/F-4）。"""
         cfg = load_config()
+        key = cfg["llm"]["api_key"]
+        masked = (key[:3] + "****" + key[-4:]) if len(key) > 8 else ("已设置" if key else "")
         return jsonify({
             "api_source": cfg["ui"]["api_source"],
             "base_url": cfg["llm"]["base_url"],
-            "api_key": cfg["llm"]["api_key"],
+            "api_key_set": bool(key),
+            "api_key_masked": masked,
             "model": cfg["llm"]["model"],
         })
 
     @app.post(f"{API_PREFIX}/config")
     def cg_post_config():
+        """保存展示配置；api_key 留空表示沿用原值，避免明文回显后空写覆盖。"""
         body = request.get_json(silent=True) or {}
         merged = load_config()
-        merged["llm"]["base_url"] = body.get("base_url", "")
-        merged["llm"]["api_key"] = body.get("api_key", "")
-        merged["llm"]["model"] = body.get("model", "")
+        merged["llm"]["base_url"] = (body.get("base_url") or "").strip()
+        new_key = (body.get("api_key") or "").strip()
+        if new_key:
+            merged["llm"]["api_key"] = new_key
+        merged["llm"]["model"] = (body.get("model") or "").strip()
         save_config(merged)
-        return jsonify({"ok": True, **merged["llm"]})
+        return jsonify({
+            "ok": True,
+            "llm_configured": bool(merged["llm"]["api_key"]),
+        })
 
     @app.get(f"{API_PREFIX}/prompt")
     def cg_get_prompt():
         return jsonify(load_prompt())
+
+    @app.get(f"{API_PREFIX}/status")
+    def cg_status():
+        """依赖自检：缺依赖时优雅降级（B-4）。"""
+        deps = {
+            "python-docx": document_reader.DOCX_AVAILABLE,
+            "pypdf": document_reader.PDF_AVAILABLE,
+            "requests": llm_client.REQUESTS_AVAILABLE,
+        }
+        return jsonify({"ok": all(deps.values()), "dependencies": deps})
 
     @app.post(f"{API_PREFIX}/analyze")
     def cg_analyze():
@@ -199,6 +256,8 @@ def register(app) -> None:
         file = request.files["file"]
         if not file.filename:
             return jsonify({"detail": "缺少文件"}), 400
+        # 仅取基础文件名，剥离任何路径成分（SEC-1 纵深防御）
+        safe_name = os.path.basename(file.filename.replace("\\", "/")) or "未命名"
 
         raw = file.read()
         if not raw:
@@ -216,15 +275,15 @@ def register(app) -> None:
             }), 400
 
         task_id = _submit_analysis(
-            file.filename, raw, base_url, api_key, model, load_prompt()
+            safe_name, raw, base_url, api_key, model, load_prompt()
         )
         return jsonify({"ok": True, "task_id": task_id})
 
     @app.get(f"{API_PREFIX}/result/<task_id>")
     def cg_result(task_id):
-        """轮询任务状态：pending / running / done / error"""
+        """轮询任务状态：pending / running / done / error（仅创建者与超管可见）。"""
         task = get_task(task_id)
-        if not task:
+        if not task or not _task_owned_by(task, _viewer()):
             return jsonify({"detail": "任务不存在或已过期"}), 404
         payload = {
             "status": task.get("status"),

@@ -1,7 +1,15 @@
 {
-  "id": "case-report",
-  "icon": "📋",
-  "accent": "#3949ab",
-  "entry": "index.html",
-  "features": ["报告抽取", "键值对 JSON", "本地存档", "规则/大模型"]
+    "id":  "case-report",
+    "icon":  "📋",
+    "accent":  "#3949ab",
+    "entry":  "index.html",
+    "features":  [
+                     "报告抽取",
+                     "键值对 JSON",
+                     "本地存档",
+                     "规则/大模型"
+                 ],
+    "version":  "1.2.0",
+    "author":  "JZToolsHub 团队",
+    "form":  "source"
 }

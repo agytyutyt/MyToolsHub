@@ -10,8 +10,8 @@
 
 const $ = (id) => document.getElementById(id);
 
-/* 部署时请同步 +1，用于绕过浏览器对 .js 资源的 24h 长缓存 */
-const APP_VER = "v=2";
+/* 部署时请与 index.html 中 app.js 的 ?v= 保持一致，用于绕过 24h 长缓存（F-2） */
+const APP_VER = "v=7";
 
 window.addEventListener("error", (e) => {
   try { setStatus("页面错误：" + (e.message || "未知"), true); } catch (_) {}
