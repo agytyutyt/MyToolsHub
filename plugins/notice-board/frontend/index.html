@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>公告板</title>
+  <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
+  <link rel="stylesheet" href="./style.css?v=3">
+</head>
+<body>
+  <div class="view">
+    <header class="page-head">
+      <div class="page-title">
+        <h1>📢 公告板</h1>
+        <p class="sub">单位与部门公告发布与查看</p>
+      </div>
+      <button id="publishBtn" class="btn btn-primary hidden">＋ 发布公告</button>
+    </header>
+
+    <!-- 公告卡片流（固定尺寸卡片，单击查看全文） -->
+    <main id="board" class="board" aria-live="polite"></main>
+
+    <!-- 空状态 -->
+    <div id="empty" class="empty hidden">
+      <div class="empty-icon">📭</div>
+      <p>暂无公告</p>
+    </div>
+  </div>
+
+  <!-- 发布公告对话框：左=发布内容，右=可见范围 -->
+  <div id="dialog" class="dialog-mask hidden">
+    <div class="dialog dialog-publish" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <h3 id="dialogTitle" class="dialog-title">发布公告</h3>
+      <div class="publish-grid">
+        <!-- 左：内容输入 -->
+        <div class="pub-left">
+          <label class="field">
+            <span class="field-label">标题</span>
+            <input id="annTitle" type="text" maxlength="80" placeholder="公告标题（80 字以内）" />
+          </label>
+          <label class="field">
+            <span class="field-label">内容</span>
+            <textarea id="annContent" rows="9" maxlength="5000"
+              placeholder="公告正文，支持换行（5000 字以内）"></textarea>
+          </label>
+        </div>
+
+        <!-- 右：可见范围（左树 | 选择按钮 | 已选框） -->
+        <div class="pub-right">
+          <div class="scope-head">
+            <span class="field-label">可见范围<span class="scope-tip">（公告仅对所选对象可见；选定单位/部门即覆盖其下全部用户）</span></span>
+            <span class="scope-ops">
+              <button id="selectAllBtn" class="link-btn" type="button"
+                title="将全部单位加入可见范围（含其下属部门与用户）">全选</button>
+              <button id="clearTargetsBtn" class="link-btn danger" type="button">清空</button>
+            </span>
+          </div>
+          <div class="scope-wrap">
+            <div id="scopeTree" class="scope-tree" aria-label="单位/部门/用户树"><!-- 树 --></div>
+            <button id="addBtn" class="scope-add" title="将选中项加入可见范围">选择 →</button>
+            <div class="scope-selbox" aria-label="已选可见范围">
+              <div id="selList" class="sel-list"></div>
+              <div id="selEmpty" class="sel-empty">尚未选择<br>请勾选后点击「选择」</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button id="cancelBtn" class="btn">取消</button>
+        <button id="confirmBtn" class="btn btn-primary">发布</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 公告详情悬浮窗 -->
+  <div id="detailDialog" class="dialog-mask hidden">
+    <div class="dialog dialog-detail" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+      <div class="detail-head">
+        <h3 id="detailTitle" class="dialog-title"></h3>
+        <button id="detailCloseBtn" class="detail-close" title="关闭">✕</button>
+      </div>
+      <div class="detail-meta">
+        <span id="detailAuthor"></span>
+        <span>·</span>
+        <time id="detailTime"></time>
+      </div>
+      <div id="detailContent" class="detail-content"></div>
+    </div>
+  </div>
+
+  <!-- 删除确认对话框 -->
+  <div id="confirm" class="dialog-mask hidden">
+    <div class="dialog dialog-sm" role="alertdialog" aria-modal="true">
+      <h3 class="dialog-title">删除公告</h3>
+      <p id="confirmText" class="confirm-text"></p>
+      <div class="dialog-actions">
+        <button id="confirmCancelBtn" class="btn">取消</button>
+        <button id="confirmOkBtn" class="btn btn-danger">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js?v=3"></script>
+</body>
+</html>

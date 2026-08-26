@@ -392,11 +392,18 @@ def get_session_user():
     role = next((r for r in cfg.get("permissions", []) if r["id"] == user.get("role")), None)
     modules = (role or {}).get("modules", [])
     super_admin = _role_super_admin(cfg, user.get("role"))
-    permissions = sorted(_registered_tool_ids()) if super_admin else list(user.get("permissions", []))
+    if super_admin:
+        permissions = sorted(_registered_tool_ids())
+    else:
+        # 逐人授权权限点 + 全站默认开放工具（tools.json 中 grant_all: true）
+        perms = list(user.get("permissions", []))
+        perms.extend(tid for tid in _grant_all_tool_ids() if tid not in perms)
+        permissions = sorted(perms)
     return {
         "username": user["username"],
         "name": user.get("name") or user["username"],
         "role": (role or {}).get("name", ""),
+        "role_id": user.get("role", ""),
         "unit": unit.get("name", ""),
         "unit_id": unit.get("id", ""),
         "department": dept.get("name", ""),
@@ -411,6 +418,18 @@ def _registered_tool_ids():
     """返回 tools.json 中注册的全部工具 ID（含禁用），用于权限点校验与接口拦截。"""
     try:
         return {t["id"] for t in load_registry().get("tools", [])}
+    except Exception:
+        return set()
+
+
+def _grant_all_tool_ids():
+    """返回声明了 grant_all: true 的工具 ID：对全体登录用户默认开放（无需逐人授权）。
+
+    在 tools.json 对应工具条目上配置 "grant_all": true 即生效，
+    典型场景：公告板这类全站基础设施型业务插件。
+    """
+    try:
+        return {t["id"] for t in load_registry().get("tools", []) if t.get("grant_all")}
     except Exception:
         return set()
 
@@ -677,6 +696,39 @@ def register(app):
             # 权限管理暂时屏蔽：已并入「人员管理」模块
             return jsonify({"error": "权限管理已并入「人员管理」模块，暂不单独开放"}), 404
         return send_from_directory(FRONTEND_DIR, f"admin-{module}.html")
+
+    # ---------------- 组织架构树（只读，供业务插件选择单位/部门） ----------------
+
+    @app.get("/api/admin/org-tree")
+    @login_required
+    def admin_org_tree():
+        """返回 单位→部门→用户 树（只读，仅标识与姓名），仅需登录。
+
+        供公告板等插件选择可见范围；不含密码/身份证等敏感字段。
+        """
+        cfg = load_admin_config()
+        tree = []
+        for u in cfg.get("units", []):
+            tree.append({
+                "id": u.get("id", ""),
+                "name": u.get("name", ""),
+                "type": "unit",
+                "children": [
+                    {
+                        "id": d.get("id", ""),
+                        "name": d.get("name", ""),
+                        "type": "department",
+                        "children": [
+                            {"id": x.get("username", ""),
+                             "name": x.get("name") or x.get("username", ""),
+                             "type": "user"}
+                            for x in d.get("users", [])
+                        ],
+                    }
+                    for d in u.get("departments", [])
+                ],
+            })
+        return jsonify({"ok": True, "tree": tree})
 
     # ---------------- 后台总览 ----------------
 

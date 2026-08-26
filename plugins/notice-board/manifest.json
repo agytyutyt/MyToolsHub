@@ -1,0 +1,10 @@
+{
+  "id": "notice-board",
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "icon": "📢",
+  "accent": "#E8710A",
+  "entry": "index.html",
+  "features": [],
+  "form": "source"
+}

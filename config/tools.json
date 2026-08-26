@@ -75,7 +75,7 @@
       "description": "上传文档（笔录/报告），调用大模型自动提取人物与关系，生成 3D 星点图。",
       "category": "office",
       "enabled": true,
-      "order": 4
+      "order": 3
     },
     {
       "id": "map-marker",
@@ -116,6 +116,15 @@
       "category": "office",
       "enabled": true,
       "order": 2
+    },
+    {
+      "id": "notice-board",
+      "name": "公告板",
+      "description": "单位与部门公告发布与查看：管理员可按单位/部门范围发布公告，全员默认可见权限。",
+      "category": "office",
+      "enabled": true,
+      "order": 4,
+      "grant_all": true
     }
   ]
 }
