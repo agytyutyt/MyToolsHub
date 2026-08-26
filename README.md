@@ -25,8 +25,9 @@
     - [7.5 常见约定与注意事项](#75-常见约定与注意事项)
 11. [内置插件一览](#内置插件一览)
 12. [轨迹数据与二维码闭环](#轨迹数据与二维码闭环)
-13. [故障排查](#故障排查)
-14. [后期接入真实后端](#后期接入真实后端)
+13. [打包部署（可上线程序）](#打包部署可上线程序)
+14. [故障排查](#故障排查)
+15. [后期接入真实后端](#后期接入真实后端)
 
 ---
 
@@ -715,6 +716,43 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 - 高德地图输入经纬度标点（需自备高德 Key），支持批量导入、点地图添加。
 - **二维码识别**：上传二维码图片，jsQR 识别并解析轨迹 JSON（兼容 `[{"时间": "经度,纬度"}]`、`{时间: [经度,纬度]}` 等形态），确认后按时间在地图上**标点并生成移动轨迹**。
 - **轨迹回放**：生成轨迹折线与时间标点，进度条可非线性步进，时间压缩让长跨度的轨迹在约 20 秒内播完，支持播放/暂停/进度跳转，播放时同步高亮当前点。
+
+---
+
+## 打包部署（可上线程序）
+
+后端以 **PyInstaller 单目录可执行程序** 打包（免安装 Python / 依赖），前端保留源码便于快速修改。
+
+**产物结构**（`build-deploy.ps1` 生成，`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.0.zip`）：
+
+```
+deploy\JZToolsHub\
+├─ JZToolsHub.exe      # 后端可执行程序（双击或 start.bat 启动）
+├─ _internal\          # 编译后的 Python 运行时 + Flask + 全部第三方依赖
+├─ static\             # 首页前端源码（可修改，重启生效）
+├─ plugins\            # 插件：frontend/ 前端源码可改；backend/ 后端源码 + 运行期 data/
+├─ config\tools.json   # 工具注册清单（可改；admin.json 等首启自动生成）
+├─ logs\               # 访问日志（运行期写入）
+└─ start.bat           # 一键启动脚本
+```
+
+**使用**：
+1. 解压后双击 `start.bat`（或直接运行 `JZToolsHub.exe`）；
+2. 浏览器访问 `http://<服务器IP>:5000`，默认管理员 `admin` / `admin123`（首启自动生成，请尽快登录后台改密）；
+3. 修改前端：编辑 `static\` 或 `plugins\<id>\frontend\` 下的文件后重启服务即生效；
+4. 端口 / 监听地址可用环境变量覆盖：`JZTOOLS_PORT`、`JZTOOLS_HOST`（默认 `0.0.0.0:5000`）。
+
+**重新打包**（需本机装有 Python 与依赖，PyInstaller 自动收集插件后端动态导入的
+`docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress`）：
+
+```powershell
+pip install -r requirements.txt pyinstaller
+powershell -ExecutionPolicy Bypass -File .\build-deploy.ps1
+```
+
+> 运行期数据（`config/admin.json`、`logs/`、`plugins/*/backend/data/`）写在 exe 同层目录，
+> 与 `_internal\` 编译产物分离：升级程序时仅替换 exe + `_internal\` 即可保留数据。
+> 打包运行使用 **waitress** 多线程生产级 WSGI 服务器（禁用 Flask debug/reloader）。
 
 ---
 

@@ -179,3 +179,7 @@
 - **notice-board 插件**：`/api/notice-board/announcements`（GET/POST/PUT/DELETE），
   `home_card()` 钩子在 `plugins/notice-board/backend/routes.py`，首页卡片动态声明按用户权限
   取最新可读公告（时间+标题+换行+内容）；前端资源版本号已到 `v=4`。
+- **打包部署**：PyInstaller 单目录可执行程序 `deploy/JZToolsHub/`（约 233 MB / zip 101 MB），
+  `start.bat` 一键启动；`build-deploy.ps1` 构建脚本（需 `pip install pyinstaller`）。
+  前端源码保留在 exe 同层 `static/` / `plugins/*/frontend/`，可改。
+  `config/admin.json` 首启自动生成含默认管理员 `admin` / `admin123`。

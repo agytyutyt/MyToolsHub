@@ -16,6 +16,11 @@ from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    # PyInstaller 打包运行：部署根目录 = exe 所在目录。
+    # config / static / plugins / logs 均位于 exe 同层，前端源码可直接修改、
+    # 配置与插件运行数据可读写（源码开发时保持 __file__ 所在目录不变）。
+    BASE_DIR = os.path.dirname(sys.executable)
 CONFIG_PATH = os.path.join(BASE_DIR, "config", "tools.json")
 PLUGINS_DIR = os.path.join(BASE_DIR, "plugins")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
@@ -49,7 +54,16 @@ _tool_meta_cache_ts = 0.0
 # 优先级高于 config/tools.json：声明了则用之，未声明则回退读取 tools.json。
 _plugin_home_card_hooks = {}
 
-app = Flask(__name__)
+# 打包运行（PyInstaller）时 Flask 内置 /static 默认指向 _internal/static，
+# 前端源码保留在 exe 同层，故显式指定 static_folder 指向部署根目录下的 static。
+if getattr(sys, "frozen", False):
+    app = Flask(
+        __name__,
+        static_folder=os.path.join(BASE_DIR, "static"),
+        static_url_path="/static",
+    )
+else:
+    app = Flask(__name__)
 # 会话密钥兜底：admin 插件 register() 时会被 config/admin.json 中的持久化密钥覆盖
 app.config["SECRET_KEY"] = __import__("secrets").token_hex(32)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -485,12 +499,12 @@ def register_plugin_backends(app):
 
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(os.path.join(BASE_DIR, "static"), "index.html")
 
 
 @app.route("/tool/<tool_id>")
 def tool_page(tool_id):
-    return send_from_directory("static", "tool.html")
+    return send_from_directory(os.path.join(BASE_DIR, "static"), "tool.html")
 
 
 @app.route("/plugin/<plugin_id>/<path:filename>")
@@ -631,7 +645,26 @@ if __name__ == "__main__":
     setup_access_logging(app)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
+    host = os.environ.get("JZTOOLS_HOST", "0.0.0.0")
     try:
-        app.run(host="0.0.0.0", port=5000, debug=True)
+        port = int(os.environ.get("JZTOOLS_PORT", "5000"))
+    except ValueError:
+        port = 5000
+    if getattr(sys, "frozen", False):
+        # 打包运行（可上线）：waitress 多线程生产级 WSGI 服务器，禁用 debug/reloader
+        try:
+            from waitress import serve
+        except ImportError:
+            serve = None
+    else:
+        serve = None
+    try:
+        if getattr(sys, "frozen", False) and serve is not None:
+            serve(app, host=host, port=port, threads=8)
+        elif getattr(sys, "frozen", False):
+            app.run(host=host, port=port, debug=False)
+        else:
+            # 源码开发模式：Flask 内置服务器（自动重载 + 调试）
+            app.run(host=host, port=port, debug=True)
     finally:
         shutdown_access_logging()

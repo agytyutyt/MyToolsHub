@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 venv/
 
+# 打包产物（PyInstaller 中间件 / 输出）
+build/
+dist/
+deploy/
+
 # 运行时日志与进程文件
 logs/
 .server.*
