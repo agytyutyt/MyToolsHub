@@ -203,6 +203,7 @@ body {
   color: var(--md-on-surface-variant);
   line-height: 1.5;
   flex: 1;
+  white-space: pre-line;
 }
 
 .tool-card .tool-features {

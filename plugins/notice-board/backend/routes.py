@@ -198,9 +198,9 @@ def home_card(app=None):
     """首页卡片内容声明（读取方式一：插件主动声明，按当前登录用户动态生成）。
 
     主应用在首页 /api/tools 请求时于请求上下文内调用本钩子：插件根据
-    当前用户的可见范围检索最新一条可读公告，并以「时间 + 公告内容」声明
-    卡片 description（时间取发布时间的年月日时分，内容截断防卡片过长）；
-    无可读公告或未登录时回退静态文案。
+    当前用户的可见范围检索最新一条可读公告，并以「时间 + 公告标题」为首行、
+    换行后展示公告内容的方式声明卡片 description；无可读公告或未登录时
+    回退静态文案。
 
     前端 frontend/js/home-card.js 的客户端覆写已随本机制下线，卡片内容
     统一由本钩子经主程序下发。
@@ -221,10 +221,15 @@ def home_card(app=None):
         return card
     a = items[0]  # list_announcements 已按 created_at 倒序，首条即最新
     when = (a.get("created_at") or "").strip()[:16]  # 2026-08-26 09:30
-    text = (a.get("content") or "").strip()
-    if len(text) > 60:
-        text = text[:60] + "…"
-    card["description"] = f"{when} {text}" if when else text
+    title = (a.get("title") or "").strip()
+    content = (a.get("content") or "").strip()
+    if len(title) > 40:
+        title = title[:40] + "…"
+    if len(content) > 60:
+        content = content[:60] + "…"
+    # 首行「时间 + 公告标题」，换行后展示公告内容（样式层 white-space: pre-line 渲染换行）
+    first = f"{when} {title}".strip() if when else title
+    card["description"] = f"{first}\n{content}" if content else first
     return card
 
 

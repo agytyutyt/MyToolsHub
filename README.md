@@ -547,9 +547,10 @@ def register(app):
       if not user:
           card["description"] = "暂无最新公告。"
           return card
-      # 动态检索当前用户可见的最新公告，以「时间 + 公告内容」声明 description
+      # 动态检索当前用户可见的最新公告，以「时间 + 公告标题」换行展示公告内容
       latest = fetch_latest_readable(user)
-      card["description"] = f"{latest['time']} {latest['content']}" if latest else "暂无最新公告。"
+      card["description"] = (f"{latest['time']} {latest['title']}\n{latest['content']}"
+                             if latest else "暂无最新公告。")
       return card
   ```
 
