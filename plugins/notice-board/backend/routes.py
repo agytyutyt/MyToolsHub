@@ -32,6 +32,12 @@ try:
 except Exception:  # admin 插件缺失时兜底（理论上不会发生）
     _get_session_user = None
 
+try:
+    from jztools_admin.routes import set_operation as _set_operation
+except Exception:  # 主应用未提供日志辅助时兜底（理论上不会发生）
+    def _set_operation(op):
+        pass
+
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PLUGIN_DIR, "data")
 API_PREFIX = "/api/notice-board"
@@ -322,6 +328,7 @@ def register(app) -> None:
     @app.post(f"{API_PREFIX}/announcements")
     def nb_publish():
         """发布公告：仅管理员角色/超管；归属四字段取自会话（铁律一）。"""
+        _set_operation("发布公告")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
@@ -356,6 +363,7 @@ def register(app) -> None:
         可改标题/内容/可见范围；保留创建归属四字段与 created_at，
         记录 updated_at。不存在或不可见一律 404（规范 8.4）。
         """
+        _set_operation("修改公告")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
@@ -380,6 +388,7 @@ def register(app) -> None:
     @app.delete(f"{API_PREFIX}/announcements/<aid>")
     def nb_delete(aid):
         """删除公告：存在但无权管理返回 403；不存在或不可见一律 404（规范 8.4）。"""
+        _set_operation("删除公告")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401

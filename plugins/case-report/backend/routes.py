@@ -41,6 +41,12 @@ except Exception:  # admin 插件缺失时兜底（理论上不会发生）
     _get_session_user = None
 
 try:
+    from jztools_admin.routes import set_operation as _set_operation
+except Exception:  # 主应用未提供日志辅助时兜底（理论上不会发生）
+    def _set_operation(op):
+        pass
+
+try:
     import requests  # noqa: F401  大模型 HTTP 调用依赖
     REQUESTS_AVAILABLE = True
 except Exception:
@@ -488,6 +494,7 @@ def register(app) -> None:
     @app.post(f"{API_PREFIX}/config")
     def cr_post_config():
         """保存展示配置；api_key 留空表示沿用原值，避免明文回显后空写覆盖。"""
+        _set_operation("保存战果录入配置")
         body = request.get_json(silent=True) or {}
         merged = load_config()
         merged["llm"]["base_url"] = (body.get("base_url") or "").strip()
@@ -507,6 +514,7 @@ def register(app) -> None:
     @app.post(f"{API_PREFIX}/parse")
     def cr_parse():
         """提交解析任务：body {text, base_url?, api_key?, model?}，立即返回 task_id。"""
+        _set_operation("解析收网情况报告")
         body = request.get_json(silent=True) or {}
         text = body.get("text")
         if not text or not str(text).strip():
@@ -620,6 +628,7 @@ def register(app) -> None:
     @app.post(f"{API_PREFIX}/categories")
     def cr_categories_learn():
         """学习一条「物品名→类别」，持久化供后续解析优先采用。"""
+        _set_operation("学习战果物品类别")
         body = request.get_json(silent=True) or {}
         name = str(body.get("name") or "").strip()
         category = str(body.get("category") or "").strip()
@@ -631,6 +640,7 @@ def register(app) -> None:
     @app.delete(f"{API_PREFIX}/categories/<item_name>")
     def cr_categories_forget(item_name):
         """删除某物品名的学习类别，恢复默认判定。"""
+        _set_operation("删除战果物品类别学习")
         category_kb.remove_override(item_name)
         return jsonify({"ok": True, "learned": category_kb.all_overrides()})
 
@@ -663,6 +673,7 @@ def register(app) -> None:
         merge_mode=merge 时将本次记录并入 matches 中指定（merge_case）的既有案件；
         merge_mode=new 时跳过同案提示、直接新增为一条新记录。
         """
+        _set_operation("保存战果记录")
         body = request.get_json(silent=True) or {}
         fields = normalize_fields(body.get("fields"))
         if not any(fields.get(k) for k in FIELD_KEYS):
@@ -731,6 +742,7 @@ def register(app) -> None:
         """修改某条台账记录的「案件名」：可输入新案件名，或改为既有案件的名称
         （选择既有案件时即并入该案，战果汇总「涉及 N 起」会随之按案件去重重算）。
         仅录入人本人或超级管理员可操作。"""
+        _set_operation("修改战果记录案件名")
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -752,6 +764,7 @@ def register(app) -> None:
 
     @app.delete(f"{API_PREFIX}/records/<rid>")
     def cr_delete(rid):
+        _set_operation("删除战果记录")
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -770,6 +783,7 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/records/<rid>/download")
     def cr_download(rid):
         """下载单条记录的键值对 JSON 文件。"""
+        _set_operation("下载战果记录")
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401

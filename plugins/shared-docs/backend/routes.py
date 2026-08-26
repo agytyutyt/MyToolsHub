@@ -31,6 +31,12 @@ try:
 except Exception:  # admin 插件缺失时兜底（理论上不会发生）
     _get_session_user = None
 
+try:
+    from jztools_admin.routes import set_operation as _set_operation
+except Exception:  # 主应用未提供日志辅助时兜底（理论上不会发生）
+    def _set_operation(op):
+        pass
+
 API_PREFIX = "/api/shared-docs"
 
 _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -507,6 +513,7 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/documents")
     def sd_create():
+        _set_operation("创建共享文档")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -559,6 +566,7 @@ def register(app) -> None:
     @app.post(f"{API_PREFIX}/documents/<doc_id>/content")
     def sd_save_content(doc_id):
         """保存内容（乐观锁）：base_version 与当前版本不一致时返回 409。"""
+        _set_operation("保存共享文档内容")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -595,6 +603,7 @@ def register(app) -> None:
 
         在线用户身份只认 session（忽略前端自报昵称），防冒名顶替。
         """
+        _set_operation("上报共享文档在线状态")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -613,6 +622,7 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/documents/<doc_id>/rename")
     def sd_rename(doc_id):
+        _set_operation("重命名共享文档")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -634,6 +644,7 @@ def register(app) -> None:
 
     @app.delete(f"{API_PREFIX}/documents/<doc_id>")
     def sd_delete(doc_id):
+        _set_operation("删除共享文档")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -656,6 +667,7 @@ def register(app) -> None:
         只改 level，保留原始 owner/unit/dept 组织信息（语义是「调整共享范围」，
         而不是「把文档搬到别的单位」）。
         """
+        _set_operation("调整共享文档范围")
         body = request.get_json(silent=True) or {}
         level = (body.get("level") or "").strip()
         if level not in ("unit", "department", "private"):
@@ -676,6 +688,7 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/documents/<doc_id>/export")
     def sd_export(doc_id):
         """导出为真实 Office 文件（.docx / .xlsx）。"""
+        _set_operation("导出共享文档")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -703,6 +716,7 @@ def register(app) -> None:
 
         可见即可编辑：能看到的单位/部门/私人文档（本人）均可导入覆盖。
         """
+        _set_operation("导入共享文档内容")
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401

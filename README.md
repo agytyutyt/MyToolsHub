@@ -353,7 +353,7 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 
 ## 访问日志
 
-系统自动记录所有 HTTP 请求，重点记录**使用者 IP 与所访问的功能**，用于使用统计与安全审计。
+系统自动记录所有 HTTP 请求，重点记录**登录用户名、客户端 IP、访问的功能与具体操作**，用于使用统计与安全审计。
 
 - **日志位置**：`logs/access.log`（首次请求时自动创建 `logs/` 目录）。
 - **滚动策略**：按天滚动（`TimedRotatingFileHandler`），保留最近 30 天，过期自动清理。
@@ -362,16 +362,16 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 ### 日志格式（TAB 分隔，每行一条）
 
 ```
-时间戳		级别		ip=客户端IP	method=方法	func=功能标签	path=路径	status=状态码	cost_ms=耗时	ua=浏览器标识
+时间戳		级别		ip=客户端IP	user=登录用户名	method=方法	func=功能标签	op=具体操作	path=路径	status=状态码	cost_ms=耗时	ua=浏览器标识
 ```
 
 示例（真实输出）：
 
 ```
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	method=GET	func=API: 工具列表	path=/api/tools	status=200	cost_ms=5	ua=Mozilla/5.0 ...
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	method=GET	func=工具壳页(地图标点)	path=/tool/map-marker	status=200	cost_ms=1	...
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	method=GET	func=插件(人物关系立体星图)/frontend/index.html	path=/plugin/character-graph/index.html	status=200	...
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	method=GET	func=后端接口: /api/character-graph/config	path=/api/character-graph/config	status=200	...
+2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=admin	method=POST	func=后端接口: /api/admin/units	op=新增单位	path=/api/admin/units	status=200	cost_ms=8	ua=Mozilla/5.0 ...
+2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=admin	method=GET	func=API: 工具列表	op=获取工具列表	path=/api/tools	status=200	cost_ms=5	...
+2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=admin	method=POST	func=后端接口: /api/notice-board/announcements	op=发布公告	path=/api/notice-board/announcements	status=200	...
+2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=-	method=GET	func=插件(人物关系立体星图)/frontend/index.html	op=打开插件功能页	path=/plugin/character-graph/index.html	status=200	...
 ```
 
 ### 字段说明
@@ -379,12 +379,18 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | 字段 | 说明 |
 | --- | --- |
 | `ip` | 客户端真实 IP；兼容反向代理，优先取 `X-Forwarded-For` 首段 |
+| `user` | 当前登录用户名；未登录为 `-`（登录接口本身记登录者，登录前的匿名请求记 `-`） |
 | `method` | HTTP 方法（GET / POST / …） |
 | `func` | 功能标签，自动解析：`首页` / `API: 工具列表` / `API: 工具详情(工具名)` / `工具壳页(工具名)` / `插件(工具名)/frontend/...` / `后端接口: /api/...` / `静态资源: ...` |
+| `op` | 具体操作标签：优先取插件/路由在请求处理中显式标记（如 `新增单位` / `修改密码` / `发布公告` / `删除共享文档` / `保存战果记录`），未标记时回退为核心路由映射或 `接口调用: 方法 路径` / `打开插件功能页` / `打开工具` 等兜底描述 |
 | `path` | 原始请求路径 |
 | `status` | HTTP 状态码 |
 | `cost_ms` | 请求处理耗时（毫秒） |
 | `ua` | 客户端 User-Agent（截断 120 字符） |
+
+### 插件如何标记具体操作
+
+插件后端可在路由处理器内调用 `set_operation("操作描述")`（从 `jztools_admin.routes` 导入，导入失败时兜底为空操作），访问日志即记录该描述；不标记时框架自动回退到路径/方法兜底，插件**禁止**自行落盘访问日志（规范 B-8，框架统一异步记录）。
 
 ---
 

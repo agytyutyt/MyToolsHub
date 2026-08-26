@@ -13,7 +13,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, g, jsonify, render_template, request, send_from_directory
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, "frozen", False):
@@ -204,6 +204,58 @@ def parse_feature():
     return f"静态资源: {path}"
 
 
+# 核心路由 → 具体操作 兜底映射（插件可显式 set_operation 覆盖）
+_OPERATION_MAP = {
+    ("GET", "/"): "访问首页",
+    ("GET", "/api/tools"): "获取工具列表",
+    ("POST", "/api/tools/reorder"): "调整首页工具排序",
+    ("GET", "/api/tools/visibility"): "查询工具可见性",
+    ("POST", "/api/tools/visibility"): "切换工具/分类可见性",
+}
+
+
+def parse_operation():
+    """解析「具体操作」标签：优先取插件显式标记（g._current_operation），
+    其次核心路由映射，最后基于路径/方法兜底。"""
+    try:
+        op = getattr(g, "_current_operation", None)
+        if op:
+            return op
+    except Exception:
+        pass
+    key = (request.method, request.path)
+    if key in _OPERATION_MAP:
+        return _OPERATION_MAP[key]
+    path = request.path
+    if path.startswith("/plugin/"):
+        return "打开插件功能页"
+    if path.startswith("/tool/"):
+        return "打开工具"
+    if path.startswith("/api/"):
+        return f"接口调用: {request.method} {path}"
+    if path.startswith("/static/"):
+        return "加载静态资源"
+    return "访问页面"
+
+
+def get_current_user():
+    """当前登录用户信息（admin 插件提供 get_session_user）；匿名返回 None。
+
+    供日志记录 username 使用；admin 插件未加载时返回 None，不阻断请求。
+    静态资源请求不解析用户，减少不必要的文件 I/O。
+    """
+    if request.path.startswith("/static/"):
+        return None
+    try:
+        from jztools_admin.routes import get_session_user
+    except Exception:
+        return None
+    try:
+        return get_session_user()
+    except Exception:
+        return None
+
+
 @app.before_request
 def _log_start():
     request.environ["_req_start"] = time.perf_counter()
@@ -261,7 +313,7 @@ def _static_cache(response):
 
 @app.after_request
 def _log_response(response):
-    """记录本次请求：IP / 方法 / 功能 / 路径 / 状态 / 耗时 / UA。
+    """记录本次请求：用户名 / IP / 方法 / 功能 / 具体操作 / 路径 / 状态 / 耗时 / UA。
 
     注意：after_request 按注册逆序执行，本函数最后注册，会先于 gzip/缓存中间件
     被调用，因此日志记录的是压缩前的原始耗时与状态，不影响正确性。
@@ -275,11 +327,16 @@ def _log_response(response):
     start = request.environ.pop("_req_start", None)
     cost_ms = round((time.perf_counter() - start) * 1000) if start else -1
 
+    user = get_current_user()
+    username = user.get("username") if user else "-"
+
     access_logger.info(
-        "ip=%s\tmethod=%s\tfunc=%s\tpath=%s\tstatus=%s\tcost_ms=%s\tua=%s",
+        "ip=%s\tuser=%s\tmethod=%s\tfunc=%s\top=%s\tpath=%s\tstatus=%s\tcost_ms=%s\tua=%s",
         get_client_ip(),
+        username,
         request.method,
         parse_feature(),
+        parse_operation(),
         request.path,
         response.status_code,
         cost_ms,

@@ -27,7 +27,7 @@ from datetime import timedelta
 from functools import wraps
 
 from cryptography.fernet import Fernet
-from flask import jsonify, redirect, request, send_from_directory, session, url_for
+from flask import g, jsonify, redirect, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # 会话超时默认值（config/admin.json 的 session 节可覆盖）
@@ -374,6 +374,20 @@ def migrate_admin_hierarchy(cfg):
 
 # ===================== 会话与鉴权 =====================
 
+def set_operation(op):
+    """标记当前请求的「具体操作」标签（写入请求上下文 g）。
+
+    访问日志（app.py _log_response）在 after_request 时读取该标签，
+    使日志能记录诸如「新增单位 / 发布公告 / 修改密码」等具体操作；
+    未标记的请求回退到基于路径/方法的兜底描述。供各插件与本插件
+    路由处理器调用，用法：set_operation("新增单位")。
+    """
+    try:
+        g._current_operation = op
+    except Exception:
+        pass
+
+
 def get_session_user():
     """返回当前登录用户的展示信息，未登录返回 None。
 
@@ -624,6 +638,7 @@ def register(app):
     @app.post("/api/login")
     def admin_api_login():
         """登录校验：成功写入 session。"""
+        set_operation("登录系统")
         data = request.get_json(silent=True) or {}
         username = (data.get("username") or "").strip()
         password = data.get("password") or ""
@@ -646,12 +661,14 @@ def register(app):
     @app.post("/api/logout")
     def admin_api_logout():
         """退出登录：清空 session。"""
+        set_operation("退出登录")
         session.clear()
         return jsonify({"ok": True})
 
     @app.get("/api/session")
     def admin_api_session():
         """返回当前登录状态，供前端渲染登录 / 用户菜单。"""
+        set_operation("查询登录状态")
         return jsonify({"user": get_session_user()})
 
     @app.post("/api/account/password")
@@ -661,6 +678,7 @@ def register(app):
 
         修改后保持当前会话有效（session 只存 username，不存密码指纹），不强制重登。
         """
+        set_operation("修改密码")
         data = request.get_json(silent=True) or {}
         old_pwd = data.get("old_password") or ""
         new_pwd = data.get("new_password") or ""
@@ -706,6 +724,7 @@ def register(app):
 
         供公告板等插件选择可见范围；不含密码/身份证等敏感字段。
         """
+        set_operation("查询组织架构树")
         cfg = load_admin_config()
         tree = []
         for u in cfg.get("units", []):
@@ -735,6 +754,7 @@ def register(app):
     @app.get("/api/admin/summary")
     @login_required
     def admin_api_summary():
+        set_operation("查询后台总览")
         cfg = load_admin_config()
         info = get_session_user()
         counts = {
@@ -763,6 +783,7 @@ def register(app):
     @app.get("/api/admin/units")
     @permission_required("unit")
     def admin_api_units():
+        set_operation("查询单位列表")
         cfg = load_admin_config()
         return jsonify({"units": [
             {
@@ -778,6 +799,7 @@ def register(app):
     @app.post("/api/admin/units")
     @permission_required("unit")
     def admin_api_units_create():
+        set_operation("新增单位")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -799,6 +821,7 @@ def register(app):
     @app.put("/api/admin/units/<unit_id>")
     @permission_required("unit")
     def admin_api_units_update(unit_id):
+        set_operation("修改单位")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -817,6 +840,7 @@ def register(app):
     @app.delete("/api/admin/units/<unit_id>")
     @permission_required("unit")
     def admin_api_units_delete(unit_id):
+        set_operation("删除单位")
         cfg = load_admin_config()
         unit = find_unit(cfg, unit_id)
         if unit is None:
@@ -832,6 +856,7 @@ def register(app):
     @app.get("/api/admin/departments")
     @permission_required("department")
     def admin_api_departments():
+        set_operation("查询部门列表")
         cfg = load_admin_config()
         departments = []
         for unit in cfg.get("units", []):
@@ -852,6 +877,7 @@ def register(app):
     @app.post("/api/admin/departments")
     @permission_required("department")
     def admin_api_departments_create():
+        set_operation("新增部门")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         unit_id = (data.get("unit_id") or "").strip()
@@ -878,6 +904,7 @@ def register(app):
     @app.put("/api/admin/departments/<dept_id>")
     @permission_required("department")
     def admin_api_departments_update(dept_id):
+        set_operation("修改部门")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -907,6 +934,7 @@ def register(app):
     @app.delete("/api/admin/departments/<dept_id>")
     @permission_required("department")
     def admin_api_departments_delete(dept_id):
+        set_operation("删除部门")
         cfg = load_admin_config()
         found = find_dept(cfg, dept_id)
         if found is None:
@@ -923,6 +951,7 @@ def register(app):
     @app.get("/api/admin/users")
     @permission_required("user")
     def admin_api_users():
+        set_operation("查询人员列表")
         cfg = load_admin_config()
         role_map = {r["id"]: r["name"] for r in cfg.get("permissions", [])}
         users = []
@@ -958,6 +987,7 @@ def register(app):
     @app.post("/api/admin/users")
     @permission_required("user")
     def admin_api_users_create():
+        set_operation("新增人员")
         data = request.get_json(silent=True) or {}
         username = (data.get("username") or "").strip()
         name = (data.get("name") or "").strip()
@@ -1013,6 +1043,7 @@ def register(app):
     @app.put("/api/admin/users/<username>")
     @permission_required("user")
     def admin_api_users_update(username):
+        set_operation("修改人员")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -1063,6 +1094,7 @@ def register(app):
     @app.delete("/api/admin/users/<username>")
     @permission_required("user")
     def admin_api_users_delete(username):
+        set_operation("删除人员")
         cfg = load_admin_config()
         if username == get_session_user()["username"]:
             return jsonify({"error": "不能删除当前登录账号"}), 400
@@ -1079,6 +1111,7 @@ def register(app):
     @app.get("/api/admin/permissions")
     @permission_required("user")
     def admin_api_permissions():
+        set_operation("查询角色列表")
         cfg = load_admin_config()
         role_usage = {}
         for _unit, _dept, user in iter_users(cfg):
@@ -1095,6 +1128,7 @@ def register(app):
     @app.post("/api/admin/permissions")
     @permission_required("user")
     def admin_api_permissions_create():
+        set_operation("新增角色")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -1119,6 +1153,7 @@ def register(app):
     @app.put("/api/admin/permissions/<role_id>")
     @permission_required("user")
     def admin_api_permissions_update(role_id):
+        set_operation("修改角色")
         data = request.get_json(silent=True) or {}
         name = (data.get("name") or "").strip()
         if not name:
@@ -1141,6 +1176,7 @@ def register(app):
     @app.delete("/api/admin/permissions/<role_id>")
     @permission_required("user")
     def admin_api_permissions_delete(role_id):
+        set_operation("删除角色")
         cfg = load_admin_config()
         if any(u.get("role") == role_id for _u, _d, u in iter_users(cfg)):
             return jsonify({"error": "该角色已分配给人员，请先调整其角色"}), 400
