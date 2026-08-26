@@ -139,8 +139,8 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 ```
 
 > **首页卡片内容两级读取（名称 / 描述 / 图标 / 主题色 / 能力标签）**：
-> 1. **插件主动声明（方式一）**：插件后端若提供可选钩子 `home_card(app)`，主应用在每次启动注册时调用，返回值作为卡片展示字段的**最高优先级来源**（见 7.2 / 7.4）；
-> 2. **tools.json 兜底（方式二）**：插件未声明时，`name` / `description` 以 `config/tools.json` 为权威取值，插件目录 `manifest.json` 中若也写了这两个字段，仅作为**缺省回退**（便于把插件目录整体复制到其他项目、尚未在配置中补充名称时依然可用）；`icon` / `accent` / `features` 默认取 `manifest.json`。
+> 1. **插件主动声明（方式一）**：插件后端若提供可选钩子 `home_card()`，主应用在启动时登记该钩子，首页请求时于请求上下文内实时调用（可按当前登录用户权限返回动态内容），返回值作为卡片展示字段的**最高优先级来源**（见 7.2 / 7.4）；
+> 2. **tools.json 兜底（方式二）**：插件未提供钩子时，`name` / `description` 以 `config/tools.json` 为权威取值，插件目录 `manifest.json` 中若也写了这两个字段，仅作为**缺省回退**（便于把插件目录整体复制到其他项目、尚未在配置中补充名称时依然可用）；`icon` / `accent` / `features` 默认取 `manifest.json`。
 
 ---
 
@@ -532,24 +532,28 @@ def register(app):
 
 插件卡片展示内容有两种读取方式（可叠加）：
 
-- **方式一：插件主动声明（启动时）** —— 插件后端在 `plugins/<id>/backend/routes.py` 中提供可选钩子
-  `home_card(app)`，返回一个 dict，每次启动由主应用调用一次，作为首页卡片展示字段的**最高优先级来源**
-  （可覆盖 `config/tools.json` 与 `manifest.json` 中的同名项）。声明字段：`name` / `description` /
-  `icon` / `accent` / `features`（缺省字段自动回退到方式二）。示例：
+- **方式一：插件主动声明（请求时动态求值）** —— 插件后端在 `plugins/<id>/backend/routes.py` 中提供可选钩子
+  `home_card()`，主应用启动时登记该钩子，首页 `/api/tools` 请求时于请求上下文内实时调用（可按当前登录用户
+  权限返回动态卡片内容），结果作为首页卡片展示字段的**最高优先级来源**（可覆盖 `config/tools.json` 与
+  `manifest.json` 中的同名项）。声明字段：`name` / `description` / `icon` / `accent` / `features`
+  （缺省字段自动回退到方式二）。示例（`plugins/notice-board/backend/routes.py` 参考实现）：
 
   ```python
   def home_card(app=None):
-      """首页卡片内容声明：每次启动时被 register_plugin_backends() 调用。"""
-      return {
-          "name": "公告板",
-          "description": "暂无最新公告。",
-          "icon": "📢",
-          "accent": "#E8710A",
-          "features": ["最新公告", "可见范围发布"],
-      }
+      """首页卡片内容声明：每次请求时被主程序调用，可依据当前用户返回动态内容。"""
+      card = {"name": "公告板", "icon": "\U0001f4e2", "accent": "#E8710A",
+              "features": ["最新公告", "可见范围发布"]}
+      user = get_session_user()  # 在请求上下文内，可获取当前登录用户
+      if not user:
+          card["description"] = "暂无最新公告。"
+          return card
+      # 动态检索当前用户可见的最新公告，以「时间 + 公告内容」声明 description
+      latest = fetch_latest_readable(user)
+      card["description"] = f"{latest['time']} {latest['content']}" if latest else "暂无最新公告。"
+      return card
   ```
 
-  > 参考实现：`plugins/notice-board/backend/routes.py`。钩子异常不会阻断插件加载，声明失败时自动回退方式二。
+  > 参考实现：`plugins/notice-board/backend/routes.py`。钩子异常不会阻断插件加载，未提供钩子自动回退方式二。
 
 - **方式二：读取 tools.json（未声明时）** —— 插件未提供 `home_card(app)` 时，按 7.4 下方配置读取。
 

@@ -43,10 +43,11 @@ _TOOL_META_TTL = 2.0  # 秒
 _tool_meta_cache = None
 _tool_meta_cache_ts = 0.0
 
-# 插件主动声明的首页卡片内容 {插件id: {name, description, icon, accent, features, ...}}
-# 由 register_plugin_backends() 在启动时收集（插件后端提供可选钩子 home_card(app)），
-# 优先级高于 config/tools.json：插件声明了则用之，未声明则回退读取 tools.json。
-_plugin_home_cards = {}
+# 插件主动声明的首页卡片内容钩子 {插件id: home_card 可调用对象}
+# 由 register_plugin_backends() 在启动时收集；每次请求（如首页 /api/tools）时
+# 于请求上下文内调用，使插件能按当前登录用户权限动态声明卡片内容。
+# 优先级高于 config/tools.json：声明了则用之，未声明则回退读取 tools.json。
+_plugin_home_card_hooks = {}
 
 app = Flask(__name__)
 # 会话密钥兜底：admin 插件 register() 时会被 config/admin.json 中的持久化密钥覆盖
@@ -344,14 +345,31 @@ def get_plugin_dir(plugin_id):
     return os.path.join(PLUGINS_DIR, plugin_id)
 
 
+def _resolve_home_card(plugin_id):
+    """按当前请求上下文解析插件主动声明的首页卡片内容。
+
+    钩子 home_card() 在每次请求（如首页 /api/tools）时实时求值，使插件
+    能依据当前登录用户的权限返回动态卡片内容；未提供钩子、返回值非 dict
+    或求值异常时返回空 dict，由调用方回退读取 tools.json / manifest。
+    """
+    hook = _plugin_home_card_hooks.get(plugin_id)
+    if hook is None:
+        return {}
+    try:
+        result = hook()  # 在请求上下文内调用，插件可用 flask.request / get_session_user()
+        return result if isinstance(result, dict) else {}
+    except Exception:
+        return {}
+
+
 def get_aggregated_tools():
     """聚合后台配置与插件清单，生成前端可用的工具列表。
 
     首页卡片内容采用两级读取：
-    1. 插件主动声明（方式一）：插件后端在启动时通过可选钩子 home_card(app)
-       主动声明 name / description / icon / accent / features 等展示字段，
-       register_plugin_backends() 收集后此处作为最高优先级来源；
-    2. tools.json 兜底（方式二）：插件未声明时，name / description 取
+    1. 插件主动声明（方式一）：插件后端提供可选钩子 home_card()，启动时登记、
+       首页请求时于请求上下文内实时求值（可按当前登录用户权限返回动态内容），
+       结果作为卡片展示字段的最高优先级来源；
+    2. tools.json 兜底（方式二）：插件未提供钩子时，name / description 取
        config/tools.json（权威），icon / accent / features 取 manifest.json。
     """
     registry = load_registry()
@@ -373,7 +391,7 @@ def get_aggregated_tools():
             continue
         m = meta.get(item["id"], {})
         # 方式一：插件主动声明的卡片内容优先（未声明则为空 dict，走 tools.json 兜底）
-        card = _plugin_home_cards.get(item["id"]) or {}
+        card = _resolve_home_card(item["id"])
         tools.append({
             "id": manifest.get("id", item["id"]),
             "name": card.get("name") or m.get("name") or manifest.get("name", item["id"]),
@@ -423,16 +441,16 @@ def register_plugin_backends(app):
     每个插件在 plugins/<插件id>/backend/ 下提供 __init__.py 与 routes.py，
     后端代码随插件整体打包、随 enabled 配置启停 —— 一切皆插件。
 
-    插件若提供可选钩子 home_card(app)，则在注册后立即调用一次（每次启动
-    主动声明首页卡片内容），结果存入 _plugin_home_cards 供首页聚合使用；
-    未提供该钩子的插件，其卡片内容回退读取 config/tools.json（见
+    插件若提供可选钩子 home_card()，则启动时登记该钩子；首页 /api/tools
+    请求时于请求上下文内实时调用（可依据当前登录用户权限动态声明卡片内容）。
+    未提供钩子的插件，其卡片内容回退读取 config/tools.json（见
     get_aggregated_tools 的合并逻辑）。
 
     admin（管理后台）为核心基础设施插件：不随 enabled 启停，始终加载，
     保证登录鉴权 / 后台接口 / 工具访问控制一直可用。
     """
-    global _plugin_home_cards
-    _plugin_home_cards = {}  # 每次启动重新收集，避免跨重启残留旧声明
+    global _plugin_home_card_hooks
+    _plugin_home_card_hooks = {}  # 每次启动重新收集，避免跨重启残留旧钩子
 
     registry = load_registry()
     tools = list(registry.get("tools", []))
@@ -445,20 +463,13 @@ def register_plugin_backends(app):
         if callable(register):
             register(app)
             app.logger.info(f"已注册后端插件：{plugin_id}")
-            # 方式一：插件主动声明首页卡片内容（可选钩子，失败不阻断加载）
+            # 方式一：登记插件首页卡片内容声明钩子（每次请求实时求值，失败不阻断加载）
             hook = getattr(routes, "home_card", None)
             if callable(hook):
-                try:
-                    card = hook(app)
-                    if isinstance(card, dict):
-                        _plugin_home_cards[plugin_id] = card
-                        app.logger.info(f"插件 {plugin_id} 已主动声明首页卡片内容")
-                    else:
-                        app.logger.warning(
-                            f"插件 {plugin_id} home_card() 返回值应为 dict，已忽略"
-                        )
-                except Exception as e:
-                    app.logger.warning(f"插件 {plugin_id} home_card() 声明失败: {e}")
+                _plugin_home_card_hooks[plugin_id] = hook
+                app.logger.info(
+                    f"插件 {plugin_id} 提供 home_card() 首页卡片内容声明钩子"
+                )
             return True
         return False
 

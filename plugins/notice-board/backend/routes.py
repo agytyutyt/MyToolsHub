@@ -195,22 +195,37 @@ def _validate_targets(body):
 
 
 def home_card(app=None):
-    """首页卡片内容声明（读取方式一：插件主动声明）。
+    """首页卡片内容声明（读取方式一：插件主动声明，按当前登录用户动态生成）。
 
-    每次启动时由主应用 register_plugin_backends() 调用，返回的 dict 作为
-    首页卡片展示字段的最高优先级来源（覆盖 config/tools.json 同名项）。
-    声明字段：name / description / icon / accent / features。
+    主应用在首页 /api/tools 请求时于请求上下文内调用本钩子：插件根据
+    当前用户的可见范围检索最新一条可读公告，并以「时间 + 公告内容」声明
+    卡片 description（时间取发布时间的年月日时分，内容截断防卡片过长）；
+    无可读公告或未登录时回退静态文案。
 
-    注意：卡片上「最新一条公告」的实时内容仍由 frontend/js/home-card.js
-    按当前登录用户的可见性动态覆盖，本声明仅提供静态兜底文案。
+    前端 frontend/js/home-card.js 的客户端覆写已随本机制下线，卡片内容
+    统一由本钩子经主程序下发。
     """
-    return {
+    card = {
         "name": "公告板",
-        "description": "暂无最新公告。",
         "icon": "📢",
         "accent": "#E8710A",
         "features": ["最新公告", "可见范围发布"],
     }
+    user = _viewer()
+    if user is None:
+        card["description"] = "暂无最新公告。"
+        return card
+    items = [a for a in list_announcements() if _readable(user, a)]
+    if not items:
+        card["description"] = "暂无最新公告。"
+        return card
+    a = items[0]  # list_announcements 已按 created_at 倒序，首条即最新
+    when = (a.get("created_at") or "").strip()[:16]  # 2026-08-26 09:30
+    text = (a.get("content") or "").strip()
+    if len(text) > 60:
+        text = text[:60] + "…"
+    card["description"] = f"{when} {text}" if when else text
+    return card
 
 
 def register(app) -> None:
