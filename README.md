@@ -138,7 +138,9 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
         └─── 名称解析（日志）◀────────── backend/（启动时自动注册 Flask 路由）
 ```
 
-> **名称 / 描述优先级**：`config/tools.json` 中注册的 `name` / `description` 为权威取值；插件目录 `manifest.json` 中若也写了这两个字段，仅作为**缺省回退**（便于把插件目录整体复制到其他项目、尚未在配置中补充名称时依然可用）。
+> **首页卡片内容两级读取（名称 / 描述 / 图标 / 主题色 / 能力标签）**：
+> 1. **插件主动声明（方式一）**：插件后端若提供可选钩子 `home_card(app)`，主应用在每次启动注册时调用，返回值作为卡片展示字段的**最高优先级来源**（见 7.2 / 7.4）；
+> 2. **tools.json 兜底（方式二）**：插件未声明时，`name` / `description` 以 `config/tools.json` 为权威取值，插件目录 `manifest.json` 中若也写了这两个字段，仅作为**缺省回退**（便于把插件目录整体复制到其他项目、尚未在配置中补充名称时依然可用）；`icon` / `accent` / `features` 默认取 `manifest.json`。
 
 ---
 
@@ -524,9 +526,32 @@ def register(app):
 | `entry` | - | `index.html` | 前端入口页面，位于 `frontend/` 下 |
 | `features` | - | `[]` | 卡片上的能力标签（字符串数组） |
 
-> 展示用**名称 / 描述**建议统一写在 `config/tools.json`（7.4），manifest 中的这两个字段仅作为插件目录迁移到其他项目时的兜底，两者同时存在时**以配置为准**。
+> 展示用**名称 / 描述**建议统一写在 `config/tools.json`（7.4），manifest 中的这两个字段仅作为插件目录迁移到其他项目时的兜底；若插件后端提供了 `home_card(app)` 主动声明（见 7.4），则以其声明为准（两种方式并存时声明优先）。
 
 ### 7.4 注册插件到首页
+
+插件卡片展示内容有两种读取方式（可叠加）：
+
+- **方式一：插件主动声明（启动时）** —— 插件后端在 `plugins/<id>/backend/routes.py` 中提供可选钩子
+  `home_card(app)`，返回一个 dict，每次启动由主应用调用一次，作为首页卡片展示字段的**最高优先级来源**
+  （可覆盖 `config/tools.json` 与 `manifest.json` 中的同名项）。声明字段：`name` / `description` /
+  `icon` / `accent` / `features`（缺省字段自动回退到方式二）。示例：
+
+  ```python
+  def home_card(app=None):
+      """首页卡片内容声明：每次启动时被 register_plugin_backends() 调用。"""
+      return {
+          "name": "公告板",
+          "description": "暂无最新公告。",
+          "icon": "📢",
+          "accent": "#E8710A",
+          "features": ["最新公告", "可见范围发布"],
+      }
+  ```
+
+  > 参考实现：`plugins/notice-board/backend/routes.py`。钩子异常不会阻断插件加载，声明失败时自动回退方式二。
+
+- **方式二：读取 tools.json（未声明时）** —— 插件未提供 `home_card(app)` 时，按 7.4 下方配置读取。
 
 编辑 `config/tools.json`，在 `tools` 数组中增加一条引用；如需新分类，再在 `categories` 中声明：
 
@@ -553,18 +578,22 @@ def register(app):
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | `id` | ✅ | 插件 ID，与 `manifest.json` 及目录名一致 |
-| `name` | - | **展示名称**（配置为权威来源；缺省回退到 manifest，再回退到 `id`） |
-| `description` | - | **卡片说明文字**（配置为权威来源；缺省回退到 manifest） |
+| `name` | - | **展示名称**（插件 `home_card()` 声明优先；其次配置为权威来源；再回退 manifest，最后回退 `id`） |
+| `description` | - | **卡片说明文字**（插件 `home_card()` 声明优先；其次配置为权威来源；再回退 manifest） |
 | `category` | ✅ | 所属分类 ID（对应 `categories` 中的 `id`） |
 | `enabled` | - | 是否启用，`false` 时首页隐藏且后端不加载 |
 | `order` | - | 展示顺序（同分类内按此排序） |
 
 保存后刷新首页即生效，**无需重启服务、无需改框架代码**。只改 `name` / `description` 即可调整前台展示文案，不动插件目录。
 
+> 注意：若插件已通过 `home_card(app)` 主动声明了 `name` / `description` 等字段（方式一），
+> 该插件卡片将**以声明为准**，此时修改 `tools.json` 中对应字段不会生效；需移除插件中的
+> `home_card()` 钩子后，`tools.json` 才会重新接管（方式二）。
+
 ### 7.5 常见约定与注意事项
 
 1. **ID 规范**：`manifest.json` 的 `id`、目录名、`config/tools.json` 中的 `id` 三者必须一致。
-2. **展示名集中管理**：工具在前台展示的**名称 / 说明**统一写在 `config/tools.json`（配置为准）；manifest 中的同名段仅作回退，不建议两处维护不同文案。
+2. **展示名集中管理**：工具在前台展示的**名称 / 说明**统一写在 `config/tools.json`（配置为准）；manifest 中的同名段仅作回退，不建议两处维护不同文案。若插件需要通过代码主动声明卡片内容（动态生成或自描述），请在 `routes.py` 提供 `home_card(app)` 钩子（方式一），此时以声明为准。
 3. **资源隔离**：所有插件文件必须放在 `plugins/<id>/` 下，前端放 `frontend/`，后端放 `backend/`。主框架 `static/` 目录属于框架自身，不要混入插件资源。
 4. **目录穿越防护**：插件 ID 只允许 `[A-Za-z0-9_-]`，`/plugin/<id>/<path>` 由 `send_from_directory` 安全控制，不要用 `..`、`/` 等字符作 ID 或路径。
 5. **相对路径引用**：前端内部引用其他资源一律用相对路径（`./app.js`、`css/style.css`），不要硬编码 `/static/...` 之外的绝对路径。

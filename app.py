@@ -43,6 +43,11 @@ _TOOL_META_TTL = 2.0  # 秒
 _tool_meta_cache = None
 _tool_meta_cache_ts = 0.0
 
+# 插件主动声明的首页卡片内容 {插件id: {name, description, icon, accent, features, ...}}
+# 由 register_plugin_backends() 在启动时收集（插件后端提供可选钩子 home_card(app)），
+# 优先级高于 config/tools.json：插件声明了则用之，未声明则回退读取 tools.json。
+_plugin_home_cards = {}
+
 app = Flask(__name__)
 # 会话密钥兜底：admin 插件 register() 时会被 config/admin.json 中的持久化密钥覆盖
 app.config["SECRET_KEY"] = __import__("secrets").token_hex(32)
@@ -342,10 +347,12 @@ def get_plugin_dir(plugin_id):
 def get_aggregated_tools():
     """聚合后台配置与插件清单，生成前端可用的工具列表。
 
-    配置驱动注册原则：
-    - config/tools.json 决定哪些工具被展示、展示顺序与分类，同时是
-      「名称 / 描述」的权威来源（manifest.json 仅作为缺省回退）；
-    - 每个工具目录的 manifest.json 提供图标、主题色、入口与能力标签。
+    首页卡片内容采用两级读取：
+    1. 插件主动声明（方式一）：插件后端在启动时通过可选钩子 home_card(app)
+       主动声明 name / description / icon / accent / features 等展示字段，
+       register_plugin_backends() 收集后此处作为最高优先级来源；
+    2. tools.json 兜底（方式二）：插件未声明时，name / description 取
+       config/tools.json（权威），icon / accent / features 取 manifest.json。
     """
     registry = load_registry()
     manifests = load_manifests()
@@ -365,14 +372,20 @@ def get_aggregated_tools():
         if manifest is None:
             continue
         m = meta.get(item["id"], {})
+        # 方式一：插件主动声明的卡片内容优先（未声明则为空 dict，走 tools.json 兜底）
+        card = _plugin_home_cards.get(item["id"]) or {}
         tools.append({
             "id": manifest.get("id", item["id"]),
-            "name": m.get("name") or manifest.get("name", item["id"]),
-            "description": m.get("description") or manifest.get("description", ""),
-            "icon": manifest.get("icon", "🧩"),
-            "accent": manifest.get("accent", "#4285F4"),
+            "name": card.get("name") or m.get("name") or manifest.get("name", item["id"]),
+            "description": card.get("description")
+                if card.get("description") is not None
+                else (m.get("description") or manifest.get("description", "")),
+            "icon": card.get("icon") or manifest.get("icon", "🧩"),
+            "accent": card.get("accent") or manifest.get("accent", "#4285F4"),
             "entry": manifest.get("entry", "index.html"),
-            "features": manifest.get("features", []),
+            "features": card.get("features")
+                if card.get("features") is not None
+                else manifest.get("features", []),
             "category": category_map.get(item.get("category"), "未分类"),
             "category_id": item.get("category", ""),
             "order": item.get("order", 0),
@@ -410,9 +423,17 @@ def register_plugin_backends(app):
     每个插件在 plugins/<插件id>/backend/ 下提供 __init__.py 与 routes.py，
     后端代码随插件整体打包、随 enabled 配置启停 —— 一切皆插件。
 
+    插件若提供可选钩子 home_card(app)，则在注册后立即调用一次（每次启动
+    主动声明首页卡片内容），结果存入 _plugin_home_cards 供首页聚合使用；
+    未提供该钩子的插件，其卡片内容回退读取 config/tools.json（见
+    get_aggregated_tools 的合并逻辑）。
+
     admin（管理后台）为核心基础设施插件：不随 enabled 启停，始终加载，
     保证登录鉴权 / 后台接口 / 工具访问控制一直可用。
     """
+    global _plugin_home_cards
+    _plugin_home_cards = {}  # 每次启动重新收集，避免跨重启残留旧声明
+
     registry = load_registry()
     tools = list(registry.get("tools", []))
 
@@ -424,6 +445,20 @@ def register_plugin_backends(app):
         if callable(register):
             register(app)
             app.logger.info(f"已注册后端插件：{plugin_id}")
+            # 方式一：插件主动声明首页卡片内容（可选钩子，失败不阻断加载）
+            hook = getattr(routes, "home_card", None)
+            if callable(hook):
+                try:
+                    card = hook(app)
+                    if isinstance(card, dict):
+                        _plugin_home_cards[plugin_id] = card
+                        app.logger.info(f"插件 {plugin_id} 已主动声明首页卡片内容")
+                    else:
+                        app.logger.warning(
+                            f"插件 {plugin_id} home_card() 返回值应为 dict，已忽略"
+                        )
+                except Exception as e:
+                    app.logger.warning(f"插件 {plugin_id} home_card() 声明失败: {e}")
             return True
         return False
 

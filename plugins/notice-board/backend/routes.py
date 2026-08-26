@@ -194,6 +194,25 @@ def _validate_targets(body):
     return targets, None
 
 
+def home_card(app=None):
+    """首页卡片内容声明（读取方式一：插件主动声明）。
+
+    每次启动时由主应用 register_plugin_backends() 调用，返回的 dict 作为
+    首页卡片展示字段的最高优先级来源（覆盖 config/tools.json 同名项）。
+    声明字段：name / description / icon / accent / features。
+
+    注意：卡片上「最新一条公告」的实时内容仍由 frontend/js/home-card.js
+    按当前登录用户的可见性动态覆盖，本声明仅提供静态兜底文案。
+    """
+    return {
+        "name": "公告板",
+        "description": "暂无最新公告。",
+        "icon": "📢",
+        "accent": "#E8710A",
+        "features": ["最新公告", "可见范围发布"],
+    }
+
+
 def register(app) -> None:
     """插件入口：由 JZToolsHub 主应用在启动时调用。"""
     os.makedirs(DATA_DIR, exist_ok=True)

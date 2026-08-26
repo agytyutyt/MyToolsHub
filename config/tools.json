@@ -120,7 +120,7 @@
     {
       "id": "notice-board",
       "name": "公告板",
-      "description": "单位与部门公告发布与查看：管理员可按单位/部门范围发布公告，全员默认可见权限。",
+      "description": "暂无最新公告。",
       "category": "office",
       "enabled": true,
       "order": 4,
