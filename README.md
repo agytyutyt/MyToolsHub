@@ -34,7 +34,17 @@
 ## 快速开始
 
 ```bash
-pip install -r requirements.txt
+# 1. 安装主框架依赖（Flask + cryptography，管理后台加密存储所需）
+pip install Flask>=3.0 cryptography>=41.0
+
+# 2. 按需安装各插件后端依赖（无需全部安装，缺依赖的插件会优雅降级并在页面提示）
+#    核心必备：admin（Flask/cryptography，已含）
+pip install -r plugins/admin/backend/requirements.txt
+#    其他插件可选用插件自带 requirements 安装，例如：
+#    pip install -r plugins/character-graph/backend/requirements.txt
+#    pip install -r plugins/shared-docs/backend/requirements.txt
+
+# 3. 启动
 python app.py
 ```
 
@@ -53,7 +63,7 @@ python app.py
 > 存入 `config/admin.json`（加密密钥保存在 `config/.admin_key`，两者均已 gitignore）；
 > 该文件不存在时首次启动自动生成，请勿提交仓库。
 
-> 本仓库开发目标环境为 **Python 3.8**（`requirements.txt` 已将 Flask 锁定在 `>=3.0,<3.1`，兼容 3.8）。若使用本机安装的 3.8，启动命令为：
+> 本仓库开发目标环境为 **Python 3.8**（Flask 锁定 `>=3.0,<3.1`，兼容 3.8）。若使用本机安装的 3.8，启动命令为：
 > ```bash
 > C:\Users\yfjz\AppData\Local\Programs\Python\Python38\python.exe app.py
 > ```
@@ -67,11 +77,12 @@ python app.py
 | 后端 | Python 3.8 · Flask 3.0 |
 | 前端 | 原生 HTML / CSS / JS（Material Design 风格） |
 | 插件机制 | 目录扫描 + 配置文件驱动，前端 iframe 隔离，后端按需动态加载 |
-| 依赖 | 见 `requirements.txt`（Flask / requests / python-docx / pypdf / openpyxl / xlrd / qrcode / zfec / numpy / opencv-python） |
+| 依赖 | 主框架：Flask / cryptography；各插件后端依赖以 `plugins/<id>/backend/requirements.txt` 声明（见下表「内置插件一览」） |
 
 ```bash
-# 依赖安装（Python 3.8）
-C:\Users\yfjz\AppData\Local\Programs\Python\Python38\Scripts\pip.exe install -r requirements.txt
+# 依赖安装（Python 3.8）：先装主框架，再按需装插件依赖
+C:\Users\yfjz\AppData\Local\Programs\Python\Python38\Scripts\pip.exe install Flask cryptography
+C:\Users\yfjz\AppData\Local\Programs\Python\Python38\Scripts\pip.exe install -r plugins\admin\backend\requirements.txt
 ```
 
 ---
@@ -103,7 +114,7 @@ JZToolsHub/
 │   └── admin/                #   核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
 │       ├── manifest.json
 │       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
-│       └── backend/          #   routes.py：鉴权、后台接口、加密存储、工具访问拦截
+│       └── backend/          #   routes.py：鉴权、后台接口、加密存储、工具访问拦截、requirements.txt
 ├── static/
 │   ├── index.html            # 首页（大方块展示）
 │   ├── tool.html             # 工具外壳页（加载插件 iframe）
@@ -112,7 +123,9 @@ JZToolsHub/
 │       ├── main.js           # 首页渲染逻辑（读取 /api/tools）
 │       └── tool.js           # 外壳页加载插件逻辑
 ├── logs/                     # 访问日志（按天滚动，自动生成）
-└── requirements.txt
+└── config/
+    ├── tools.json            # ★ 后台配置：站点信息 + 分类 + 工具注册清单（含名称/说明/排序）+ 日志开关
+    └── admin.json            # ★ 管理后台数据（单位/部门/人员/角色，Fernet 加密存储，首启自动生成，gitignore）
 ```
 
 ---
@@ -729,7 +742,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 后端以 **PyInstaller 单目录可执行程序** 打包（免安装 Python / 依赖），前端保留源码便于快速修改。
 
-**产物结构**（`build-deploy.ps1` 生成，`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.0.zip`）：
+**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.0.zip`）：
 
 ```
 deploy\JZToolsHub\
@@ -748,17 +761,14 @@ deploy\JZToolsHub\
 3. 修改前端：编辑 `static\` 或 `plugins\<id>\frontend\` 下的文件后重启服务即生效；
 4. 端口 / 监听地址可用环境变量覆盖：`JZTOOLS_PORT`、`JZTOOLS_HOST`（默认 `0.0.0.0:5000`）。
 
-**重新打包**（需本机装有 Python 与依赖，PyInstaller 自动收集插件后端动态导入的
-`docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress`）：
-
-```powershell
-pip install -r requirements.txt pyinstaller
-powershell -ExecutionPolicy Bypass -File .\build-deploy.ps1
-```
+> `app.py` 已内置 PyInstaller「打包运行」分支（`frozen` 模式自动适配 `BASE_DIR`/静态资源路径，
+> 并以 **waitress** 多线程生产级 WSGI 服务器运行，禁用 debug/reloader）。
+> 构建脚本（`build-deploy.ps1`）与打包配置（`JZToolsHub.spec`）已从仓库移除，如需重新打包可
+> 自行恢复等价脚本；PyInstaller 会自动收集插件后端动态导入的
+> `docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress`。
 
 > 运行期数据（`config/admin.json`、`logs/`、`plugins/*/backend/data/`）写在 exe 同层目录，
 > 与 `_internal\` 编译产物分离：升级程序时仅替换 exe + `_internal\` 即可保留数据。
-> 打包运行使用 **waitress** 多线程生产级 WSGI 服务器（禁用 Flask debug/reloader）。
 
 ---
 
