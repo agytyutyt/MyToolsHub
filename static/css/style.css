@@ -277,54 +277,46 @@ body {
   .cat-nav-dot { width: 12px; height: 12px; }
 }
 
-/* ---------- Tool detail page ---------- */
-.tool-shell {
+/* ---------- Tool detail page：顶Bar + 插件主体全幅直出（与管理后台一致） ---------- */
+/* 锁定视口高度，让 .tool-stage 精确占据顶Bar以下全部空间，页面本身不滚动 */
+body.tool-body {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.tool-stage {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 24px;
   width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.tool-shell .tool-head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.tool-shell .tool-head .tool-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--md-radius-m);
-  background: rgba(var(--tool-accent-rgb, 66, 133, 244), .12);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-}
-
-.tool-shell .tool-head .tool-title {
-  font-size: 22px;
-  font-weight: 500;
-}
-
-.tool-shell .tool-head .tool-desc {
-  font-size: 14px;
-  color: var(--md-on-surface-variant);
-  margin-top: 2px;
+  min-height: 0;
 }
 
 .tool-frame {
   flex: 1;
   width: 100%;
-  min-height: 640px;
+  height: 100%;
+  min-height: 0;
   border: none;
-  border-radius: var(--md-radius-m);
   background: var(--md-surface);
-  box-shadow: var(--md-shadow-1);
+}
+
+/* 插件加载失败时的占位提示 */
+.tool-error {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--md-on-surface-variant);
+  font-size: 15px;
+}
+
+.tool-error .tool-error-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--md-on-surface);
 }
 
 /* ---------- 右下角悬浮球（⋮ 更多）+ 展开菜单 ---------- */
