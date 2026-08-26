@@ -1,8 +1,10 @@
 """公告板 —— JZToolsHub 后端插件路由。
 
 功能：
-- 管理员角色（role-admin）与超级管理员可发布公告，发布时选择可见范围：
+- 管理员角色（role-admin）与超级管理员可发布、修改公告，发布时选择可见范围：
   以树状结构勾选若干 单位 / 部门 / 用户，公告仅对这些对象可见；
+- 修改公告：管理员角色/超管可编辑其可见范围内的公告（标题/内容/可见范围），
+  保留创建归属四字段与创建时间，更新 updated_at；删除仍限创建者或超管；
 - 全体登录用户默认拥有本插件权限（tools.json 中 grant_all: true，
   由 admin 插件在会话信息中统一并入权限点），办案员仅可查看；
 - 公告按可见性规则过滤后展示：命中任一目标即可见
@@ -77,6 +79,11 @@ def _can_manage(user, ann):
     if user.get("super_admin"):
         return True
     return (ann.get("created_by") or "") == user.get("username")
+
+
+def _can_edit(user):
+    """修改权限：超级管理员或管理员角色（与发布权限一致），可修改其可见范围内的公告。"""
+    return _can_publish(user)
 
 
 def _hit_target(user, t):
@@ -194,6 +201,28 @@ def _validate_targets(body):
     return targets, None
 
 
+def _parse_ann_body():
+    """解析并校验发布/修改请求体的 标题 / 内容 / 可见范围。
+
+    返回 (title, content, targets, err)；err 非空时前三个值为空占位。
+    """
+    body = request.get_json(silent=True) or {}
+    title = str(body.get("title") or "").strip()
+    content = str(body.get("content") or "").strip()
+    if not title:
+        return "", "", None, "请输入公告标题"
+    if not content:
+        return "", "", None, "请输入公告内容"
+    if len(title) > MAX_TITLE_LEN:
+        return "", "", None, f"标题不能超过 {MAX_TITLE_LEN} 字"
+    if len(content) > MAX_CONTENT_LEN:
+        return "", "", None, f"内容不能超过 {MAX_CONTENT_LEN} 字"
+    targets, err = _validate_targets(body)
+    if err:
+        return "", "", None, err
+    return title, content, targets, None
+
+
 def home_card(app=None):
     """首页卡片内容声明（读取方式一：插件主动声明，按当前登录用户动态生成）。
 
@@ -268,6 +297,7 @@ def register(app) -> None:
                 "updated_at": ann.get("updated_at") or "",
                 "targets": ann.get("targets") or [],
                 "manageable": _can_manage(user, ann),
+                "editable": _can_edit(user),
             })
         return jsonify({"ok": True, "count": len(items), "items": items})
 
@@ -298,19 +328,7 @@ def register(app) -> None:
         if not _can_publish(user):
             return jsonify({"ok": False, "error": "仅管理员可发布公告"}), 403
 
-        body = request.get_json(silent=True) or {}
-        title = str(body.get("title") or "").strip()
-        content = str(body.get("content") or "").strip()
-        if not title:
-            return jsonify({"ok": False, "error": "请输入公告标题"}), 400
-        if not content:
-            return jsonify({"ok": False, "error": "请输入公告内容"}), 400
-        if len(title) > MAX_TITLE_LEN:
-            return jsonify({"ok": False, "error": f"标题不能超过 {MAX_TITLE_LEN} 字"}), 400
-        if len(content) > MAX_CONTENT_LEN:
-            return jsonify({"ok": False, "error": f"内容不能超过 {MAX_CONTENT_LEN} 字"}), 400
-
-        targets, err = _validate_targets(body)
+        title, content, targets, err = _parse_ann_body()
         if err:
             return jsonify({"ok": False, "error": err}), 400
 
@@ -328,6 +346,34 @@ def register(app) -> None:
             "targets": targets,
         }
         with _LOCK:
+            save_announcement(ann)
+        return jsonify({"ok": True, "id": ann["id"]})
+
+    @app.put(f"{API_PREFIX}/announcements/<aid>")
+    def nb_update(aid):
+        """修改公告：仅管理员角色/超管（须可读该公告）。
+
+        可改标题/内容/可见范围；保留创建归属四字段与 created_at，
+        记录 updated_at。不存在或不可见一律 404（规范 8.4）。
+        """
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
+        with _LOCK:
+            ann = load_announcement(aid)
+            if not ann or not _readable(user, ann):
+                return jsonify({"ok": False, "error": "公告不存在或已被删除"}), 404
+            if not _can_edit(user):
+                return jsonify({"ok": False, "error": "仅管理员可修改公告"}), 403
+
+            title, content, targets, err = _parse_ann_body()
+            if err:
+                return jsonify({"ok": False, "error": err}), 400
+
+            ann["title"] = title
+            ann["content"] = content
+            ann["targets"] = targets
+            ann["updated_at"] = _now()
             save_announcement(ann)
         return jsonify({"ok": True, "id": ann["id"]})
 

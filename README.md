@@ -307,6 +307,24 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 再次解析时的类别判定优先级：**用户已学习类别 > 大模型判定 > 本地规则判定**；
 不适用既有类别的新物品由大模型单独归类（未配置大模型时用本地规则兜底）。保存记录时也会把最终明细中的类别一并学习。
 
+**notice-board 插件后端接口**（公告板——按可见范围发布 / 修改 / 删除与查看公告）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/notice-board/status` | 依赖自检 |
+| `GET /api/notice-board/config` | 当前用户是否可发布/修改公告（`can_publish`） |
+| `GET /api/notice-board/announcements` | 公告列表 —— 仅返回当前用户可见的公告（单位=同单位 / 部门=同部门且同单位 / 用户=本人；超管可见全部）；条目含 `created_by` / `created_by_name` / `created_at` / `updated_at` / `targets` / `manageable`（可删除）/ `editable`（可修改） |
+| `GET /api/notice-board/latest` | 最新一条可见公告（首页卡片曾用；现卡片内容由插件 `home_card()` 声明） |
+| `POST /api/notice-board/announcements` | 发布公告 `{title, content, targets}` —— 仅管理员角色/超管；归属四字段取自 session；`targets` 为 `[{type: unit\|department\|user, id, uid?}]`（部门需带 `uid`=所属单位） |
+| `PUT /api/notice-board/announcements/<aid>` | 修改公告 `{title, content, targets}` —— 仅管理员角色/超管（须可读该公告）；保留创建归属与 `created_at`，更新 `updated_at`；不可读一律 404 |
+| `DELETE /api/notice-board/announcements/<aid>` | 删除公告 —— 仅创建者或超管；不可读一律 404 |
+
+> 公告以 JSON 一公告一文件保存在 `plugins/notice-board/backend/data/`（已 gitignore）。
+> **首页卡片动态声明**：首页插件卡片内容支持两级读取 —— 插件后端提供可选钩子 `home_card()`
+> 时（启动登记、请求时实时求值，可按当前登录用户权限返回动态内容）以声明为准；未提供钩子时
+> 回退读取 `config/tools.json`（name/description）+ `manifest.json`（icon/accent/features）。
+> 公告板 `home_card()` 按当前用户可见范围取最新公告，以「时间 + 标题」首行、换行展示公告内容。
+
 `GET /api/tools` 返回结构示例：
 
 ```json
@@ -623,8 +641,10 @@ def register(app):
 | 共享文档 · 私人 | U 是超管，或 `X.created_by == n(U)` |
 | 战果记录（本人视图） | U 是超管，或 `X.created_by == n(U)` |
 | 战果记录（本部门视图） | 本人视图全部 + `X.department_id == d(U)` 且 `X.unit_id == u(U)` |
+| 公告板 | U 是超管，或命中公告 `targets` 中任一目标（单位=同单位 / 部门=同部门且同单位 / 用户=本人） |
 
 **写操作约束**：重命名 / 删除 / 改归属等管理操作仅创建者或超级管理员；协作编辑内容（共享文档内容保存）"可见即可编辑"。
+**公告板例外**：发布与**修改**为管理员角色或超管（修改须可读该公告），删除仍限创建者或超管。
 
 **标准取用样板**：
 
@@ -659,6 +679,7 @@ def current_user_or_none():
 | qr-video-decode | dev | ✅ | ✅ | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
 | shared-docs | office | ✅ | ✅ | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、版本冲突提示、`.docx` / `.xlsx` 导入导出 |
 | case-report | police | ✅ | ✅ | 输入收网情况报告 → 抽取 时间/主办大队/案件名/抓获人数/缴获物品 → 键值对 JSON 本地台账 |
+| notice-board | office | ✅ | ✅ | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；首页卡片经 `home_card()` 动态声明最新可读公告（时间+标题+换行+内容） |
 
 ---
 

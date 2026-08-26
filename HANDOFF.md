@@ -1,8 +1,8 @@
 # HANDOFF.md — 战果录入插件交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-08-21（战果录入插件已合入 main 并 push 至 origin/main；先后包含：
-> 基础插件 `c891d0e` + 本日追加的「同案合并 / 台账改案件名 / 案件筛选侧边栏」功能，均已提交并推送）
+> 最后更新：2026-08-26（分支 `PluginDesign`：首页卡片内容两级读取 + 公告板动态声明 / 编辑功能，
+> 提交 `04ca21f` / `e8428ca` / `69bfd06` 已合入本分支，本轮改动与文档更新待提交）
 
 ---
 
@@ -79,6 +79,30 @@
   案件筛选/拼音排序亦单独验证（3 个拼音序案件 + 数字开头案件排前、
   `?case=` 过滤台账与汇总、引号写法过滤命中）。
 
+### 追加（2026-08-26）：首页卡片两级读取 + 公告板动态声明 / 编辑功能
+
+在分支 `PluginDesign` 上完成，已提交 `04ca21f` / `e8428ca` / `69bfd06`，本轮改动（编辑功能 + 文档更新）待提交。
+
+- **首页插件卡片内容两级读取（app.py）**：
+  - 方式一：插件后端提供可选钩子 `home_card()`，`register_plugin_backends()` 启动时登记，
+    首页 `/api/tools` 请求时于请求上下文内实时调用（`_resolve_home_card()`），可按当前登录
+    用户权限动态声明 name/description/icon/accent/features；
+  - 方式二：未提供钩子时回退读取 `config/tools.json`（name/description）+ `manifest.json`
+    （icon/accent/features）；
+  - 钩子异常不阻断加载，声明字段可部分提供（缺省字段自动回退）。
+- **公告板卡片动态声明**（`plugins/notice-board/backend/routes.py::home_card()`）：
+  - 按当前用户可见范围取最新一条可读公告，以「时间 + 标题」首行 + 换行 + 内容 声明卡片；
+  - 下线原前端 `frontend/js/home-card.js` 客户端覆写（已删除），首页卡片统一由后端声明；
+  - `.tool-desc` 增加 `white-space: pre-line` 渲染换行。
+- **公告板公告修改功能**（管理员角色/超管）：
+  - 新增 `PUT /api/notice-board/announcements/<aid>`：改标题/内容/可见范围，保留创建归属与
+    `created_at`，更新 `updated_at`；不可读 404、非管理员 403；
+  - 列表条目新增 `editable` 字段，卡片「编辑」按钮复用发布对话框（标题「编辑公告」/按钮「保存」）；
+  - 提取 `_parse_ann_body()` 共享发布/修改校验。
+- **验证**：Flask test client 全流程通过（发布→列表 editable→PUT 修改→非管理员 403/404、
+  created_at 保留、updated_at 更新）；`node --check` 通过。
+- **git**：分支 `PluginDesign`，未 push。
+
 ## 4. 当前状态 / 卡点
 
 - **git**：`main` 已与 `origin/main` 同步（`c891d0e` + 本轮「同案合并/改案件名/案件筛选侧边栏」改动均已提交并 push，用户已授权）。
@@ -152,3 +176,6 @@
   m.register_plugin_backends(m.app); c = m.app.test_client()
   # POST /api/case-report/parse {text} → 轮询 result/<task_id>；GET /api/case-report/aggregate
   ```
+- **notice-board 插件**：`/api/notice-board/announcements`（GET/POST/PUT/DELETE），
+  `home_card()` 钩子在 `plugins/notice-board/backend/routes.py`，首页卡片动态声明按用户权限
+  取最新可读公告（时间+标题+换行+内容）；前端资源版本号已到 `v=4`。

@@ -1,5 +1,7 @@
 /* 公告板 —— 前端逻辑
- * - 全员可查看（grant_all 默认赋权）；发布按钮仅对管理员角色/超管显示；
+ * - 全员可查看（grant_all 默认赋权）；发布/编辑仅对管理员角色/超管开放；
+ * - 编辑：管理员对可见范围内的公告可改标题/内容/可见范围（卡片「编辑」按钮），
+ *   复用发布对话框，提交 PUT；删除仍限创建者或超管；
  * - 发布对话框左右结构：左侧标题与内容，右侧可见范围；
  * - 可见范围为三段式：左=单位→部门→用户树（可多选勾选），
  *   中=「选择」按钮（把勾选项加入右侧），右=已选对象框（可逐项移除）；
@@ -48,6 +50,7 @@ let targets = [];                  // 已选可见范围 [{type, id, uid?}]
 let expandedUnits = {};            // 单位节点展开状态
 let expandedDepts = {};            // 部门节点展开状态
 let deletingId = null;             // 待删除公告 id
+let editingId = null;              // 待编辑公告 id（非空时对话框为编辑模式）
 
 const keyOf = (t) => `${t.type}:${t.id}`;
 
@@ -75,6 +78,7 @@ async function loadOrgTree() {
       }
     }
     renderTree();
+    renderSelList();   // 组织树就绪后重绘已选框，让编辑模式预填的展示名正确解析
   } catch (_) {
     $("scopeTree").innerHTML = '<div class="tree-empty">组织架构加载失败</div>';
   }
@@ -347,6 +351,17 @@ function buildCard(item) {
     Object.assign(document.createElement("time"), { textContent: item.created_at || "" }),
     Object.assign(document.createElement("span"), { className: "spacer" }),
   );
+  if (item.editable) {
+    const edit = document.createElement("button");
+    edit.className = "ann-edit";
+    edit.textContent = "编辑";
+    edit.title = "修改标题/内容/可见范围";
+    edit.addEventListener("click", (e) => {
+      e.stopPropagation();   // 阻止冒泡：点编辑不应触发卡片「查看全文」
+      openEditDialog(item);
+    });
+    meta.appendChild(edit);
+  }
   if (item.manageable) {
     const del = document.createElement("button");
     del.className = "ann-del";
@@ -379,13 +394,30 @@ function closeDetail() {
   $("detailDialog").classList.add("hidden");
 }
 
-/* ==================== 发布 ==================== */
+/* ==================== 发布 / 编辑 ==================== */
 function openPublishDialog() {
+  editingId = null;
+  $("dialogTitle").textContent = "发布公告";
+  $("confirmBtn").textContent = "发布";
   $("annTitle").value = "";
   $("annContent").value = "";
   targets = [];
   checkedSet.clear();
   renderSelList();
+  refreshCheckedMarks();
+  $("dialog").classList.remove("hidden");
+  setTimeout(() => $("annTitle").focus(), 50);
+}
+
+function openEditDialog(item) {
+  editingId = item.id;
+  $("dialogTitle").textContent = "编辑公告";
+  $("confirmBtn").textContent = "保存";
+  $("annTitle").value = item.title || "";
+  $("annContent").value = item.content || "";
+  targets = (item.targets || []).map((t) => ({ ...t }));
+  checkedSet.clear();
+  renderSelList();   // 展示名依赖 NAME_MAP，loadOrgTree 异步完成后会重绘一次
   refreshCheckedMarks();
   $("dialog").classList.remove("hidden");
   setTimeout(() => $("annTitle").focus(), 50);
@@ -401,13 +433,23 @@ async function confirmPublish() {
   const btn = $("confirmBtn");
   btn.disabled = true;
   try {
-    await api(API + "/announcements", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, content, targets }),
-    });
+    const payload = { title, content, targets };
+    if (editingId) {
+      await api(`${API}/announcements/${encodeURIComponent(editingId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      toast("公告已保存");
+    } else {
+      await api(API + "/announcements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      toast("公告已发布");
+    }
     closePublishDialog();
-    toast("公告已发布");
     loadList();
   } catch (e) {
     toast(e.message, true);

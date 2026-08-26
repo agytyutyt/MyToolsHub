@@ -165,6 +165,18 @@ body {
 }
 .ann-del:hover { color: var(--error); background: rgba(217, 48, 37, .08); }
 
+.ann-edit {
+  border: none;
+  background: none;
+  color: var(--on-surface-variant);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-family: inherit;
+}
+.ann-edit:hover { color: var(--primary); background: rgba(11, 87, 208, .08); }
+
 /* ---------- 空状态 ---------- */
 .empty {
   text-align: center;

@@ -75,7 +75,7 @@
       "description": "上传文档（笔录/报告），调用大模型自动提取人物与关系，生成 3D 星点图。",
       "category": "office",
       "enabled": true,
-      "order": 3
+      "order": 4
     },
     {
       "id": "map-marker",
@@ -107,7 +107,7 @@
       "description": "多人共同编辑 Word 与 Excel 文档，实时同步、在线用户、版本冲突提示，支持导入/导出 .docx / .xlsx。",
       "category": "office",
       "enabled": true,
-      "order": 1
+      "order": 2
     },
     {
       "id": "case-report",
@@ -115,7 +115,7 @@
       "description": "输入公安某部门某案件的收网情况报告，自动提取时间/主办大队/案件名/抓获人数/缴获物品，以键值对 JSON 本地化存档。",
       "category": "office",
       "enabled": true,
-      "order": 2
+      "order": 3
     },
     {
       "id": "notice-board",
@@ -123,7 +123,7 @@
       "description": "暂无最新公告。",
       "category": "office",
       "enabled": true,
-      "order": 4,
+      "order": 1,
       "grant_all": true
     }
   ]
