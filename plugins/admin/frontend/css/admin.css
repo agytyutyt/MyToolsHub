@@ -83,7 +83,6 @@ select.admin-input {
 .admin-btn {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   padding: 10px 18px;
   font-size: 14px;
   font-weight: 500;
@@ -95,6 +94,10 @@ select.admin-input {
   cursor: pointer;
   text-decoration: none;
   transition: background var(--md-transition), box-shadow var(--md-transition);
+}
+
+.admin-btn > * + * {
+  margin-left: 8px;
 }
 
 .admin-btn:hover {
@@ -165,9 +168,12 @@ select.admin-input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
   flex-wrap: wrap;
   margin-bottom: 20px;
+}
+
+.admin-head > * + * {
+  margin-left: 16px;
 }
 
 .admin-head h1 {
@@ -201,13 +207,15 @@ select.admin-input {
 .user-menu {
   display: flex;
   align-items: center;
-  gap: 8px;
+}
+
+.user-menu > * + * {
+  margin-left: 8px;
 }
 
 .user-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   width: 28px;              /* 默认只露出蓝色圆（头像） */
   height: 40px;             /* 固定高度：悬浮展开胶囊时顶栏高度不变，页面不抖动 */
   flex-shrink: 0;           /* 防止被父级 flex 挤压变形 */
@@ -221,6 +229,10 @@ select.admin-input {
   cursor: default;
   white-space: nowrap;
   transition: width 0.22s ease, padding 0.22s ease, background 0.22s ease;
+}
+
+.user-chip > * + * {
+  margin-left: 8px;
 }
 
 /* 悬浮：蓝色圆左移，向右伸出胶囊并展示完整名称 */
@@ -248,7 +260,10 @@ select.admin-input {
 .data-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+}
+
+.data-list > * + * {
+  margin-top: 10px;
 }
 
 .data-row {
@@ -275,10 +290,13 @@ select.admin-input {
 .data-row .row-title {
   display: flex;
   align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
   font-size: 16px;
   font-weight: 500;
+}
+
+.data-row .row-title > * + * {
+  margin-left: 10px;
 }
 
 .data-row .row-title .chip {
@@ -295,7 +313,10 @@ select.admin-input {
 .data-row .row-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+}
+
+.data-row .row-actions > * + * {
+  margin-left: 8px;
 }
 
 /* ===================== 表格 ===================== */
@@ -340,13 +361,19 @@ select.admin-input {
 .form-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+}
+
+.form-grid > * + * {
+  margin-top: 14px;
 }
 
 .form-grid .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+}
+
+.form-grid .field > * + * {
+  margin-top: 6px;
 }
 
 .form-grid .field label {
@@ -362,32 +389,40 @@ select.admin-input {
 .modal-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
   margin-top: 6px;
+}
+
+.modal-foot > * + * {
+  margin-left: 10px;
 }
 
 /* 权限模块勾选 */
 .module-check {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--md-outline-variant);
   border-radius: var(--md-radius-s);
 }
 
+.module-check > * + * {
+  margin-top: 8px;
+}
+
 .module-check label {
   display: flex;
   align-items: center;
-  gap: 8px;
   font-size: 14px;
   cursor: pointer;
+}
+
+.module-check label > * + * {
+  margin-left: 8px;
 }
 
 .module-check input[type="checkbox"] {
   width: 16px;
   height: 16px;
-  accent-color: var(--md-primary);
   cursor: pointer;
 }
 

@@ -72,11 +72,13 @@ async function render() {
     const data = await res.json();
 
     // 站点信息（标题 / 副标题 / 页脚）均来自 config/tools.json
-    document.title = data.site?.title || document.title;
-    document.getElementById('site-title').textContent = data.site?.title || '';
-    document.getElementById('hero-title').textContent = data.site?.title || '工具箱';
-    document.getElementById('hero-subtitle').textContent = data.site?.subtitle || '';
-    document.getElementById('footer').textContent = data.site?.footer || '';
+    // 注意：兼容 Chrome 72（不支持可选链 ?.，使用显式判空）
+    const site = data.site || {};
+    document.title = site.title || document.title;
+    document.getElementById('site-title').textContent = site.title || '';
+    document.getElementById('hero-title').textContent = site.title || '工具箱';
+    document.getElementById('hero-subtitle').textContent = site.subtitle || '';
+    document.getElementById('footer').textContent = site.footer || '';
 
     const tools = data.tools || [];
     if (tools.length === 0) {

@@ -48,15 +48,15 @@
       <div class="form-grid">
         <div class="field">
           <label for="f-unit">所属单位</label>
-          <select class="admin-input" id="f-unit">${unitOptionsHtml(dept?.unit_id || '')}</select>
+          <select class="admin-input" id="f-unit">${unitOptionsHtml((dept && dept.unit_id) || '')}</select>
         </div>
         <div class="field">
           <label for="f-name">部门名称</label>
-          <input class="admin-input" type="text" id="f-name" value="${esc(dept?.name || '')}" placeholder="如：技术部">
+          <input class="admin-input" type="text" id="f-name" value="${esc((dept && dept.name) || '')}" placeholder="如：技术部">
         </div>
         <div class="field">
           <label for="f-desc">描述（可选）</label>
-          <input class="admin-input" type="text" id="f-desc" value="${esc(dept?.description || '')}" placeholder="部门职责说明">
+          <input class="admin-input" type="text" id="f-desc" value="${esc((dept && dept.description) || '')}" placeholder="部门职责说明">
         </div>
         <div class="modal-foot">
           <button class="admin-btn" type="button" data-close>取消</button>

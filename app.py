@@ -698,6 +698,51 @@ def api_tools_visibility_save():
         return jsonify({"error": "category not found"}), 404
 
 
+# ===================== 系统托盘（仅打包运行） =====================
+
+def _tray_icon_image():
+    """生成托盘图标位图：64x64 主题蓝底 + 白色「JZ」。"""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (64, 64), "#4285F4")
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle((2, 2, 62, 62), radius=14, fill="#4285F4")
+    draw.rectangle((0, 0, 63, 63), outline="#3367D6", width=2)
+    draw.text((14, 12), "JZ", fill="white", font=None)
+    return img
+
+
+def run_tray_icon(host, port):
+    """在后台线程运行系统托盘图标（仅打包运行，PyInstaller console=False）。
+
+    - 左键双击：打开默认浏览器访问本站；
+    - 右键菜单：打开浏览器 / 退出服务（退出即结束进程）。
+    """
+    import webbrowser
+    import pystray
+
+    def _open_browser():
+        url = "http://127.0.0.1:%d" % port if host in ("0.0.0.0", "::") else "http://%s:%d" % (host, port)
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+
+    def _quit():
+        # 打包运行的 GUI 程序：直接结束进程即可（waitress 由 OS 回收）
+        os._exit(0)
+
+    try:
+        menu = pystray.Menu(
+            pystray.MenuItem("打开浏览器", lambda icon, item: _open_browser()),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("退出服务", lambda icon, item: _quit()),
+        )
+        icon = pystray.Icon("JZToolsHub", _tray_icon_image(), "JZ 工具箱", menu)
+        icon.run()
+    except Exception:
+        pass  # 托盘启动失败不阻断服务（后台静默运行）
+
+
 if __name__ == "__main__":
     setup_access_logging(app)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
@@ -715,6 +760,13 @@ if __name__ == "__main__":
             serve = None
     else:
         serve = None
+    if getattr(sys, "frozen", False):
+        # 打包运行：无控制台窗口，以系统托盘图标常驻后台（pystray 自带消息循环线程）
+        import threading
+        threading.Thread(
+            target=run_tray_icon, args=(host, port),
+            daemon=True, name="tray-icon",
+        ).start()
     try:
         if getattr(sys, "frozen", False) and serve is not None:
             serve(app, host=host, port=port, threads=8)

@@ -10,41 +10,27 @@
   --danger: #e53935;
   --radius: 12px;
   --shadow: 0 2px 10px rgba(15, 40, 60, 0.08);
-}
-
-* { box-sizing: border-box; }
-
-body {
+}* { box-sizing: border-box; }body {
   margin: 0;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
-}
-
-.hidden { display: none !important; }
-
-.view {
+}.hidden { display: none !important; }.view {
   max-width: 1080px;
   margin: 0 auto;
   padding: 24px 20px 60px;
-}
-
-/* ==================== 顶部 ==================== */
+}/* ==================== 顶部 ==================== */
 .page-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  gap: 16px;
+  
   flex-wrap: wrap;
   margin-bottom: 20px;
 }
-
-.page-title h1 { margin: 0; font-size: 26px; }
-.page-title .sub { margin: 6px 0 0; color: var(--text-2); font-size: 14px; }
-
-.head-actions { display: flex; gap: 8px; align-items: center; }
-
-.input, .select {
+/* Chrome<84 flex gap fallback *//* ==================== 顶部 ==================== */
+.page-head > * + * { margin-left: 16px; }.page-title h1 { margin: 0; font-size: 26px; }.page-title .sub { margin: 6px 0 0; color: var(--text-2); font-size: 14px; }.head-actions { display: flex;  align-items: center; }
+/* Chrome<84 flex gap fallback */.head-actions > * + * { margin-left: 8px; }.input, .select {
   height: 38px;
   padding: 0 12px;
   border: 1px solid var(--border);
@@ -53,10 +39,7 @@ body {
   background: var(--card);
   color: var(--text);
   outline: none;
-}
-.input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
-
-.btn {
+}.input:focus, .select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }.btn {
   height: 38px;
   padding: 0 16px;
   border: 1px solid var(--border);
@@ -67,18 +50,11 @@ body {
   cursor: pointer;
   white-space: nowrap;
   transition: background .15s, border-color .15s, color .15s;
-}
-.btn:hover { border-color: var(--accent); color: var(--accent-dark); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-
-.btn-primary {
+}.btn:hover { border-color: var(--accent); color: var(--accent-dark); }.btn:disabled { opacity: .5; cursor: not-allowed; }.btn-primary {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
-}
-.btn-primary:hover { background: var(--accent-dark); color: #fff; }
-
-/* ==================== 依赖提示 ==================== */
+}.btn-primary:hover { background: var(--accent-dark); color: #fff; }/* ==================== 依赖提示 ==================== */
 .deps {
   padding: 10px 14px;
   margin-bottom: 14px;
@@ -88,73 +64,44 @@ body {
   color: #8d6e00;
   font-size: 13px;
   line-height: 1.6;
-}
-
-/* ==================== 文档列表 ==================== */
-.doc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
-
-.doc-card {
+}/* ==================== 文档列表 ==================== */
+.doc-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }.doc-card {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
   box-shadow: var(--shadow);
   transition: transform .15s, box-shadow .15s;
-}
-.doc-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(15, 40, 60, 0.12); }
-
-.doc-card-head { display: flex; align-items: center; gap: 10px; }
-.doc-icon { font-size: 26px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--accent-light); }
-.doc-card h3 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.doc-meta { margin: 10px 0 12px; color: var(--text-2); font-size: 12px; line-height: 1.7; }
-.doc-meta .tag { display: inline-block; padding: 1px 8px; margin-right: 6px; border-radius: 10px; background: var(--accent-light); color: var(--accent-dark); font-size: 12px; }
-
-.doc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.doc-actions .btn { height: 32px; padding: 0 12px; font-size: 13px; }
-.doc-actions .btn.danger:hover { border-color: var(--danger); color: var(--danger); }
-
-.empty { text-align: center; color: var(--text-2); padding: 60px 0; font-size: 15px; }
-
-/* ==================== 编辑器视图 ==================== */
+}.doc-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(15, 40, 60, 0.12); }.doc-card-head { display: flex; align-items: center;  }
+/* Chrome<84 flex gap fallback */.doc-card-head > * + * { margin-left: 10px; }.doc-icon { font-size: 26px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: var(--accent-light); }.doc-card h3 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.doc-meta { margin: 10px 0 12px; color: var(--text-2); font-size: 12px; line-height: 1.7; }.doc-meta .tag { display: inline-block; padding: 1px 8px; margin-right: 6px; border-radius: 10px; background: var(--accent-light); color: var(--accent-dark); font-size: 12px; }.doc-actions { display: flex;  flex-wrap: wrap; }
+/* Chrome<84 flex gap fallback */.doc-actions > * + * { margin-left: 8px; }.doc-actions .btn { height: 32px; padding: 0 12px; font-size: 13px; }.doc-actions .btn.danger:hover { border-color: var(--danger); color: var(--danger); }.empty { text-align: center; color: var(--text-2); padding: 60px 0; font-size: 15px; }/* ==================== 编辑器视图 ==================== */
 .editor-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  
   flex-wrap: wrap;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 12px;
 }
-
-.doc-title { font-size: 18px; font-weight: 600; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.badge { padding: 2px 10px; border-radius: 10px; background: var(--accent-light); color: var(--accent-dark); font-size: 12px; }
-
-.users { display: flex; gap: 6px; flex-wrap: wrap; }
-.user-chip {
+/* Chrome<84 flex gap fallback *//* ==================== 编辑器视图 ==================== */
+.editor-bar > * + * { margin-left: 10px; }.doc-title { font-size: 18px; font-weight: 600; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.badge { padding: 2px 10px; border-radius: 10px; background: var(--accent-light); color: var(--accent-dark); font-size: 12px; }.users { display: flex;  flex-wrap: wrap; }
+/* Chrome<84 flex gap fallback */.users > * + * { margin-left: 6px; }.user-chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  
   padding: 2px 10px;
   border-radius: 12px;
   background: #e8f5e9;
   color: #2e7d32;
   font-size: 12px;
 }
-.user-chip::before { content: "●"; font-size: 10px; }
-
-.spacer { flex: 1; }
-
-.save-state { font-size: 13px; color: var(--text-2); min-width: 72px; text-align: right; }
-.save-state.ok { color: #2e7d32; }
-.save-state.err { color: var(--danger); }
-
-/* ==================== 冲突提示 ==================== */
+/* Chrome<84 flex gap fallback */.user-chip > * + * { margin-left: 4px; }.user-chip::before { content: "●"; font-size: 10px; }.spacer { flex: 1; }.save-state { font-size: 13px; color: var(--text-2); min-width: 72px; text-align: right; }.save-state.ok { color: #2e7d32; }.save-state.err { color: var(--danger); }/* ==================== 冲突提示 ==================== */
 .conflict {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  
   flex-wrap: wrap;
   padding: 12px 16px;
   margin-bottom: 12px;
@@ -164,13 +111,13 @@ body {
   color: #b71c1c;
   font-size: 14px;
 }
-.conflict-actions { display: flex; gap: 8px; }
-
-/* ==================== 工具栏 ==================== */
+/* Chrome<84 flex gap fallback *//* ==================== 冲突提示 ==================== */
+.conflict > * + * { margin-left: 12px; }.conflict-actions { display: flex;  }
+/* Chrome<84 flex gap fallback */.conflict-actions > * + * { margin-left: 8px; }/* ==================== 工具栏 ==================== */
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 6px;
+  
   flex-wrap: wrap;
   padding: 8px 12px;
   background: var(--card);
@@ -178,7 +125,8 @@ body {
   border-bottom: none;
   border-radius: var(--radius) var(--radius) 0 0;
 }
-.tool-btn {
+/* Chrome<84 flex gap fallback *//* ==================== 工具栏 ==================== */
+.toolbar > * + * { margin-left: 6px; }.tool-btn {
   min-width: 34px;
   height: 34px;
   padding: 0 10px;
@@ -188,12 +136,7 @@ body {
   font-size: 14px;
   cursor: pointer;
   color: var(--text);
-}
-.tool-btn:hover { background: var(--accent-light); color: var(--accent-dark); }
-.tool-btn:active { background: #b2dfdb; }
-.sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
-
-/* ==================== Word 编辑器 ==================== */
+}.tool-btn:hover { background: var(--accent-light); color: var(--accent-dark); }.tool-btn:active { background: #b2dfdb; }.sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }/* ==================== Word 编辑器 ==================== */
 .editor-area {
   min-height: 460px;
   padding: 24px 28px;
@@ -206,30 +149,15 @@ body {
   line-height: 1.9;
   overflow-y: auto;
   max-height: 72vh;
-}
-.editor-area:empty::before { content: attr(data-placeholder); color: #b0bec5; pointer-events: none; }
-.editor-area h1 { font-size: 26px; margin: 12px 0 8px; }
-.editor-area h2 { font-size: 22px; margin: 12px 0 8px; }
-.editor-area h3 { font-size: 18px; margin: 12px 0 8px; }
-.editor-area h4, .editor-area h5, .editor-area h6 { font-size: 16px; margin: 12px 0 8px; }
-.editor-area p, .editor-area div { margin: 6px 0; }
-.editor-area ul, .editor-area ol { margin: 6px 0; padding-left: 26px; }
-
-/* ==================== Excel 编辑器 ==================== */
-.excel-size { color: var(--text-2); font-size: 13px; }
-
-.excel-wrap {
+}.editor-area:empty::before { content: attr(data-placeholder); color: #b0bec5; pointer-events: none; }.editor-area h1 { font-size: 26px; margin: 12px 0 8px; }.editor-area h2 { font-size: 22px; margin: 12px 0 8px; }.editor-area h3 { font-size: 18px; margin: 12px 0 8px; }.editor-area h4, .editor-area h5, .editor-area h6 { font-size: 16px; margin: 12px 0 8px; }.editor-area p, .editor-area div { margin: 6px 0; }.editor-area ul, .editor-area ol { margin: 6px 0; padding-left: 26px; }/* ==================== Excel 编辑器 ==================== */
+.excel-size { color: var(--text-2); font-size: 13px; }.excel-wrap {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 0 0 var(--radius) var(--radius);
   box-shadow: var(--shadow);
   overflow: auto;
   max-height: 72vh;
-}
-
-.excel-grid { border-collapse: collapse; min-width: 100%; }
-.excel-grid th, .excel-grid td { border: 1px solid var(--border); }
-.excel-grid th.rowhead, .excel-grid th.colhead {
+}.excel-grid { border-collapse: collapse; min-width: 100%; }.excel-grid th, .excel-grid td { border: 1px solid var(--border); }.excel-grid th.rowhead, .excel-grid th.colhead {
   background: #eceff1;
   color: var(--text-2);
   font-size: 12px;
@@ -237,12 +165,7 @@ body {
   text-align: center;
   position: sticky;
   z-index: 2;
-}
-.excel-grid th.rowhead { left: 0; min-width: 44px; }
-.excel-grid th.colhead { top: 0; min-width: 80px; }
-.excel-grid tr:first-child th.colhead { z-index: 3; }
-
-/* 列宽拖拽手柄：固定在列头内（sticky 即定位祖先），始终显示一条分隔线 */
+}.excel-grid th.rowhead { left: 0; min-width: 44px; }.excel-grid th.colhead { top: 0; min-width: 80px; }.excel-grid tr:first-child th.colhead { z-index: 3; }/* 列宽拖拽手柄：固定在列头内（sticky 即定位祖先），始终显示一条分隔线 */
 .col-resize {
   position: absolute;
   right: 0;
@@ -251,8 +174,7 @@ body {
   width: 6px;
   cursor: col-resize;
   z-index: 4;
-}
-.col-resize::after {
+}.col-resize::after {
   content: "";
   position: absolute;
   top: 4px;
@@ -260,29 +182,19 @@ body {
   right: 2px;
   width: 1px;
   background: #b0bec5;
-}
-.col-resize:hover::after { background: var(--accent); width: 2px; right: 1px; }
-body.col-resizing,
-body.col-resizing * { user-select: none; cursor: col-resize; }
-.excel-grid td[contenteditable] {
+}.col-resize:hover::after { background: var(--accent); width: 2px; right: 1px; }body.col-resizing,
+body.col-resizing * { user-select: none; cursor: col-resize; }.excel-grid td[contenteditable] {
   min-width: 80px;
   min-height: 26px;
   padding: 4px 8px;
   font-size: 13px;
   outline: none;
   white-space: pre;
-}
-.excel-grid td[contenteditable]:hover { background: #f5faf9; }
-.excel-grid td[contenteditable]:focus { background: #fffde7; box-shadow: inset 0 0 0 2px var(--accent); }
-
-/* 滚动条 */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #cfd8dc; border-radius: 5px; }
-::-webkit-scrollbar-thumb:hover { background: #b0bec5; }
-
-/* ==================== 文档列表 Tab ==================== */
-.doc-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
-.doc-tab {
+}.excel-grid td[contenteditable]:hover { background: #f5faf9; }.excel-grid td[contenteditable]:focus { background: #fffde7; box-shadow: inset 0 0 0 2px var(--accent); }/* 滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }::-webkit-scrollbar-thumb { background: #cfd8dc; border-radius: 5px; }::-webkit-scrollbar-thumb:hover { background: #b0bec5; }/* ==================== 文档列表 Tab ==================== */
+.doc-tabs { display: flex;  margin-bottom: 14px; }
+/* Chrome<84 flex gap fallback *//* ==================== 文档列表 Tab ==================== */
+.doc-tabs > * + * { margin-left: 4px; }.doc-tab {
   padding: 8px 16px;
   border: 1px solid var(--border);
   border-radius: 8px 8px 0 0;
@@ -292,15 +204,12 @@ body.col-resizing * { user-select: none; cursor: col-resize; }
   color: var(--text-2);
   transition: color .15s, border-color .15s;
   border-bottom: none;
-}
-.doc-tab:hover { color: var(--accent-dark); }
-.doc-tab.active {
+}.doc-tab:hover { color: var(--accent-dark); }.doc-tab.active {
   color: var(--accent-dark);
   font-weight: 600;
   border-color: var(--accent);
   border-bottom-color: var(--card);
-}
-.tab-count {
+}.tab-count {
   display: inline-block;
   min-width: 18px;
   padding: 0 5px;
@@ -311,26 +220,17 @@ body.col-resizing * { user-select: none; cursor: col-resize; }
   font-size: 11px;
   line-height: 18px;
   text-align: center;
-}
-
-/* ==================== 归属徽标 ==================== */
-.scope-tag { margin-left: 4px; }
-.scope-tag.scope-unit { background: #e3f2fd; color: #1565c0; }
-.scope-tag.scope-department { background: #e8f5e9; color: #2e7d32; }
-.scope-tag.scope-private { background: #fff3e0; color: #e65100; }
-.doc-meta .owner { margin-left: 4px; font-size: 12px; color: var(--text-2); }
-
-/* ==================== 通用弹窗（与 case-report 同级） ==================== */
+}/* ==================== 归属徽标 ==================== */
+.scope-tag { margin-left: 4px; }.scope-tag.scope-unit { background: #e3f2fd; color: #1565c0; }.scope-tag.scope-department { background: #e8f5e9; color: #2e7d32; }.scope-tag.scope-private { background: #fff3e0; color: #e65100; }.doc-meta .owner { margin-left: 4px; font-size: 12px; color: var(--text-2); }/* ==================== 通用弹窗（与 case-report 同级） ==================== */
 .dialog-mask {
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   background: rgba(15, 30, 50, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
-}
-.dialog {
+}.dialog {
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
@@ -338,10 +238,8 @@ body.col-resizing * { user-select: none; cursor: col-resize; }
   width: min(420px, 92vw);
   max-height: 80vh;
   overflow: auto;
-}
-.dialog h3 { margin: 0 0 10px; font-size: 16px; color: var(--text); }
-.dialog .dl-body { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
-.dialog .dl-body input,
+}.dialog h3 { margin: 0 0 10px; font-size: 16px; color: var(--text); }.dialog .dl-body { display: flex; flex-direction: column;  margin-top: 6px; }
+/* Chrome<84 flex gap fallback */.dialog .dl-body > * + * { margin-top: 12px; }.dialog .dl-body input,
 .dialog .dl-body select {
   width: 100%;
   height: 40px;
@@ -351,18 +249,15 @@ body.col-resizing * { user-select: none; cursor: col-resize; }
   padding: 0 12px;
   background: var(--card);
   color: var(--text);
-}
-.dialog .dl-body select:focus, .dialog .dl-body input:focus {
+}.dialog .dl-body select:focus, .dialog .dl-body input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-light);
   outline: none;
-}
-.dialog .dl-label { font-size: 13px; color: var(--text-2); font-weight: 600; margin-bottom: 4px; }
-.dialog .muted { font-size: 12px; color: var(--text-2); margin: 4px 0 0; line-height: 1.5; }
-.dialog-actions {
+}.dialog .dl-label { font-size: 13px; color: var(--text-2); font-weight: 600; margin-bottom: 4px; }.dialog .muted { font-size: 12px; color: var(--text-2); margin: 4px 0 0; line-height: 1.5; }.dialog-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
+  
   margin-top: 16px;
   flex-wrap: wrap;
 }
+/* Chrome<84 flex gap fallback */.dialog-actions > * + * { margin-left: 10px; }

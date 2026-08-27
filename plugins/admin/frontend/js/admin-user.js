@@ -120,13 +120,13 @@
       <div class="form-grid">
         <div class="field">
           <label for="f-username">登录名</label>
-          <input class="admin-input" type="text" id="f-username" value="${esc(user?.username || '')}"
+          <input class="admin-input" type="text" id="f-username" value="${esc((user && user.username) || '')}"
                  ${user ? 'disabled' : ''} placeholder="字母/数字/_ . -">
           ${user ? '<span class="field-hint">登录名创建后不可修改</span>' : ''}
         </div>
         <div class="field">
           <label for="f-name">姓名</label>
-          <input class="admin-input" type="text" id="f-name" value="${esc(user?.name || '')}" placeholder="真实姓名">
+          <input class="admin-input" type="text" id="f-name" value="${esc((user && user.name) || '')}" placeholder="真实姓名">
         </div>
         <div class="field">
           <label for="f-password">密码 ${user ? '（留空保持不变）' : ''}</label>
@@ -134,19 +134,19 @@
         </div>
         <div class="field">
           <label for="f-unit">所属单位</label>
-          <select class="admin-input" id="f-unit">${unitOptionsHtml(user?.unit_id || '')}</select>
+          <select class="admin-input" id="f-unit">${unitOptionsHtml((user && user.unit_id) || '')}</select>
         </div>
         <div class="field">
           <label for="f-dept">所属部门</label>
-          <select class="admin-input" id="f-dept">${deptOptionsHtml(user?.unit_id || '', user?.department_id || '')}</select>
+          <select class="admin-input" id="f-dept">${deptOptionsHtml((user && user.unit_id) || '', (user && user.department_id) || '')}</select>
         </div>
         <div class="field">
           <label for="f-role">角色</label>
-          <select class="admin-input" id="f-role">${optionsHtml(roles, 'id', 'name', user?.role || '')}</select>
+          <select class="admin-input" id="f-role">${optionsHtml(roles, 'id', 'name', (user && user.role) || '')}</select>
         </div>
         <div class="field">
           <label for="f-idcard">身份证号码</label>
-          <input class="admin-input" type="text" id="f-idcard" value="${esc(user?.idcard || '')}"
+          <input class="admin-input" type="text" id="f-idcard" value="${esc((user && user.idcard) || '')}"
                  placeholder="18 位居民身份证号" autocomplete="off">
         </div>
         <div class="field" style="margin-top:4px;padding-top:14px;border-top:1px solid var(--md-outline-variant);">
@@ -335,11 +335,11 @@
     openModal(role ? '编辑角色' : '新建角色', '' +
       '<div class="form-grid">' +
       '<div class="field"><label for="rf-name">角色名称</label>' +
-      '<input class="admin-input" type="text" id="rf-name" value="' + esc(role?.name || '') + '" placeholder="如：办案员"></div>' +
+      '<input class="admin-input" type="text" id="rf-name" value="' + esc((role && role.name) || '') + '" placeholder="如：办案员"></div>' +
       '<div class="field"><label for="rf-desc">描述（可选）</label>' +
-      '<input class="admin-input" type="text" id="rf-desc" value="' + esc(role?.description || '') + '"></div>' +
+      '<input class="admin-input" type="text" id="rf-desc" value="' + esc((role && role.description) || '') + '"></div>' +
       '<div class="field"><label>可访问的管理模块（不勾选则为纯工具使用者，如办案员）</label>' +
-      '<div class="module-check" id="rf-modules">' + moduleChecksHtml(role?.modules) + '</div></div>' +
+      '<div class="module-check" id="rf-modules">' + moduleChecksHtml(role && role.modules) + '</div></div>' +
       '<div class="modal-foot"><button class="admin-btn" type="button" data-close>取消</button>' +
       '<button class="admin-btn primary" type="button" id="role-save">保存</button></div>' +
       '</div>', function (wrap) {

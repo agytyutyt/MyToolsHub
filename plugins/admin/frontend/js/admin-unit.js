@@ -39,11 +39,11 @@
       <div class="form-grid">
         <div class="field">
           <label for="f-name">单位名称</label>
-          <input class="admin-input" type="text" id="f-name" value="${esc(unit?.name || '')}" placeholder="如：某某总队">
+          <input class="admin-input" type="text" id="f-name" value="${esc((unit && unit.name) || '')}" placeholder="如：某某总队">
         </div>
         <div class="field">
           <label for="f-desc">描述（可选）</label>
-          <input class="admin-input" type="text" id="f-desc" value="${esc(unit?.description || '')}" placeholder="单位职责说明">
+          <input class="admin-input" type="text" id="f-desc" value="${esc((unit && unit.description) || '')}" placeholder="单位职责说明">
         </div>
         <div class="modal-foot">
           <button class="admin-btn" type="button" data-close>取消</button>

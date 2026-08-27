@@ -58,15 +58,15 @@
       <div class="form-grid">
         <div class="field">
           <label for="f-name">角色名称</label>
-          <input class="admin-input" type="text" id="f-name" value="${esc(role?.name || '')}" placeholder="如：普通成员">
+          <input class="admin-input" type="text" id="f-name" value="${esc((role && role.name) || '')}" placeholder="如：普通成员">
         </div>
         <div class="field">
           <label for="f-desc">描述（可选）</label>
-          <input class="admin-input" type="text" id="f-desc" value="${esc(role?.description || '')}">
+          <input class="admin-input" type="text" id="f-desc" value="${esc((role && role.description) || '')}">
         </div>
         <div class="field">
           <label>可访问的管理模块</label>
-          <div id="f-modules">${moduleChecksHtml(role?.modules)}</div>
+          <div id="f-modules">${moduleChecksHtml(role && role.modules)}</div>
         </div>
         <div class="modal-foot">
           <button class="admin-btn" type="button" data-close>取消</button>
