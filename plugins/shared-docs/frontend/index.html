@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>共享文档</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=5">
+  <link rel="stylesheet" href="./style.css?v=10">
 </head>
 <body>
   <!-- ==================== 文档列表视图 ==================== -->
@@ -21,13 +21,17 @@
     </header>
 
     <div id="deps" class="deps hidden"></div>
-    <div class="doc-tabs" id="doc-tabs">
-      <button type="button" class="doc-tab active" data-level="unit">本单位 <span class="tab-count" id="count-unit">0</span></button>
-      <button type="button" class="doc-tab" data-level="department">本部门 <span class="tab-count" id="count-dept">0</span></button>
-      <button type="button" class="doc-tab" data-level="private">我的 <span class="tab-count" id="count-mine">0</span></button>
+    <div class="doc-frame">
+      <div class="doc-tabs" id="doc-tabs">
+        <button type="button" class="doc-tab active" data-level="unit">本单位 <span class="tab-count" id="count-unit">0</span></button>
+        <button type="button" class="doc-tab" data-level="department">本部门 <span class="tab-count" id="count-dept">0</span></button>
+        <button type="button" class="doc-tab" data-level="private">我的 <span class="tab-count" id="count-mine">0</span></button>
+      </div>
+      <div class="doc-frame-body">
+        <div id="doc-list" class="doc-list"></div>
+        <div id="empty-tip" class="empty hidden">该范围下还没有文档，点击「＋ 新建」开始协作编辑</div>
+      </div>
     </div>
-    <div id="doc-list" class="doc-list"></div>
-    <div id="empty-tip" class="empty hidden">该范围下还没有文档，点击「＋ 新建」开始协作编辑</div>
   </div>
 
   <!-- ==================== 编辑器视图 ==================== -->
@@ -43,47 +47,49 @@
       <button id="btn-export" class="btn btn-primary">导出</button>
     </header>
 
-    <div id="conflict" class="conflict hidden">
-      <span>⚠️ 该文档已被其他用户更新，本地修改与最新版本冲突</span>
-      <div class="conflict-actions">
-        <button id="btn-discard" class="btn">丢弃本地修改</button>
-        <button id="btn-overwrite" class="btn btn-primary">覆盖保存</button>
+    <div class="doc-frame">
+      <div id="conflict" class="conflict hidden">
+        <span>⚠️ 该文档已被其他用户更新，本地修改与最新版本冲突</span>
+        <div class="conflict-actions">
+          <button id="btn-discard" class="btn">丢弃本地修改</button>
+          <button id="btn-overwrite" class="btn btn-primary">覆盖保存</button>
+        </div>
       </div>
-    </div>
 
-    <!-- Word 编辑器 -->
-    <div id="word-editor" class="editor hidden">
-      <div id="word-toolbar" class="toolbar">
-        <button data-cmd="bold" class="tool-btn" title="加粗"><b>B</b></button>
-        <button data-cmd="italic" class="tool-btn" title="斜体"><i>I</i></button>
-        <button data-cmd="underline" class="tool-btn" title="下划线"><u>U</u></button>
-        <span class="sep"></span>
-        <button data-block="h1" class="tool-btn" title="标题 1">H1</button>
-        <button data-block="h2" class="tool-btn" title="标题 2">H2</button>
-        <button data-block="h3" class="tool-btn" title="标题 3">H3</button>
-        <button data-block="p" class="tool-btn" title="正文">P</button>
-        <span class="sep"></span>
-        <button data-cmd="insertUnorderedList" class="tool-btn" title="无序列表">• 列表</button>
-        <button data-cmd="insertOrderedList" class="tool-btn" title="有序列表">1. 列表</button>
-        <span class="sep"></span>
-        <button data-cmd="undo" class="tool-btn" title="撤销">↩</button>
-        <button data-cmd="redo" class="tool-btn" title="重做">↪</button>
+      <!-- Word 编辑器 -->
+      <div id="word-editor" class="editor hidden">
+        <div id="word-toolbar" class="toolbar">
+          <button data-cmd="bold" class="tool-btn" title="加粗"><b>B</b></button>
+          <button data-cmd="italic" class="tool-btn" title="斜体"><i>I</i></button>
+          <button data-cmd="underline" class="tool-btn" title="下划线"><u>U</u></button>
+          <span class="sep"></span>
+          <button data-block="h1" class="tool-btn" title="标题 1">H1</button>
+          <button data-block="h2" class="tool-btn" title="标题 2">H2</button>
+          <button data-block="h3" class="tool-btn" title="标题 3">H3</button>
+          <button data-block="p" class="tool-btn" title="正文">P</button>
+          <span class="sep"></span>
+          <button data-cmd="insertUnorderedList" class="tool-btn" title="无序列表">• 列表</button>
+          <button data-cmd="insertOrderedList" class="tool-btn" title="有序列表">1. 列表</button>
+          <span class="sep"></span>
+          <button data-cmd="undo" class="tool-btn" title="撤销">↩</button>
+          <button data-cmd="redo" class="tool-btn" title="重做">↪</button>
+        </div>
+        <div id="word-area" class="editor-area" contenteditable="true" spellcheck="false" data-placeholder="开始输入，支持标题 / 加粗 / 斜体 / 下划线 / 列表…"></div>
       </div>
-      <div id="word-area" class="editor-area" contenteditable="true" spellcheck="false" data-placeholder="开始输入，支持标题 / 加粗 / 斜体 / 下划线 / 列表…"></div>
-    </div>
 
-    <!-- Excel 编辑器 -->
-    <div id="excel-editor" class="editor hidden">
-      <div class="toolbar">
-        <button id="excel-add-row" class="tool-btn" title="在末尾追加一行">＋ 行</button>
-        <button id="excel-del-row" class="tool-btn" title="删除最后一行">－ 行</button>
-        <button id="excel-add-col" class="tool-btn" title="在末尾追加一列">＋ 列</button>
-        <button id="excel-del-col" class="tool-btn" title="删除最后一列">－ 列</button>
-        <span class="sep"></span>
-        <span id="excel-size" class="excel-size"></span>
-      </div>
-      <div class="excel-wrap">
-        <table id="excel-grid" class="excel-grid"></table>
+      <!-- Excel 编辑器 -->
+      <div id="excel-editor" class="editor hidden">
+        <div class="toolbar">
+          <button id="excel-add-row" class="tool-btn" title="在末尾追加一行">＋ 行</button>
+          <button id="excel-del-row" class="tool-btn" title="删除最后一行">－ 行</button>
+          <button id="excel-add-col" class="tool-btn" title="在末尾追加一列">＋ 列</button>
+          <button id="excel-del-col" class="tool-btn" title="删除最后一列">－ 列</button>
+          <span class="sep"></span>
+          <span id="excel-size" class="excel-size"></span>
+        </div>
+        <div class="excel-wrap">
+          <table id="excel-grid" class="excel-grid"></table>
+        </div>
       </div>
     </div>
 
