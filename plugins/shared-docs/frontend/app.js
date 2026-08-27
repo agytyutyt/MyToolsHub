@@ -687,6 +687,20 @@
       .then(function () { input.value = ""; });
   }
 
+  /* ==================== 全屏切换 ==================== */
+  function toggleFullscreen() {
+    var isFs = false;
+    $$(".view").forEach(function (v) {
+      v.classList.toggle("fullscreen");
+      if (v.classList.contains("fullscreen")) isFs = true;
+    });
+    $$(".btn-fullscreen").forEach(function (b) {
+      b.classList.toggle("active", isFs);
+      b.title = isFs ? "退出全屏" : "全屏显示";
+      if (b.textContent.indexOf("全屏") > -1) b.textContent = isFs ? "⛶ 退出全屏" : "⛶ 全屏";
+    });
+  }
+
   /* ==================== 事件绑定 ==================== */
   function bindEvents() {
     $("#btn-create").addEventListener("click", openCreateModal);
@@ -729,6 +743,9 @@
     $("#btn-export").addEventListener("click", exportCurrent);
     $("#btn-import").addEventListener("click", function () { $("#file-input").click(); });
     $("#file-input").addEventListener("change", doImport);
+    $$(".btn-fullscreen").forEach(function (b) {
+      b.addEventListener("click", toggleFullscreen);
+    });
 
     $("#btn-discard").addEventListener("click", discardLocal);
     $("#btn-overwrite").addEventListener("click", overwriteLocal);

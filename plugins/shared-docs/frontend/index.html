@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>共享文档</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=10">
+  <link rel="stylesheet" href="./style.css?v=14">
 </head>
 <body>
   <!-- ==================== 文档列表视图 ==================== -->
@@ -16,6 +16,7 @@
         <p class="sub">多人共同编辑 Word 与 Excel 文档，实时同步、在线协作</p>
       </div>
       <div class="head-actions">
+        <button type="button" class="btn btn-fullscreen" title="全屏显示">⛶ 全屏</button>
         <button id="btn-create" class="btn btn-primary">＋ 新建</button>
       </div>
     </header>
@@ -44,6 +45,7 @@
       <div class="spacer"></div>
       <span class="save-state" id="save-state"></span>
       <button id="btn-import" class="btn">导入</button>
+      <button type="button" class="btn btn-fullscreen" title="全屏显示">⛶</button>
       <button id="btn-export" class="btn btn-primary">导出</button>
     </header>
 
@@ -150,6 +152,6 @@
   </div>
 
   <script src="/plugin/admin/js/admin-common.js"></script>
-  <script src="./app.js?v=5"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>
