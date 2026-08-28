@@ -433,3 +433,82 @@ select.admin-input {
   color: var(--md-on-surface-variant);
   font-size: 14px;
 }
+
+/* ===================== 系统设置（数据目录） ===================== */
+.settings-card {
+  max-width: 720px;
+  padding: 24px;
+  background: var(--md-surface);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-radius-l);
+  box-shadow: var(--md-shadow-1);
+}
+
+.settings-card h3 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.settings-desc {
+  margin: 0 0 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--md-on-surface-variant);
+}
+
+.settings-info {
+  padding: 14px 16px;
+  background: var(--md-surface-container-lowest, #fafafa);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-radius-s);
+}
+
+.info-row {
+  display: flex;
+  align-items: baseline;
+  font-size: 14px;
+}
+
+.info-row + .info-row {
+  margin-top: 10px;
+}
+
+.info-label {
+  flex: 0 0 88px;
+  color: var(--md-on-surface-variant);
+}
+
+.info-value {
+  font-family: Consolas, Monaco, monospace;
+  word-break: break-all;
+}
+
+.settings-form {
+  margin-top: 22px;
+}
+
+.settings-form label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.form-row {
+  display: flex;
+}
+
+.form-row > * + * {
+  margin-left: 8px;
+}
+
+.form-row .admin-input {
+  flex: 1;
+}
+
+.settings-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--md-on-surface-variant);
+}

@@ -39,8 +39,8 @@ except Exception:  # 主应用未提供日志辅助时兜底（理论上不会�
 
 API_PREFIX = "/api/shared-docs"
 
-_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-_DATA_DIR = os.path.join(_BACKEND_DIR, "data")
+import jztools_data
+_DATA_DIR = jztools_data.get_data_root_dir("plugins", "shared-docs", "data")
 
 _DOC_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 

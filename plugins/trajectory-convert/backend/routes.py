@@ -125,9 +125,9 @@ TASKS = {}
 TASKS_LOCK = threading.Lock()
 TASK_TTL_SECONDS = 30 * 60
 
-_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-_CONFIG_PATH = os.path.join(_BACKEND_DIR, "config.json")
-_TASK_DIR = os.path.join(_BACKEND_DIR, ".task_cache")
+import jztools_data
+_CONFIG_PATH = jztools_data.get_data_root_file("plugins", "trajectory-convert", "config.json")
+_TASK_DIR = jztools_data.get_data_root_dir("plugins", "trajectory-convert", ".task_cache")
 
 
 # ===================== 配置读取 =====================

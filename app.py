@@ -15,16 +15,34 @@ from datetime import datetime, timedelta
 
 from flask import Flask, g, jsonify, render_template, request, send_from_directory
 
+import jztools_data
+from jztools_data import get_data_root, get_data_root_dir
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, "frozen", False):
     # PyInstaller 打包运行：部署根目录 = exe 所在目录。
     # config / static / plugins / logs 均位于 exe 同层，前端源码可直接修改、
     # 配置与插件运行数据可读写（源码开发时保持 __file__ 所在目录不变）。
     BASE_DIR = os.path.dirname(sys.executable)
+# 数据根目录：用户可配置，默认 <用户目录>\.jztoolshub（见 jztools_data.py）。
+# 用户数据（tools.json / admin.json / 插件数据 / 日志）随数据根目录存放，
+# 程序整体替换升级时数据不丢失。CONFIG_PATH / LOG_DIR / LOG_FILE 在
+# init_data_root() 中按数据根目录重算。
+DATA_ROOT = None
 CONFIG_PATH = os.path.join(BASE_DIR, "config", "tools.json")
 PLUGINS_DIR = os.path.join(BASE_DIR, "plugins")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "access.log")
+
+
+def init_data_root():
+    """启动时初始化数据根目录：先迁移旧版程序目录中的用户数据，再重算关键路径。"""
+    global DATA_ROOT, CONFIG_PATH, LOG_DIR, LOG_FILE
+    jztools_data.migrate_legacy_app_data()
+    DATA_ROOT = get_data_root()
+    CONFIG_PATH = os.path.join(DATA_ROOT, "config", "tools.json")
+    LOG_DIR = os.path.join(DATA_ROOT, "logs")
+    LOG_FILE = os.path.join(LOG_DIR, "access.log")
 
 # 插件 ID 只允许出现在目录名中，防止目录穿越
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -744,6 +762,7 @@ def run_tray_icon(host, port):
 
 
 if __name__ == "__main__":
+    init_data_root()  # 迁移旧版程序目录数据 + 解析数据根目录（决定日志/配置位置）
     setup_access_logging(app)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)

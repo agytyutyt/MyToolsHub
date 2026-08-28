@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>系统设置 · 管理后台</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=12">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=1">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+</head>
+<body>
+  <header class="app-bar">
+    <a href="/" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title">JZ 工具箱 · 管理后台</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="user-menu" id="user-slot"></div>
+  </header>
+
+  <main class="admin-content" id="app">
+    <div class="admin-head">
+      <div>
+        <h1>系统设置</h1>
+        <div class="admin-sub">数据保存目录管理：数据目录支持迁移，升级替换程序文件夹时数据不丢失</div>
+      </div>
+      <a class="admin-btn" href="/admin">← 后台首页</a>
+    </div>
+
+    <div class="settings-card">
+      <h3>数据保存目录</h3>
+      <p class="settings-desc">
+        所有用户数据（管理配置、文档、公告、案件、日志等）均保存在此目录。
+        默认位于用户主目录下，更改后自动将旧目录数据迁移到新目录。
+      </p>
+
+      <div class="settings-info" id="info-root">
+        <div class="info-row">
+          <span class="info-label">当前目录</span>
+          <code class="info-value" id="cur-root">加载中…</code>
+        </div>
+        <div class="info-row">
+          <span class="info-label">默认目录</span>
+          <code class="info-value" id="default-root">-</code>
+        </div>
+        <div class="info-row">
+          <span class="info-label">占用空间</span>
+          <span class="info-value" id="usage-size">-</span>
+        </div>
+      </div>
+
+      <div class="settings-form">
+        <label for="new-root-input">更改数据目录</label>
+        <div class="form-row">
+          <input type="text" id="new-root-input" class="admin-input" placeholder="输入新的数据目录绝对路径（如 D:\JZData）" />
+          <button type="button" class="admin-btn primary" id="btn-change-root">更改并迁移</button>
+        </div>
+        <p class="settings-hint">新目录不存在将自动创建；已存在同名文件/目录不会覆盖。</p>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/plugin/admin/js/admin-common.js?v=1"></script>
+  <script src="/plugin/admin/js/admin-settings.js?v=1"></script>
+</body>
+</html>

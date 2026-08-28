@@ -38,8 +38,8 @@ except Exception:  # 主应用未提供日志辅助时兜底（理论上不会�
     def _set_operation(op):
         pass
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+import jztools_data
+DATA_DIR = jztools_data.get_data_root_dir("plugins", "notice-board", "data")
 API_PREFIX = "/api/notice-board"
 
 # 可发布公告的角色：超级管理员 + 管理员角色（role-admin / 「管理员」）

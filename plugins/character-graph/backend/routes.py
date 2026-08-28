@@ -27,9 +27,9 @@ try:
 except Exception:  # admin 插件缺失时兜底（理论上不会发生）
     _get_session_user = None
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
-PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
+import jztools_data
+CONFIG_FILE = jztools_data.get_data_root_file("plugins", "character-graph", "config.json")
+PROMPT_FILE = jztools_data.get_data_root_file("plugins", "character-graph", "prompt.json")
 API_PREFIX = "/api/character-graph"
 
 # 后台分析线程池：限制并发 LLM 任务数，防止大模型调用耗尽资源

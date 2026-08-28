@@ -697,7 +697,7 @@
     $$(".btn-fullscreen").forEach(function (b) {
       b.classList.toggle("active", isFs);
       b.title = isFs ? "退出全屏" : "全屏显示";
-      if (b.textContent.indexOf("全屏") > -1) b.textContent = isFs ? "⛶ 退出全屏" : "⛶ 全屏";
+      b.textContent = isFs ? "退出全屏" : "全屏";
     });
   }
 

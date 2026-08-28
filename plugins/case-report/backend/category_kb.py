@@ -11,8 +11,9 @@ import json
 import os
 import threading
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-KB_FILE = os.path.join(DATA_DIR, "item_categories.json")
+import jztools_data
+DATA_DIR = jztools_data.get_data_root_dir("plugins", "case-report", "data")
+KB_FILE = jztools_data.get_data_root_file("plugins", "case-report", "item_categories.json")
 
 _LOCK = threading.RLock()
 _cache = None  # {"map": {物品名: 类别}}

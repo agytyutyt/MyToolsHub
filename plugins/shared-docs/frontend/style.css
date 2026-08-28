@@ -251,7 +251,8 @@ body.col-resizing * { user-select: none; cursor: col-resize; }.excel-grid td[con
   border-radius: var(--radius);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
   padding: 20px 22px;
-  width: min(420px, 92vw);
+  width: 420px;
+  max-width: 92vw;
   max-height: 80vh;
   overflow: auto;
 }.dialog h3 { margin: 0 0 10px; font-size: 16px; color: var(--text); }.dialog .dl-body { display: flex; flex-direction: column;  margin-top: 6px; }

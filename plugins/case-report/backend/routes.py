@@ -53,10 +53,10 @@ except Exception:
     requests = None
     REQUESTS_AVAILABLE = False
 
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_FILE = os.path.join(PLUGIN_DIR, "config.json")
-PROMPT_FILE = os.path.join(PLUGIN_DIR, "prompt.json")
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+import jztools_data
+CONFIG_FILE = jztools_data.get_data_root_file("plugins", "case-report", "config.json")
+PROMPT_FILE = jztools_data.get_data_root_file("plugins", "case-report", "prompt.json")
+DATA_DIR = jztools_data.get_data_root_dir("plugins", "case-report", "data")
 API_PREFIX = "/api/case-report"
 
 # 后台解析线程池：限制并发大模型任务数

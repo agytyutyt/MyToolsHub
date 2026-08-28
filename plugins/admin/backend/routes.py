@@ -30,6 +30,8 @@ from cryptography.fernet import Fernet
 from flask import g, jsonify, redirect, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import jztools_data
+
 # 会话超时默认值（config/admin.json 的 session 节可覆盖）
 SESSION_IDLE_MINUTES = 30    # 空闲超时：连续这么久没有任何请求，自动登出
 SESSION_ABSOLUTE_HOURS = 12  # 绝对有效期：登录满这么久必须重新登录
@@ -37,9 +39,11 @@ SESSION_ABSOLUTE_HOURS = 12  # 绝对有效期：登录满这么久必须重新�
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FRONTEND_DIR = os.path.join(PLUGIN_DIR, "frontend")
 PROJECT_DIR = os.path.dirname(os.path.dirname(PLUGIN_DIR))
-CONFIG_PATH = os.path.join(PROJECT_DIR, "config", "tools.json")
-ADMIN_CONFIG_PATH = os.path.join(PROJECT_DIR, "config", "admin.json")
-ADMIN_KEY_PATH = os.path.join(PROJECT_DIR, "config", ".admin_key")
+# 用户数据统一存放于数据根目录（默认 <用户目录>\.jztoolshub，见 jztools_data.py）。
+# 升级时整体替换程序文件夹，数据保存在数据根目录中不丢失。
+CONFIG_PATH = jztools_data.get_data_root_file("config", "tools.json")
+ADMIN_CONFIG_PATH = jztools_data.get_data_root_file("config", "admin.json")
+ADMIN_KEY_PATH = jztools_data.get_data_root_file("config", ".admin_key")
 
 # 允许的权限模块（管理后台的四个子模块）
 ADMIN_MODULES = ("unit", "department", "user", "permission")
@@ -1186,4 +1190,63 @@ def register(app):
         cfg["permissions"] = [r for r in roles if r["id"] != role_id]
         save_admin_config(cfg)
         return jsonify({"ok": True})
+
+    # ---------------- 系统数据目录管理（仅超级管理员） ----------------
+
+    @app.get("/admin/settings")
+    @login_required
+    def admin_settings_page():
+        """数据目录设置页（仅超级管理员）。"""
+        info = get_session_user()
+        if not info or not info.get("super_admin"):
+            return redirect(url_for("admin_index"))
+        return send_from_directory(FRONTEND_DIR, "admin-settings.html")
+
+    @app.get("/api/admin/data-settings")
+    @login_required
+    def admin_api_data_settings():
+        """返回当前数据根目录与占用摘要，供数据目录设置页展示。"""
+        info = get_session_user()
+        if not info or not info.get("super_admin"):
+            return jsonify({"error": "仅超级管理员可查看数据目录设置"}), 403
+        set_operation("查询数据目录设置")
+        try:
+            summary = jztools_data.data_usage_summary()
+        except Exception:
+            summary = {"root": jztools_data.get_data_root(), "subdirs": [], "total_bytes": 0}
+        return jsonify({
+            "ok": True,
+            "data_root": summary["root"],
+            "default_data_root": jztools_data.default_data_root(),
+            "subdirs": summary["subdirs"],
+            "total_bytes": summary["total_bytes"],
+        })
+
+    @app.post("/api/admin/data-settings")
+    @login_required
+    def admin_api_data_settings_save():
+        """修改数据根目录：把旧目录数据整体迁移到新目录后持久化指针。
+
+        请求体：{ "data_root": "绝对路径", "migrate": true }
+        迁移采用「目标不存在则移动、已存在则跳过」策略，不会覆盖新目录已有数据。
+        """
+        info = get_session_user()
+        if not info or not info.get("super_admin"):
+            return jsonify({"error": "仅超级管理员可修改数据目录"}), 403
+        set_operation("修改数据目录")
+        data = request.get_json(silent=True) or {}
+        new_root = (data.get("data_root") or "").strip()
+        migrate = bool(data.get("migrate", True))
+        if not new_root:
+            return jsonify({"error": "请填写数据保存目录"}), 400
+        new_root = os.path.abspath(os.path.expanduser(new_root))
+        if not os.path.isabs(new_root):
+            return jsonify({"error": "数据保存目录必须是绝对路径"}), 400
+        try:
+            root, moved, err = jztools_data.set_data_root(new_root, migrate=migrate)
+        except Exception as e:
+            return jsonify({"error": f"设置数据目录失败：{e}"}), 500
+        if err:
+            return jsonify({"error": err}), 400
+        return jsonify({"ok": True, "data_root": root, "migrated": moved})
 
