@@ -26,8 +26,9 @@
 11. [内置插件一览](#内置插件一览)
 12. [轨迹数据与二维码闭环](#轨迹数据与二维码闭环)
 13. [打包部署（可上线程序）](#打包部署可上线程序)
-14. [故障排查](#故障排查)
-15. [后期接入真实后端](#后期接入真实后端)
+14. [项目更新与数据迁移](#项目更新与数据迁移)
+15. [故障排查](#故障排查)
+16. [后期接入真实后端](#后期接入真实后端)
 
 ---
 
@@ -50,18 +51,20 @@ python app.py
 
 浏览器访问 <http://localhost:5000> 即可看到首页。
 
-> **默认管理员账号：** `admin` / `admin123`，首次启动自动生成（`config/admin.json`）。
+> **默认管理员账号：** `admin` / `admin123`，首次启动自动生成（保存于数据根目录 `config/admin.json`）。
 > 登录后可访问管理后台 `/admin`，进行部门、人员、权限管理。
 > 登录状态在首页顶栏右侧显示；顶部用户菜单内可直接「修改密码」（原密码 + 新密码 ≥6 位）。
 > **强制登录（R2）**：未登录访问任意页面一律重定向到 `/login?next=…`，登录后原路返回；
 > 未登录调用任意 `/api/*` 一律返回 401 JSON（白名单仅保留 `/login`、`/api/login`、
 > `/api/logout`、`/api/session`、`/favicon.ico` 与无业务数据的静态资源）。
 > **会话超时（R1）**：连续 `session.idle_minutes` 分钟（默认 30）无任何请求，或登录满
-> `session.absolute_hours` 小时（默认 12）自动登出；可在 `config/admin.json` 顶层 `session`
-> 节调整（首启自动生成，缺省即上述默认值）。页面每 60 秒心跳探测一次登录状态，过期自动跳登录。
+> `session.absolute_hours` 小时（默认 12）自动登出；可在数据根目录 `config/admin.json` 顶层
+> `session` 节调整（首启自动生成，缺省即上述默认值）。页面每 60 秒心跳探测一次登录状态，过期自动跳登录。
 > **敏感数据加密：** 账号密码、身份证号、大模型 API Key 等以 Fernet 对称加密密文
-> 存入 `config/admin.json`（加密密钥保存在 `config/.admin_key`，两者均已 gitignore）；
+> 存入数据根目录 `config/admin.json`（加密密钥保存在同目录 `config/.admin_key`，两者均已 gitignore）；
 > 该文件不存在时首次启动自动生成，请勿提交仓库。
+> **用户数据目录：** 管理配置、日志与插件运行数据默认保存在 `<用户主目录>\.jztoolshub\`，
+> 不随程序文件夹一起被替换（见「项目更新与数据迁移」）；管理员可在后台「系统设置」中修改数据目录。
 
 > 本仓库开发目标环境为 **Python 3.8**（Flask 锁定 `>=3.0,<3.1`，兼容 3.8）。若使用本机安装的 3.8，启动命令为：
 > ```bash
@@ -122,10 +125,12 @@ JZToolsHub/
 │   └── js/
 │       ├── main.js           # 首页渲染逻辑（读取 /api/tools）
 │       └── tool.js           # 外壳页加载插件逻辑
+└── jztools_data.py           # ★ 数据根目录管理：解析/迁移用户数据目录（见「项目更新与数据迁移」）
+
+数据根目录（默认 <用户主目录>\.jztoolshub\，管理员可在后台「系统设置」中修改）：
+├── config/                   # tools.json（首启从程序目录模板复制）、admin.json、.admin_key
 ├── logs/                     # 访问日志（按天滚动，自动生成）
-└── config/
-    ├── tools.json            # ★ 后台配置：站点信息 + 分类 + 工具注册清单（含名称/说明/排序）+ 日志开关
-    └── admin.json            # ★ 管理后台数据（单位/部门/人员/角色，Fernet 加密存储，首启自动生成，gitignore）
+└── plugins/<id>/             # 各插件运行数据（data/、config.json、prompt.json、.task_cache/）
 ```
 
 ---
@@ -180,11 +185,11 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /plugin/<id>/<path>` | 插件前端静态资源（映射到 `plugins/<id>/frontend/`），目录穿越已拦截 |
 | `GET /api/tools` | 聚合后的工具列表（站点信息 + 分类 + 工具清单） |
 | `GET /api/tools/<id>` | 单个工具信息，不存在返回 404 |
-| `POST /api/tools/reorder` | 保存首页布局：请求体 `{categories: [分类id按显示顺序], tools: {分类id: [工具id…]}}`，按分类顺序重排 `categories`、按位置重写各工具的 `category` 与 `order` 并写回 `config/tools.json` |
+| `POST /api/tools/reorder` | 保存首页布局：请求体 `{categories: [分类id按显示顺序], tools: {分类id: [工具id…]}}`，按分类顺序重排 `categories`、按位置重写各工具的 `category` 与 `order` 并写回数据根目录 `config/tools.json` |
 | `GET /api/tools/visibility` | 返回全部分类与工具及启用状态（`enabled`），供「隐藏工具」浮窗使用（含已隐藏项） |
-| `POST /api/tools/visibility` | 切换启用：`{type: 'tool'\|'category', id, enabled}`，写回 `config/tools.json`（分类/工具各支持 `enabled` 字段） |
+| `POST /api/tools/visibility` | 切换启用：`{type: 'tool'\|'category', id, enabled}`，写回数据根目录 `config/tools.json`（分类/工具各支持 `enabled` 字段） |
 
-**登录 / 管理后台接口**（由 `admin` 插件提供，`config/admin.json` 存储单位 / 部门 / 人员 / 角色，层级：**单位(units) → 部门(departments) → 用户(users)**）：
+**登录 / 管理后台接口**（由 `admin` 插件提供，数据根目录 `config/admin.json` 存储单位 / 部门 / 人员 / 角色，层级：**单位(units) → 部门(departments) → 用户(users)**）：
 
 | 接口 | 说明 |
 | --- | --- |
@@ -268,7 +273,8 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `GET /api/shared-docs/documents/<id>/export` | 导出真实 Office 文件（Word→`.docx`、Excel→`.xlsx`） |
 | `POST /api/shared-docs/documents/<id>/import` | 上传 `.docx` / `.xlsx` / `.xls` 导入覆盖当前文档（可见即可编辑） |
 
-> 文档数据以 JSON 文件保存在 `plugins/shared-docs/backend/data/`（已 gitignore），
+> 文档数据以 JSON 文件保存在数据根目录 `plugins/shared-docs/data/`（已 gitignore，
+> 默认 `<用户主目录>\.jztoolshub\plugins\shared-docs\data\`），
 > 内容格式：Word 为块级结构（`blocks`：段落 / 标题 / 列表 + 富文本 runs），
 > Excel 为二维数组（`rows`）加可选列宽（`colWidths`，像素，0=自动）。
 > **历史文档迁移**：启动时自动给没有 `scope` 的存量文档补「私人 + 创建者 admin」，
@@ -297,7 +303,8 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 
 > 解析策略：配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全，
 > 未配置时自动回落「本地规则解析」（正则），开箱即用。
-> 台账以键值对 JSON 一记录一文件保存在 `plugins/case-report/backend/data/`（已 gitignore）。
+> 台账以键值对 JSON 一记录一文件保存在数据根目录 `plugins/case-report/data/`
+> （默认 `<用户主目录>\.jztoolshub\plugins\case-report\data\`，已 gitignore）。
 > **案件名实体对齐**：同一案件可能因写法差异出现不同名称（如 `"2.11"开设赌场案` 与
 > `2.11开设赌场案`）。保存/比较前会规整案件名（去掉引号、书名号、空白）；
 > 入库时自动检测同名案件并提示「并入 / 作为新案件保存」；
@@ -317,7 +324,7 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 
 **类别学习（持久化）**：解析结果先在界面展示为可编辑明细（类别 / 名称 / 数量 / 单位）。
 修改类别后系统自动把「物品名→类别」写入本地类别库
-（`plugins/case-report/backend/data/item_categories.json`，已 gitignore）。
+（数据根目录 `plugins/case-report/data/item_categories.json`，已 gitignore）。
 再次解析时的类别判定优先级：**用户已学习类别 > 大模型判定 > 本地规则判定**；
 不适用既有类别的新物品由大模型单独归类（未配置大模型时用本地规则兜底）。保存记录时也会把最终明细中的类别一并学习。
 
@@ -333,7 +340,8 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 | `PUT /api/notice-board/announcements/<aid>` | 修改公告 `{title, content, targets}` —— 仅管理员角色/超管（须可读该公告）；保留创建归属与 `created_at`，更新 `updated_at`；不可读一律 404 |
 | `DELETE /api/notice-board/announcements/<aid>` | 删除公告 —— 仅创建者或超管；不可读一律 404 |
 
-> 公告以 JSON 一公告一文件保存在 `plugins/notice-board/backend/data/`（已 gitignore）。
+> 公告以 JSON 一公告一文件保存在数据根目录 `plugins/notice-board/data/`
+> （默认 `<用户主目录>\.jztoolshub\plugins\notice-board\data\`，已 gitignore）。
 > **首页卡片动态声明**：首页插件卡片内容支持两级读取 —— 插件后端提供可选钩子 `home_card()`
 > 时（启动登记、请求时实时求值，可按当前登录用户权限返回动态内容）以声明为准；未提供钩子时
 > 回退读取 `config/tools.json`（name/description）+ `manifest.json`（icon/accent/features）。
@@ -368,9 +376,10 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 
 系统自动记录所有 HTTP 请求，重点记录**登录用户名、客户端 IP、访问的功能与具体操作**，用于使用统计与安全审计。
 
-- **日志位置**：`logs/access.log`（首次请求时自动创建 `logs/` 目录）。
+- **日志位置**：数据根目录 `logs/access.log`（首次请求时自动创建 `logs/` 目录；默认
+  `<用户主目录>\.jztoolshub\logs\access.log`）。
 - **滚动策略**：按天滚动（`TimedRotatingFileHandler`），保留最近 30 天，过期自动清理。
-- **启用开关**：`config/tools.json` → `site.logging`，默认 `true`；设为 `false` 即停止写日志。
+- **启用开关**：数据根目录 `config/tools.json` → `site.logging`，默认 `true`；设为 `false` 即停止写日志。
 
 ### 日志格式（TAB 分隔，每行一条）
 
@@ -742,17 +751,28 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 后端以 **PyInstaller 单目录可执行程序** 打包（免安装 Python / 依赖），前端保留源码便于快速修改。
 
-**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.0.zip`）：
+**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.2.zip`）：
 
 ```
 deploy\JZToolsHub\
 ├─ JZToolsHub.exe      # 后端可执行程序（双击或 start.bat 启动）
 ├─ _internal\          # 编译后的 Python 运行时 + Flask + 全部第三方依赖
 ├─ static\             # 首页前端源码（可修改，重启生效）
-├─ plugins\            # 插件：frontend/ 前端源码可改；backend/ 后端源码 + 运行期 data/
-├─ config\tools.json   # 工具注册清单（可改；admin.json 等首启自动生成）
-├─ logs\               # 访问日志（运行期写入）
+├─ plugins\            # 插件：frontend/ 前端源码可改；backend/ 后端源码
+├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录后改数据根目录副本）
+├─ docs\  README.md  HANDOFF.md
 └─ start.bat           # 一键启动脚本
+```
+
+**用户数据（不在程序目录）**：
+
+```
+<用户主目录>\.jztoolshub\        # 数据根目录（管理员可在「后台 → 系统设置」中修改）
+├─ config\                      # tools.json（工具注册/站点配置，首启从模板复制）
+│   ├─ admin.json               #   管理后台数据（单位/部门/人员/角色，Fernet 加密）
+│   └─ .admin_key               #   加密密钥（与密文同目录迁移）
+├─ logs\                        # 访问日志（按天滚动）
+└─ plugins\                     # 各插件运行数据（data/、config.json、prompt.json、.task_cache/）
 ```
 
 **使用**：
@@ -767,8 +787,56 @@ deploy\JZToolsHub\
 > 自行恢复等价脚本；PyInstaller 会自动收集插件后端动态导入的
 > `docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress`。
 
-> 运行期数据（`config/admin.json`、`logs/`、`plugins/*/backend/data/`）写在 exe 同层目录，
-> 与 `_internal\` 编译产物分离：升级程序时仅替换 exe + `_internal\` 即可保留数据。
+> **用户数据默认不在程序目录**（见下节「项目更新与数据迁移」）：管理配置
+> （`admin.json`/`.admin_key`）、访问日志、各插件运行数据均保存在**数据根目录**
+> （默认 `<用户主目录>\.jztoolshub\`），升级程序时只需替换 exe + `_internal\`（或整个文件夹），
+> 用户数据不会丢失。
+
+---
+
+## 项目更新与数据迁移
+
+**核心原则：用户数据保存在数据根目录（默认 `<用户主目录>\.jztoolshub\`），与程序文件夹分离。**
+
+数据根目录由 `jztools_data.py` 统一管理，可通过指针文件（`<用户主目录>\.jztoolshub.json` 主指针
++ 程序目录 `config\data_root.json` 备份指针）解析，管理员可在 **管理后台 → 系统设置** 中查看当前目录、
+修改数据目录，修改时自动把旧目录数据整体迁移到新目录。
+
+### 数据根目录内容
+
+| 数据 | 路径（相对数据根目录） | 说明 |
+| --- | --- | --- |
+| 工具注册 / 站点配置 | `config/tools.json` | 首启从程序目录 `config\tools.json` 模板复制，之后改数据根目录副本 |
+| 管理后台数据 | `config/admin.json` | 单位/部门/人员/角色，敏感字段 Fernet 加密 |
+| 加密密钥 | `config/.admin_key` | 与密文同目录迁移，两者必须一起移动 |
+| 访问日志 | `logs/` | 按天滚动，保留 30 天 |
+| 各插件运行数据 | `plugins/<插件id>/` | 共享文档 `data/`、公告板 `data/`、战果录入 `data/`+`config.json`+`prompt.json`、星图 `config.json`+`prompt.json`、轨迹转换 `config.json`+`.task_cache/` 等 |
+
+### 升级步骤（替换整个文件夹时数据不丢失）
+
+1. **停止旧服务**（托盘图标右键「退出服务」）。
+2. **备份**（可选但建议）：确认数据根目录存在且包含所需数据（`<用户主目录>\.jztoolshub\` 或管理员自设目录）。
+3. **替换程序文件夹**：用新版 `deploy\JZToolsHub\` 覆盖旧的程序文件夹（或删除旧文件夹后放入新版）。
+4. **启动新版**：双击 `start.bat`。启动时 `init_data_root()` 自动完成两件事——
+   - 若程序目录中残留旧版用户数据（`config/admin.json`、`logs/`、各插件 `backend/data/` 等），
+     自动迁移到数据根目录（幂等，目标已存在则不覆盖）；
+   - 若数据根目录缺失 `tools.json`，从程序目录模板复制。
+5. **验证**：登录后台，确认账号、文档、公告、战果等数据完整；打开「系统设置」确认数据目录正确。
+
+> **旧版（数据在程序目录内）升级**：新版首次启动会把程序目录里的 `admin.json`/`.admin_key`/`logs/`
+> 与各插件 `backend/data/`、`config.json`、`prompt.json`、`.task_cache` 自动搬进数据根目录，
+> 之后即可放心整体替换程序文件夹。首次迁移前请勿删除旧程序目录。
+
+### 管理员修改数据目录
+
+1. 登录后台 → 右上角「⚙️ 设置」→ 系统设置页。
+2. 查看「当前目录 / 默认目录 / 占用空间」。
+3. 输入新的绝对路径 → 点「更改并迁移」：系统把 `config/`、`logs/`、`plugins/` 三个子目录
+   整体迁移到新目录（目标已存在的同名文件/目录不会覆盖），并更新主/备份指针。
+4. 迁移完成后新目录即生效，旧目录中的文件已搬走。
+
+> 修改数据目录会同时移动加密密钥（`.admin_key`）与密文（`admin.json`），保证账号数据可正常解密。
+> 迁移是「移动」而非「复制」，完成后旧目录不再保留原数据（子目录整体搬走）。
 
 ---
 
@@ -785,6 +853,9 @@ deploy\JZToolsHub\
 | 地图标点空白/地图不显示 | 在「⚙️ 配置」中填写有效的高德 Web 服务 Key 并保存 |
 | 共享文档导入/导出不可用 | 确认已安装 `python-docx / openpyxl`（Word/Excel）与 `xlrd`（.xls）；页面顶部依赖提示会列出缺失项 |
 | 端口被占用 | 修改 `app.py` 末尾 `port=5000`，或先停止旧进程再启动 |
+| 升级后数据不见了 | 确认数据根目录（`<用户主目录>\.jztoolshub\` 或管理员自设目录）未被误删；旧程序目录里的 `admin.json`、插件 `backend/data/` 等会在新版首次启动时自动迁移到数据根目录，升级前请勿删除旧目录 |
+| 登录提示密码错误（升级后） | 升级会连同加密密钥（`.admin_key`）一起迁移；若仅复制了 `admin.json` 而未迁移 `.admin_key`，解密会失败。请在旧程序目录或旧数据根目录中找到 `.admin_key` 一并迁入数据根目录 `config/` 下 |
+| 首页/后台图标显示异常 | 前端 emoji 图标依赖系统 emoji 字体；若浏览器过旧或系统字体缺失，请升级浏览器或系统字体（详见「打包部署」），后台也可在「系统设置」确认数据目录正常 |
 
 ---
 

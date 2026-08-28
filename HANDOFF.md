@@ -1,7 +1,7 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-08-26（`main` 已与 `origin/main` 同步，最新提交 `ea320f3`）
+> 最后更新：2026-08-28（`main` 已与 `origin/main` 同步，最新提交 `76526fc`）
 
 ---
 
@@ -20,9 +20,11 @@
 
 - 分支：`main`，**已与 `origin/main` 同步**（用户已授权推送）。
 - 最近提交：
-  - `ea320f3` feat: 访问日志记录用户名与具体操作（`ip/user/method/func/op/path/status/cost_ms/ua`）
-  - `669bcf5` chore: 移除打包部署相关文件（`JZToolsHub.spec` / `build-deploy.ps1` / 根 `requirements.txt`）
-  - `3c1818a` ~ `c891d0e`：公告板动态声明/编辑、首页卡片两级读取、插件设计规范等历史功能
+  - `76526fc` chore: 清理遗留（case-report prompt 行尾、trajectory-convert config.json 迁数据根目录）
+  - `1c4ddb3` feat: 数据目录可配置化——新增 `jztools_data.py` 集中管理数据根目录 + 后台系统设置页 + 启动自动迁移
+  - `3faa9aa` feat: 共享文档宽度 vw 自适应 + 全屏切换
+  - `9f483ad` feat: 共享文档 UI 优化（Excel 换行、Material 外框、Chrome 风格 Tab、按钮等宽）
+  - 更早：访问日志、打包部署移除、公告板动态声明等历史功能
 - 依赖改为**按插件声明**：根 `requirements.txt` 已删除，各插件在
   `plugins/<id>/backend/requirements.txt` 声明自身依赖（缺依赖插件优雅降级并在页面提示）。
   `app.py` 仍保留 PyInstaller `frozen` 分支 + waitress 生产 WSGI，但构建脚本/打包配置已不在仓库。
@@ -41,22 +43,39 @@
 | 地图标点 | `plugins/map-marker/` | 纯前端 | — | 高德地图标点、二维码识别回放、移动轨迹 |
 | Base64 / JSON 格式化 / 取色器 / MD5 | `plugins/{base64,json-formatter,color-picker,md5-generator}/` | 纯前端 | — | 示例/基础工具（tools.json 中 `enabled` 控制显隐） |
 
-## 4. 最近一次功能：访问日志增强（`ea320f3`）
+## 4. 最近一次功能：数据目录可配置化（`1c4ddb3`）
 
-在既有异步访问日志（`logs/access.log`，按天滚动保留 30 天，`config/tools.json` → `site.logging` 开关）
-基础上新增两个字段，全部请求统一记录：
+**目标**：系统数据（管理配置 / 日志 / 各插件运行数据）默认保存到计算机用户目录，管理员可改，
+更换数据目录后自动迁移旧数据 —— 整体替换程序文件夹升级时用户数据不丢失。
 
-```
-时间戳  级别  ip=客户端IP  user=登录用户名  method=方法  func=功能标签  op=具体操作  path=路径  status=状态码  cost_ms=耗时  ua=浏览器标识
-```
+### 数据根目录（`jztools_data.py`）
 
-- `user`：`app.py::get_current_user()` 经 admin 插件的 `get_session_user()` 解析当前登录用户名，
-  未登录为 `-`；`/static/` 静态资源请求跳过解析省 I/O。
-- `op`：`app.py::parse_operation()` 解析——优先取 `g._current_operation`（插件在请求内显式标记），
-  其次核心路由映射表 `_OPERATION_MAP`，最后路径/方法兜底。
-- 插件标记方式：`from jztools_admin.routes import set_operation`（导入失败兜底空操作），处理器内调用
-  `set_operation("发布公告")`。已打标：admin 全部 CRUD（登录/改密/单位/部门/人员/角色）、
-  公告板发布/修改/删除、共享文档增删改挂靠/导入导出、战果录入保存/删除/改案件名/学习类别。
+- 默认 `<用户主目录>\.jztoolshub\`，指针双写：主指针 `~\.jztoolshub.json`（用户目录，替换程序文件夹后仍可找到）+
+  备份指针 `<程序目录>/config/data_root.json`。
+- 布局：`config/`（tools.json / admin.json / .admin_key）、`logs/`、`plugins/<id>/`（data / config.json / prompt.json / .task_cache）。
+- 关键函数：`get_data_root()` / `get_data_root_dir()` / `get_data_root_file()` / `migrate_legacy_app_data()`（启动迁移旧版程序目录数据）/
+  `migrate_data_root()`（换目录迁移）/ `set_data_root()` / `data_usage_summary()`。
+- **启动顺序（app.py `__main__`）**：`init_data_root()`（先 `migrate_legacy_app_data()` 再重算 CONFIG_PATH/LOG_DIR）→
+  `setup_access_logging()` → `register_plugin_backends()`。
+
+### 改动面
+
+- **app.py**：`init_data_root()` 迁移旧数据 + 重算 `CONFIG_PATH/LOG_DIR/LOG_FILE`。
+- **admin 插件**：`CONFIG_PATH/ADMIN_CONFIG_PATH/ADMIN_KEY_PATH` 改走 `jztools_data`；新增 `GET/POST /api/admin/data-settings`（仅超管）、
+  `/admin/settings` 设置页（`admin-settings.html` + `admin-settings.js`），后台首页加「⚙️ 设置」入口。
+- **全部插件后端**（shared-docs / notice-board / case-report / character-graph / trajectory-convert）：
+  `data/`、`config.json`、`prompt.json`、`.task_cache` 统一改用 `jztools_data` 定位。
+- **配置模板**：程序目录 `config/tools.json` 保留为模板，首启复制到数据根目录；此后读写都改数据根目录副本。
+
+### 升级 / 换目录方法（也见 README「项目更新与数据迁移」）
+
+1. 旧版（数据在程序目录）升级：新版首启自动把程序目录 `admin.json`/`.admin_key`/`logs/`/各插件 `backend/data`、`config.json`、`prompt.json`、`.task_cache` 迁入数据根目录（幂等，目标已存在不覆盖）。
+2. 之后整体替换程序文件夹，用户数据仍在数据根目录，不丢失。
+3. 管理员换目录：后台 → 系统设置 → 输入新绝对路径 →「更改并迁移」（`migrate_data_root` 按 config/logs/plugins 三个子目录整体搬移，已存在不覆盖，并更新双指针）。
+
+> **注意**：迁移是「移动」而非「复制」；`.admin_key` 与 `admin.json` 密文必须同目录一起迁，否则解密失败。
+> 前端 emoji 图标在旧浏览器（Chrome 72/78）可能显示异常，已把首页 `.tool-icon` 显式指定 emoji 字体栈缓解。
+
 
 ## 5. 当前状态 / 卡点
 
