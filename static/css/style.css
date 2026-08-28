@@ -206,6 +206,13 @@ body {
                "Segoe UI Symbol", "Noto Sans Symbols2", sans-serif;
 }
 
+.tool-card .tool-icon .tool-icon-img {
+  width: 32px;
+  height: 32px;
+  display: block;
+  flex: none;
+}
+
 .tool-card .tool-name {
   font-size: 18px;
   font-weight: 500;

@@ -55,7 +55,7 @@ function toolCard(tool) {
   return `
     <a class="tool-card" data-tool-id="${tool.id}" href="/tool/${encodeURIComponent(tool.id)}"
        style="--tool-accent: ${accents}; --tool-accent-rgb: ${hexToRgb(accents)};">
-      <div class="tool-icon">${tool.icon || '🧩'}</div>
+      <div class="tool-icon">${tool.icon_file ? '<img class="tool-icon-img" src="/static/icons/' + encodeURIComponent(tool.icon_file) + '" alt="">' : (tool.icon ? esc(tool.icon) : '🧩')}</div>
       <div class="tool-name">${tool.name}</div>
       <div class="tool-desc">${tool.description || ''}</div>
       <div class="tool-features">

@@ -196,6 +196,15 @@ select.admin-input {
   align-items: center;
   justify-content: center;
   font-size: 30px;
+  line-height: 1;
+  overflow: visible;
+}
+
+.admin-module-icon .tool-icon-img {
+  width: 32px;
+  height: 32px;
+  display: block;
+  flex: none;
 }
 
 .admin-module-count {

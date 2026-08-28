@@ -5,10 +5,10 @@
   const grid = document.getElementById('admin-grid');
 
   const MODULE_META = {
-    unit: { icon: '🏛️', accent: '#5E35B1' },
-    department: { icon: '🏢', accent: '#4285F4' },
-    user: { icon: '👥', accent: '#34A853' },
-    permission: { icon: '🛡️', accent: '#FBBC05' },
+    unit: { icon: '1f3db.svg', accent: '#5E35B1' },
+    department: { icon: '1f3e2.svg', accent: '#4285F4' },
+    user: { icon: '1f465.svg', accent: '#34A853' },
+    permission: { icon: '1f6e1.svg', accent: '#FBBC05' },
   };
 
   function hexToRgb(hex) {
@@ -18,12 +18,12 @@
   }
 
   function moduleCard(m) {
-    const meta = MODULE_META[m.id] || { icon: '📦', accent: '#4285F4' };
+    const meta = MODULE_META[m.id] || { icon: '1f9e9.svg', accent: '#4285F4' };
     const countLabel = m.id === 'permission' ? '角色数' : '记录数';
     return `
       <a class="tool-card" href="/admin/${m.id}"
          style="--tool-accent: ${meta.accent}; --tool-accent-rgb: ${hexToRgb(meta.accent)};">
-        <div class="admin-module-icon" style="background: rgba(${hexToRgb(meta.accent)}, .12);">${meta.icon}</div>
+        <div class="admin-module-icon" style="background: rgba(${hexToRgb(meta.accent)}, .12);"><img class="tool-icon-img" src="/static/icons/${encodeURIComponent(meta.icon)}" alt=""></div>
         <div class="tool-name">${esc(m.name)}</div>
         <div class="tool-desc">${countLabel} ${m.count} 条</div>
         <div class="tool-features">

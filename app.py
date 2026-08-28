@@ -481,13 +481,17 @@ def get_aggregated_tools():
         m = meta.get(item["id"], {})
         # 方式一：插件主动声明的卡片内容优先（未声明则为空 dict，走 tools.json 兜底）
         card = _resolve_home_card(item["id"])
+        icon = card.get("icon") or manifest.get("icon", "🧩")
         tools.append({
             "id": manifest.get("id", item["id"]),
             "name": card.get("name") or m.get("name") or manifest.get("name", item["id"]),
             "description": card.get("description")
                 if card.get("description") is not None
                 else (m.get("description") or manifest.get("description", "")),
-            "icon": card.get("icon") or manifest.get("icon", "🧩"),
+            "icon": icon,
+            # 兼容无彩色 emoji 字体的环境（如 Windows 7）：manifest 的 emoji 图标
+            # 无法渲染时，前端可回退到 /static/icons/<icon_file> 的 SVG 图标。
+            "icon_file": _icon_svg_file(icon),
             "accent": card.get("accent") or manifest.get("accent", "#4285F4"),
             "entry": manifest.get("entry", "index.html"),
             "features": card.get("features")
@@ -499,6 +503,32 @@ def get_aggregated_tools():
         })
     tools.sort(key=lambda t: t["order"])
     return tools
+
+
+# 已知插件 emoji 图标 → SVG 文件名（static/icons/ 下已内置 Twemoji 图形）。
+# 用于无彩色 emoji 字体的环境（Windows 7 等）回退显示；未知 emoji 返回 None，
+# 前端继续用 emoji 文本渲染。
+_EMOJI_ICON_FILES = {
+    "⚙️": "2699.svg",          # admin 管理后台
+    "🔐": "1f510.svg",          # base64
+    "📋": "1f4cb.svg",          # case-report
+    "🌌": "1f30c.svg",          # character-graph
+    "🎨": "1f3a8.svg",          # color-picker
+    "🧩": "1f9e9.svg",          # json-formatter
+    "🗺️": "1f5fa.svg",          # map-marker
+    "#️⃣": "23-20e3.svg",        # md5-generator
+    "📢": "1f4a2.svg",          # notice-board
+    "📽️": "1f4fd.svg",          # qr-video-decode
+    "📝": "1f4dd.svg",          # shared-docs
+    "🛰️": "1f6f0.svg",          # trajectory-convert
+}
+
+
+def _icon_svg_file(icon):
+    """返回 emoji 对应的 SVG 文件名；未知/为空返回 None。"""
+    if not icon:
+        return None
+    return _EMOJI_ICON_FILES.get(icon)
 
 
 def _load_backend_module(plugin_id):
