@@ -10,7 +10,7 @@
   <title>JZ 工具箱</title>
   <link rel="stylesheet" href="/static/css/style.css?v=14">
   <link rel="stylesheet" href="/plugin/admin/css/admin.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧩</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
 </head>
 <body>
   <!-- 顶部应用栏 -->
@@ -45,8 +45,8 @@
   <!-- 右下角悬浮球（⋮ 更多）：悬浮展开菜单 → 编辑位置 / 隐藏工具 -->
   <div class="fab-menu" id="fab-menu">
     <div class="fab-pop" id="fab-pop" role="menu">
-      <button type="button" class="fab-pop-item" data-action="edit" id="fab-act-edit">✏️ 编辑位置</button>
-      <button type="button" class="fab-pop-item" data-action="hide">🙈 隐藏工具</button>
+      <button type="button" class="fab-pop-item" data-action="edit" id="fab-act-edit"><span data-jz-icon="✏️"></span> 编辑位置</button>
+      <button type="button" class="fab-pop-item" data-action="hide"><span data-jz-icon="🙈"></span> 隐藏工具</button>
     </div>
     <button class="fab" id="edit-fab" type="button" title="更多" aria-label="更多" aria-haspopup="true">
       <span class="fab-dots" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -75,7 +75,8 @@
     </div>
   </div>
 
+  <script src="/static/js/jz-icon.js?v=1"></script>
   <script src="/plugin/admin/js/admin-common.js"></script>
-  <script src="/static/js/main.js?v=12"></script>
+  <script src="/static/js/main.js?v=13"></script>
 </body>
 </html>

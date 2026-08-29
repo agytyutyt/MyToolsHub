@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <!-- 地图标点插件（纯前端，依赖高德地图 JS SDK）
  * 功能：输入经纬度标点、批量导入、二维码识别、按时间生成移动轨迹。
  * 注意：使用前需在页面设置中填入自备的高德 Key（保存在浏览器 localStorage）。
@@ -142,7 +142,7 @@
 </head>
 <body>
   <div class="header">
-    <h1>🗺️ 地图标点</h1>
+    <h1><span data-jz-icon="🗺️"></span> 地图标点</h1>
     <div class="field">
       <label>经度</label><input id="lng" type="number" step="0.000001" placeholder="116.397">
     </div>
@@ -153,8 +153,8 @@
       <label>名称</label><input id="name" type="text" placeholder="标记名称（可选）" style="width:140px;">
     </div>
     <button class="btn primary" id="add">添加标点</button>
-    <button class="btn" id="scan-btn">📷 二维码识别</button>
-    <button class="btn" id="settings">⚙️ 配置</button>
+    <button class="btn" id="scan-btn"><span data-jz-icon="📷"></span> 二维码识别</button>
+    <button class="btn" id="settings"><span data-jz-icon="⚙️"></span> 配置</button>
   </div>
   <div class="main">
     <div id="map"></div>
@@ -187,8 +187,8 @@
 
   <div class="track-wrap" id="track-bar" style="display:none;">
     <div class="track-bar">
-      <button class="btn primary" id="track-play" title="播放/暂停">▶ 播放</button>
-      <button class="btn" id="track-restart" title="回到起点">⏮</button>
+      <button class="btn primary" id="track-play" title="播放/暂停"><span data-jz-icon="▶"></span> 播放</button>
+      <button class="btn" id="track-restart" title="回到起点"><span data-jz-icon="⏮"></span></button>
       <input id="track-progress" type="range" min="0" max="1000" value="0">
       <span class="track-time" id="track-time">--:--:--</span>
       <select id="track-speed" title="播放速度">
@@ -232,7 +232,8 @@
   </div>
 
 <script src="./jsqr.min.js?v=1"></script>
-<script>
+  <script src="/static/js/jz-icon.js?v=1"></script>
+  <script>
   // ==================== 页面元素引用 ====================
   // 地图容器、底部状态栏、浮动提示框的三个 DOM 引用
   const mapEl = document.getElementById('map');
@@ -739,7 +740,7 @@
     map.setFitView([trackLine, ...trackMarkers], false, [80, 80, 80, 80]);
     const bar = document.getElementById('track-bar');
     bar.style.display = 'block';
-    document.getElementById('track-play').textContent = '▶ 播放';
+    document.getElementById('track-play').innerHTML = JZIcon.html('▶') + ' 播放';
     document.getElementById('track-time').textContent = formatTimeLabel(trackPoints[0].time);
     setStatus(`轨迹已生成：${trackPoints.length} 个轨迹点`);
   }
@@ -823,7 +824,7 @@
   function playTrack() {
     if (trackPlaying) return;
     trackPlaying = true;
-    document.getElementById('track-play').textContent = '⏸ 暂停';
+    document.getElementById('track-play').innerHTML = JZIcon.html('⏸') + ' 暂停';
     const speed = parseFloat(document.getElementById('track-speed').value) || 1;
     let last = Date.now();
     (function step() {
@@ -846,7 +847,7 @@
   function stopTrack() {
     trackPlaying = false;
     if (trackAnim) { cancelAnimationFrame(trackAnim); trackAnim = null; }
-    document.getElementById('track-play').textContent = '▶ 播放';
+    document.getElementById('track-play').innerHTML = JZIcon.html('▶') + ' 播放';
   }
 
   // 清除轨迹：移除折线、标点、移动点并同步到标记列表

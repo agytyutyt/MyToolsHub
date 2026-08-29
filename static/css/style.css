@@ -213,6 +213,15 @@ body {
   flex: none;
 }
 
+/* 通用 emoji→SVG 图标（JZIcon 兼容层） */
+.jz-icon {
+  display: inline-block;
+  vertical-align: -0.15em;
+  width: 1em;
+  height: 1em;
+  line-height: 1;
+}
+
 .tool-card .tool-name {
   font-size: 18px;
   font-weight: 500;

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -11,14 +11,14 @@
   <div class="view">
     <header class="page-head">
       <div class="page-title">
-        <h1>📋 战果录入</h1>
+        <h1><span data-jz-icon="📋"></span> 战果录入</h1>
         <p class="sub">输入收网情况报告 → 抽取五要素 → 键值对 JSON 本地存档</p>
       </div>
     </header>
 
     <!-- 大模型配置（可选，未配置时自动使用本地规则解析） -->
     <details class="card config-card" id="cfgCard">
-      <summary>⚙️ 大模型解析配置（可选，未配置时使用本地规则解析）</summary>
+      <summary><span data-jz-icon="⚙️"></span> 大模型解析配置（可选，未配置时使用本地规则解析）</summary>
       <div class="cfg-grid">
         <label>API 地址
           <input id="baseUrl" type="text" placeholder="https://api.deepseek.com" />
@@ -43,7 +43,7 @@
         placeholder="粘贴或输入公安某部门对某案件的收网情况报告，例如：&#10;2026年8月20日凌晨，刑侦一支队对“8·16”系列盗窃专案统一收网，抓获犯罪嫌疑人5名，缴获涉案手机6部、赃款8万元。"></textarea>
       <p class="muted">报告中包含 时间 / 主办大队 / 案件名 / 抓获人数 / 缴获物品 越完整，抽取越准确。</p>
       <div class="row-actions">
-        <button id="parseBtn" class="btn btn-primary">🔍 解析录入</button>
+        <button id="parseBtn" class="btn btn-primary"><span data-jz-icon="🔍"></span> 解析录入</button>
         <button id="clearBtn" class="btn">清空</button>
         <span id="parseStatus" class="toolbar-status"></span>
       </div>
@@ -68,7 +68,7 @@
       </div>
       <p class="muted">下方字段可直接修改，确认后点击「保存入库」，将以键值对 JSON 写入本地台账。</p>
       <div class="row-actions">
-        <button id="saveEntryBtn" class="btn btn-primary">💾 保存入库</button>
+        <button id="saveEntryBtn" class="btn btn-primary"><span data-jz-icon="💾"></span> 保存入库</button>
         <button id="reparseBtn" class="btn">重新解析</button>
       </div>
     </section>
@@ -123,6 +123,7 @@
 
   <div id="toast" class="toast hidden"></div>
   <script src="/plugin/admin/js/admin-common.js"></script>
-  <script src="./app.js?v=9"></script>
+  <script src="/static/js/jz-icon.js?v=1"></script>
+  <script src="./app.js?v=10"></script>
 </body>
 </html>

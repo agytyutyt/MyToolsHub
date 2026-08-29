@@ -123,7 +123,7 @@
     });
   }
 
-  function typeIcon(t) { return t === "word" ? "📄" : "📊"; }
+  function typeIcon(t) { return JZIcon.html(t === "word" ? "📄" : "📊"); }
 
   function scopeLabel(level) {
     if (level === "unit") return "单位";

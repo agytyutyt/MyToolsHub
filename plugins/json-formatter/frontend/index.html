@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <!-- JSON 格式化插件（纯前端）
  * 基于 JSON.parse / JSON.stringify 实现格式化、压缩与语法校验，
  * 全部处理在浏览器本地完成，不经过后端。
@@ -69,6 +69,7 @@
   <div class="status"><span id="st-msg"></span><span id="st-info"></span></div>
   <div class="toast" id="toast"></div>
 
+<script src="/static/js/jz-icon.js?v=1"></script>
 <script>
   const input = document.getElementById('input');
   const output = document.getElementById('output');
@@ -94,13 +95,13 @@
       const json = JSON.parse(input.value);
       const pretty = JSON.stringify(json, null, indentation());
       output.value = pretty;
-      stMsg.innerHTML = '<span class="ok">✅ 校验通过</span>';
+      stMsg.innerHTML = '<span class="ok">' + JZIcon.html('✅') + ' 校验通过</span>';
       stInfo.textContent = `${pretty.length} 字符 · 共 ${pretty.split('\n').length} 行`;
     } catch (e) {
       // F-3：错误消息含用户输入片段，必须经 DOM API 渲染防 XSS
       const span = document.createElement('span');
       span.className = 'err';
-      span.textContent = `❌ ${e.message}`;
+      span.textContent = JZIcon.html('❌') + ' ' + e.message;
       stMsg.innerHTML = '';
       stMsg.appendChild(span);
       stInfo.textContent = '';
@@ -113,12 +114,12 @@
       const json = JSON.parse(input.value);
       const min = JSON.stringify(json);
       output.value = min;
-      stMsg.innerHTML = '<span class="ok">✅ 校验通过</span>';
+      stMsg.innerHTML = '<span class="ok">' + JZIcon.html('✅') + ' 校验通过</span>';
       stInfo.textContent = `${min.length} 字符`;
     } catch (e) {
       const span = document.createElement('span');
       span.className = 'err';
-      span.textContent = `❌ ${e.message}`;
+      span.textContent = JZIcon.html('❌') + ' ' + e.message;
       stMsg.innerHTML = '';
       stMsg.appendChild(span);
       stInfo.textContent = '';

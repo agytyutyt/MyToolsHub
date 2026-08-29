@@ -110,7 +110,7 @@ function buildNodeRow(node, depth, onToggleKids, kidsEl) {
 
   const icon = document.createElement("span");
   icon.className = "tree-icon";
-  icon.textContent = TYPE_ICON[node.type] || "•";
+  icon.innerHTML = JZIcon.html(TYPE_ICON[node.type] || "•");
 
   const name = document.createElement("span");
   name.textContent = node.name;
@@ -288,7 +288,7 @@ function renderSelList() {
 
     const icon = document.createElement("span");
     icon.className = "sel-icon";
-    icon.textContent = TYPE_ICON[t.type];
+    icon.innerHTML = JZIcon.html(TYPE_ICON[t.type]);
 
     const name = document.createElement("span");
     name.className = "sel-name";
@@ -346,7 +346,7 @@ function buildCard(item) {
   meta.className = "ann-meta";
   meta.append(
     Object.assign(document.createElement("span"),
-      { textContent: "👤 " + (item.created_by_name || item.created_by || "未知") }),
+      { innerHTML: JZIcon.html("👤") + " " + (item.created_by_name || item.created_by || "未知") }),
     Object.assign(document.createElement("span"), { textContent: "·" }),
     Object.assign(document.createElement("time"), { textContent: item.created_at || "" }),
     Object.assign(document.createElement("span"), { className: "spacer" }),
@@ -381,8 +381,8 @@ function buildCard(item) {
 /* ==================== 详情悬浮窗 ==================== */
 function openDetail(item) {
   $("detailTitle").textContent = item.title || "";
-  $("detailAuthor").textContent =
-    "👤 " + (item.created_by_name || item.created_by || "未知");
+  $("detailAuthor").innerHTML =
+    JZIcon.html("👤") + " " + (item.created_by_name || item.created_by || "未知");
   $("detailTime").textContent = item.created_at || "";
   const box = $("detailContent");
   box.innerHTML = nl2br(item.content);   // esc 后按换行转 <br>
