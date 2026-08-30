@@ -448,6 +448,34 @@ def _record_manageable(user, rec):
     return rec.get("created_by") == user["username"]
 
 
+def _filter_by_period(recs, month, from_, to):
+    """按入库时间（created_at）过滤记录。
+
+    month=YYYY-MM 匹配该月；from / to 为 YYYY-MM-DD（或 YYYY-MM），按自然序比较。
+    """
+    out = recs
+    if month:
+        m = str(month)[:7]
+        out = [r for r in out if (r.get("created_at") or "").startswith(m)]
+    if from_:
+        f = str(from_)[:10]
+        out = [r for r in out if (r.get("created_at") or "")[:10] >= f]
+    if to:
+        t = str(to)[:10]
+        out = [r for r in out if (r.get("created_at") or "")[:10] <= t]
+    return out
+
+
+def _collect_months(recs):
+    """提取记录集中出现的「年-月」集合（去重、倒序），供前端月份下拉。"""
+    seen = {}
+    for r in recs:
+        m = (r.get("created_at") or "")[:7]
+        if m:
+            seen[m] = True
+    return sorted(seen.keys(), reverse=True)
+
+
 def migrate_record_owner():
     """给历史记录补归属：录入人 admin。
 
@@ -564,7 +592,8 @@ def register(app) -> None:
     def cr_aggregate():
         """跨记录战果汇总：类似物品归为统一类别、数量叠加；
         「涉及 N 起」按规整后的案件名去重（同一案件多条记录只计一起）。
-        支持 ?case=<案件名> 仅统计该案件的记录；支持 ?scope=mine|dept|all（默认 mine）按范围过滤。"""
+        支持 ?case=<案件名> 仅统计该案件的记录；支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -573,6 +602,10 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         case_name = parser.normalize_case_name(request.args.get("case") or "")
         recs = scoped_records(user, scope)
+        recs = _filter_by_period(recs,
+                                 request.args.get("month") or "",
+                                 request.args.get("from") or "",
+                                 request.args.get("to") or "")
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
@@ -586,18 +619,37 @@ def register(app) -> None:
         rows = parser.aggregate_items([r.get("items") or [] for r in recs], case_keys)
         return jsonify({"ok": True, "count": len(rows), "categories": rows})
 
-    @app.get(f"{API_PREFIX}/cases")
-    def cr_cases():
-        """既有案件列表（按规整案件名去重、拼音排序），供下拉筛选/入库合并/改案件名选择。
-        跟随 ?scope=mine|dept|all 过滤：切到「本部门」时，下拉里出现的就是本部门所有人的案件。"""
+    @app.get(f"{API_PREFIX}/months")
+    def cr_months():
+        """当前可见范围内的入库月份列表（倒序），供「按月份显示/统计」下拉使用。
+        跟随 ?scope=mine|dept|all 过滤。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
         scope = (request.args.get("scope") or "mine").strip()
         if scope == "all" and not user.get("super_admin"):
             return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
+        months = _collect_months(scoped_records(user, scope))
+        return jsonify({"ok": True, "months": months})
+
+    @app.get(f"{API_PREFIX}/cases")
+    def cr_cases():
+        """既有案件列表（按规整案件名去重、拼音排序），供下拉筛选/入库合并/改案件名选择。
+        跟随 ?scope=mine|dept|all 过滤：切到「本部门」时，下拉里出现的就是本部门所有人的案件。
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。"""
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        scope = (request.args.get("scope") or "mine").strip()
+        if scope == "all" and not user.get("super_admin"):
+            return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
+        recs = scoped_records(user, scope)
+        recs = _filter_by_period(recs,
+                                 request.args.get("month") or "",
+                                 request.args.get("from") or "",
+                                 request.args.get("to") or "")
         groups = {}
-        for rec in scoped_records(user, scope):
+        for rec in recs:
             cn = parser.normalize_case_name((rec.get("fields") or {}).get("案件名"))
             if not cn:
                 continue
@@ -647,7 +699,8 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/records")
     def cr_list():
         """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录；
-        支持 ?scope=mine|dept|all（默认 mine）按范围过滤。"""
+        支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -656,6 +709,10 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         case_name = parser.normalize_case_name(request.args.get("case") or "")
         recs = scoped_records(user, scope)
+        recs = _filter_by_period(recs,
+                                 request.args.get("month") or "",
+                                 request.args.get("from") or "",
+                                 request.args.get("to") or "")
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
@@ -761,6 +818,48 @@ def register(app) -> None:
             rec["fields"]["案件名"] = new_name
             save_record(rec)
         return jsonify({"ok": True, "record": rec})
+
+    @app.put(f"{API_PREFIX}/records/<rid>")
+    def cr_update(rid):
+        """编辑台账记录：可修改 fields（五要素）/ source_text / items（物品明细）。
+        仅录入人本人或超级管理员可操作；保存时同步学习「物品名→类别」。
+        body：{fields?, source_text?, items?}，缺省字段保持不变。"""
+        _set_operation("编辑战果记录")
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        body = request.get_json(silent=True) or {}
+        with _LOCK:
+            rec = load_record(rid)
+            if not rec or not _record_readable(user, rec):
+                return jsonify({"ok": False, "detail": "记录不存在或无权访问"}), 404
+            if not _record_manageable(user, rec):
+                return jsonify({"ok": False, "detail": "仅录入人本人或管理员可编辑"}), 403
+            # 字段：仅接收五要素，缺省保留原值
+            if body.get("fields") is not None:
+                fields = normalize_fields(body.get("fields"))
+                if not any(fields.get(k) for k in FIELD_KEYS):
+                    return jsonify({"ok": False, "detail": "没有任何要素可保存"}), 400
+                if fields.get("案件名"):
+                    fields["案件名"] = parser.normalize_case_name(fields["案件名"])
+                rec["fields"] = fields
+            # 原始报告
+            if "source_text" in body:
+                src = body.get("source_text") or ""
+                rec["source_text"] = str(src)[:MAX_TEXT_LEN]
+            # 物品明细
+            if body.get("items") is not None:
+                items = _validate_items(body.get("items"))
+                if items is None:
+                    return jsonify({"ok": False, "detail": "物品明细格式不正确"}), 400
+                rec["items"] = items
+            save_record(rec)
+            saved = dict(rec)
+        # 同步学习类别（编辑后的明细也应记住）
+        for it in saved.get("items") or []:
+            if it.get("category") and it.get("name"):
+                category_kb.set_override(it["name"], it["category"])
+        return jsonify({"ok": True, "record": saved})
 
     @app.delete(f"{API_PREFIX}/records/<rid>")
     def cr_delete(rid):

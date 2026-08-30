@@ -23,6 +23,9 @@
     caseNorm: "",   // 当前筛选案件（规整名），空串=全部案件
     caseName: "",   // 当前筛选案件的展示名
     scope: "mine",  // 查看范围：mine=我的战果 / dept=本部门 / all=全部(仅超管)
+    month: "",      // 入库月份筛选 YYYY-MM，空=全部
+    from: "",       // 自定义开始日期 YYYY-MM-DD
+    to: "",         // 自定义结束日期 YYYY-MM-DD
     user: null,     // 当前登录用户（AdminCommon.getSession() 取）
   };
 
@@ -90,6 +93,8 @@
   function closeDialog() {
     $("#dialog").classList.add("hidden");
     $("#dialogBody").innerHTML = "";
+    var dlg = $("#dialog .dialog");
+    if (dlg) dlg.classList.remove("wide");
   }
 
   /* ==================== 大模型配置 ==================== */
@@ -448,9 +453,9 @@
     return row;
   }
 
-  function collectItems() {
+  function collectItemsFrom(sel) {
     var out = [];
-    document.querySelectorAll("#itemsEditor .item-row").forEach(function (row) {
+    document.querySelectorAll(sel).forEach(function (row) {
       var name = row.querySelector(".ie-name").value.trim();
       if (!name) return;
       var qtyEl = row.querySelector(".ie-qty");
@@ -464,6 +469,10 @@
       });
     });
     return out;
+  }
+
+  function collectItems() {
+    return collectItemsFrom("#itemsEditor .item-row");
   }
 
   var learnTimer = null;
@@ -545,12 +554,63 @@
     var parts = [];
     if (state.caseNorm) parts.push("case=" + encodeURIComponent(state.caseNorm));
     if (state.scope && state.scope !== "mine") parts.push("scope=" + state.scope);
+    if (state.month) parts.push("month=" + encodeURIComponent(state.month));
+    if (state.from) parts.push("from=" + encodeURIComponent(state.from));
+    if (state.to) parts.push("to=" + encodeURIComponent(state.to));
     return parts.length ? "?" + parts.join("&") : "";
+  }
+
+  /* 载入「按入库月份」下拉选项（当前范围下所有出现过的月份，倒序） */
+  function loadMonths() {
+    return api("/api/case-report/months" + (state.scope && state.scope !== "mine" ? "?scope=" + state.scope : ""))
+      .then(function (data) {
+        var sel = $("#monthFilter");
+        if (!sel) return;
+        var cur = state.month || "";
+        sel.innerHTML = '<option value="">全部月份</option>' +
+          (data.months || []).map(function (m) {
+            return "<option value='" + esc(m) + "'>" + esc(m) + "</option>";
+          }).join("");
+        sel.value = cur;
+      }).catch(function () {});
+  }
+
+  /* 应用时间筛选后统一刷新（月份下拉、案件侧边栏、台账、汇总） */
+  function applyPeriod() {
+    var from = $("#fromDate").value;
+    var to = $("#toDate").value;
+    if (from && to && from > to) { toast("开始日期不能晚于结束日期", "err"); return; }
+    state.month = $("#monthFilter").value || "";
+    state.from = from;
+    state.to = to;
+    state.caseNorm = "";
+    state.caseName = "";
+    loadMonths().then(function () {
+      return refreshCases().then(function () {
+        refreshRecords();
+        refreshSummary();
+      });
+    });
+  }
+
+  function clearPeriod() {
+    state.month = "";
+    state.from = "";
+    state.to = "";
+    $("#monthFilter").value = "";
+    $("#fromDate").value = "";
+    $("#toDate").value = "";
+    applyPeriod();
   }
 
   /* 重建左侧案件侧边栏（后端已按拼音排序），并保持当前选中高亮 */
   function refreshCases() {
-    return api("/api/case-report/cases").then(function (data) {
+    var q = [];
+    if (state.scope && state.scope !== "mine") q.push("scope=" + state.scope);
+    if (state.month) q.push("month=" + encodeURIComponent(state.month));
+    if (state.from) q.push("from=" + encodeURIComponent(state.from));
+    if (state.to) q.push("to=" + encodeURIComponent(state.to));
+    return api("/api/case-report/cases" + (q.length ? "?" + q.join("&") : "")).then(function (data) {
       var box = $("#caseList");
       box.innerHTML = "";
       box.appendChild(buildCaseItem("全部案件", "", 0));
@@ -698,6 +758,7 @@
       // 「删除」「改案件名」仅录入人本人或超管可用（前端显隐只是体验，后端有 403 兜底）
       var canManage = !!(state.user && (state.user.super_admin || rec.created_by === state.user.username));
       if (canManage) {
+        actions.appendChild(btn("编辑", function () { openEditRecord(rec); }));
         actions.appendChild(btn("修改案件名", function () { editCaseName(rec); }));
         actions.appendChild(btn("删除", function () { deleteRecord(rec); }, "btn btn-danger"));
       }
@@ -791,6 +852,57 @@
     });
   }
 
+  /* ==================== 台账编辑（完整记录） ==================== */
+  function openEditRecord(rec) {
+    var f = rec.fields || {};
+    var fieldHtml = FIELD_KEYS.map(function (k) {
+      var v = f[k] == null ? "" : esc(f[k]);
+      return "<div class='field-row'><div class='key'>" + esc(k) + "</div>" +
+             "<input data-field='" + esc(k) + "' value='" + v + "' /></div>";
+    }).join("");
+    var srcHtml = "<textarea class='edit-source' id='editSource'>" + esc(rec.source_text || "") + "</textarea>";
+    var itemsHtml = "<div id='editItemRows' class='items-editor-list'></div>" +
+      "<div class='row-actions' style='margin-top:8px'><button id='editAddItem' class='btn'>＋ 添加条目</button></div>" +
+      "<div class='dl-label' style='margin-top:12px'>原始报告</div>" + srcHtml;
+    var body = "<div class='edit-field-grid'>" + fieldHtml + "</div>" +
+      "<div class='dl-label' style='margin-top:12px'>缴获物品明细（可修改类别/名称/数量/单位）</div>" + itemsHtml;
+    openDialog("编辑战果记录", body, [
+      { label: "保存", primary: true, handler: function () { doSaveEdit(rec.id); } },
+      { label: "取消", handler: closeDialog },
+    ]);
+    var rowsBox = $("#editItemRows");
+    (rec.items || []).forEach(function (it) { rowsBox.appendChild(buildItemRow(it)); });
+    $("#editAddItem").addEventListener("click", function () {
+      rowsBox.appendChild(buildItemRow({}));
+    });
+    var dlg = $("#dialog .dialog");
+    if (dlg) dlg.classList.add("wide");
+  }
+
+  function doSaveEdit(rid) {
+    var fields = {};
+    $$("#dialog input[data-field]").forEach(function (input) {
+      fields[input.dataset.field] = input.value.trim();
+    });
+    var has = FIELD_KEYS.some(function (k) { return fields[k]; });
+    if (!has) { toast("没有任何要素可保存", "err"); return; }
+    var body = { fields: fields, items: collectItemsFrom("#editItemRows .item-row") };
+    var src = $("#editSource");
+    if (src) body.source_text = src.value;
+    api("/api/case-report/records/" + rid, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(function (data) {
+      toast("已保存修改", "ok");
+      closeDialog();
+      loadCategories();
+      syncCaseView();
+    }).catch(function (e) {
+      toast("保存失败：" + e.message, "err");
+    });
+  }
+
   function deleteRecord(rec) {
     var name = (rec.fields && rec.fields["案件名"]) || rec.id;
     if (!confirm("确定删除战果记录「" + name + "」？该操作不可恢复。")) return;
@@ -846,11 +958,24 @@
       });
       state.caseNorm = "";
       state.caseName = "";
-      // 重建案件侧边栏与台账/汇总
-      refreshCases().then(function () {
-        refreshRecords();
-        refreshSummary();
+      // 重建月份下拉、案件侧边栏与台账/汇总
+      loadMonths().then(function () {
+        refreshCases().then(function () {
+          refreshRecords();
+          refreshSummary();
+        });
       });
+    });
+
+    // 时间筛选：按月份 / 自定义起止日期
+    $("#applyPeriod").addEventListener("click", applyPeriod);
+    $("#clearPeriod").addEventListener("click", clearPeriod);
+    $("#monthFilter").addEventListener("change", function () {
+      if ($("#fromDate").value || $("#toDate").value) {
+        $("#fromDate").value = "";
+        $("#toDate").value = "";
+      }
+      applyPeriod();
     });
 
     // 对话框：点遮罩或按 Esc 关闭

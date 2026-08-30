@@ -42,6 +42,12 @@
     '❌': '274c.svg',     // 校验失败
     '⚠️': '26a0.svg',     // 冲突警告
     '🧩': '1f9e9.svg',     // 拼图（通用 fallback 图标）
+    '🔐': '1f510.svg',     // base64
+    '🌌': '1f30c.svg',     // character-graph
+    '🎨': '1f3a8.svg',     // color-picker
+    '#️⃣': '23-20e3.svg',   // md5-generator
+    '📽️': '1f4fd.svg',     // qr-video-decode
+    '🛰️': '1f6f0.svg',     // trajectory-convert
   };
 
   var _supported = null;
@@ -113,13 +119,19 @@
   }
 
   // 处理静态 HTML 中的 data-jz-icon 占位元素
+  // 支持彩色 emoji 时填入 emoji 文本，否则替换为 SVG <img>（两种情况都填充，
+  // 避免空 span 导致图标不显示）。
   function processDom(root) {
-    if (supportsColorEmoji()) return; // 支持环境无需替换
+    var useEmoji = supportsColorEmoji();
     var scope = root && root.querySelectorAll ? root : document;
     var els = scope.querySelectorAll('[data-jz-icon]');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       var emoji = el.getAttribute('data-jz-icon') || '';
+      if (useEmoji) {
+        el.textContent = emoji;
+        continue;
+      }
       var f = svgFile(emoji);
       if (f) el.innerHTML = '<img class="jz-icon" src="/static/icons/' + encodeURIComponent(f) + '" alt="">';
       else el.textContent = emoji;
