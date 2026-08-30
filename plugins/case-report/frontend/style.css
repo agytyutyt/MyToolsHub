@@ -130,9 +130,9 @@ input, textarea {
   font-size: 15px;
   padding: 4px 6px;
 }.item-row .ie-del:hover { background: #ffebee; border-radius: 6px; }/* ==================== 战果汇总 ==================== */
-.summary-list { display: flex; flex-wrap: wrap;  margin-top: 4px; margin-bottom: -10px; }
+.summary-list { display: flex; flex-wrap: wrap;  margin-top: 4px; margin-left: -10px; margin-bottom: -10px; }
 /* Chrome<84 flex gap fallback *//* ==================== 战果汇总 ==================== */
-.summary-list > * + * { margin-left: 10px; }.summary-item {
+.summary-list > * { margin-left: 10px; }.summary-item {
   display: flex;
   align-items: center;
   
@@ -230,14 +230,14 @@ input, textarea {
   background: var(--accent-light);
   color: var(--accent-dark);
   font-weight: 600;
-}.case-item .ci-name { word-break: break-all; min-width: 0; }.case-item .ci-count { font-size: 11px; color: var(--text-2); white-space: nowrap; flex: none; }.sidebar-tip { margin-top: 10px; padding: 0 4px; }.case-main { flex: 1 1 auto; min-width: 0; }.record-list { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 4px; }.record-card {
+}.case-item .ci-name { word-break: break-all; min-width: 0; }.case-item .ci-count { font-size: 11px; color: var(--text-2); white-space: nowrap; flex: none; }.sidebar-tip { margin-top: 10px; padding: 0 4px; }.case-main { flex: 1 1 auto; min-width: 0; }.record-list { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 4px; }.record-card {
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 20px 18px;
   background: var(--card);
 }.record-title { font-size: 15px; font-weight: 600; margin: 0 0 8px; display: flex;  align-items: center; flex-wrap: wrap; }
-/* Chrome<84 flex gap fallback */.record-title > * + * { margin-left: 8px; }.record-title .case { flex: 1; min-width: 160px; }.record-title .time { font-weight: 400; color: var(--text-2); font-size: 13px; }.kv-chips { display: flex; flex-wrap: wrap;  margin: 8px 0; }
-/* Chrome<84 flex gap fallback */.kv-chips > * + * { margin-left: 6px; }.kv-chip {
+/* Chrome<84 flex gap fallback */.record-title > * + * { margin-left: 8px; }.record-title .case { flex: 1; min-width: 160px; }.record-title .time { font-weight: 400; color: var(--text-2); font-size: 13px; }.kv-chips { display: flex; flex-wrap: wrap;  margin: 8px -6px -8px; }
+/* Chrome<84 flex gap fallback */.kv-chips > * { margin: 0 0 8px 6px; }.kv-chip {
   display: inline-flex;
   align-items: center;
   

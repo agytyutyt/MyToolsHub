@@ -89,6 +89,7 @@ body {
   color: var(--md-on-surface);
   font-size: 22px;
   cursor: pointer;
+  text-decoration: none;
   transition: background var(--md-transition);
 }
 
