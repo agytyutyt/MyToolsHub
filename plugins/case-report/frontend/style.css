@@ -189,11 +189,12 @@ input, textarea {
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   padding: 14px 12px 12px;
-  max-height: calc(100vh - 32px);
+  /* 距下边缘 15px 时停止增高：16px(top sticky) + 15px(bottom) */
+  max-height: calc(100vh - 31px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-}.case-sidebar h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }.case-list { display: flex; flex-direction: column;  overflow: auto; max-height: calc(100vh - 300px); min-height: 120px; flex: 1 1 auto; }
+}.case-sidebar h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }.case-list { display: flex; flex-direction: column;  overflow: auto; flex: 1 1 auto; min-height: 0; }
 /* Chrome<84 flex gap fallback *//* ==================== 案件筛选侧边栏内的时间筛选（竖向） ==================== */
 .case-sidebar .period-filter {
   display: flex;

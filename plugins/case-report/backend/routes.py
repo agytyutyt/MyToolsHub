@@ -150,8 +150,14 @@ def ensure_files():
 
 # ===================== 字段规整 =====================
 
-def normalize_fields(raw):
-    """只保留五要素，trim 长度，抓获人数转阿拉伯数字/整数，时间补全整日期。"""
+def normalize_fields(raw, now=None):
+    """只保留五要素，trim 长度，抓获人数转阿拉伯数字/整数，时间补全整日期。
+
+    支持以下自动补充：
+    - 时间字段为空时填入当前日期（YYYY年M月D日）；
+    - 主办大队字段如为「X队」（X=中文数字或阿拉伯数字），自动补为「X大队」。
+    """
+    now = now or datetime.now()
     raw = raw or {}
     out = {}
     for k in FIELD_KEYS:
@@ -162,8 +168,16 @@ def normalize_fields(raw):
         if len(v) > MAX_ITEM_LEN:
             v = v[:MAX_ITEM_LEN]
         out[k] = v
+    # 时间：为空时填入当前日期
     if out["时间"]:
         out["时间"] = parser.normalize_time(out["时间"])
+    if not out["时间"]:
+        out["时间"] = f"{now.year}年{now.month}月{now.day}日"
+    # 主办大队：「X队」→「X大队」
+    dept = out["主办大队"]
+    if dept:
+        dept = re.sub(r"^([一二三四五六七八九十\d]+)队$", r"\1大队", dept)
+        out["主办大队"] = dept
     cnt = out["抓获人数"]
     if cnt:
         cnt = parser.normalize_count(cnt)
@@ -754,6 +768,13 @@ def register(app) -> None:
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+
+        # 主办大队为空时，以当前用户部门为主办大队（并统一「X队→X大队」表述）
+        if not fields.get("主办大队") and user.get("department"):
+            dept = str(user.get("department") or "").strip()
+            if dept:
+                dept = re.sub(r"^([一二三四五六七八九十\d]+)队$", r"\1大队", dept)
+                fields["主办大队"] = dept
 
         # 同案检测只在自己的记录里查：合并目标必须是自己可管理的记录
         if merge_mode == "auto" and case_name:
