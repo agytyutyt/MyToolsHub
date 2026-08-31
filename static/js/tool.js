@@ -11,6 +11,18 @@ async function loadTool() {
   const stage = document.getElementById('tool-stage');
   const frame = document.getElementById('tool-frame');
 
+  // 站点名称来自 /api/tools 的 site.title（配置化），用于 logo 与浏览器标签
+  let siteName = 'JZ 工具箱';
+  try {
+    const siteRes = await fetch('/api/tools');
+    if (siteRes.ok) {
+      const siteData = await siteRes.json();
+      siteName = (siteData.site && siteData.site.title) || siteName;
+    }
+  } catch (e) { /* 忽略，使用默认值 */ }
+  const titleEl = document.getElementById('site-title');
+  if (titleEl) titleEl.textContent = siteName;
+
   function showError(title, detail) {
     if (frame) frame.remove();
     const box = document.createElement('div');
@@ -26,6 +38,7 @@ async function loadTool() {
   }
 
   if (!toolId) {
+    document.title = '无效的工具 ID · ' + siteName;
     showError('无效的工具 ID', '请从工具箱首页重新进入');
     return;
   }
@@ -35,11 +48,11 @@ async function loadTool() {
     const res = await fetch('/api/tools/' + encodeURIComponent(toolId));
     if (!res.ok) throw new Error('工具不存在或未启用');
     const tool = await res.json();
-    document.title = (tool.name || toolId) + ' · JZ 工具箱';
+    document.title = (tool.name || toolId) + ' · ' + siteName;
     // iframe 指向插件前端入口（插件间互不污染）
     frame.src = `/plugin/${encodeURIComponent(tool.id)}/${tool.entry || 'index.html'}`;
   } catch (err) {
-    document.title = '无法加载工具 · JZ 工具箱';
+    document.title = '无法加载工具 · ' + siteName;
     showError('无法加载工具', err.message);
   }
 }

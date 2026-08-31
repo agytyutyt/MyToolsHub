@@ -745,18 +745,17 @@
 
       var chips = document.createElement("div");
       chips.className = "kv-chips";
-      [["主办大队", "主办大队"], ["主办人", "主办人"], ["抓获人数", "抓获人数"]].forEach(function (pair) {
-        var v = f[pair[0]];
-        if (v === "" || v == null) return;
+      // 主办大队、主办人常驻显示（字段空缺则显示为空）；抓获人数有值才显示
+      [["主办大队", "主办大队"], ["主办人", "主办人"]].forEach(function (pair) {
         var chip = document.createElement("span");
         chip.className = "kv-chip";
-        chip.innerHTML = "<b>" + esc(pair[1]) + "：</b><span class='v'>" + esc(v) + "</span>";
+        chip.innerHTML = "<b>" + esc(pair[1]) + "：</b><span class='v'>" + esc(f[pair[0]] || "") + "</span>";
         chips.appendChild(chip);
       });
-      if (rec.created_by_name) {
+      if (f["抓获人数"] != null && f["抓获人数"] !== "") {
         var chip = document.createElement("span");
         chip.className = "kv-chip";
-        chip.innerHTML = "<b>录入人：</b><span class='v'>" + esc(rec.created_by_name) + "</span>";
+        chip.innerHTML = "<b>抓获人数：</b><span class='v'>" + esc(f["抓获人数"]) + "</span>";
         chips.appendChild(chip);
       }
       // 缴获物品逐项单列（类似物品归类）

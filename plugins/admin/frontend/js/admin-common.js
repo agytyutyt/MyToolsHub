@@ -49,6 +49,22 @@
     return window[SESSION];
   }
 
+  // 加载站点名称到 logo 标题（.logo-title，来自 /api/tools 的 site.title）
+  async function loadSiteTitle() {
+    try {
+      const res = await fetch('/api/tools');
+      const data = await res.json().catch(() => ({}));
+      const siteName = (data.site && data.site.title) || '';
+      if (!siteName) return;
+      const els = document.querySelectorAll('.logo-title');
+      els.forEach(el => {
+        // 保留原有「 · 管理后台」等后缀，仅替换站点名前缀
+        const suffix = el.dataset.suffix || '';
+        el.textContent = siteName + suffix;
+      });
+    } catch (e) { /* 忽略 */ }
+  }
+
   // 渲染顶部用户菜单（由各 admin 页面调用，注入到 #user-slot）
   function renderUserMenu(container) {
     getSession().then(user => {
@@ -208,8 +224,12 @@
     showToast,
     getSession,
     renderUserMenu,
+    loadSiteTitle,
     requireModule,
     openModal,
     confirmDialog,
   };
+
+  // 自动把 logo 标题替换为 config/tools.json 配置的站点名（保留「 · 管理后台」等后缀）
+  loadSiteTitle();
 })();
