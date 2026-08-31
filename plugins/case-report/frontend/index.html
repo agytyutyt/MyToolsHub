@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>战果录入</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=13">
+  <link rel="stylesheet" href="./style.css?v=15">
 </head>
 <body>
   <div class="view">
@@ -30,7 +30,9 @@
           <input id="model" type="text" placeholder="deepseek-v4-flash" />
         </label>
         <div class="cfg-actions">
+          <button id="testConfig" class="btn">测试连通</button>
           <button id="saveConfig" class="btn">保存配置</button>
+          <span id="configTestTip" class="tip hidden"></span>
           <span id="configTip" class="tip"></span>
         </div>
       </div>
@@ -155,7 +157,7 @@
 
   <div id="toast" class="toast hidden"></div>
   <script src="/plugin/admin/js/admin-common.js"></script>
-  <script src="/static/js/jz-icon.js?v=2"></script>
-  <script src="./app.js?v=13"></script>
+  <script src="/static/js/jz-icon.js?v=3"></script>
+  <script src="./app.js?v=14"></script>
 </body>
 </html>

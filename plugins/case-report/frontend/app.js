@@ -137,6 +137,32 @@
     });
   }
 
+  function testConfig() {
+    var btn = $("#testConfig");
+    var tip = $("#configTestTip");
+    btn.disabled = true;
+    tip.textContent = "测试中…";
+    tip.className = "tip";
+    postJSON("/api/case-report/config/test", {
+      base_url: $("#baseUrl").value,
+      api_key: $("#apiKey").value,
+      model: $("#model").value,
+    }).then(function (data) {
+      if (data.ok) {
+        tip.textContent = "✓ " + (data.detail || "连通正常");
+        tip.className = "tip";
+      } else {
+        tip.textContent = "✗ " + (data.detail || "连通失败");
+        tip.className = "tip err";
+      }
+    }).catch(function (e) {
+      tip.textContent = "✗ " + e.message;
+      tip.className = "tip err";
+    }).then(function () {
+      btn.disabled = false;
+    });
+  }
+
   /* ==================== 解析 ==================== */
   function setStatus(text, kind) {
     var el = $("#parseStatus");
@@ -941,6 +967,7 @@
     });
     $("#saveEntryBtn").addEventListener("click", saveEntry);
     $("#saveConfig").addEventListener("click", saveConfig);
+    $("#testConfig").addEventListener("click", testConfig);
     $("#refreshRecords").addEventListener("click", function () {
       refreshRecords();
       refreshSummary();

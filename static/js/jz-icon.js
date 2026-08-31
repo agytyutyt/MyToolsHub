@@ -54,7 +54,7 @@
 
   // sessionStorage 缓存键：仅首次进入站点时做一次 canvas 检测，之后（含 iframe 插件页）
   // 直接读缓存，避免每个页面重复执行像素检测的开销。
-  var CACHE_KEY = 'jz_emoji_supported_v1';
+  var CACHE_KEY = 'jz_emoji_supported_v2';
 
   function readCache() {
     try {
@@ -71,8 +71,10 @@
     } catch (e) { /* 忽略 */ }
   }
 
-  // 检测是否能渲染彩色 emoji：画一个黑色底，用 emoji 字体画红色笑脸，
-  // 取像素判断是否出现「非灰阶」的彩色像素（彩色 emoji 才有；方框/单色则无）。
+  // 检测是否能渲染彩色 emoji：在画布上画出 😀，统计字形像素的「色相多样性」。
+  // 彩色 emoji 字体（Segoe UI Emoji 等，Win8+）会渲染出多种颜色（黄脸/红嘴/黑眼）；
+  // 而 Win7 等缺少彩色 emoji 字体时，字形回退为单色「方框」（tofu）或单色字形，
+  // 无论画布 fillStyle 设成什么颜色，字形始终只有一种色相 → 判定不支持，改用 SVG。
   function supportsColorEmoji() {
     if (_supported !== null) return _supported;
     if (readCache()) return _supported;
@@ -89,15 +91,33 @@
       ctx.fillStyle = '#ff0000';
       ctx.fillText('\uD83D\uDE00', 2, 2); // 😀
       var data = ctx.getImageData(0, 0, 32, 32).data;
+      var hueBins = {};
       var colored = 0;
       for (var i = 0; i < data.length; i += 4) {
-        var r = data[i], g = data[i + 1], b = data[i + 2];
-        // 非灰阶（|r-g| 或 |g-b| 明显）且非纯黑/透明 → 判定为彩色 emoji 像素
-        if ((Math.abs(r - g) > 24 || Math.abs(g - b) > 24 || Math.abs(r - b) > 24)) {
-          colored++;
-        }
+        var r = data[i], g = data[i + 1], b = data[i + 2], a = data[i + 3];
+        if (a < 10) continue;               // 透明像素跳过
+        if (r + g + b < 30) continue;       // 近黑背景/描边跳过
+        // 灰阶像素（单色字形/反锯齿）跳过
+        if (Math.abs(r - g) <= 24 && Math.abs(g - b) <= 24 && Math.abs(r - b) <= 24) continue;
+        var max = Math.max(r, g, b), min = Math.min(r, g, b);
+        if (max - min < 16) continue;       // 低饱和（接近灰）跳过
+        // 粗略色相分桶（12 桶），统计出现几种颜色
+        var hue = 0;
+        if (max === r) hue = ((g - b) / (max - min)) % 6;
+        else if (max === g) hue = (b - r) / (max - min) + 2;
+        else hue = (r - g) / (max - min) + 4;
+        if (hue < 0) hue += 6;
+        var bin = Math.floor(hue / 6 * 12);
+        if (bin > 11) bin = 11;
+        hueBins[bin] = (hueBins[bin] || 0) + 1;
+        colored++;
       }
-      _supported = colored > 5;
+      // 至少 2 个不同色相（各 ≥2 像素）才判定为彩色；单色方框只有 1 种色相
+      var bins = 0;
+      for (var k in hueBins) {
+        if (hueBins[k] >= 2) bins++;
+      }
+      _supported = colored > 5 && bins >= 2;
     } catch (e) {
       _supported = false;
     }

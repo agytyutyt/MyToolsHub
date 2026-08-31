@@ -578,6 +578,26 @@ def register(app) -> None:
         save_config(merged)
         return jsonify({"ok": True, "llm_configured": bool(merged["llm"]["api_key"])})
 
+    @app.post(f"{API_PREFIX}/config/test")
+    def cr_test_config():
+        """大模型连通性测试：用当前配置（或本次表单值）发一条最小请求验证。
+
+        body 可选 {base_url?, api_key?, model?}，缺省回退到已保存配置；
+        api_key 留空表示沿用已保存值（不回传明文的安全约定）。
+        """
+        _set_operation("测试大模型连通性")
+        body = request.get_json(silent=True) or {}
+        cfg = load_config()
+        base_url = (body.get("base_url") or cfg["llm"]["base_url"] or "").strip()
+        api_key = (body.get("api_key") or cfg["llm"]["api_key"] or "").strip()
+        model = (body.get("model") or cfg["llm"]["model"] or "").strip()
+        if not base_url:
+            return jsonify({"ok": False, "detail": "请先填写 API 地址"}), 400
+        if not api_key:
+            return jsonify({"ok": False, "detail": "请先填写 API Key（或已保存配置）"}), 400
+        ok, detail = llm_client.test_connection(base_url, api_key, model)
+        return jsonify({"ok": ok, "detail": detail})
+
     @app.get(f"{API_PREFIX}/status")
     def cr_status():
         """依赖自检：缺依赖时优雅降级（B-4）。"""

@@ -45,16 +45,23 @@ def parse_model_output(text):
     raise LLMError("大模型返回的内容不是合法 JSON，请检查模型是否按格式输出")
 
 
-def chat_json(base_url, api_key, model, system, user, temperature=0.1, timeout=120):
-    """发送一次 chat/completions 请求并解析 JSON 回复。
+def build_chat_url(base_url):
+    """根据 base_url 拼出 chat/completions 完整地址。
 
     base_url 允许以 /chat/completions 结尾（直接使用），否则自动拼接。
     """
     base = (base_url or DEFAULT_BASE_URL).strip()
     if base.endswith("/chat/completions"):
-        url = base
-    else:
-        url = base.rstrip("/") + "/chat/completions"
+        return base
+    return base.rstrip("/") + "/chat/completions"
+
+
+def chat_json(base_url, api_key, model, system, user, temperature=0.1, timeout=120):
+    """发送一次 chat/completions 请求并解析 JSON 回复。
+
+    base_url 允许以 /chat/completions 结尾（直接使用），否则自动拼接。
+    """
+    url = build_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -87,6 +94,58 @@ def chat_json(base_url, api_key, model, system, user, temperature=0.1, timeout=1
     except (KeyError, IndexError, TypeError):
         raise LLMError("大模型返回结构异常，请检查模型名称是否正确")
     return parse_model_output(content)
+
+
+def test_connection(base_url, api_key, model, timeout=15):
+    """连通性测试：向 /chat/completions 发一条最小请求，验证地址/Key/模型可用。
+
+    返回 (ok, detail)：ok=False 时 detail 为可读的错误原因。
+    判定标准：HTTP 200 且返回结构合法（含 choices[].message）即视为连通——
+    推理模型（如 DeepSeek 系）在 max_tokens 较小时会把额度花在
+    reasoning_content 上，content 可能为空，但这并不代表不可用。
+    """
+    url = build_chat_url(base_url)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model or DEFAULT_MODEL,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 16,
+        "temperature": 0,
+        "stream": False,
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+    except requests.RequestException as e:
+        return False, f"无法连接大模型服务，请检查网络与接口地址（{type(e).__name__}）"
+
+    if resp.status_code >= 400:
+        try:
+            detail = resp.json()
+            detail = json.dumps(detail, ensure_ascii=False)[:300]
+        except Exception:
+            detail = (resp.text or "")[:300]
+        hint = "（请检查 API Key）" if resp.status_code in (401, 403) else ""
+        return False, f"接口返回错误（HTTP {resp.status_code}）{hint}：{detail}"
+
+    try:
+        data = resp.json()
+        choices = data.get("choices") or []
+        message = choices[0].get("message", {}) if choices else {}
+    except (KeyError, TypeError, ValueError, IndexError):
+        return False, "返回结构异常，请检查 base_url 是否为 OpenAI 兼容接口"
+
+    if not message:
+        return False, "返回结构异常：未包含 choices[].message，请检查接口兼容性"
+
+    # 结构合法即视为连通；附上模型实际输出（content 或推理内容）便于反馈
+    snippet = str(message.get("content") or message.get("reasoning_content") or "").strip()
+    detail = "连通正常，模型可正常响应"
+    if snippet:
+        detail = f"连通正常，模型响应：{snippet[:40]}"
+    return True, detail
 
 
 # 系统提示词：只输出五要素键值对 JSON（含缴获物品逐项类别）

@@ -41,7 +41,7 @@
   grid-template-columns: 1fr 1fr;
   gap: 12px;
   padding-bottom: 14px;
-}.cfg-grid label { display: block; font-size: 13px; color: var(--text-2); }.cfg-grid label input { margin-top: 4px; width: 100%; }.cfg-actions { display: flex; align-items: center;  }
+}.cfg-grid label { display: block; font-size: 13px; color: var(--text-2); }.cfg-grid label input { margin-top: 4px; width: 100%; }.cfg-actions { display: flex; align-items: center;  align-self: end; }.cfg-actions .btn { height: 40px; }
 /* Chrome<84 flex gap fallback */.cfg-actions > * + * { margin-left: 10px; }/* ==================== 表单控件 ==================== */
 input, textarea {
   border: 1px solid var(--border);
@@ -79,7 +79,7 @@ input, textarea {
   margin-top: 12px;
   flex-wrap: wrap;
 }
-/* Chrome<84 flex gap fallback */.row-actions > * + * { margin-left: 10px; }.toolbar-status { font-size: 13px; color: var(--text-2); }.toolbar-status.err { color: var(--danger); }.toolbar-status.ok { color: var(--ok); }.tip { font-size: 13px; color: var(--ok); }.muted { color: var(--text-2); font-size: 13px; margin: 8px 0 0; line-height: 1.6; }/* ==================== 抽取结果 ==================== */
+/* Chrome<84 flex gap fallback */.row-actions > * + * { margin-left: 10px; }.toolbar-status { font-size: 13px; color: var(--text-2); }.toolbar-status.err { color: var(--danger); }.toolbar-status.ok { color: var(--ok); }.tip { font-size: 13px; color: var(--ok); }.tip.err { color: var(--danger); }.muted { color: var(--text-2); font-size: 13px; margin: 8px 0 0; line-height: 1.6; }/* ==================== 抽取结果 ==================== */
 .result-head { display: flex; align-items: center;  flex-wrap: wrap; }
 /* Chrome<84 flex gap fallback *//* ==================== 抽取结果 ==================== */
 .result-head > * + * { margin-left: 10px; }.result-head h2 { margin-bottom: 12px; }.badge {
