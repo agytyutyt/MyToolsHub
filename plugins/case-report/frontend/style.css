@@ -149,11 +149,10 @@ input, textarea {
 .record-head > * + * { margin-left: 12px; }.record-head h2 { margin: 0; }.spacer { flex: 1; }/* ==================== 时间筛选（按月/自定义区间） ==================== */
 .period-filter {
   display: flex;
-  align-items: center;
   
-  flex-wrap: wrap;
+  flex-direction: column;
 }
-/* Chrome<84 flex gap fallback */.period-filter > * + * { margin-left: 8px; }.period-filter label { font-size: 13px; color: var(--text-2); }.period-filter select,
+/* Chrome<84 flex gap fallback */.period-filter label { font-size: 13px; color: var(--text-2); }.period-filter select,
 .period-filter input {
   height: 32px;
   border: 1px solid var(--border);
@@ -195,18 +194,34 @@ input, textarea {
   display: flex;
   flex-direction: column;
 }.case-sidebar h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }.case-list { display: flex; flex-direction: column;  overflow: auto; flex: 1 1 auto; min-height: 0; }
-/* Chrome<84 flex gap fallback *//* ==================== 部门/主办人筛选 ==================== */
-.org-filter {
+/* Chrome<84 flex gap fallback *//* ==================== 部门/主办人/时间筛选（统一行布局） ==================== */
+.filter-block {
+  display: flex;
+  flex-direction: column;
+  
+  margin-bottom: 10px;
+}
+/* Chrome<84 flex gap fallback */.filter-block > * + * { margin-top: 8px; }.filter-row {
   display: flex;
   align-items: center;
   
-  flex-wrap: wrap;
-  margin-bottom: 10px;
+  width: 100%;
 }
-/* Chrome<84 flex gap fallback */.org-filter > * + * { margin-left: 8px; }.org-filter label { font-size: 13px; color: var(--text-2); }.org-filter select {
+/* Chrome<84 flex gap fallback */.filter-row > * + * { margin-left: 0; }.filter-row label {
+  flex: none;
+  width: 48px;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  margin-right: 8px;
+  flex-shrink: 0;
+}.filter-row select,
+.filter-row input[type="date"] {
   height: 32px;
+  flex: 1 1 0;
   min-width: 0;
-  flex: 1 1 auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 13px;
@@ -216,19 +231,10 @@ input, textarea {
 }
 /* Chrome<84 flex gap fallback *//* ==================== 案件筛选侧边栏内的时间筛选（横向） ==================== */
 .case-sidebar .period-filter {
-  display: flex;
-  align-items: center;
-  
-  flex-wrap: wrap;
-  margin-bottom: 10px;
   padding-bottom: 10px;
   border-bottom: 1px dashed var(--border);
 }
-/* Chrome<84 flex gap fallback */.case-sidebar .period-filter > * + * { margin-left: 8px; margin-top: 0; }.case-sidebar .period-filter select,
-.case-sidebar .period-filter input {
-  width: auto;
-  box-sizing: border-box;
-}.case-sidebar .period-filter .period-actions { display: flex;  }
+/* Chrome<84 flex gap fallback */.case-sidebar .period-filter .period-actions { display: flex;  }
 /* Chrome<84 flex gap fallback */.case-sidebar .period-filter .period-actions > * + * { margin-left: 8px; }.case-sidebar .period-filter .period-actions .pf-btn { flex: 1; }.case-sidebar .sidebar-tip { margin-top: 10px; padding: 0 4px; }
 /* Chrome<84 flex gap fallback */.case-list > * + * { margin-top: 2px; }.case-item {
   display: flex;

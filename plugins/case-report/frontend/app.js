@@ -23,7 +23,6 @@
     caseNorm: "",   // 当前筛选案件（规整名），空串=全部案件
     caseName: "",   // 当前筛选案件的展示名
     scope: "mine",  // 查看范围：mine=我的战果 / dept=本部门 / all=全部(仅超管)
-    month: "",      // 入库月份筛选 YYYY-MM，空=全部
     from: "",       // 自定义开始日期 YYYY-MM-DD
     to: "",         // 自定义结束日期 YYYY-MM-DD
     dept: "",       // 部门筛选（部门ID）
@@ -561,28 +560,11 @@
     var parts = [];
     if (state.caseNorm) parts.push("case=" + encodeURIComponent(state.caseNorm));
     if (state.scope && state.scope !== "mine") parts.push("scope=" + state.scope);
-    if (state.month) parts.push("month=" + encodeURIComponent(state.month));
     if (state.from) parts.push("from=" + encodeURIComponent(state.from));
     if (state.to) parts.push("to=" + encodeURIComponent(state.to));
     if (state.dept) parts.push("dept=" + encodeURIComponent(state.dept));
     if (state.person) parts.push("user=" + encodeURIComponent(state.person));
     return parts.length ? "?" + parts.join("&") : "";
-  }
-
-  /* 载入「按入库月份」下拉选项（当前范围下所有出现过的月份，倒序）；
-     空值（默认）即全部时间，无独立「全部月份」项。 */
-  function loadMonths() {
-    return api("/api/case-report/months" + (state.scope && state.scope !== "mine" ? "?scope=" + state.scope : ""))
-      .then(function (data) {
-        var sel = $("#monthFilter");
-        if (!sel) return;
-        var cur = state.month || "";
-        sel.innerHTML = '<option value="">选择月份</option>' +
-          (data.months || []).map(function (m) {
-            return "<option value='" + esc(m) + "'>" + esc(m) + "</option>";
-          }).join("");
-        sel.value = cur;
-      }).catch(function () {});
   }
 
   /* 载入部门/用户筛选项（来自管理后台组织树） */
@@ -616,29 +598,24 @@
     }).catch(function () {});
   }
 
-  /* 应用时间筛选后统一刷新（月份下拉、案件侧边栏、台账、汇总） */
+  /* 应用时间筛选后统一刷新（案件侧边栏、台账、汇总） */
   function applyPeriod() {
     var from = $("#fromDate").value;
     var to = $("#toDate").value;
     if (from && to && from > to) { toast("开始日期不能晚于结束日期", "err"); return; }
-    state.month = $("#monthFilter").value || "";
     state.from = from;
     state.to = to;
     state.caseNorm = "";
     state.caseName = "";
-    loadMonths().then(function () {
-      return refreshCases().then(function () {
-        refreshRecords();
-        refreshSummary();
-      });
+    refreshCases().then(function () {
+      refreshRecords();
+      refreshSummary();
     });
   }
 
   function clearPeriod() {
-    state.month = "";
     state.from = "";
     state.to = "";
-    $("#monthFilter").value = "";
     $("#fromDate").value = "";
     $("#toDate").value = "";
     applyPeriod();
@@ -648,7 +625,6 @@
   function refreshCases() {
     var q = [];
     if (state.scope && state.scope !== "mine") q.push("scope=" + state.scope);
-    if (state.month) q.push("month=" + encodeURIComponent(state.month));
     if (state.from) q.push("from=" + encodeURIComponent(state.from));
     if (state.to) q.push("to=" + encodeURIComponent(state.to));
     return api("/api/case-report/cases" + (q.length ? "?" + q.join("&") : "")).then(function (data) {
@@ -998,42 +974,29 @@
       });
       state.caseNorm = "";
       state.caseName = "";
-      // 重建月份下拉、案件侧边栏与台账/汇总
-      loadMonths().then(function () {
-        refreshCases().then(function () {
-          refreshRecords();
-          refreshSummary();
-        });
+      // 重建案件侧边栏与台账/汇总
+      refreshCases().then(function () {
+        refreshRecords();
+        refreshSummary();
       });
     });
 
-    // 时间筛选：按月份 / 自定义起止日期
+    // 时间筛选：自定义起止日期
     $("#applyPeriod").addEventListener("click", applyPeriod);
     $("#clearPeriod").addEventListener("click", clearPeriod);
-    $("#monthFilter").addEventListener("change", function () {
-      if ($("#fromDate").value || $("#toDate").value) {
-        $("#fromDate").value = "";
-        $("#toDate").value = "";
-      }
-      applyPeriod();
-    });
 
     // 部门/人员筛选
     $("#deptFilter").addEventListener("change", function () {
       state.dept = this.value || "";
       state.caseNorm = "";
       state.caseName = "";
-      loadMonths().then(function () {
-        refreshCases().then(function () { refreshRecords(); refreshSummary(); });
-      });
+      refreshCases().then(function () { refreshRecords(); refreshSummary(); });
     });
     $("#userFilter").addEventListener("change", function () {
       state.person = this.value || "";
       state.caseNorm = "";
       state.caseName = "";
-      loadMonths().then(function () {
-        refreshCases().then(function () { refreshRecords(); refreshSummary(); });
-      });
+      refreshCases().then(function () { refreshRecords(); refreshSummary(); });
     });
 
     // 导出 Excel
