@@ -11,7 +11,7 @@
   var $ = function (s) { return document.querySelector(s); };
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
 
-  var FIELD_KEYS = ["案件名", "时间", "主办大队", "抓获人数", "缴获物品"];
+  var FIELD_KEYS = ["案件名", "时间", "主办大队", "主办人", "抓获人数", "缴获物品"];
   var POLL_MS = 1200;
   var POLL_TIMEOUT = 90000;
 
@@ -26,6 +26,8 @@
     month: "",      // 入库月份筛选 YYYY-MM，空=全部
     from: "",       // 自定义开始日期 YYYY-MM-DD
     to: "",         // 自定义结束日期 YYYY-MM-DD
+    dept: "",       // 部门筛选（部门ID）
+    person: "",     // 用户筛选（用户名/姓名）
     user: null,     // 当前登录用户（AdminCommon.getSession() 取）
   };
 
@@ -237,7 +239,7 @@
 
   /* 本地规则兜底（仅前端辅助，与后端 parser.py 逻辑一致的精简版） */
   function localRulesParse(text) {
-    var fields = { "案件名": "", "时间": "", "主办大队": "", "抓获人数": "", "缴获物品": "" };
+    var fields = { "案件名": "", "时间": "", "主办大队": "", "主办人": "", "抓获人数": "", "缴获物品": "" };
     if (!text) return fields;
     var m;
     m = text.match(/(?:主办|承办|牵头)(?:单位)?[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9]{1,10}(?:支队|大队|中队|专班|专案组|工作组))/);
@@ -281,7 +283,12 @@
       key.textContent = k;
       var input = document.createElement("input");
       input.dataset.field = k;
-      input.value = fields[k] == null ? "" : fields[k];
+      var val = fields[k] == null ? "" : fields[k];
+      // 主办人：解析/兜底未给时默认填当前登录用户姓名
+      if (!val && k === "主办人" && state.user && state.user.name) {
+        val = state.user.name;
+      }
+      input.value = val;
       input.placeholder = k === "抓获人数" ? "如：5" : "";
       row.appendChild(key);
       row.appendChild(input);
@@ -557,22 +564,56 @@
     if (state.month) parts.push("month=" + encodeURIComponent(state.month));
     if (state.from) parts.push("from=" + encodeURIComponent(state.from));
     if (state.to) parts.push("to=" + encodeURIComponent(state.to));
+    if (state.dept) parts.push("dept=" + encodeURIComponent(state.dept));
+    if (state.person) parts.push("user=" + encodeURIComponent(state.person));
     return parts.length ? "?" + parts.join("&") : "";
   }
 
-  /* 载入「按入库月份」下拉选项（当前范围下所有出现过的月份，倒序） */
+  /* 载入「按入库月份」下拉选项（当前范围下所有出现过的月份，倒序）；
+     空值（默认）即全部时间，无独立「全部月份」项。 */
   function loadMonths() {
     return api("/api/case-report/months" + (state.scope && state.scope !== "mine" ? "?scope=" + state.scope : ""))
       .then(function (data) {
         var sel = $("#monthFilter");
         if (!sel) return;
         var cur = state.month || "";
-        sel.innerHTML = '<option value="">全部月份</option>' +
+        sel.innerHTML = '<option value="">选择月份</option>' +
           (data.months || []).map(function (m) {
             return "<option value='" + esc(m) + "'>" + esc(m) + "</option>";
           }).join("");
         sel.value = cur;
       }).catch(function () {});
+  }
+
+  /* 载入部门/用户筛选项（来自管理后台组织树） */
+  function loadOrgOptions() {
+    return api("/api/admin/org-tree").then(function (data) {
+      var deptSel = $("#deptFilter");
+      var userSel = $("#userFilter");
+      if (!deptSel || !userSel) return;
+      var depts = [];
+      var users = [];
+      (data.tree || []).forEach(function (unit) {
+        (unit.children || []).forEach(function (d) {
+          depts.push({ id: d.id, name: d.name });
+          (d.children || []).forEach(function (u) {
+            users.push({ id: u.id, name: u.name });
+          });
+        });
+      });
+      // 去重
+      var deptMap = {}, userMap = {};
+      depts.forEach(function (d) { if (d.id && !deptMap[d.id]) deptMap[d.id] = d; });
+      users.forEach(function (u) { if (u.id && !userMap[u.id]) userMap[u.id] = u; });
+      depts = Object.keys(deptMap).map(function (k) { return deptMap[k]; });
+      users = Object.keys(userMap).map(function (k) { return userMap[k]; });
+      deptSel.innerHTML = '<option value="">全部部门</option>' +
+        depts.map(function (d) { return "<option value='" + esc(d.id) + "'>" + esc(d.name) + "</option>"; }).join("");
+      userSel.innerHTML = '<option value="">全部人员</option>' +
+        users.map(function (u) { return "<option value='" + esc(u.id) + "'>" + esc(u.name) + "（" + esc(u.id) + "）</option>"; }).join("");
+      if (state.dept) deptSel.value = state.dept;
+      if (state.person) userSel.value = state.person;
+    }).catch(function () {});
   }
 
   /* 应用时间筛选后统一刷新（月份下拉、案件侧边栏、台账、汇总） */
@@ -704,7 +745,7 @@
 
       var chips = document.createElement("div");
       chips.className = "kv-chips";
-      [["主办大队", "主办大队"], ["抓获人数", "抓获人数"]].forEach(function (pair) {
+      [["主办大队", "主办大队"], ["主办人", "主办人"], ["抓获人数", "抓获人数"]].forEach(function (pair) {
         var v = f[pair[0]];
         if (v === "" || v == null) return;
         var chip = document.createElement("span");
@@ -978,6 +1019,36 @@
       applyPeriod();
     });
 
+    // 部门/人员筛选
+    $("#deptFilter").addEventListener("change", function () {
+      state.dept = this.value || "";
+      state.caseNorm = "";
+      state.caseName = "";
+      loadMonths().then(function () {
+        refreshCases().then(function () { refreshRecords(); refreshSummary(); });
+      });
+    });
+    $("#userFilter").addEventListener("change", function () {
+      state.person = this.value || "";
+      state.caseNorm = "";
+      state.caseName = "";
+      loadMonths().then(function () {
+        refreshCases().then(function () { refreshRecords(); refreshSummary(); });
+      });
+    });
+
+    // 导出 Excel
+    $("#exportExcel").addEventListener("click", function () {
+      var url = "/api/case-report/export" + caseQuery();
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "case-report.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      toast("正在导出…", "ok");
+    });
+
     // 对话框：点遮罩或按 Esc 关闭
     var dialog = $("#dialog");
     dialog.addEventListener("mousedown", function (e) {
@@ -993,6 +1064,7 @@
     bindEvents();
     loadConfig();
     loadCategories();
+    loadOrgOptions();
     // 当前登录用户（服务端权威）：决定「全部」范围可见性与台账操作按钮显隐
     if (window.AdminCommon && window.AdminCommon.getSession) {
       window.AdminCommon.getSession().then(function (u) {

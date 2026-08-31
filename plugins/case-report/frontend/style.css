@@ -181,32 +181,52 @@ input, textarea {
 }
 /* Chrome<84 flex gap fallback *//* ==================== 案件筛选侧边栏 ==================== */
 .case-layout > * + * { margin-left: 16px; }.case-sidebar {
-  flex: 0 0 220px;
+  flex: 0 0 300px;
   position: sticky;
   top: 16px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 14px 12px 12px;
+  padding: 14px 14px 12px;
   /* 距下边缘 15px 时停止增高：16px(top sticky) + 15px(bottom) */
   max-height: calc(100vh - 31px);
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }.case-sidebar h2 { font-size: 14px; margin: 0 0 10px; color: var(--text); }.case-list { display: flex; flex-direction: column;  overflow: auto; flex: 1 1 auto; min-height: 0; }
-/* Chrome<84 flex gap fallback *//* ==================== 案件筛选侧边栏内的时间筛选（竖向） ==================== */
+/* Chrome<84 flex gap fallback *//* ==================== 部门/主办人筛选 ==================== */
+.org-filter {
+  display: flex;
+  align-items: center;
+  
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+/* Chrome<84 flex gap fallback */.org-filter > * + * { margin-left: 8px; }.org-filter label { font-size: 13px; color: var(--text-2); }.org-filter select {
+  height: 32px;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 0 8px;
+  background: var(--card);
+  color: var(--text);
+}
+/* Chrome<84 flex gap fallback *//* ==================== 案件筛选侧边栏内的时间筛选（横向） ==================== */
 .case-sidebar .period-filter {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  align-items: center;
+  
+  flex-wrap: wrap;
   margin-bottom: 10px;
   padding-bottom: 10px;
   border-bottom: 1px dashed var(--border);
 }
-/* Chrome<84 flex gap fallback */.case-sidebar .period-filter > * + * { margin-left: 0; margin-top: 6px; }.case-sidebar .period-filter select,
+/* Chrome<84 flex gap fallback */.case-sidebar .period-filter > * + * { margin-left: 8px; margin-top: 0; }.case-sidebar .period-filter select,
 .case-sidebar .period-filter input {
-  width: 100%;
+  width: auto;
   box-sizing: border-box;
 }.case-sidebar .period-filter .period-actions { display: flex;  }
 /* Chrome<84 flex gap fallback */.case-sidebar .period-filter .period-actions > * + * { margin-left: 8px; }.case-sidebar .period-filter .period-actions .pf-btn { flex: 1; }.case-sidebar .sidebar-tip { margin-top: 10px; padding: 0 4px; }

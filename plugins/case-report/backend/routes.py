@@ -33,6 +33,15 @@ from datetime import datetime
 
 from flask import jsonify, request, send_file
 
+try:
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    openpyxl = None
+    OPENPYXL_AVAILABLE = False
+
 from . import category_kb, llm_client, parser
 
 try:
@@ -292,6 +301,7 @@ def _run_parse(task_id, text, cfg_llm, api_key, model, prompt):
                 used.add("rules")
 
         fields = normalize_fields(fields)
+        fields.pop("主办人", None)  # 主办人不参与解析，留空由保存时默认用户姓名填充
         method = "+".join(sorted(used)) or "rules"
         set_task(task_id, status="done", fields=fields,
                  method=method, llm_error=llm_error, rules=rules,
@@ -490,6 +500,27 @@ def _collect_months(recs):
     return sorted(seen.keys(), reverse=True)
 
 
+def _filter_by_org(recs, department_id, username):
+    """按部门 ID / 用户名（录入人）过滤记录；参数为空则不过滤。
+
+    department_id：精确匹配记录 department_id（支持传入部门名称模糊匹配）；
+    username：匹配 created_by 或 created_by_name（支持输入姓名/登录名搜索）。
+    """
+    out = recs
+    dept = (department_id or "").strip()
+    if dept:
+        out = [r for r in out
+               if (r.get("department_id") or "") == dept
+               or dept in (r.get("department_name") or "")]
+    user = (username or "").strip()
+    if user:
+        out = [r for r in out
+               if (r.get("created_by") or "") == user
+               or user in (r.get("created_by_name") or "")
+               or (r.get("fields") or {}).get("主办人") == user]
+    return out
+
+
 def migrate_record_owner():
     """给历史记录补归属：录入人 admin。
 
@@ -620,6 +651,9 @@ def register(app) -> None:
                                  request.args.get("month") or "",
                                  request.args.get("from") or "",
                                  request.args.get("to") or "")
+        recs = _filter_by_org(recs,
+                              request.args.get("dept") or "",
+                              request.args.get("user") or "")
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
@@ -662,6 +696,9 @@ def register(app) -> None:
                                  request.args.get("month") or "",
                                  request.args.get("from") or "",
                                  request.args.get("to") or "")
+        recs = _filter_by_org(recs,
+                              request.args.get("dept") or "",
+                              request.args.get("user") or "")
         groups = {}
         for rec in recs:
             cn = parser.normalize_case_name((rec.get("fields") or {}).get("案件名"))
@@ -714,7 +751,8 @@ def register(app) -> None:
     def cr_list():
         """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录；
         支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
-        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。"""
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤；
+        支持 ?dept=<部门ID或名称>、?user=<用户名/姓名> 按部门/主办人过滤。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -727,6 +765,9 @@ def register(app) -> None:
                                  request.args.get("month") or "",
                                  request.args.get("from") or "",
                                  request.args.get("to") or "")
+        recs = _filter_by_org(recs,
+                              request.args.get("dept") or "",
+                              request.args.get("user") or "")
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
@@ -775,6 +816,10 @@ def register(app) -> None:
             if dept:
                 dept = re.sub(r"^([一二三四五六七八九十\d]+)队$", r"\1大队", dept)
                 fields["主办大队"] = dept
+
+        # 主办人为空时，以当前用户姓名为默认值
+        if not fields.get("主办人"):
+            fields["主办人"] = user.get("name") or ""
 
         # 同案检测只在自己的记录里查：合并目标必须是自己可管理的记录
         if merge_mode == "auto" and case_name:
@@ -863,6 +908,9 @@ def register(app) -> None:
                     return jsonify({"ok": False, "detail": "没有任何要素可保存"}), 400
                 if fields.get("案件名"):
                     fields["案件名"] = parser.normalize_case_name(fields["案件名"])
+                # 主办人为空时默认取录入人姓名（旧记录兼容：无主办人则以录入人兜底）
+                if not fields.get("主办人"):
+                    fields["主办人"] = rec.get("created_by_name") or user.get("name") or ""
                 rec["fields"] = fields
             # 原始报告
             if "source_text" in body:
@@ -899,6 +947,93 @@ def register(app) -> None:
             except OSError:
                 return jsonify({"ok": False, "detail": "删除失败"}), 500
         return jsonify({"ok": True})
+
+    @app.get(f"{API_PREFIX}/export")
+    def cr_export():
+        """按当前筛选条件导出战果台账为 Excel（.xlsx）。
+
+        过滤参数与 /records 一致：scope / case / month / from / to / dept / user。
+        导出的记录包含：案件名 / 时间 / 主办大队 / 主办人 / 抓获人数 / 缴获物品 /
+        缴获明细 / 录入人 / 所属部门 / 入库时间 / 原始报告。
+        """
+        _set_operation("导出战果台账")
+        user = _cr_viewer()
+        if user is None:
+            return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
+        scope = (request.args.get("scope") or "mine").strip()
+        if scope == "all" and not user.get("super_admin"):
+            return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
+        if not OPENPYXL_AVAILABLE:
+            return jsonify({"ok": False, "detail": "缺少 openpyxl，无法导出 Excel（pip install openpyxl）"}), 500
+        case_name = parser.normalize_case_name(request.args.get("case") or "")
+        recs = scoped_records(user, scope)
+        recs = _filter_by_period(recs,
+                                 request.args.get("month") or "",
+                                 request.args.get("from") or "",
+                                 request.args.get("to") or "")
+        recs = _filter_by_org(recs,
+                              request.args.get("dept") or "",
+                              request.args.get("user") or "")
+        if case_name:
+            recs = [r for r in recs
+                    if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
+        recs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "战果台账"
+        headers = ["案件名", "时间", "主办大队", "主办人", "抓获人数", "缴获物品",
+                   "缴获明细", "录入人", "所属部门", "入库时间", "原始报告"]
+        ws.append(headers)
+        # 表头样式
+        header_fill = PatternFill("solid", fgColor="4A90D9")
+        thin = Side(style="thin", color="BBBBBB")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        for c in range(1, len(headers) + 1):
+            cell = ws.cell(row=1, column=c)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border = border
+        # 数据行
+        for rec in recs:
+            f = rec.get("fields") or {}
+            items_txt = "；".join(
+                f"{it.get('name') or ''}"
+                f"{('×' + str(it.get('quantity'))) if it.get('quantity') is not None else ''}"
+                f"{(it.get('unit') or '')}"
+                for it in (rec.get("items") or [])
+            )
+            dept_name = rec.get("department_name") or rec.get("department_id") or ""
+            ws.append([
+                f.get("案件名", ""),
+                f.get("时间", ""),
+                f.get("主办大队", ""),
+                f.get("主办人", "") or rec.get("created_by_name") or "",
+                f.get("抓获人数", ""),
+                f.get("缴获物品", ""),
+                items_txt,
+                rec.get("created_by_name") or rec.get("created_by") or "",
+                dept_name,
+                rec.get("created_at", ""),
+                rec.get("source_text", "") or "",
+            ])
+        # 列宽与自动换行
+        widths = [24, 16, 16, 12, 12, 30, 30, 12, 16, 20, 40]
+        for i, w in enumerate(widths, start=1):
+            ws.column_dimensions[get_column_letter(i)].width = w
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                cell.border = border
+        ws.freeze_panes = "A2"
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        fname = f"case-report-{datetime.now().strftime('%Y%m%d-%H%M%S')}.xlsx"
+        return send_file(buf, as_attachment=True, download_name=fname,
+                         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     @app.get(f"{API_PREFIX}/records/<rid>/download")
     def cr_download(rid):

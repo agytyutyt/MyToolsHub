@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>战果录入</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=9">
+  <link rel="stylesheet" href="./style.css?v=10">
 </head>
 <body>
   <div class="view">
@@ -77,12 +77,23 @@
     <div class="case-layout">
       <aside class="case-sidebar">
         <h2>案件筛选</h2>
+
+        <div class="org-filter" id="orgFilter">
+          <label>部门</label>
+          <select id="deptFilter" title="按部门筛选">
+            <option value="">全部部门</option>
+          </select>
+          <label>主办人</label>
+          <select id="userFilter" title="按主办人/录入人筛选">
+            <option value="">全部人员</option>
+          </select>
+        </div>
+
         <div class="period-filter" id="periodFilter">
           <label>时间</label>
           <select id="monthFilter" title="按入库月份筛选">
-            <option value="">全部月份</option>
+            <option value="">选择月份</option>
           </select>
-          <span>或</span>
           <input type="date" id="fromDate" title="开始日期" />
           <span>至</span>
           <input type="date" id="toDate" title="结束日期" />
@@ -118,6 +129,7 @@
               <button type="button" class="scope-btn" data-scope="all" id="scope-all">全部</button>
             </div>
             <button id="refreshRecords" class="btn">刷新</button>
+            <button id="exportExcel" class="btn"><span data-jz-icon="📄"></span> 导出 Excel</button>
           </div>
 
           <div id="recordList" class="record-list"></div>
@@ -139,6 +151,6 @@
   <div id="toast" class="toast hidden"></div>
   <script src="/plugin/admin/js/admin-common.js"></script>
   <script src="/static/js/jz-icon.js?v=2"></script>
-  <script src="./app.js?v=11"></script>
+  <script src="./app.js?v=12"></script>
 </body>
 </html>
