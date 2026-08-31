@@ -66,6 +66,8 @@ import jztools_data
 CONFIG_FILE = jztools_data.get_data_root_file("plugins", "case-report", "config.json")
 PROMPT_FILE = jztools_data.get_data_root_file("plugins", "case-report", "prompt.json")
 DATA_DIR = jztools_data.get_data_root_dir("plugins", "case-report", "data")
+# 主办大队可选值配置文件（插件目录内固化，随插件分发）
+ORG_UNITS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "org_units.json")
 API_PREFIX = "/api/case-report"
 
 # 后台解析线程池：限制并发大模型任务数
@@ -144,6 +146,18 @@ def load_prompt():
     }
 
 
+def load_org_units():
+    """读取主办大队可选值（插件目录 org_units.json 固化）。"""
+    units = []
+    try:
+        with open(ORG_UNITS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        units = [str(u).strip() for u in (data.get("主办大队") or []) if str(u).strip()]
+    except Exception:
+        pass
+    return units
+
+
 def ensure_files():
     """首次运行生成可编辑的默认配置文件与数据目录。"""
     if not os.path.exists(CONFIG_FILE):
@@ -159,12 +173,38 @@ def ensure_files():
 
 # ===================== 字段规整 =====================
 
+def _normalize_unit(dept, units=None):
+    """把主办大队归一到配置文件可选值（一大队/二大队/三大队）。
+
+    规则：已是可选值之一则保留；否则从文本中提取中文/阿拉伯数字 1-3，
+    映射到对应序号的可选值（一大队→1、二大队→2、三大队→3）；
+    无法识别则置空。
+    """
+    units = units if units is not None else load_org_units()
+    if not units:
+        return (dept or "").strip()
+    dept = (dept or "").strip()
+    if dept in units:
+        return dept
+    if not dept:
+        return ""
+    cn = {"一": 1, "二": 2, "三": 3}
+    num = None
+    m = re.search(r"([一二三1-3])", dept)
+    if m:
+        ch = m.group(1)
+        num = cn.get(ch) if ch in cn else int(ch)
+    if num and 1 <= num <= len(units):
+        return units[num - 1]
+    return ""
+
+
 def normalize_fields(raw, now=None):
     """只保留五要素，trim 长度，抓获人数转阿拉伯数字/整数，时间补全整日期。
 
     支持以下自动补充：
     - 时间字段为空时填入当前日期（YYYY年M月D日）；
-    - 主办大队字段如为「X队」（X=中文数字或阿拉伯数字），自动补为「X大队」。
+    - 主办大队归一到插件配置的可选值（一大队/二大队/三大队）。
     """
     now = now or datetime.now()
     raw = raw or {}
@@ -182,11 +222,8 @@ def normalize_fields(raw, now=None):
         out["时间"] = parser.normalize_time(out["时间"])
     if not out["时间"]:
         out["时间"] = f"{now.year}年{now.month}月{now.day}日"
-    # 主办大队：「X队」→「X大队」
-    dept = out["主办大队"]
-    if dept:
-        dept = re.sub(r"^([一二三四五六七八九十\d]+)队$", r"\1大队", dept)
-        out["主办大队"] = dept
+    # 主办大队：归一到配置可选值
+    out["主办大队"] = _normalize_unit(out["主办大队"])
     cnt = out["抓获人数"]
     if cnt:
         cnt = parser.normalize_count(cnt)
@@ -564,6 +601,11 @@ def register(app) -> None:
             "llm_configured": bool(key) and bool(cfg["llm"]["base_url"]),
         })
 
+    @app.get(f"{API_PREFIX}/org-units")
+    def cr_get_org_units():
+        """主办大队可选值（插件目录 org_units.json 固化）。"""
+        return jsonify({"ok": True, "units": load_org_units()})
+
     @app.post(f"{API_PREFIX}/config")
     def cr_post_config():
         """保存展示配置；api_key 留空表示沿用原值，避免明文回显后空写覆盖。"""
@@ -830,12 +872,11 @@ def register(app) -> None:
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
 
-        # 主办大队为空时，以当前用户部门为主办大队（并统一「X队→X大队」表述）
+        # 主办大队缺省时取当前用户部门，并归一到配置可选值
         if not fields.get("主办大队") and user.get("department"):
             dept = str(user.get("department") or "").strip()
             if dept:
-                dept = re.sub(r"^([一二三四五六七八九十\d]+)队$", r"\1大队", dept)
-                fields["主办大队"] = dept
+                fields["主办大队"] = _normalize_unit(dept)
 
         # 主办人为空时，以当前用户姓名为默认值
         if not fields.get("主办人"):
@@ -1002,8 +1043,8 @@ def register(app) -> None:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "战果台账"
-        headers = ["案件名", "时间", "主办大队", "主办人", "抓获人数", "缴获物品",
-                   "缴获明细", "录入人", "所属部门", "入库时间", "原始报告"]
+        headers = ["案件名", "时间", "主办大队", "主办人", "抓获人数", "涉案价值",
+                   "缴获物品", "缴获明细", "录入人", "所属部门", "入库时间", "原始报告"]
         ws.append(headers)
         # 表头样式
         header_fill = PatternFill("solid", fgColor="4A90D9")
@@ -1031,6 +1072,7 @@ def register(app) -> None:
                 f.get("主办大队", ""),
                 f.get("主办人", "") or rec.get("created_by_name") or "",
                 f.get("抓获人数", ""),
+                f.get("涉案价值", ""),
                 f.get("缴获物品", ""),
                 items_txt,
                 rec.get("created_by_name") or rec.get("created_by") or "",
@@ -1039,7 +1081,7 @@ def register(app) -> None:
                 rec.get("source_text", "") or "",
             ])
         # 列宽与自动换行
-        widths = [24, 16, 16, 12, 12, 30, 30, 12, 16, 20, 40]
+        widths = [24, 16, 16, 12, 12, 16, 30, 30, 12, 16, 20, 40]
         for i, w in enumerate(widths, start=1):
             ws.column_dimensions[get_column_letter(i)].width = w
         for row in ws.iter_rows(min_row=2):

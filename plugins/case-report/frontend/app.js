@@ -11,7 +11,7 @@
   var $ = function (s) { return document.querySelector(s); };
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
 
-  var FIELD_KEYS = ["案件名", "时间", "主办大队", "主办人", "抓获人数", "缴获物品"];
+  var FIELD_KEYS = ["案件名", "时间", "主办大队", "主办人", "抓获人数", "涉案价值", "缴获物品"];
   var POLL_MS = 1200;
   var POLL_TIMEOUT = 90000;
 
@@ -28,6 +28,7 @@
     dept: "",       // 部门筛选（部门ID）
     person: "",     // 用户筛选（用户名/姓名）
     user: null,     // 当前登录用户（AdminCommon.getSession() 取）
+    orgUnits: [],   // 主办大队可选值（插件目录 org_units.json 固化）
   };
 
   function esc(s) {
@@ -113,6 +114,12 @@
       } else {
         $("#configTip").textContent = "使用本地规则解析";
       }
+    }).catch(function () {});
+  }
+
+  function loadOrgUnits() {
+    api("/api/case-report/org-units").then(function (data) {
+      state.orgUnits = data.units || [];
     }).catch(function () {});
   }
 
@@ -264,7 +271,7 @@
 
   /* 本地规则兜底（仅前端辅助，与后端 parser.py 逻辑一致的精简版） */
   function localRulesParse(text) {
-    var fields = { "案件名": "", "时间": "", "主办大队": "", "主办人": "", "抓获人数": "", "缴获物品": "" };
+    var fields = { "案件名": "", "时间": "", "主办大队": "", "主办人": "", "抓获人数": "", "涉案价值": "", "缴获物品": "" };
     if (!text) return fields;
     var m;
     m = text.match(/(?:主办|承办|牵头)(?:单位)?[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9]{1,10}(?:支队|大队|中队|专班|专案组|工作组))/);
@@ -278,6 +285,14 @@
     if (m) fields["抓获人数"] = cn2num(m[1]);
     m = text.match(/缴获([^。；;\n]{1,120})/);
     if (m) fields["缴获物品"] = m[1].replace(/等[、，。\s]*$/, "");
+    // 主办大队：归一到配置可选值（一大队/二大队/三大队）
+    if (fields["主办大队"]) {
+      var num = fields["主办大队"].match(/[一二三1-3]/);
+      if (num) {
+        var idx = { "一": 1, "二": 2, "三": 3 }[num[0]] || parseInt(num[0], 10);
+        if (state.orgUnits[idx - 1]) fields["主办大队"] = state.orgUnits[idx - 1];
+      }
+    }
     return fields;
   }
 
@@ -297,24 +312,43 @@
   }
 
   /* ==================== 抽取结果表单 ==================== */
+  function orgUnitOptions(sel) {
+    var opts = "";
+    opts += "<option value=''>（未指定）</option>";
+    (state.orgUnits || []).forEach(function (u) {
+      opts += "<option value='" + esc(u) + "'" + (sel === u ? " selected" : "") + ">" + esc(u) + "</option>";
+    });
+    return opts;
+  }
+
   function renderFields(fields) {
     var grid = $("#fieldGrid");
     grid.innerHTML = "";
     FIELD_KEYS.forEach(function (k) {
       var row = document.createElement("div");
       row.className = "field-row";
+      if (k === "缴获物品") row.classList.add("hidden");  // 明细在缴获物品明细编辑器里编辑
       var key = document.createElement("div");
       key.className = "key";
       key.textContent = k;
-      var input = document.createElement("input");
-      input.dataset.field = k;
       var val = fields[k] == null ? "" : fields[k];
       // 主办人：解析/兜底未给时默认填当前登录用户姓名
       if (!val && k === "主办人" && state.user && state.user.name) {
         val = state.user.name;
       }
+      if (k === "主办大队") {
+        var sel = document.createElement("select");
+        sel.dataset.field = k;
+        sel.innerHTML = orgUnitOptions(val);
+        row.appendChild(key);
+        row.appendChild(sel);
+        grid.appendChild(row);
+        return;
+      }
+      var input = document.createElement("input");
+      input.dataset.field = k;
       input.value = val;
-      input.placeholder = k === "抓获人数" ? "如：5" : "";
+      input.placeholder = k === "抓获人数" ? "如：5" : (k === "涉案价值" ? "如：80万元" : "");
       row.appendChild(key);
       row.appendChild(input);
       grid.appendChild(row);
@@ -323,8 +357,8 @@
 
   function collectFields() {
     var fields = {};
-    $("#fieldGrid").querySelectorAll("input[data-field]").forEach(function (input) {
-      fields[input.dataset.field] = input.value.trim();
+    $("#fieldGrid").querySelectorAll("[data-field]").forEach(function (el) {
+      fields[el.dataset.field] = el.value.trim();
     });
     return fields;
   }
@@ -413,7 +447,6 @@
       if (!input) return;
       var text = input.value.trim();
       if (!text) {
-        $("#itemsEditorWrap").classList.add("hidden");
         $("#itemsEditor").innerHTML = "";
         return;
       }
@@ -427,8 +460,7 @@
     var wrap = $("#itemsEditorWrap");
     var box = $("#itemsEditor");
     box.innerHTML = "";
-    if (!items.length) { wrap.classList.add("hidden"); return; }
-    wrap.classList.remove("hidden");
+    wrap.classList.remove("hidden");  // 缴获物品明细默认展开显示
     (items || []).forEach(function (it) { box.appendChild(buildItemRow(it)); });
   }
 
@@ -760,6 +792,13 @@
         chip.innerHTML = "<b>抓获人数：</b><span class='v'>" + esc(f["抓获人数"]) + "</span>";
         chips.appendChild(chip);
       }
+      // 涉案价值：未解析出内容则为空，台账中为空时不显示
+      if (f["涉案价值"] != null && f["涉案价值"] !== "") {
+        var chip = document.createElement("span");
+        chip.className = "kv-chip";
+        chip.innerHTML = "<b>涉案价值：</b><span class='v'>" + esc(f["涉案价值"]) + "</span>";
+        chips.appendChild(chip);
+      }
       // 缴获物品逐项单列（类似物品归类）
       var items = rec.items || [];
       if (items.length) {
@@ -898,7 +937,12 @@
   function openEditRecord(rec) {
     var f = rec.fields || {};
     var fieldHtml = FIELD_KEYS.map(function (k) {
+      if (k === "缴获物品") return "";
       var v = f[k] == null ? "" : esc(f[k]);
+      if (k === "主办大队") {
+        return "<div class='field-row'><div class='key'>" + esc(k) + "</div>" +
+               "<select data-field='" + esc(k) + "'>" + orgUnitOptions(v) + "</select></div>";
+      }
       return "<div class='field-row'><div class='key'>" + esc(k) + "</div>" +
              "<input data-field='" + esc(k) + "' value='" + v + "' /></div>";
     }).join("");
@@ -923,8 +967,8 @@
 
   function doSaveEdit(rid) {
     var fields = {};
-    $$("#dialog input[data-field]").forEach(function (input) {
-      fields[input.dataset.field] = input.value.trim();
+    $$("#dialog [data-field]").forEach(function (el) {
+      fields[el.dataset.field] = el.value.trim();
     });
     var has = FIELD_KEYS.some(function (k) { return fields[k]; });
     if (!has) { toast("没有任何要素可保存", "err"); return; }
@@ -1052,6 +1096,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     bindEvents();
     loadConfig();
+    loadOrgUnits();
     loadCategories();
     loadOrgOptions();
     // 当前登录用户（服务端权威）：决定「全部」范围可见性与台账操作按钮显隐

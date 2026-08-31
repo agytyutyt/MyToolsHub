@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>战果录入</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=15">
+  <link rel="stylesheet" href="./style.css?v=16">
 </head>
 <body>
   <div class="view">
@@ -43,7 +43,7 @@
       <h2>收网情况报告</h2>
       <textarea id="reportText" rows="6" spellcheck="false"
         placeholder="粘贴或输入公安某部门对某案件的收网情况报告，例如：&#10;2026年8月20日凌晨，刑侦一支队对“8·16”系列盗窃专案统一收网，抓获犯罪嫌疑人5名，缴获涉案手机6部、赃款8万元。"></textarea>
-      <p class="muted">报告中包含 时间 / 主办大队 / 案件名 / 抓获人数 / 缴获物品 越完整，抽取越准确。</p>
+      <p class="muted">报告中包含 时间 / 主办大队 / 案件名 / 抓获人数 / 涉案价值 / 缴获物品 越完整，抽取越准确。</p>
       <div class="row-actions">
         <button id="parseBtn" class="btn btn-primary"><span data-jz-icon="🔍"></span> 解析录入</button>
         <button id="clearBtn" class="btn">清空</button>
@@ -158,6 +158,6 @@
   <div id="toast" class="toast hidden"></div>
   <script src="/plugin/admin/js/admin-common.js"></script>
   <script src="/static/js/jz-icon.js?v=3"></script>
-  <script src="./app.js?v=14"></script>
+  <script src="./app.js?v=16"></script>
 </body>
 </html>
