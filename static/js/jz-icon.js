@@ -158,6 +158,20 @@
     }
   }
 
+  // 注入 .jz-icon 尺寸样式：插件页面多数不加载框架 style.css，但 SVG 图标需要
+  // width/height 约束才能正确显示。本注入确保无论页面是否加载框架 CSS，SVG 图标
+  // 始终以 1em 尺寸显示，不会因自然尺寸过大打乱布局。
+  function injectIconStyle() {
+    try {
+      if (document.getElementById('jz-icon-style')) return;
+      var style = document.createElement('style');
+      style.id = 'jz-icon-style';
+      style.textContent = '.jz-icon{display:inline-block;vertical-align:-0.15em;width:1em;height:1em;line-height:1}';
+      (document.head || document.documentElement).appendChild(style);
+    } catch (e) { /* 忽略 */ }
+  }
+  injectIconStyle();
+
   if (typeof document !== 'undefined') {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () { processDom(document); });
