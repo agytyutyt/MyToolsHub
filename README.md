@@ -280,31 +280,35 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 > **历史文档迁移**：启动时自动给没有 `scope` 的存量文档补「私人 + 创建者 admin」，
 > 默认仅超管可见；需要老文档共享时由管理员在前端改成「单位」层级即可（幂等，重复启动不重复迁移）。
 
-**case-report 插件后端接口**（战果录入——收网情况报告要素抽取 + 本地台账）：
+**case-report 插件后端接口**（战果录入——收网情况报告大模型要素抽取 + 本地台账）：
 
 | 接口 | 说明 |
 | --- | --- |
 | `GET /api/case-report/config` | 读取大模型配置（base_url / api_key / model）及是否已配置 |
 | `POST /api/case-report/config` | 保存大模型配置 |
-| `POST /api/case-report/parse` | 提交解析任务 `{text, base_url?, api_key?, model?}`，**立即返回 `task_id`**，后台异步执行 |
-| `GET /api/case-report/result/<task_id>` | 轮询解析结果：`fields`（五要素键值对）、`items`（缴获物品逐项拆分）、`method`（`llm` / `llm+rules` / `rules`）、`llm_error` |
-| `POST /api/case-report/items` | 把缴获物品文本拆分为单列物品 `{text}`（供前端实时预览归类/数量） |
+| `POST /api/case-report/config/test` | 大模型连通性测试：用当前（或本次表单）配置发一条最小请求验证地址/Key/模型可用 |
+| `GET /api/case-report/org-units` | 主办大队可选值（插件目录 `org_units.json` 固化：一大队/二大队/三大队） |
+| `POST /api/case-report/parse` | 提交解析任务 `{text, base_url?, api_key?, model?}`，**立即返回 `task_id`**，后台异步执行（**仅大模型解析**，未配置/失败时任务置 `error`，前端提示） |
+| `GET /api/case-report/result/<task_id>` | 轮询解析结果：`fields`（要素键值对）、`items`（缴获物品逐项明细）、`method`（`llm`）、`llm_error` |
 | `GET /api/case-report/categories` | 既有类别集合：`learned`（用户已学习的「物品名→类别」）+ `known`（可选类别列表） |
 | `POST /api/case-report/categories` | 学习一条类别 `{name, category}`，持久化后后续解析优先采用 |
 | `DELETE /api/case-report/categories/<name>` | 删除某物品名的学习类别，恢复默认判定 |
 | `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并）；「涉及 N 起」按规整后案件名去重（同一案件多条记录只计 1 起）。支持 `?case=<案件名>` 仅统计该案件（涉及 N 起 = 1）；支持 `?scope=mine\|dept\|all`（默认 mine）按范围过滤 |
 | `GET /api/case-report/cases` | 既有案件列表（按规整后案件名去重、**拼音排序**，含各案件记录条数与 `normalized` 规整名），供筛选侧边栏 / 入库合并 / 改案件名选择；**跟随 `?scope=` 过滤**（切到「本部门」时下拉为部门内所有人案件） |
 | `GET /api/case-report/records` | 本地台账列表（按入库时间倒序），支持 `?case=<案件名>` 仅返回该案件的记录；支持 `?scope=mine\|dept\|all`（默认 mine）：mine=本人、dept=本人+同部门（部门+单位双重比对）、all=全站（仅超管，普通账号传 `scope=all` 返回 403） |
-| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?, merge_mode?, merge_case?}`；`items` 为用户编辑后的单列明细（可省略，省略则自动拆分），保存时同步学习 `物品名→类别`。案件名保存前自动规整（去引号/空白）。**服务端自动打归属标签**（`created_by` / `created_by_name` / `unit_id` / `department_id`，取自 session）；`merge_mode=auto`（默认）时**只在自己可管理的记录里**检测同名案件（不落盘、返回 `duplicate:true + matches`）；`merge_mode=merge` 时并入既有案件（`merge_case` 指定归入的目标案件名）；`merge_mode=new` 时跳过同案提示直接新增 |
+| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?, merge_mode?, merge_case?}`；`items` 为用户编辑后的单列明细（可省略，未传时为空列表），保存时同步学习 `物品名→类别`。案件名保存前自动规整（去引号/空白）。**服务端自动打归属标签**（`created_by` / `created_by_name` / `unit_id` / `department_id`，取自 session）；`merge_mode=auto`（默认）时**只在自己可管理的记录里**检测同名案件（不落盘、返回 `duplicate:true + matches`）；`merge_mode=merge` 时并入既有案件（`merge_case` 指定归入的目标案件名）；`merge_mode=new` 时跳过同案提示直接新增 |
 | `GET /api/case-report/records/<rid>` | 单条记录详情 —— 本人或同部门可读，其余 **404** |
 | `PUT /api/case-report/records/<rid>/case` | 修改记录的案件名 `{case_name}`（可新建案件名，或改为既有案件名即并入该案）—— 仅录入人本人或超管（其余 **403**） |
 | `DELETE /api/case-report/records/<rid>` | 删除记录 —— 仅录入人本人或超管（其余 403） |
 | `GET /api/case-report/records/<rid>/download` | 下载单条记录的键值对 JSON 文件（`case-<rid>.json`）—— 本人或同部门可读，其余 404 |
 
-> 解析策略：配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全，
-> 未配置时自动回落「本地规则解析」（正则），开箱即用。
+> 解析策略：**仅大模型解析**。未配置 API Key 或调用失败时任务返回 `error`，前端提示用户配置；
+> 已取消本地规则与正则解析（所有要素与缴获明细均由大模型结构化输出，缴获明细为
+> `items: [{category, name, quantity, unit}]`）。
 > 台账以键值对 JSON 一记录一文件保存在数据根目录 `plugins/case-report/data/`
 > （默认 `<用户主目录>\.jztoolshub\plugins\case-report\data\`，已 gitignore）。
+> **主办大队**：只能为 一大队/二大队/三大队（插件目录 `org_units.json` 固化），解析/保存时自动归一到该三值，无法识别置空。
+> **涉案价值**：由大模型解析，原文有则填、无则为空；台账中为空时不显示。
 > **案件名实体对齐**：同一案件可能因写法差异出现不同名称（如 `"2.11"开设赌场案` 与
 > `2.11开设赌场案`）。保存/比较前会规整案件名（去掉引号、书名号、空白）；
 > 入库时自动检测同名案件并提示「并入 / 作为新案件保存」；
@@ -315,9 +319,9 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 > 并保持选中（选中案件消失时自动回落「全部案件」）。
 
 **时间规则**：仅写「月/日」（如 8月20日）时自动补当前年份；出现「昨天 / 前天 / 今天」等
-以当前年月日为基准回推；大模型与规则产出的时间统一归一化为「YYYY年M月D日」。
+以当前年月日为基准回推；大模型产出的时间统一归一化为「YYYY年M月D日」。
 
-**缴获物品规则**：除在 `fields.缴获物品` 保留原文摘要外，逐项拆分为
+**缴获物品规则**：除在 `fields.缴获物品` 保留原文摘要外，逐项由大模型输出
 `items: [{category, name, quantity, unit}]` 单列存储——如「冰毒500克、涉案手机6部」拆为
 毒品/手机两项；类似物品（如 电脑 / 笔记本电脑 / 台式电脑 / 平板）映射为同一「电脑」类别，
 可在 `GET /api/case-report/aggregate` 中跨记录按数量叠加（重量→克、货币→元，批次「一批/若干」不参与数字累加）。
@@ -325,8 +329,7 @@ config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest
 **类别学习（持久化）**：解析结果先在界面展示为可编辑明细（类别 / 名称 / 数量 / 单位）。
 修改类别后系统自动把「物品名→类别」写入本地类别库
 （数据根目录 `plugins/case-report/data/item_categories.json`，已 gitignore）。
-再次解析时的类别判定优先级：**用户已学习类别 > 大模型判定 > 本地规则判定**；
-不适用既有类别的新物品由大模型单独归类（未配置大模型时用本地规则兜底）。保存记录时也会把最终明细中的类别一并学习。
+再次解析时的类别判定优先级：**用户已学习类别 > 大模型判定**；保存记录时也会把最终明细中的类别一并学习。
 
 **notice-board 插件后端接口**（公告板——按可见范围发布 / 修改 / 删除与查看公告）：
 
@@ -707,7 +710,7 @@ def current_user_or_none():
 | trajectory-convert | dev | ✅ | ✅ | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → 生成二维码视频流，或静态二维码图片（单张/多张） |
 | qr-video-decode | dev | ✅ | ✅ | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
 | shared-docs | office | ✅ | ✅ | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、版本冲突提示、`.docx` / `.xlsx` 导入导出 |
-| case-report | police | ✅ | ✅ | 输入收网情况报告 → 抽取 时间/主办大队/案件名/抓获人数/缴获物品 → 键值对 JSON 本地台账 |
+| case-report | office | ✅ | ✅ | 输入收网情况报告 → 大模型抽取 时间/主办大队/案件名/抓获人数/涉案价值/缴获物品 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队） |
 | notice-board | office | ✅ | ✅ | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；首页卡片经 `home_card()` 动态声明最新可读公告（时间+标题+换行+内容） |
 
 ---
@@ -751,7 +754,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 后端以 **PyInstaller 单目录可执行程序** 打包（免安装 Python / 依赖），前端保留源码便于快速修改。
 
-**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.2.zip`）：
+**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.3.zip`）：
 
 ```
 deploy\JZToolsHub\
