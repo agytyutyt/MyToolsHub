@@ -663,7 +663,8 @@ def register(app) -> None:
         """跨记录战果汇总：类似物品归为统一类别、数量叠加；
         「涉及 N 起」按规整后的案件名去重（同一案件多条记录只计一起）。
         支持 ?case=<案件名> 仅统计该案件的记录；支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
-        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。"""
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。
+        返回首项为「抓获人数」合计（仅统计有抓获人数字段的记录）。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -690,7 +691,26 @@ def register(app) -> None:
                 for r in recs
             ]
         rows = parser.aggregate_items([r.get("items") or [] for r in recs], case_keys)
-        return jsonify({"ok": True, "count": len(rows), "categories": rows})
+        # 抓获人数合计：仅统计有抓获人数的记录
+        arrest_total = 0
+        arrest_records = 0
+        for r in recs:
+            cnt = (r.get("fields") or {}).get("抓获人数")
+            try:
+                arrest_total += int(cnt)
+                arrest_records += 1
+            except (TypeError, ValueError):
+                pass
+        arrest_item = {
+            "category": "抓获人数",
+            "quantity": arrest_total,
+            "unit": "人",
+            "records": arrest_records,
+            "unknown": 0,
+            "stat": "arrest",
+        }
+        return jsonify({"ok": True, "count": len(rows) + (1 if arrest_records else 0),
+                        "categories": [arrest_item] + rows if arrest_records else rows})
 
     @app.get(f"{API_PREFIX}/months")
     def cr_months():
@@ -777,7 +797,8 @@ def register(app) -> None:
         """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录；
         支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
         支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤；
-        支持 ?dept=<部门ID或名称>、?user=<用户名/姓名> 按部门/主办人过滤。"""
+        支持 ?dept=<部门ID或名称>、?user=<用户名/姓名> 按部门/主办人过滤；
+        支持 ?item_cat=<类别> 仅返回包含该类别物品的记录。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -785,6 +806,7 @@ def register(app) -> None:
         if scope == "all" and not user.get("super_admin"):
             return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         case_name = parser.normalize_case_name(request.args.get("case") or "")
+        item_cat = (request.args.get("item_cat") or "").strip()
         recs = scoped_records(user, scope)
         recs = _filter_by_period(recs,
                                  request.args.get("month") or "",
@@ -796,6 +818,9 @@ def register(app) -> None:
         if case_name:
             recs = [r for r in recs
                     if parser.normalize_case_name((r.get("fields") or {}).get("案件名")) == case_name]
+        if item_cat:
+            recs = [r for r in recs
+                    if any((it.get("category") or "") == item_cat for it in (r.get("items") or []))]
         return jsonify({"ok": True, "count": len(recs), "records": recs})
 
     @app.post(f"{API_PREFIX}/records")

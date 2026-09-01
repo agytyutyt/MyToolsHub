@@ -29,6 +29,9 @@
     person: "",     // 用户筛选（用户名/姓名）
     user: null,     // 当前登录用户（AdminCommon.getSession() 取）
     orgUnits: [],   // 主办大队可选值（插件目录 org_units.json 固化）
+    itemCat: "",    // 战果汇总物品类别筛选
+    caseSearch: "", // 案件名搜索关键词
+    summaryExpanded: false, // 战果汇总展开/收起
   };
 
   function esc(s) {
@@ -491,8 +494,20 @@
   }
 
   /* ==================== 战果汇总 ==================== */
+  // 汇总查询：不携带 item_cat（汇总始终展示全部类别，选中项仅高亮）
+  function summaryQuery() {
+    var parts = [];
+    if (state.caseNorm) parts.push("case=" + encodeURIComponent(state.caseNorm));
+    if (state.scope && state.scope !== "mine") parts.push("scope=" + state.scope);
+    if (state.from) parts.push("from=" + encodeURIComponent(state.from));
+    if (state.to) parts.push("to=" + encodeURIComponent(state.to));
+    if (state.dept) parts.push("dept=" + encodeURIComponent(state.dept));
+    if (state.person) parts.push("user=" + encodeURIComponent(state.person));
+    return parts.length ? "?" + parts.join("&") : "";
+  }
+
   function refreshSummary() {
-    api("/api/case-report/aggregate" + caseQuery()).then(function (data) {
+    api("/api/case-report/aggregate" + summaryQuery()).then(function (data) {
       var rows = data.categories || [];
       var list = $("#summaryList");
       list.innerHTML = "";
@@ -506,6 +521,10 @@
       rows.forEach(function (r) {
         var el = document.createElement("div");
         el.className = "summary-item";
+        if (r.stat === "arrest") el.classList.add("stat-arrest");
+        if (state.itemCat && state.itemCat === r.category) {
+          el.classList.add("active");
+        }
         var qtyHtml;
         if (r.quantity == null) {
           qtyHtml = "<span class='total'>若干</span>";
@@ -520,9 +539,47 @@
         }
         el.innerHTML = "<span class='cat'>" + esc(r.category) + "</span>" + qtyHtml +
           "<span class='meta'>涉及 " + (r.records || 0) + " 起</span>";
+        // 抓获人数为统计项，不可点击筛选；物品类别可点击 → 台账仅展示含该物品的战果条目
+        if (r.stat !== "arrest") {
+          el.addEventListener("click", function () {
+            state.itemCat = state.itemCat === r.category ? "" : r.category;
+            refreshSummary();
+            refreshRecords();
+          });
+        }
         list.appendChild(el);
       });
+      syncSummaryCollapse();
     }).catch(function () {});
+  }
+
+  /* 战果汇总展开/收起：内容超出折叠高度时显示「展开全部」+ 渐变遮罩 */
+  function syncSummaryCollapse() {
+    var wrap = $("#summaryCollapse");
+    var toggle = $("#summaryToggle");
+    var list = $("#summaryList");
+    if (!wrap || !toggle || !list) return;
+    // 以列表实际高度判断是否溢出（不计负 margin 影响）
+    var listHeight = list.getBoundingClientRect().height;
+    var maxH = 190;
+    // 先按折叠态测量，再恢复
+    wrap.classList.remove("expanded");
+    var overflow = listHeight > maxH;
+    if (overflow) {
+      state.summaryExpanded = state.summaryExpanded || false;
+      wrap.classList.toggle("expanded", state.summaryExpanded);
+      toggle.classList.remove("hidden");
+      toggle.textContent = state.summaryExpanded ? "收起" : "展开全部";
+    } else {
+      state.summaryExpanded = false;
+      wrap.classList.remove("expanded");
+      toggle.classList.add("hidden");
+    }
+  }
+
+  function toggleSummary() {
+    state.summaryExpanded = !state.summaryExpanded;
+    syncSummaryCollapse();
   }
 
   /* ==================== 台账列表（可按案件筛选） ==================== */
@@ -534,6 +591,7 @@
     if (state.to) parts.push("to=" + encodeURIComponent(state.to));
     if (state.dept) parts.push("dept=" + encodeURIComponent(state.dept));
     if (state.person) parts.push("user=" + encodeURIComponent(state.person));
+    if (state.itemCat) parts.push("item_cat=" + encodeURIComponent(state.itemCat));
     return parts.length ? "?" + parts.join("&") : "";
   }
 
@@ -599,27 +657,40 @@
     if (state.from) q.push("from=" + encodeURIComponent(state.from));
     if (state.to) q.push("to=" + encodeURIComponent(state.to));
     return api("/api/case-report/cases" + (q.length ? "?" + q.join("&") : "")).then(function (data) {
-      var box = $("#caseList");
-      box.innerHTML = "";
-      box.appendChild(buildCaseItem("全部案件", "", 0));
-      (data.cases || []).forEach(function (c) {
-        box.appendChild(buildCaseItem(c.name, c.normalized || c.name, c.records));
-      });
-      // 若选中案件已不存在（记录被删/改名），回落「全部案件」
-      if (state.caseNorm) {
-        var still = Array.prototype.some.call(box.children, function (ch) {
-          return ch.dataset.norm === state.caseNorm;
-        });
-        if (!still) {
-          state.caseNorm = "";
-          state.caseName = "";
-          var all = box.querySelector(".case-item");
-          Array.prototype.forEach.call(box.children, function (ch) {
-            ch.classList.toggle("active", ch === all);
-          });
-        }
-      }
+      state.cases = data.cases || [];
+      renderCaseList();
     });
+  }
+
+  /* 渲染案件侧边栏：按搜索关键词过滤后展示 */
+  function renderCaseList() {
+    var box = $("#caseList");
+    box.innerHTML = "";
+    var kw = state.caseSearch.trim().toLowerCase();
+    var cases = state.cases || [];
+    var matched = kw
+      ? cases.filter(function (c) { return (c.name || "").toLowerCase().indexOf(kw) !== -1; })
+      : cases;
+    box.appendChild(buildCaseItem("全部案件", "", 0));
+    matched.forEach(function (c) {
+      box.appendChild(buildCaseItem(c.name, c.normalized || c.name, c.records));
+    });
+    // 若选中案件已不存在（记录被删/改名，或搜索过滤后未命中），回落「全部案件」
+    if (state.caseNorm) {
+      var still = Array.prototype.some.call(box.children, function (ch) {
+        return ch.dataset.norm === state.caseNorm;
+      });
+      if (!still) {
+        state.caseNorm = "";
+        state.caseName = "";
+        var all = box.querySelector(".case-item");
+        Array.prototype.forEach.call(box.children, function (ch) {
+          ch.classList.toggle("active", ch === all);
+        });
+        refreshRecords();
+        refreshSummary();
+      }
+    }
   }
 
   function buildCaseItem(label, norm, records) {
@@ -668,10 +739,13 @@
     var box = $("#recordList");
     box.innerHTML = "";
     var count = $("#recordCount");
+    var filterTip = "";
+    if (state.itemCat) filterTip = " · 筛选类别「" + state.itemCat + "」";
     count.textContent = state.records.length
-      ? (state.caseName ? "案件「" + state.caseName + "」共 " : "共 ") + state.records.length + " 条"
-      : "";
+      ? (state.caseName ? "案件「" + state.caseName + "」共 " : "共 ") + state.records.length + " 条" + filterTip
+      : (state.itemCat ? "无「" + state.itemCat + "」类物品的战果条目" : "");
     $("#emptyTip").classList.toggle("hidden", state.records.length > 0);
+    if (typeof updateScrollTop === "function") updateScrollTop();
 
     state.records.forEach(function (rec) {
       var f = rec.fields || {};
@@ -760,6 +834,36 @@
 
       box.appendChild(card);
     });
+  }
+
+  /* 返回第一条悬浮按钮：台账第一条记录不可见时显示，可见时隐藏；
+     按钮放在台账卡片外部、靠近卡片右侧 */
+  function updateScrollTop() {
+    var btn = $("#scrollTopBtn");
+    if (!btn) return;
+    var ledger = document.getElementById("ledgerCard");
+    var first = document.querySelector("#recordList .record-card");
+    var show = false;
+    if (first) {
+      var r = first.getBoundingClientRect();
+      var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      // 第一条完全滚出可视区（上边缘以上或下边缘以下）才显示
+      show = r.bottom <= 0 || r.top >= vh;
+    }
+    if (show && ledger) {
+      var vw = document.documentElement.clientWidth || window.innerWidth || 0;
+      var lr = ledger.getBoundingClientRect();
+      var bw = btn.offsetWidth || 40;
+      // 按钮左缘贴卡片右缘外侧（卡片外部、靠近卡片右侧）
+      var gap = 6;
+      var left = lr.right + gap;
+      // 越界保护：窗口太窄放不下时退回视口右缘内
+      if (left + bw > vw - 8) left = vw - bw - 8;
+      if (left < 8) left = 8;
+      btn.style.left = left + "px";
+      btn.style.right = "";
+    }
+    btn.classList.toggle("hidden", !show);
   }
 
   function btn(text, handler, cls) {
@@ -929,6 +1033,7 @@
       refreshRecords();
       refreshSummary();
     });
+    $("#summaryToggle").addEventListener("click", toggleSummary);
     $("#addItemBtn").addEventListener("click", function () {
       $("#itemsEditorWrap").classList.remove("hidden");
       $("#itemsEditor").appendChild(buildItemRow({}));
@@ -977,6 +1082,14 @@
       refreshCases().then(function () { refreshRecords(); refreshSummary(); });
     });
 
+    // 案件名搜索（客户端实时过滤）
+    var searchTimer = null;
+    $("#caseSearch").addEventListener("input", function () {
+      state.caseSearch = this.value;
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = setTimeout(renderCaseList, 150);
+    });
+
     // 导出 Excel
     $("#exportExcel").addEventListener("click", function () {
       var url = "/api/case-report/export" + caseQuery();
@@ -988,6 +1101,28 @@
       a.remove();
       toast("正在导出…", "ok");
     });
+
+    // 本地战果台账：当第一条记录滚出可视区时显示「返回第一条」悬浮按钮
+    var scrollTopBtn = $("#scrollTopBtn");
+    if (scrollTopBtn) {
+      scrollTopBtn.addEventListener("click", function () {
+        var first = document.querySelector("#recordList .record-card");
+        if (!first) return;
+        // 平滑滚动到第一条记录（旧浏览器回退为直接跳转）
+        try {
+          first.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (e) {
+          first.scrollIntoView(true);
+        }
+      });
+      var scrollTimer = null;
+      window.addEventListener("scroll", function () {
+        if (scrollTimer) clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(updateScrollTop, 80);
+      }, false);
+      window.addEventListener("resize", updateScrollTop, false);
+    }
+    updateScrollTop();
 
     // 对话框：点遮罩或按 Esc 关闭
     var dialog = $("#dialog");
