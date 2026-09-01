@@ -769,16 +769,24 @@ def register(app):
         }
         # 权限管理已并入「人员管理」，后台首页不再展示独立模块卡片（暂时屏蔽）
         visible_modules = [m for m in ADMIN_MODULES if m != "permission"]
+        modules = [
+            {
+                "id": m,
+                "name": ADMIN_MODULE_NAMES[m],
+                "count": counts[m],
+                "allowed": m in info["modules"],
+            }
+            for m in visible_modules
+        ]
+        # 系统设置：数据目录管理等敏感配置，仅超级管理员可见、可入
+        modules.append({
+            "id": "settings",
+            "name": "系统设置",
+            "count": 0,
+            "allowed": bool(info.get("super_admin")),
+        })
         return jsonify({
-            "modules": [
-                {
-                    "id": m,
-                    "name": ADMIN_MODULE_NAMES[m],
-                    "count": counts[m],
-                    "allowed": m in info["modules"],
-                }
-                for m in visible_modules
-            ],
+            "modules": modules,
             "user": info,
         })
 

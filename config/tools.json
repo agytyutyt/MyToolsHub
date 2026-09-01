@@ -1,6 +1,6 @@
 {
   "site": {
-    "title": "JZ 工具箱",
+    "title": "工具合集",
     "subtitle": "一切皆插件 · 配置驱动的工具集合",
     "footer": "JZToolsHub · 基于 Flask + 配置驱动插件机制",
     "logging": true
