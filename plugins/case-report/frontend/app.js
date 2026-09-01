@@ -1,7 +1,7 @@
 /* 战果录入 —— 前端逻辑
  *
- * 流程：输入收网情况报告 → 后端抽取五要素 → 可编辑键值对 → 保存到本地 JSON 台账
- * - 解析走后台任务（task_id 轮询），大模型未配置时后端自动回落本地规则解析；
+ * 流程：输入收网情况报告 → 大模型解析五要素 → 可编辑键值对 → 保存到本地 JSON 台账
+ * - 解析走后台任务（task_id 轮询），仅支持大模型解析，未配置/失败时提示用户；
  * - 抽取结果以键值对表单呈现，可修改后再保存；
  * - 台账列表支持 复制JSON / 导出下载 / 删除。
  */
@@ -110,9 +110,9 @@
         : "sk-...";
       $("#model").value = data.model || "";
       if (data.llm_configured) {
-        $("#configTip").textContent = "✓ 已配置大模型，解析将优先走大模型";
+        $("#configTip").textContent = "✓ 已配置大模型，解析将走大模型";
       } else {
-        $("#configTip").textContent = "使用本地规则解析";
+        $("#configTip").textContent = "⚠ 未配置完整大模型，无法解析报告";
       }
     }).catch(function () {});
   }
@@ -131,8 +131,8 @@
       api_key: $("#apiKey").value,
       model: $("#model").value,
     }).then(function (data) {
-      toast(data.llm_configured ? "配置已保存，将优先使用大模型解析" : "配置已保存，当前使用本地规则解析", "ok");
-      $("#configTip").textContent = data.llm_configured ? "✓ 已配置大模型" : "使用本地规则解析";
+      toast(data.llm_configured ? "配置已保存，解析将走大模型" : "配置已保存，但尚未配置完整，无法解析报告", "ok");
+      $("#configTip").textContent = data.llm_configured ? "✓ 已配置大模型" : "⚠ 未配置完整大模型，无法解析报告";
       if (data.llm_configured) {
         $("#apiKey").value = "";
         $("#apiKey").placeholder = "已设置，留空则不修改";
@@ -216,8 +216,7 @@
           clearInterval(state.taskTimer);
           state.taskTimer = null;
           setStatus("", "");
-          toast((data.detail || "解析失败") + "，已改用本地规则解析", "err");
-          fallbackParse();
+          toast(data.detail || "解析失败（请检查大模型配置）", "err");
           $("#parseBtn").disabled = false;
           $("#clearBtn").disabled = false;
         }
@@ -229,86 +228,15 @@
     state.currentFields = data.fields || {};
     renderFields(state.currentFields);
     $("#resultCard").classList.remove("hidden");
-    var method = data.method || "rules";
     var badge = $("#methodBadge");
     badge.classList.remove("hidden");
-    var map = {
-      "llm": "大模型解析",
-      "llm+rules": "大模型解析（本地规则补全）",
-      "rules": "本地规则解析（未配置大模型）",
-    };
-    badge.textContent = map[method] || method;
-    badge.title = method;
-    if (data.llm_error) {
-      var line = $(".method-note");
-      if (!line) {
-        line = document.createElement("p");
-        line.className = "muted method-note";
-        $("#resultCard .result-head").after(line);
-      }
-      line.textContent = "提示：大模型解析未成功（" + data.llm_error + "），已改用本地规则补全。";
-    }
+    badge.textContent = "大模型解析";
+    badge.title = "llm";
     setStatus("解析完成 ✓", "ok");
     $("#parseBtn").disabled = false;
     $("#clearBtn").disabled = false;
     renderItemsEditor(data.items || []);
     $("#resultCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }
-
-  function fallbackParse() {
-    /* 后端口径：error 分支不会返回字段，这里用本地规则兜底解析 */
-    try {
-      var fields = localRulesParse(state.sourceText || $("#reportText").value);
-      renderFields(fields);
-      $("#resultCard").classList.remove("hidden");
-      $("#methodBadge").textContent = "本地规则解析（兜底）";
-      $("#methodBadge").classList.remove("hidden");
-      setStatus("部分字段未能抽取，请手动补充", "err");
-    } catch (e) {
-      setStatus("", "");
-    }
-  }
-
-  /* 本地规则兜底（仅前端辅助，与后端 parser.py 逻辑一致的精简版） */
-  function localRulesParse(text) {
-    var fields = { "案件名": "", "时间": "", "主办大队": "", "主办人": "", "抓获人数": "", "涉案价值": "", "缴获物品": "" };
-    if (!text) return fields;
-    var m;
-    m = text.match(/(?:主办|承办|牵头)(?:单位)?[:：]?\s*([\u4e00-\u9fa5A-Za-z0-9]{1,10}(?:支队|大队|中队|专班|专案组|工作组))/);
-    if (m) fields["主办大队"] = m[1];
-    m = text.match(/(?:19|20)\d{2}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?/) || text.match(/\d{1,2}\s*月\s*\d{1,2}\s*日/);
-    if (m) fields["时间"] = m[0];
-    m = text.match(/[“"]([^”"]{1,40})[”"]\s*(?:专案|系列案|案)?/) ||
-        text.match(/(?:案件名|案名|案件名称)[:：]+\s*([^\s，。,;；]{1,40})/);
-    if (m) fields["案件名"] = m[1] || m[0];
-    m = text.match(/(?:抓获|抓捕|到案|落网|刑事拘留|刑拘|带回|审查)(?:犯罪嫌疑人|嫌疑人|涉案人员|人员)?(?:共)?([0-9一二三四五六七八九十百两]+)名?/);
-    if (m) fields["抓获人数"] = cn2num(m[1]);
-    m = text.match(/缴获([^。；;\n]{1,120})/);
-    if (m) fields["缴获物品"] = m[1].replace(/等[、，。\s]*$/, "");
-    // 主办大队：归一到配置可选值（一大队/二大队/三大队）
-    if (fields["主办大队"]) {
-      var num = fields["主办大队"].match(/[一二三1-3]/);
-      if (num) {
-        var idx = { "一": 1, "二": 2, "三": 3 }[num[0]] || parseInt(num[0], 10);
-        if (state.orgUnits[idx - 1]) fields["主办大队"] = state.orgUnits[idx - 1];
-      }
-    }
-    return fields;
-  }
-
-  function cn2num(s) {
-    if (/^\d+$/.test(s)) return String(parseInt(s, 10));
-    var digits = { "零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
-    var total = 0, num = 0;
-    for (var i = 0; i < s.length; i++) {
-      var ch = s[i];
-      if (ch in digits) { num = digits[ch]; }
-      else if (ch === "十") { total += (num || 1) * 10; num = 0; }
-      else if (ch === "百") { total += (num || 1) * 100; num = 0; }
-      else return s;
-    }
-    total += num;
-    return total ? String(total) : s;
   }
 
   /* ==================== 抽取结果表单 ==================== */
@@ -398,6 +326,7 @@
       }
       syncCaseView();
       loadCategories();
+      $("#resultCard").classList.add("hidden");  // 入库后不再展示抽取结果卡片
     }).catch(function (e) {
       toast("保存失败：" + e.message, "err");
     }).then(function () {
@@ -439,23 +368,6 @@
   }
 
   /* ==================== 缴获物品明细编辑器（可改类别，改动即持久化） ==================== */
-  var itemsTimer = null;
-  function scheduleItemsPreview() {
-    if (itemsTimer) clearTimeout(itemsTimer);
-    itemsTimer = setTimeout(function () {
-      var input = document.querySelector('#fieldGrid input[data-field="缴获物品"]');
-      if (!input) return;
-      var text = input.value.trim();
-      if (!text) {
-        $("#itemsEditor").innerHTML = "";
-        return;
-      }
-      postJSON("/api/case-report/items", { text: text })
-        .then(function (data) { renderItemsEditor(data.items || []); })
-        .catch(function () {});
-    }, 400);
-  }
-
   function renderItemsEditor(items) {
     var wrap = $("#itemsEditorWrap");
     var box = $("#itemsEditor");
@@ -1029,12 +941,6 @@
     });
 
     // 缴获物品字段改动时实时预览拆分归类
-    $("#fieldGrid").addEventListener("input", function (e) {
-      var input = e.target.closest('input[data-field]');
-      if (!input) return;
-      if (input.dataset.field === "缴获物品") scheduleItemsPreview();
-    });
-
     // 作用域切换：我的战果 / 本部门 / 全部（仅超管显示「全部」）
     $("#scope-toggle").addEventListener("click", function (e) {
       var btn = e.target.closest(".scope-btn");

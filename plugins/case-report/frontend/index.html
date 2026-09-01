@@ -16,9 +16,9 @@
       </div>
     </header>
 
-    <!-- 大模型配置（可选，未配置时自动使用本地规则解析） -->
+    <!-- 大模型配置（必填，未配置时无法解析） -->
     <details class="card config-card" id="cfgCard">
-      <summary><span data-jz-icon="⚙️"></span> 大模型解析配置（可选，未配置时使用本地规则解析）</summary>
+      <summary><span data-jz-icon="⚙️"></span> 大模型解析配置（必填：未配置 API 则无法解析报告）</summary>
       <div class="cfg-grid">
         <label>API 地址
           <input id="baseUrl" type="text" placeholder="https://api.deepseek.com" />
@@ -66,7 +66,7 @@
           <button id="addItemBtn" class="btn">＋ 添加条目</button>
         </div>
         <p class="muted">修改「类别」后系统会自动记住（写入本地类别库）；再次解析时优先复用已记住的类别，
-          不适配的新物品由大模型（未配置时走本地规则）单独归类。保存后将写入台账并参与「战果汇总」累加。</p>
+          不适配的新物品由大模型单独归类。保存后将写入台账并参与「战果汇总」累加。</p>
       </div>
       <p class="muted">下方字段可直接修改，确认后点击「保存入库」，将以键值对 JSON 写入本地台账。</p>
       <div class="row-actions">
@@ -158,6 +158,6 @@
   <div id="toast" class="toast hidden"></div>
   <script src="/plugin/admin/js/admin-common.js"></script>
   <script src="/static/js/jz-icon.js?v=3"></script>
-  <script src="./app.js?v=16"></script>
+  <script src="./app.js?v=18"></script>
 </body>
 </html>

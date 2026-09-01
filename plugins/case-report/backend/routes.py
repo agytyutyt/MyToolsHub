@@ -8,11 +8,10 @@
 单列存储；类似物品（如电脑/笔记本）归为统一战果类别，可跨记录按
 「战果汇总」（/aggregate）做数量叠加。
 
-解析策略：
-- 配置了大模型 API Key 时优先「大模型解析」，缺项由本地规则补全；
-- 未配置时自动回落「本地规则解析」（正则兜底），保证工具开箱即用。
+解析策略：仅大模型解析。未配置大模型时返回错误提示，前端将会提示用户配置。
+（已取消本地规则与正则解析，所有字段与缴获明细均由大模型结构化输出。）
 
-时间规则：仅写「月/日」时自动补当前年份；出现「昨天/前天/今天」等
+时间规整：仅写「月/日」时自动补当前年份；出现「昨天/前天/今天」等
 以当前年月日为基准回推。
 
 并发设计：解析含大模型调用，走后台线程池 + task_id 轮询，
@@ -262,87 +261,64 @@ def create_task(created_at):
     return tid
 
 
-def _resolve_item_categories(items, llm_class):
-    """物品类别优先级：用户已学习类别 > 大模型判定 > 本地规则判定。
+def _build_items(llm_items):
+    """把大模型返回的缴获物品明细数组规整为 items（含用户学习类别覆盖）。
 
-    llm_class: {"物品名": "类别"}（由大模型对缴获物品逐项判定，可为空）。
+    llm_items: [{"名称","类别","数量","单位"}, ...]。
     """
-    overrides = category_kb.all_overrides()
-    for it in items or []:
+    items = []
+    for it in llm_items or []:
         if not isinstance(it, dict):
             continue
-        name = (it.get("name") or "").strip()
+        name = str(it.get("名称") or "").strip()
         if not name:
             continue
-        learned = overrides.get(name)
-        if learned:
-            it["category"] = learned
-            continue
-        llm_cat = llm_class.get(name)
-        if llm_cat:
-            it["category"] = llm_cat
-    return items
-
-
-def _llm_class_dict(llm_class):
-    """把大模型返回的物品分类数组 [{"名称","类别"}, ...] 规整为 {"名称": "类别"}。"""
-    out = {}
-    for item in llm_class or []:
-        if isinstance(item, dict):
-            name = str(item.get("名称") or "").strip()
-            cat = str(item.get("类别") or "").strip()
-            if name and cat:
-                out[name] = cat
-    return out
-
-
-def _build_items(fields, llm_class):
-    """拆分缴获物品为单列 items，并按 学习类别 > 大模型类别 > 规则类别 赋值。"""
-    items = parser.parse_items(fields.get("缴获物品", ""))
-    items = _resolve_item_categories(items, llm_class)
-    return items
+        qty = it.get("数量")
+        try:
+            qty = round(float(qty), 2) if qty not in (None, "") else None
+        except (TypeError, ValueError):
+            qty = None
+        items.append({
+            "category": str(it.get("类别") or "").strip() or parser.CATEGORY_OTHER,
+            "name": name,
+            "quantity": qty,
+            "unit": str(it.get("单位") or "").strip(),
+        })
+    overrides = category_kb.all_overrides()
+    return parser.apply_category_overrides(items, overrides)
 
 
 def _run_parse(task_id, text, cfg_llm, api_key, model, prompt):
-    """后台线程执行：大模型优先 + 规则补全 + 用户类别修正。"""
+    """后台线程执行：仅大模型解析（未配置/失败时任务置 error，前端提示）。"""
     try:
         set_task(task_id, status="running")
-        rules = parser.parse_by_rules(text)
-
-        fields = {}
-        used = set()
         llm_error = ""
-        llm_class = {}
         api_key = (api_key or "").strip()
-        if api_key:
-            try:
-                llm_fields = llm_client.extract_fields(
-                    text, cfg_llm.get("base_url"), api_key,
-                    model or cfg_llm.get("model"), prompt,
-                    timeout=120,
-                )
-                llm_class = _llm_class_dict(llm_fields.get("物品分类"))
-                llm_fields = normalize_fields(llm_fields)
-                for k in FIELD_KEYS:
-                    if llm_fields.get(k):
-                        fields[k] = llm_fields[k]
-                        used.add("llm")
-            except llm_client.LLMError as e:
-                llm_error = str(e)
-            except Exception as e:
-                llm_error = f"大模型调用异常（{type(e).__name__}），已改用规则解析"
+        if not api_key:
+            llm_error = "未配置大模型解析：请先在「大模型解析配置」中填写 API 地址、API Key 与模型名称"
+            set_task(task_id, status="error", detail=llm_error)
+            return
 
-        for k in FIELD_KEYS:
-            if not fields.get(k) and rules.get(k):
-                fields[k] = rules[k]
-                used.add("rules")
+        try:
+            llm_fields = llm_client.extract_fields(
+                text, cfg_llm.get("base_url"), api_key,
+                model or cfg_llm.get("model"), prompt,
+                timeout=120,
+            )
+        except llm_client.LLMError as e:
+            llm_error = str(e)
+            set_task(task_id, status="error", detail=f"大模型解析失败：{llm_error}")
+            return
+        except Exception as e:
+            llm_error = f"大模型调用异常（{type(e).__name__}）"
+            set_task(task_id, status="error", detail=llm_error)
+            return
 
-        fields = normalize_fields(fields)
+        fields = normalize_fields(llm_fields)
         fields.pop("主办人", None)  # 主办人不参与解析，留空由保存时默认用户姓名填充
-        method = "+".join(sorted(used)) or "rules"
-        set_task(task_id, status="done", fields=fields,
-                 method=method, llm_error=llm_error, rules=rules,
-                 items=_build_items(fields, llm_class))
+        items = _build_items(llm_fields.get("缴获物品明细"))
+        set_task(task_id, status="done", fields=fields, method="llm",
+                 llm_error="", items=items)
     except (ValueError, RuntimeError) as e:
         set_task(task_id, status="error", detail=str(e))
     except Exception as e:
@@ -677,23 +653,13 @@ def register(app) -> None:
         if task.get("status") == "done":
             payload.update({
                 "fields": task.get("fields"),
-                "method": task.get("method", "rules"),
+                "method": task.get("method", "llm"),
                 "llm_error": task.get("llm_error", ""),
                 "items": task.get("items", []),
             })
         if task.get("status") == "error":
             payload["detail"] = task.get("detail", "解析失败")
         return jsonify(payload)
-
-    @app.post(f"{API_PREFIX}/items")
-    def cr_items_preview():
-        """把「缴获物品」文本拆分为单列物品（供前端实时预览归类结果）。"""
-        body = request.get_json(silent=True) or {}
-        text = body.get("text")
-        if not text:
-            return jsonify({"ok": True, "count": 0, "items": []})
-        items = parser.parse_items(str(text)[:MAX_TEXT_LEN])
-        return jsonify({"ok": True, "count": len(items), "items": items})
 
     @app.get(f"{API_PREFIX}/aggregate")
     def cr_aggregate():
@@ -855,7 +821,7 @@ def register(app) -> None:
         source_text = (body.get("source_text") or "")
         if isinstance(source_text, str) and len(source_text) > MAX_TEXT_LEN:
             source_text = source_text[:MAX_TEXT_LEN]
-        items = _validate_items(body.get("items")) or _build_items(fields, {})
+        items = _validate_items(body.get("items")) or []
 
         # 规整案件名（去引号/空白），保证同一案件不同写法在对齐与存储上一致
         if fields.get("案件名"):
