@@ -539,33 +539,34 @@
 
   /* 载入部门/用户筛选项（来自管理后台组织树） */
   function loadOrgOptions() {
-    return api("/api/admin/org-tree").then(function (data) {
-      var deptSel = $("#deptFilter");
-      var userSel = $("#userFilter");
-      if (!deptSel || !userSel) return;
-      var depts = [];
-      var users = [];
-      (data.tree || []).forEach(function (unit) {
-        (unit.children || []).forEach(function (d) {
-          depts.push({ id: d.id, name: d.name });
-          (d.children || []).forEach(function (u) {
-            users.push({ id: u.id, name: u.name });
+    var deptSel = $("#deptFilter");
+    var userSel = $("#userFilter");
+    if (!deptSel || !userSel) return Promise.resolve();
+    // 部门筛选：以「主办大队」为检索字段（一大队/二大队/三大队，来自 org_units.json）
+    return api("/api/case-report/org-units").then(function (unitData) {
+      var units = unitData.units || [];
+      deptSel.innerHTML = '<option value="">全部部门</option>' +
+        units.map(function (u) { return "<option value='" + esc(u) + "'>" + esc(u) + "</option>"; }).join("");
+      if (state.dept) deptSel.value = state.dept;
+    }).catch(function () {}).then(function () {
+      // 主办人筛选：以「主办人」为检索字段（姓名，来自组织树用户）
+      return api("/api/admin/org-tree").then(function (data) {
+        var users = [];
+        (data.tree || []).forEach(function (unit) {
+          (unit.children || []).forEach(function (d) {
+            (d.children || []).forEach(function (u) {
+              users.push({ name: u.name, id: u.id });
+            });
           });
         });
-      });
-      // 去重
-      var deptMap = {}, userMap = {};
-      depts.forEach(function (d) { if (d.id && !deptMap[d.id]) deptMap[d.id] = d; });
-      users.forEach(function (u) { if (u.id && !userMap[u.id]) userMap[u.id] = u; });
-      depts = Object.keys(deptMap).map(function (k) { return deptMap[k]; });
-      users = Object.keys(userMap).map(function (k) { return userMap[k]; });
-      deptSel.innerHTML = '<option value="">全部部门</option>' +
-        depts.map(function (d) { return "<option value='" + esc(d.id) + "'>" + esc(d.name) + "</option>"; }).join("");
-      userSel.innerHTML = '<option value="">全部人员</option>' +
-        users.map(function (u) { return "<option value='" + esc(u.id) + "'>" + esc(u.name) + "（" + esc(u.id) + "）</option>"; }).join("");
-      if (state.dept) deptSel.value = state.dept;
-      if (state.person) userSel.value = state.person;
-    }).catch(function () {});
+        var userMap = {};
+        users.forEach(function (u) { if (u.name && !userMap[u.name]) userMap[u.name] = u; });
+        users = Object.keys(userMap).map(function (k) { return userMap[k]; });
+        userSel.innerHTML = '<option value="">全部人员</option>' +
+          users.map(function (u) { return "<option value='" + esc(u.name) + "'>" + esc(u.name) + "</option>"; }).join("");
+        if (state.person) userSel.value = state.person;
+      }).catch(function () {});
+    });
   }
 
   /* 应用时间筛选后统一刷新（案件侧边栏、台账、汇总） */

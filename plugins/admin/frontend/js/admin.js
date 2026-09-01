@@ -46,7 +46,7 @@
   }
 
   async function openSettingsModal() {
-    var bodyHtml = '<div class="settings-card" style="max-width:none;padding:0;border:none">'
+    var bodyHtml = '<div class="settings-card" style="max-width:none;padding:0;border:none;box-shadow:none;background:transparent">'
       + '<p class="settings-desc">所有用户数据（管理配置、文档、公告、案件、日志等）均保存在此目录。默认位于用户主目录下，更改后自动将旧目录数据迁移到新目录。</p>'
       + '<div class="settings-info" id="s-info-root">'
       + '<div class="info-row"><span class="info-label">当前目录</span><code class="info-value" id="s-cur-root">加载中…</code></div>'

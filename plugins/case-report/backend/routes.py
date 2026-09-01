@@ -514,23 +514,20 @@ def _collect_months(recs):
 
 
 def _filter_by_org(recs, department_id, username):
-    """按部门 ID / 用户名（录入人）过滤记录；参数为空则不过滤。
+    """按「主办大队 / 主办人」过滤记录；参数为空则不过滤。
 
-    department_id：精确匹配记录 department_id（支持传入部门名称模糊匹配）；
-    username：匹配 created_by 或 created_by_name（支持输入姓名/登录名搜索）。
+    department_id：匹配记录 fields.主办大队（一大队/二大队/三大队，支持包含匹配）；
+    username：匹配记录 fields.主办人（支持包含匹配）。
     """
     out = recs
     dept = (department_id or "").strip()
     if dept:
         out = [r for r in out
-               if (r.get("department_id") or "") == dept
-               or dept in (r.get("department_name") or "")]
+               if dept in ((r.get("fields") or {}).get("主办大队") or "")]
     user = (username or "").strip()
     if user:
         out = [r for r in out
-               if (r.get("created_by") or "") == user
-               or user in (r.get("created_by_name") or "")
-               or (r.get("fields") or {}).get("主办人") == user]
+               if user in ((r.get("fields") or {}).get("主办人") or "")]
     return out
 
 
