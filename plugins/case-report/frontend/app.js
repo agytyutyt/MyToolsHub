@@ -553,26 +553,26 @@
     }).catch(function () {});
   }
 
-  /* 战果汇总展开/收起：内容超出折叠高度时显示「展开全部」+ 渐变遮罩 */
+  /* 战果汇总展开/收起：内容超过 2 行时收起并显示「展开全部」+ 渐变遮罩 */
   function syncSummaryCollapse() {
     var wrap = $("#summaryCollapse");
     var toggle = $("#summaryToggle");
     var list = $("#summaryList");
     if (!wrap || !toggle || !list) return;
-    // 以列表实际高度判断是否溢出（不计负 margin 影响）
     var listHeight = list.getBoundingClientRect().height;
-    var maxH = 190;
-    // 先按折叠态测量，再恢复
+    var maxH = 122;   // 2 行高度
     wrap.classList.remove("expanded");
     var overflow = listHeight > maxH;
     if (overflow) {
       state.summaryExpanded = state.summaryExpanded || false;
       wrap.classList.toggle("expanded", state.summaryExpanded);
+      wrap.classList.toggle("collapsed", !state.summaryExpanded);
       toggle.classList.remove("hidden");
       toggle.textContent = state.summaryExpanded ? "收起" : "展开全部";
     } else {
       state.summaryExpanded = false;
       wrap.classList.remove("expanded");
+      wrap.classList.remove("collapsed");
       toggle.classList.add("hidden");
     }
   }

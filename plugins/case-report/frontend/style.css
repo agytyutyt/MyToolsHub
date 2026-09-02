@@ -145,7 +145,7 @@ input, textarea {
 /* Chrome<84 flex gap fallback *//* ==================== 战果汇总 ==================== */
 .summary-list > * { margin-left: 10px; }.summary-collapse {
   position: relative;
-  max-height: 190px;
+  max-height: 122px;   /* 最多 2 行（每行 ~61px） */
   overflow: hidden;
   transition: max-height .28s ease;
 }
@@ -156,8 +156,10 @@ input, textarea {
   height: 56px;
   background: linear-gradient(to bottom, rgba(255,255,255,0), #ffffff);
   pointer-events: none;
+  opacity: 0;          /* 默认隐藏，仅溢出收起时显示 */
   transition: opacity .28s ease;
 }
+.summary-collapse.collapsed .summary-fade { opacity: 1; }
 .summary-collapse.expanded .summary-fade { opacity: 0; }
 .summary-toggle {
   margin-top: 8px;
