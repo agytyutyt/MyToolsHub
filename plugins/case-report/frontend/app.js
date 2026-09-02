@@ -480,7 +480,7 @@
     var used = (state.catKnown || []).slice();
     Object.keys(learned || {}).forEach(function (k) { used.push(learned[k]); });
     used = used.filter(function (c, i) { return c && used.indexOf(c) === i; });
-    renderCatKnown(used.sort(function (a, b) { return a === "其他" ? 1 : b === "其他" ? -1 : a < b ? -1 : 1; }));
+    renderCatKnown(used.sort(function (a, b) { return a === "其他" ? 1 : b === "其他" ? -1 : a.localeCompare(b, 'zh-CN'); }));
   }
 
   function renderCatKnown(cats) {
@@ -595,36 +595,16 @@
     return parts.length ? "?" + parts.join("&") : "";
   }
 
-  /* 载入部门/用户筛选项（来自管理后台组织树） */
+  /* 载入部门筛选项（主办大队，来自 org_units.json）；主办人改手动输入搜索 */
   function loadOrgOptions() {
     var deptSel = $("#deptFilter");
-    var userSel = $("#userFilter");
-    if (!deptSel || !userSel) return Promise.resolve();
-    // 部门筛选：以「主办大队」为检索字段（一大队/二大队/三大队，来自 org_units.json）
+    if (!deptSel) return Promise.resolve();
     return api("/api/case-report/org-units").then(function (unitData) {
       var units = unitData.units || [];
       deptSel.innerHTML = '<option value="">全部部门</option>' +
         units.map(function (u) { return "<option value='" + esc(u) + "'>" + esc(u) + "</option>"; }).join("");
       if (state.dept) deptSel.value = state.dept;
-    }).catch(function () {}).then(function () {
-      // 主办人筛选：以「主办人」为检索字段（姓名，来自组织树用户）
-      return api("/api/admin/org-tree").then(function (data) {
-        var users = [];
-        (data.tree || []).forEach(function (unit) {
-          (unit.children || []).forEach(function (d) {
-            (d.children || []).forEach(function (u) {
-              users.push({ name: u.name, id: u.id });
-            });
-          });
-        });
-        var userMap = {};
-        users.forEach(function (u) { if (u.name && !userMap[u.name]) userMap[u.name] = u; });
-        users = Object.keys(userMap).map(function (k) { return userMap[k]; });
-        userSel.innerHTML = '<option value="">全部人员</option>' +
-          users.map(function (u) { return "<option value='" + esc(u.name) + "'>" + esc(u.name) + "</option>"; }).join("");
-        if (state.person) userSel.value = state.person;
-      }).catch(function () {});
-    });
+    }).catch(function () {});
   }
 
   /* 应用时间筛选后统一刷新（案件侧边栏、台账、汇总） */
@@ -656,6 +636,8 @@
     if (state.scope && state.scope !== "mine") q.push("scope=" + state.scope);
     if (state.from) q.push("from=" + encodeURIComponent(state.from));
     if (state.to) q.push("to=" + encodeURIComponent(state.to));
+    if (state.dept) q.push("dept=" + encodeURIComponent(state.dept));
+    if (state.person) q.push("user=" + encodeURIComponent(state.person));
     return api("/api/case-report/cases" + (q.length ? "?" + q.join("&") : "")).then(function (data) {
       state.cases = data.cases || [];
       renderCaseList();
@@ -1075,11 +1057,16 @@
       state.caseName = "";
       refreshCases().then(function () { refreshRecords(); refreshSummary(); });
     });
-    $("#userFilter").addEventListener("change", function () {
-      state.person = this.value || "";
+    // 主办人筛选：手动输入搜索（防抖）
+    var userTimer = null;
+    $("#userFilter").addEventListener("input", function () {
+      state.person = this.value.trim();
       state.caseNorm = "";
       state.caseName = "";
-      refreshCases().then(function () { refreshRecords(); refreshSummary(); });
+      if (userTimer) clearTimeout(userTimer);
+      userTimer = setTimeout(function () {
+        refreshCases().then(function () { refreshRecords(); refreshSummary(); });
+      }, 300);
     });
 
     // 案件名搜索（客户端实时过滤）

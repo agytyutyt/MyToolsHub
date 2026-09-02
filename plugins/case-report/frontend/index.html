@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>战果录入</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=26">
+  <link rel="stylesheet" href="./style.css?v=27">
 </head>
 <body>
   <div class="view">
@@ -89,9 +89,7 @@
           </div>
           <div class="filter-row">
             <label>主办人</label>
-            <select id="userFilter" title="按主办人筛选">
-              <option value="">全部人员</option>
-            </select>
+            <input type="text" id="userFilter" class="user-filter-input" placeholder="输入主办人姓名…" title="按主办人筛选" autocomplete="off" />
           </div>
         </div>
 
@@ -168,6 +166,6 @@
   <button type="button" class="scroll-top hidden" id="scrollTopBtn" title="返回第一条"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true" style="transform:rotate(90deg)"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
   <script src="/plugin/admin/js/admin-common.js"></script>
   <script src="/static/js/jz-icon.js?v=5"></script>
-  <script src="./app.js?v=25"></script>
+  <script src="./app.js?v=28"></script>
 </body>
 </html>

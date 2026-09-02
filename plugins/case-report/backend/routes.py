@@ -450,10 +450,23 @@ def _cr_viewer():
         return None
 
 
+def _is_my_record(user, rec):
+    """判断记录是否属于当前用户：以「主办人」字段匹配用户姓名。
+
+    旧记录若未填主办人，则以录入人姓名（created_by_name）兜底。
+    """
+    host = (rec.get("fields") or {}).get("主办人")
+    if host:
+        return host == user.get("name")
+    # 主办人缺失的旧记录：录入人姓名兜底
+    return (rec.get("created_by_name") or rec.get("created_by")) == user.get("name")
+
+
 def scoped_records(user, scope):
     """按查看范围过滤台账记录。
 
     scope: mine=我的(默认)；dept=同部门；all=全站(仅超管可用)
+    「我的」以主办人字段匹配当前用户姓名。
     """
     recs = list_records()
     if scope == "all" and user.get("super_admin"):
@@ -461,18 +474,18 @@ def scoped_records(user, scope):
     if scope == "dept":
         return [
             r for r in recs
-            if r.get("created_by") == user["username"]
+            if _is_my_record(user, r)
             or (r.get("department_id") == user.get("department_id")
                 and r.get("unit_id") == user.get("unit_id"))
         ]
-    return [r for r in recs if r.get("created_by") == user["username"]]
+    return [r for r in recs if _is_my_record(user, r)]
 
 
 def _record_readable(user, rec):
-    """读权限：超管 / 本人 / 同部门（部门+单位双重比对）。"""
+    """读权限：超管 / 本人（主办人或录入人）/ 同部门（部门+单位双重比对）。"""
     if user.get("super_admin"):
         return True
-    if rec.get("created_by") == user["username"]:
+    if _is_my_record(user, rec) or rec.get("created_by") == user["username"]:
         return True
     return (rec.get("department_id") == user.get("department_id")
             and rec.get("unit_id") == user.get("unit_id"))

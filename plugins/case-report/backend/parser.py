@@ -229,7 +229,16 @@ def aggregate_items(record_items, case_keys=None):
             for u2, u in units.items():
                 out.append({"category": cat, "quantity": _qty(u["sum"], u["unknown"]),
                             "unit": u2, "records": len(u["records"]), "unknown": u["unknown"]})
-    out.sort(key=lambda x: (-x["records"], x["category"]))
+    def _pinyin_key(s):
+        """中文按拼音排序：GB2312/GBK 一级汉字近似拼音序；ASCII 在前，无法编码的生僻字在后。"""
+        s = s or ""
+        if s == CATEGORY_OTHER:
+            return (2, b"")
+        try:
+            return (1, s.encode("gbk"))
+        except UnicodeEncodeError:
+            return (1, s)
+    out.sort(key=lambda x: _pinyin_key(x["category"]))
     return out
 
 
