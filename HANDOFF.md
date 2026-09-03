@@ -1,7 +1,7 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-01（`main` 已与 `origin/main` 同步，最新提交 `2ec7eda`）
+> 最后更新：2026-09-03（一键安装/更新/卸载 + 配置模板同步机制落地）
 
 ---
 
@@ -28,8 +28,10 @@
   - 更早：JZIcon emoji兼容层、数据目录可配置化、共享文档/公告板/战果录入等历史功能
 - 依赖改为**按插件声明**：根 `requirements.txt` 已删除，各插件在
   `plugins/<id>/backend/requirements.txt` 声明自身依赖（缺依赖插件优雅降级并在页面提示）。
-  `app.py` 仍保留 PyInstaller `frozen` 分支 + waitress 生产 WSGI，但构建脚本/打包配置已不在仓库。
-- 工作区有未提交修改（本次会话中的文档更新、SVG 返回箭头等），如非本会话起始工作区，请先 `git status` 确认。
+  `app.py` 保留 PyInstaller `frozen` 分支 + waitress 生产 WSGI；**打包脚本 `build-deploy.ps1`
+  与打包配置 `JZToolsHub.spec` 已在仓库**（见第 5 节发布流程）。
+- 工作区有未提交修改（一键安装/更新/卸载机制：`install.ps1`、`一键安装.bat`、`一键卸载.bat`、
+  `jztools_data.py`、`app.py`、`build-deploy.ps1` 及文档），如非本会话起始工作区，请先 `git status` 确认。
 
 ## 3. 内置插件一览
 
@@ -78,10 +80,98 @@
 > **注意**：迁移是「移动」而非「复制」；`.admin_key` 与 `admin.json` 密文必须同目录一起迁，否则解密失败。
 > 前端 emoji 图标在旧浏览器（Chrome 72/78）可能显示异常，已把首页 `.tool-icon` 显式指定 emoji 字体栈缓解。
 
+## 5. 最新功能：一键安装/更新/卸载 + 配置模板同步（本会话）
 
-## 5. 当前状态 / 卡点
+**背景**：新版 zip 替换旧文件后，部分配置未能及时更新（如大模型的 prompt）。排查发现：
+新版本配置（`plugins/*/backend/prompt.json`、`config/tools.json`）存放在项目主目录，
+但程序运行时实际读取的配置位于用户数据根目录（`~/.jztoolshub/plugins/<id>/prompt.json`）。
+需在系统升级时把新版本模板同步到用户数据根目录。
 
-- **无硬性阻塞**。`main` 已推送，工作区有未提交的文档更新。
+### 新增/改动文件
+
+| 文件 | 说明 |
+| --- | --- |
+| `install.ps1`（根目录，源文件） | 一键安装 / 更新 / 卸载核心 PowerShell 脚本，含 `Sync-ConfigTemplates` 配置模板同步函数 |
+| `一键安装.bat` | 双击入口 → 调用 `install.ps1`（无参数 = 安装/更新） |
+| `一键卸载.bat` | 双击入口 → 调用 `install.ps1 -Uninstall`（删除程序+用户数据，需确认） |
+| `jztools_data.py`（改动） | 新增 `sync_templates()` 版本门控同步函数，`_TEMPLATE_SYNC` 清单定义模板映射与策略 |
+| `app.py`（改动） | `init_data_root()` 末尾调用 `jztools_data.sync_templates()` |
+| `build-deploy.ps1`（改动） | 新增 `-Version` 参数，打包时自动复制 `install.ps1`/`一键安装.bat`/`一键卸载.bat`/`version.json` 到部署目录，可选生成 zip |
+| `README.md`（改动） | 更新「打包部署」「项目更新与数据迁移」章节，新增「配置模板自动同步」说明 |
+
+### 关键机制
+
+**配置模板同步**（`jztools_data.sync_templates()`）：
+
+- 触发条件：`version.json` 中的 `app` 与数据根目录 `config/.app_state.json` 记录的
+  `last_app` 不一致时执行（一次），一致时跳过（幂等）。
+- 清单（`_TEMPLATE_SYNC`）：
+
+  | 模板路径 | 策略 | 说明 |
+  | --- | --- | --- |
+  | `plugins/case-report/prompt.json` | overwrite | 备份 `.bak-old` 后覆盖 |
+  | `plugins/character-graph/prompt.json` | overwrite | 同上 |
+  | `config/tools.json` | merge-tools | 合并：保留用户启停/排序，追加新分类/新工具 |
+  | `plugins/case-report/config.json` | ensure-keys | 保留用户 LLM，仅补模板新字段 |
+  | `plugins/character-graph/config.json` | ensure-keys | 同上 |
+
+- **双保险**：`install.ps1` 的 `Sync-ConfigTemplates` 函数在更新时也做等价合并；
+  即使手动替换文件夹，app 启动时也会自动同步。
+
+**一键安装/更新流程**（`install.ps1`）：
+
+1. 停止旧 JZToolsHub 进程。
+2. 检测已安装（注册表 Uninstall 键 > 默认目录 `%LOCALAPPDATA%\JZToolsHub` > 含 `config/data_root.json` 的源目录 → 就地更新）。
+3. 复制程序文件（排除运行时产物）；源=目标时跳过复制。
+4. 调用 `Sync-ConfigTemplates` 同步模板。
+5. 写 `version.json`、注册表卸载信息、开始菜单/桌面快捷方式。
+
+**卸载流程**（`install.ps1 -Uninstall`）：
+
+1. 停止进程。清理快捷方式。删除程序目录。删除数据根目录（默认；`-KeepData` 保留）。
+2. 删除数据目录指针（`~/.jztoolshub.json`）。清理注册表。
+
+**版本号**：`version.json` 由 `build-deploy.ps1 -Version` 参数指定（默认读取上一版 patch+1）。
+
+### 版本迭代发布 / 目标机更新流程（后续接手必读）
+
+```
+开发者（仓库）                                目标机
+─────────────────────────────              ─────────────────────────────
+改代码 / 改根目录 install.ps1、
+一键安装.bat、一键卸载.bat（如需）
+        │
+build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
+  ├─ PyInstaller 打包 exe                          │
+  ├─ 组装 deploy\JZToolsHub\                双击「一键安装.bat」
+  ├─ 复制根目录安装/卸载脚本                   ├─ 停旧服务 → 定位安装目录 → 复制程序
+  └─ 产出 JZToolsHub-v<x.y.z>.zip            ├─ Sync-ConfigTemplates 同步模板
+        │                                    └─ 注册表 + 快捷方式 + version.json
+分发 zip ──────────────────────────▶         双击「start.bat」启动（或托盘退出旧服后自动）
+                                             卸载：双击「一键卸载.bat」（Y 确认，全删；
+                                                   -KeepData 仅删程序留数据）
+```
+
+- **必须递增版本号**：`sync_templates()` 与 `install.ps1` 均以 `version.json` 的 `app` 与
+  数据根目录 `config/.app_state.json` 的 `last_app` 比对作为同步触发条件，版本不变则跳过。
+- **脚本源文件在仓库根目录**：部署包里的是副本，直接改包内脚本不会回写仓库，下次打包被覆盖。
+- **新增插件带模板配置时**：在 `jztools_data.py` 的 `_TEMPLATE_SYNC` 与 `install.ps1` 的
+  `Sync-ConfigTemplates` 两处同时登记（清单须一致），详见 README「配置模板自动同步」。
+
+### 与旧版兼容
+
+- 已有 `deploy/JZToolsHub/` 已有 `install.ps1`（旧版，无模板同步）和 `uninstall.bat`。
+  新版 `build-deploy.ps1` 生成的部署目录自动覆盖为新版脚本（`一键安装.bat`、`一键卸载.bat`）。
+- 旧版 `install.ps1` 注册的 UninstallString 指向 `install.ps1 -Uninstall`，更新后新版
+  `install.ps1` 会替换旧版，卸载入口不变。
+- `uninstall.bat` 仍保留在旧部署目录中（新包不再带它），不影响功能，可用 `一键卸载.bat` 替代。
+
+
+## 6. 当前状态 / 卡点
+
+- **无硬性阻塞**。`main` 已推送；工作区含本次「一键安装/更新/卸载 + 配置模板同步」相关改动
+  （`install.ps1`、`一键安装.bat`、`一键卸载.bat`、`jztools_data.py`、`app.py`、
+  `build-deploy.ps1`、README、HANDOFF），待提交。
 - 以下为未充分验证/待办项（别当成已解决）：
   1. 访问日志新增字段仅经 Flask test client 验证（`user=admin`、`op=新增单位/发布公告/删除共享文档`
      等标签正确），未在真实浏览器/多用户环境走查；`get_session_user()` 每请求读 `config/admin.json`，
@@ -89,10 +179,14 @@
   2. 战果录入已改为仅大模型解析（LLM-only），缴获物品明细由大模型结构化输出 `缴获物品明细` 数组，
      真实网络环境下该新格式输出需验证（旧 `物品分类` 格式不再接受）。
   3. 公告板/共享文档/战果录入等前端新功能多靠 `node --check` + test client 回归，浏览器走查较少。
-  4. 若后续重新做打包部署，需自建 `build-deploy.ps1` / `JZToolsHub.spec`（已从仓库移除）。
-  5. 前端返回按钮已从 `←` 文本字形改为 SVG 图标（Material arrow_back），5 个页面均已更新。
+  4. **一键安装/卸载脚本已在开发机通过语法检查、Python 侧 sync_templates 隔离测试与 exe 冒烟测试，
+     但尚未在目标机做完整「全新安装 → 更新 → 卸载」三段式实测**；首次正式发版建议在测试机走一遍。
+  5. **打包用 Python 3.14（PATH 默认）时产物不支持 Win7**；需兼容 Win7 的部署必须用
+     Python 3.8 打包（`-Python "C:\Users\yfjz\AppData\Local\Programs\Python\Python38\python.exe"`，
+     3.8 环境需先补装 `pystray` + `pillow`）。
+  6. 前端返回按钮已从 `←` 文本字形改为 SVG 图标（Material arrow_back），5 个页面均已更新。
 
-## 6. 踩过的坑 —— 绝对不要踩
+## 7. 踩过的坑 —— 绝对不要踩
 
 1. **绝不要清理 `plugins/*/backend/data/` 目录**。曾两次在测试脚本里误删用户真实台账记录
    （git 不含插件 data）。测试清理只删自己刚建的文件，或改用独立临时目录；动手前先 `git status`/列目录。
@@ -110,13 +204,24 @@
 7. **LLM 路径解析在 HTTP 轮询下要数秒**（连接/超时兜底），前端轮询上限 90s；测试轮询别只等 5 秒就断言。
 8. **bash/read 工具偶发不稳定**（返回空/ChildProcess.kill），write/edit 更可靠；抽风就重试或改小读取块，
    同一批并发工具调用不要依赖彼此结果。
+9. **安装/卸载脚本编码**：`install.ps1` 必须 UTF-8 with BOM（PS 5.1 无 BOM 按 ANSI 解析，中文乱码）；
+   `一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI 且**不要**加 `chcp 65001`（cmd 按系统代码页逐行解析，
+   UTF-8 中文会乱码）；脚本写出的 JSON 一律 UTF-8 无 BOM（`json.load` 遇 BOM 报错）。
+10. **测试 sync_templates / install.ps1 时务必隔离数据根目录**：本机 `~/.jztoolshub` 是真实用户数据，
+    直接跑会改写 `config/.app_state.json`（曾发生，已恢复）。Python 侧测试用临时目录 +
+    monkeypatch `get_base_dir/get_data_root`；不要在未隔离状态下对真实数据根目录做版本变更测试。
 
-## 7. 关键信息速查
+## 8. 关键信息速查
 
 - 启动：`python app.py`（默认 `0.0.0.0:5000`，`JZTOOLS_PORT`/`JZTOOLS_HOST` 可覆盖）。
-- 默认管理员：`admin` / `admin123`（首启自动生成于 `config/admin.json`，登录后请尽快改密）。
+- **打包发布**：`powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "x.y.z"`
+  （产物 `deploy\JZToolsHub\` + `deploy\JZToolsHub-v<x.y.z>.zip`；`-Python` 可换解释器；
+  安装/卸载脚本源文件在仓库根目录，打包时自动复制进部署包，**改脚本只改根目录再重新打包**）。
+- **目标机安装 / 更新 / 卸载**：解压 zip → 双击 `一键安装.bat`（装/更一体）→ `start.bat` 启动；
+  卸载双击 `一键卸载.bat`。发版必须递增 `-Version`，否则目标机模板同步不触发。
+- 默认管理员：`admin` / `admin123`（首启自动生成于数据根目录 `config/admin.json`，登录后请尽快改密）。
 - 管理后台：`/admin`；会话超时 `session.idle_minutes`（默认 30 分钟）/ `session.absolute_hours`（默认 12 小时）。
-- 访问日志：`logs/access.log`（TAB 分隔，异步落盘，`site.logging` 开关）。
+- 访问日志：数据根目录 `logs/access.log`（TAB 分隔，异步落盘，`site.logging` 开关）。
 - 快速自测（不进浏览器）：
   ```python
   import sys; sys.path.insert(0, r"D:\JZToolsHub")
@@ -129,5 +234,6 @@
 - 插件后端写法：`plugins/<id>/backend/routes.py` 导出 `register(app)`；会话取
   `from jztools_admin.routes import get_session_user`；日志操作标签取
   `from jztools_admin.routes import set_operation`（均带 try/except 兜底）。
-- 关键文档：`README.md`（架构/API 表/日志）、`插件设计规范.md`（B-1~B-8、SEC-1~6）、
+- 关键文档：`README.md`（架构/API 表/日志/**打包发布流程/模板同步机制**）、
+  `插件设计规范.md`（B-1~B-8、SEC-1~6）、
   `docs/`（登录改造与数据隔离 / 容器化与插件热插拔 两份设计文档）。

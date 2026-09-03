@@ -43,6 +43,9 @@ def init_data_root():
     CONFIG_PATH = os.path.join(DATA_ROOT, "config", "tools.json")
     LOG_DIR = os.path.join(DATA_ROOT, "logs")
     LOG_FILE = os.path.join(LOG_DIR, "access.log")
+    # 版本升级时把程序目录中的配置模板（prompt.json / tools.json 等）同步进数据根目录，
+    # 保证大模型提示词等「随版本迭代」的配置在更新后立即生效（幂等：仅版本变化时执行一次）。
+    jztools_data.sync_templates()
 
 # 插件 ID 只允许出现在目录名中，防止目录穿越
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")

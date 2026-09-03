@@ -754,7 +754,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 后端以 **PyInstaller 单目录可执行程序** 打包（免安装 Python / 依赖），前端保留源码便于快速修改。
 
-**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.3.zip`）：
+**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.3.5.zip`）：
 
 ```
 deploy\JZToolsHub\
@@ -764,7 +764,11 @@ deploy\JZToolsHub\
 ├─ plugins\            # 插件：frontend/ 前端源码可改；backend/ 后端源码
 ├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录后改数据根目录副本）
 ├─ docs\  README.md  HANDOFF.md
-└─ start.bat           # 一键启动脚本
+├─ start.bat           # 一键启动脚本
+├─ 一键安装.bat         # ★ 一键安装 / 更新（双击运行，自动判断安装或升级）
+├─ 一键卸载.bat         # ★ 一键卸载（含用户数据，双击后确认删除）
+├─ install.ps1         # 安装 / 更新 / 卸载核心逻辑（PowerShell）
+└─ version.json        # 版本号（{app, schema}，用于升级检测与模板同步）
 ```
 
 **用户数据（不在程序目录）**：
@@ -779,21 +783,58 @@ deploy\JZToolsHub\
 ```
 
 **使用**：
-1. 解压后双击 `start.bat`（或直接运行 `JZToolsHub.exe`）；
+1. **全新安装 / 升级**：解压后双击 `一键安装.bat`（自动判断：未安装→完整安装；已安装→停止旧服务、更新程序文件、同步配置模板到用户数据根目录）；
 2. 浏览器访问 `http://<服务器IP>:5000`，默认管理员 `admin` / `admin123`（首启自动生成，请尽快登录后台改密）；
 3. 修改前端：编辑 `static\` 或 `plugins\<id>\frontend\` 下的文件后重启服务即生效；
-4. 端口 / 监听地址可用环境变量覆盖：`JZTOOLS_PORT`、`JZTOOLS_HOST`（默认 `0.0.0.0:5000`）。
+4. 端口 / 监听地址可用环境变量覆盖：`JZTOOLS_PORT`、`JZTOOLS_HOST`（默认 `0.0.0.0:5000`）；
+5. **卸载**：双击 `一键卸载.bat` 并输入 Y（将停止服务、删除项目文件与用户数据根目录）。
 
 > `app.py` 已内置 PyInstaller「打包运行」分支（`frozen` 模式自动适配 `BASE_DIR`/静态资源路径，
 > 并以 **waitress** 多线程生产级 WSGI 服务器运行，禁用 debug/reloader）。
-> 构建脚本（`build-deploy.ps1`）与打包配置（`JZToolsHub.spec`）已从仓库移除，如需重新打包可
-> 自行恢复等价脚本；PyInstaller 会自动收集插件后端动态导入的
-> `docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress`。
+> PyInstaller 经 `JZToolsHub.spec` 显式收集插件后端动态导入的第三方库：
+> `docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress / pystray / PIL`。
 
 > **用户数据默认不在程序目录**（见下节「项目更新与数据迁移」）：管理配置
 > （`admin.json`/`.admin_key`）、访问日志、各插件运行数据均保存在**数据根目录**
 > （默认 `<用户主目录>\.jztoolshub\`），升级程序时只需替换 exe + `_internal\`（或整个文件夹），
 > 用户数据不会丢失。
+
+### 版本迭代发布流程（生成安装 / 更新 / 卸载程序）
+
+安装、更新、卸载脚本的**源文件在仓库根目录**（`install.ps1`、`一键安装.bat`、`一键卸载.bat`）。
+`build-deploy.ps1` 打包时自动把它们与 `version.json` 一并复制进部署包——后续开发者只需维护
+根目录源文件，无需手动同步部署目录。
+
+```powershell
+# 递增版本号并打包（版本号写入 version.json，是目标机配置模板同步的触发依据）
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.3.6"
+
+# 可选参数：
+#   -Python "C:\...\Python38\python.exe"   指定打包解释器（默认 PATH 上的 python；
+#                                          产物需兼容 Win7 时必须用 Python 3.8 打包）
+#   -DeployName "JZToolsHub-py38"          指定输出目录名（多版本部署目录共存）
+```
+
+打包脚本依次完成：
+
+1. PyInstaller 按 `JZToolsHub.spec` 打包后端（`JZToolsHub.exe` + `_internal\`）；
+2. 组装 `deploy\JZToolsHub\`：复制 `static/`、`plugins/`、`docs/`、`config\tools.json` 模板，
+   并清理插件运行时数据（`data/`、`config.json`、`__pycache__`、`.task_cache/`）；
+3. **复制根目录 `install.ps1`、`一键安装.bat`、`一键卸载.bat`，写入 `version.json`**；
+4. 生成 `start.bat` 一键启动脚本；
+5. 压缩产出 `deploy\JZToolsHub-v<版本>.zip`（即「一键安装程序」，直接分发）。
+
+> **修改了安装 / 卸载逻辑后必须改根目录源文件并重新打包**：部署包内的脚本是根目录的副本，
+> 直接改部署包里的脚本不会回写仓库，下次打包会被覆盖。
+
+**目标机更新操作（版本迭代后）**：
+
+1. 把新版 `JZToolsHub-v<版本>.zip` 发到目标机，解压到任意目录；
+2. 双击 `一键安装.bat`：自动停止旧服务 → 定位既有安装目录 → 更新程序文件 →
+   同步配置模板（大模型 prompt、tools.json 等）到用户数据根目录 → 重建快捷方式与注册表；
+3. 双击 `start.bat` 启动（首次安装会自动生成数据根目录与默认管理员）；
+4. **发版务必递增 `-Version`**：版本号不变时，`sync_templates()` 判定「未升级」而跳过模板同步，
+   新版 prompt 等配置不会生效。
 
 ---
 
@@ -820,11 +861,71 @@ deploy\JZToolsHub\
 1. **停止旧服务**（托盘图标右键「退出服务」）。
 2. **备份**（可选但建议）：确认数据根目录存在且包含所需数据（`<用户主目录>\.jztoolshub\` 或管理员自设目录）。
 3. **替换程序文件夹**：用新版 `deploy\JZToolsHub\` 覆盖旧的程序文件夹（或删除旧文件夹后放入新版）。
-4. **启动新版**：双击 `start.bat`。启动时 `init_data_root()` 自动完成两件事——
+4. **启动新版**：双击 `start.bat`。启动时 `init_data_root()` 自动完成——
    - 若程序目录中残留旧版用户数据（`config/admin.json`、`logs/`、各插件 `backend/data/` 等），
      自动迁移到数据根目录（幂等，目标已存在则不覆盖）；
-   - 若数据根目录缺失 `tools.json`，从程序目录模板复制。
+   - 若数据根目录缺失 `tools.json`，从程序目录模板复制；
+   - **配置模板同步**：对比 `version.json` 与数据根目录 `config/.app_state.json` 记录的上次
+     应用版本，版本变化时把程序目录中的**配置模板**（`prompt.json`、`tools.json`、插件
+     `config.json`）同步进数据根目录（见下文「配置模板自动同步」），保证新版的大模型提示词、
+     新工具等**随版本迭代的配置在升级后立即生效**（这就是旧版本「替换文件后 prompt 未更新」的根治）。
 5. **验证**：登录后台，确认账号、文档、公告、战果等数据完整；打开「系统设置」确认数据目录正确。
+
+### 一键安装 / 更新 / 卸载（推荐）
+
+每次发版用 `build-deploy.ps1` 生成的部署包自带三个入口（见「打包部署」），推荐日常更新直接使用：
+
+- **`一键安装.bat`**（安装 + 更新）：运行 `install.ps1`，自动——
+  1. 停止正在运行的 JZToolsHub 服务；
+  2. 检测是否已安装（注册表 Uninstall 键 / 默认安装目录 `%LOCALAPPDATA%\JZToolsHub`，可用
+     `-InstallDir` 指定其他目录）：已安装→更新到安装目录；未安装→全新安装到默认目录；
+  3. 复制程序文件（排除 `deploy/dist/build/.zcode/__pycache__`）；
+  4. **同步配置模板到用户数据根目录**（与上文启动时自动同步相同的清单与规则，双保险）；
+  5. 写回 `version.json`、注册表卸载信息、开始菜单与桌面快捷方式。
+- **`一键卸载.bat`**：运行 `install.ps1 -Uninstall`，停服务后删除项目文件、**用户数据根目录**、
+  数据目录指针（`<用户主目录>\.jztoolshub.json`）、快捷方式与注册表卸载项；
+  若只想删程序保留数据，可在 PowerShell 中执行 `install.ps1 -Uninstall -KeepData`。
+- 直接在解压目录双击 `start.bat`（或 `JZToolsHub.exe`）也能启动。
+
+**后续开发者如何维护这套脚本**：
+
+- **扩展配置模板同步清单**：新增带 `prompt.json` / `config.json` 模板的插件后，需在
+  **两处同步登记**——① `jztools_data.py` 的 `_TEMPLATE_SYNC`（启动时同步，权威实现）；
+  ② `install.ps1` 的 `Sync-ConfigTemplates`（安装时同步，双保险）。两处的清单须保持一致。
+  优先级：随版本迭代的模板（如 prompt）用 `overwrite`；用户可自定义的（如 LLM 配置）用
+  `ensure-keys`；用户可能在后台改过的（如 tools.json）用 `merge-tools`。
+- **编码约定**：`install.ps1` 必须 **UTF-8 with BOM**（PowerShell 5.1 无 BOM 时按 ANSI 解析，
+  中文注释/输出会乱码）；`一键安装.bat` / `一键卸载.bat` 必须 **GBK/ANSI** 编码（cmd 按系统
+  代码页解析，UTF-8 会导致中文乱码甚至执行错误）；脚本写出的 JSON 一律 **UTF-8 无 BOM**
+  （Python `json.load` 遇 BOM 会报错）。
+- **脚本行为自测**：改动后可先在测试机验证——双击 `一键安装.bat`（全新安装路径）→ 再跑一次
+  （更新路径）→ `一键卸载.bat` 输 Y（卸载路径），确认注册表、快捷方式、数据根目录的建立与清理
+  均符合预期。
+
+### 配置模板自动同步
+
+**背景**：程序目录 `plugins\<id>\backend\prompt.json`、`config\tools.json` 等是「随版本迭代的
+模板」，而程序实际读取的是数据根目录里的运行配置（如 `plugins\<id>\prompt.json`）。早期版本
+升级只替换程序文件，数据根目录里的 prompt 等未更新，导致新版配置（如大模型提示词）不生效。
+
+**机制**（`jztools_data.sync_templates()`，一键安装脚本中也做了等价实现）：
+
+- 同步条件：数据根目录 `config/.app_state.json` 中的 `last_app` 与程序目录 `version.json` 的
+  `app` 不一致时执行一次，执行后更新 `last_app`；版本一致则跳过（幂等，不打扰用户）。
+- 同步清单与规则：
+
+  | 模板（程序目录 → 数据根目录） | 规则 |
+  | --- | --- |
+  | `plugins/case-report/backend/prompt.json` → `plugins/case-report/prompt.json` | **覆盖**，旧文件备份为 `.bak-old` |
+  | `plugins/character-graph/backend/prompt.json` → `plugins/character-graph/prompt.json` | **覆盖**，旧文件备份为 `.bak-old` |
+  | `config/tools.json` → `config/tools.json` | **合并**：新分类/新工具追加，保留用户启停、排序、自定义字段 |
+  | `plugins/case-report/backend/config.json` → `plugins/case-report/config.json` | **补键**：仅补模板新增字段，保留用户 LLM 配置（api_key 等） |
+  | `plugins/character-graph/backend/config.json` → `plugins/character-graph/config.json` | **补键**：同上 |
+
+> 用户数据（`admin.json`、`.admin_key`、插件 `data/`、日志）绝不参与模板同步，更新不会丢失。
+> **新增插件需同步模板时**，在 `jztools_data.py` 的 `_TEMPLATE_SYNC` 与 `install.ps1` 的
+> `Sync-ConfigTemplates` 两处同时登记（清单与规则须一致），详见上文「一键安装 / 更新 / 卸载」
+> 的维护说明。
 
 > **旧版（数据在程序目录内）升级**：新版首次启动会把程序目录里的 `admin.json`/`.admin_key`/`logs/`
 > 与各插件 `backend/data/`、`config.json`、`prompt.json`、`.task_cache` 自动搬进数据根目录，

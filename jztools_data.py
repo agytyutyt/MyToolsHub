@@ -60,6 +60,31 @@ _LEGACY_MAP = [
 # 用于「首次启动把开发期旧数据也一并搬进数据根目录」，与 _LEGACY_MAP 一致）。
 _DATA_SUBDIRS = ("config", "logs", "plugins")
 
+# 随版本升级同步的「程序目录模板 -> 数据根目录运行配置」清单。
+# 模式：
+#   overwrite   ：直接覆盖运行配置（旧文件先备份为 .bak-<版本>）。用于 prompt.json 这类
+#                 「随版本迭代演进」的模板（大模型提示词升级后应自动生效）。
+#   merge-tools ：把 tools.json 模板中的新分类/新工具合并进数据根目录现有配置，
+#                 保留用户已做的启停 / 排序 / 自定义（不覆盖用户改动）。
+#   ensure-keys ：仅把模板中「用户配置缺失的键」补全（深合并），
+#                 保留用户已有值（如 LLM api_key / base_url / model）。
+_TEMPLATE_SYNC = [
+    # (程序目录相对路径, 数据根目录相对路径, 模式)
+    (("plugins", "case-report", "backend", "prompt.json"),
+     ("plugins", "case-report", "prompt.json"), "overwrite"),
+    (("plugins", "character-graph", "backend", "prompt.json"),
+     ("plugins", "character-graph", "prompt.json"), "overwrite"),
+    (("config", "tools.json"), ("config", "tools.json"), "merge-tools"),
+    (("plugins", "case-report", "backend", "config.json"),
+     ("plugins", "case-report", "config.json"), "ensure-keys"),
+    (("plugins", "character-graph", "backend", "config.json"),
+     ("plugins", "character-graph", "config.json"), "ensure-keys"),
+]
+
+# 应用版本状态文件：数据根目录 config/.app_state.json（记录上次启动的应用版本，
+# 用于「仅在版本升级时同步一次模板」，避免每次启动都打扰用户已保存的配置）。
+_APP_STATE_FILE = ("config", ".app_state.json")
+
 
 def get_base_dir():
     """返回程序根目录：源码运行时为项目目录，PyInstaller 打包运行为 exe 所在目录。"""
@@ -253,6 +278,182 @@ def set_data_root(new_root, migrate=True):
     get_data_root_dir("plugins")
     _ensure_tools_json(get_base_dir(), new_root)
     return new_root, moved, None
+
+
+# ===================== 配置模板同步（版本升级时自动生效） =====================
+
+
+def _read_json_file(path, default=None):
+    """安全读取 JSON 文件，失败返回 default。"""
+    if not os.path.isfile(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _write_json_file(path, obj):
+    """写入 JSON 文件（原子写）。"""
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        log.warning("写入 JSON 文件失败（%s）：%s", path, e)
+
+
+def _file_hash16(path):
+    """返回文件 MD5 前 16 位十六进制字符串（用于比较模板版本）。"""
+    import hashlib
+    try:
+        h = hashlib.md5()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()[:16]
+    except Exception:
+        return ""
+
+
+def _read_app_state():
+    """读取数据根目录 config/.app_state.json。"""
+    path = get_data_root_file(*_APP_STATE_FILE)
+    return _read_json_file(path) or {}
+
+
+def _write_app_state(state):
+    """写入数据根目录 config/.app_state.json。"""
+    path = get_data_root_file(*_APP_STATE_FILE)
+    _write_json_file(path, state)
+
+
+def _read_version(base=None):
+    """读取程序目录 version.json 中的 app 版本号，不存在返回 None。"""
+    base = base or get_base_dir()
+    vf = os.path.join(base, "version.json")
+    obj = _read_json_file(vf)
+    return (obj or {}).get("app") if obj else None
+
+
+def _merge_tools(user, template):
+    """把模板 tools.json 合并进用户现有配置（保留用户自定义）。
+
+    - site    ：保留用户已有字段，仅补充模板新增字段
+    - categories：按 id 合并，已有分类保留用户版本，新分类追加
+    - tools   ：按 id 合并，已有工具保留用户版本（含 enabled/order/hidden），新工具追加
+    """
+    out = {}
+    # site
+    us = user.get("site") or {}
+    ts = template.get("site") or {}
+    ms = dict(ts)
+    for k, v in us.items():
+        ms[k] = v
+    out["site"] = ms
+    # categories
+    uc = list(user.get("categories") or [])
+    uc_ids = {c.get("id") for c in uc if isinstance(c, dict)}
+    for c in template.get("categories") or []:
+        if isinstance(c, dict) and c.get("id") not in uc_ids:
+            uc.append(c)
+            uc_ids.add(c.get("id"))
+    out["categories"] = uc
+    # tools
+    ut = list(user.get("tools") or [])
+    ut_map = {t.get("id"): t for t in ut if isinstance(t, dict)}
+    for t in template.get("tools") or []:
+        if isinstance(t, dict) and t.get("id") not in ut_map:
+            ut.append(t)
+    out["tools"] = ut
+    return out
+
+
+def _ensure_deep_keys(user, template):
+    """递归确保 template 中的键在 user 中存在（仅补缺失，不覆盖已有）。"""
+    if isinstance(template, dict) and isinstance(user, dict):
+        for k, v in template.items():
+            if k not in user:
+                user[k] = v
+            elif isinstance(v, dict) and isinstance(user[k], dict):
+                _ensure_deep_keys(user[k], v)
+    return user
+
+
+def _sync_templates(base, root, version):
+    """核心：按 _TEMPLATE_SYNC 清单同步配置模板。返回同步的文件数。"""
+    synced = 0
+    for src_rel, dst_rel, mode in _TEMPLATE_SYNC:
+        src = os.path.join(base, *src_rel)
+        dst = os.path.join(root, *dst_rel)
+        if not os.path.isfile(src):
+            log.warning("模板同步：程序目录缺少 %s，跳过", os.path.join(*src_rel))
+            continue
+        if not os.path.isfile(dst):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            try:
+                shutil.copyfile(src, dst)
+                log.info("模板同步：已初始化 %s", os.path.join(*dst_rel))
+                synced += 1
+            except OSError as e:
+                log.warning("模板同步：初始化 %s 失败：%s", os.path.join(*dst_rel), e)
+            continue
+        # 目标已存在，按模式处理
+        try:
+            if mode == "overwrite":
+                bak = dst + ".bak-old"
+                if not os.path.isfile(bak):
+                    shutil.copyfile(dst, bak)
+                shutil.copyfile(src, dst)
+                log.info("模板同步：已覆盖 %s（旧版备份 .bak-old）", os.path.join(*dst_rel))
+                synced += 1
+            elif mode == "merge-tools":
+                tu = _read_json_file(dst) or {}
+                tt = _read_json_file(src) or {}
+                merged = _merge_tools(tu, tt)
+                _write_json_file(dst, merged)
+                log.info("模板同步：已合并 %s（保留用户启停/排序）", os.path.join(*dst_rel))
+                synced += 1
+            elif mode == "ensure-keys":
+                uu = _read_json_file(dst) or {}
+                tt = _read_json_file(src) or {}
+                _ensure_deep_keys(uu, tt)
+                _write_json_file(dst, uu)
+                log.info("模板同步：已补全 %s（保留用户配置）", os.path.join(*dst_rel))
+                synced += 1
+        except Exception as e:
+            log.warning("模板同步：%s 处理失败（%s）", os.path.join(*dst_rel), e)
+    return synced
+
+
+def sync_templates():
+    """版本升级时同步一次：程序目录模板 -> 数据根目录运行配置。
+
+    在 app 启动时（init_data_root 后）调用。当
+    ``version.json`` 中的 app 版本号与数据根目录
+    ``config/.app_state.json`` 中记录的 last_app 不一致时，
+    执行 _TEMPLATE_SYNC 清单中所有条目，并更新 last_app。
+    版本一致时跳过（幂等）。
+    """
+    base = get_base_dir()
+    root = get_data_root()
+    version = _read_version(base)
+    if not version:
+        return 0
+    state = _read_app_state()
+    if version == state.get("last_app"):
+        return 0
+    synced = _sync_templates(base, root, version)
+    state["last_app"] = version
+    _write_app_state(state)
+    if synced:
+        log.info("模板同步完成：%d 个文件已同步（版本 %s）", synced, version)
+    return synced
 
 
 def data_usage_summary():
