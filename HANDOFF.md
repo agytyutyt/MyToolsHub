@@ -1,7 +1,7 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-03（一键安装/更新/卸载 + 配置模板同步机制落地）
+> 最后更新：2026-09-04（文档对齐代码实际：API 表补全、架构速记、插件后端速查表、git 状态刷新）
 
 ---
 
@@ -11,27 +11,52 @@
 
 - 主应用 `app.py` 启动时扫描 `plugins/<插件id>/`，注册插件后端路由到同一 Flask 应用。
 - 插件前端放在 `plugins/<id>/frontend/`，通过 `/plugin/<id>/<path>` 静态访问。
-- 工具清单由 `config/tools.json` 声明（name/description/category/order/enabled/hidden）。
+- 工具清单由 `config/tools.json` 声明（name/description/category/order/enabled/hidden/grant_all）。
 - 管理后台（`admin`）是**核心基础设施插件**：登录鉴权、会话超时、单位/部门/人员/权限管理、
    工具访问控制、Fernet 加密存储，始终加载、不随 enabled 启停。
 - `README.md` 有完整架构说明与 HTTP API 表，改完功能记得同步它；`插件设计规范.md` 是插件开发铁律。
 
+### 1.1 架构速记（改代码前先看这里）
+
+**启动时序**（app.py `__main__`）：
+`init_data_root()`（迁移旧数据 → 解析数据根目录 → `sync_templates()` 模板同步）→
+`setup_access_logging()`（异步日志队列）→ `register_plugin_backends()`（先无条件加载 admin，再按
+tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务。
+
+**请求拦截管线**（admin 插件 `register()` 注册的 4 个 before_request，按序执行）：
+1. `make_session_guard`：空闲 30 分钟 / 绝对 12 小时超时登出，活跃滑动续期；
+2. `_enforce_login`：白名单（/login、/api/login、/api/logout、/api/session、/favicon.ico、
+   /static/、/plugin/admin/css|js）之外一律要求登录（页面 302，API 401）；
+3. `_protect_admin_ops`：首页布局写操作需登录；
+4. `_enforce_tool_access`：非超管按权限点拦 `/tool/<id>`、`/plugin/<id>/...`、`/api/<插件id>/...`。
+
+**关键单例/全局**：
+- `app.py`：`DATA_ROOT/CONFIG_PATH/LOG_DIR`（init_data_root 后指向数据根目录）、
+  `_plugin_home_card_hooks`（home_card 钩子表）、`_tool_meta_cache`（日志解析用 2s TTL 缓存）。
+- `jztools_data.py`：`get_data_root()` 双指针解析（主指针 `~/.jztoolshub.json` 优先，
+  备份指针 `<程序目录>/config/data_root.json`）；`_TEMPLATE_SYNC` 模板同步清单；
+  `_LEGACY_MAP` 旧版数据迁移映射。
+- admin：`ADMIN_CONFIG_PATH`（数据根目录 config/admin.json）、`_fernet`（懒加载）、
+  `_registered_tool_ids()` / `_grant_all_tool_ids()`（权限点全集 / grant_all 全集）。
+
+**tools.json 特殊字段**：`hidden: true`（不出卡片但注册后端，admin 用）、
+`grant_all: true`（全体登录用户默认可用，notice-board 用）、`enabled: false`（下线且后端不加载）。
+
+**环境变量**：`JZTOOLS_HOST`（默认 0.0.0.0）、`JZTOOLS_PORT`（默认 5000，解析失败回落 5000）。
+
 ## 2. 当前 git 状态
 
-- 分支：`main`，**已与 `origin/main` 同步**（用户已授权推送）。
-- 最近提交：
-  - `2ec7eda` feat: 战果录入主办大队归一到可选值+涉案价值仅大模型解析——新建org_units.json固化三大队/二大队/一大队配置,前端主办大队改为下拉选择,涉案价值仅由大模型解析(移除parser.py与frontend兜底的本地规则提取),LLM提示词+prompt.json更新主办大队/涉案价值描述
-  - `c97455e` feat: 战果录入大模型连通性测试+Win7 SVG修复——新增POST /api/case-report/config/test连通性测试,修复Win7下emoji误判为彩色导致SVG图标显示白色方框(检测算法改为「色相多样性」),配置卡按钮对齐等
-  - `0b676f3` fix: 战果录入筛选侧边栏统一行布局+对齐修复——部门/主办人/时间/至四个筛选项统一为filter-block/filter-row行布局,修复文字右边缘与胶囊左边缘不对齐,移除入库月份筛选
-  - `1e156b6` feat: 标语配置化+战果台账显示优化——JZ工具箱/一切皆插件等标语改为从config/tools.json读取,战果台账卡片移除录入人显示,主办大队/主办人常驻显示
-  - `4572dc6` feat: 战果录入新增主办人字段+导出Excel+部门/人员筛选
-  - 更早：JZIcon emoji兼容层、数据目录可配置化、共享文档/公告板/战果录入等历史功能
+- 分支：`main`。最近提交：
+  - `1d25e21` feat: 一键安装/更新/卸载机制+配置模板同步（install.ps1 / jztools_data.sync_templates / build-deploy -Version）
+  - `906585c` feat: 优化战果录入大模型提示词以改善低性能模型解析
+  - `3fc45c9` feat: 战果录入汇总/筛选排序与主办人匹配优化
+  - 更早：战果录入导出 Excel / 主办人字段、JZIcon emoji 兼容层、数据目录可配置化、共享文档/公告板/战果录入等历史功能
 - 依赖改为**按插件声明**：根 `requirements.txt` 已删除，各插件在
   `plugins/<id>/backend/requirements.txt` 声明自身依赖（缺依赖插件优雅降级并在页面提示）。
   `app.py` 保留 PyInstaller `frozen` 分支 + waitress 生产 WSGI；**打包脚本 `build-deploy.ps1`
   与打包配置 `JZToolsHub.spec` 已在仓库**（见第 5 节发布流程）。
-- 工作区有未提交修改（一键安装/更新/卸载机制：`install.ps1`、`一键安装.bat`、`一键卸载.bat`、
-  `jztools_data.py`、`app.py`、`build-deploy.ps1` 及文档），如非本会话起始工作区，请先 `git status` 确认。
+- 仓库根目录**没有** `version.json`（由 `build-deploy.ps1 -Version` 在部署目录生成）；
+  根目录也没有 `start.bat`（由打包脚本生成进部署目录）。
 
 ## 3. 内置插件一览
 
@@ -169,22 +194,22 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 
 ## 6. 当前状态 / 卡点
 
-- **无硬性阻塞**。`main` 已推送；工作区含本次「一键安装/更新/卸载 + 配置模板同步」相关改动
-  （`install.ps1`、`一键安装.bat`、`一键卸载.bat`、`jztools_data.py`、`app.py`、
-  `build-deploy.ps1`、README、HANDOFF），待提交。
+- **无硬性阻塞**。`main` 已推送，工作区干净（仅 `.zcode/` 未跟踪，是会话工作目录，不要提交）。
 - 以下为未充分验证/待办项（别当成已解决）：
-  1. 访问日志新增字段仅经 Flask test client 验证（`user=admin`、`op=新增单位/发布公告/删除共享文档`
+  1. 访问日志字段仅经 Flask test client 验证（`user=admin`、`op=新增单位/发布公告/删除共享文档`
      等标签正确），未在真实浏览器/多用户环境走查；`get_session_user()` 每请求读 `config/admin.json`，
-     静态资源已跳过，但高并发 API 场景若吃紧需加缓存。
-  2. 战果录入已改为仅大模型解析（LLM-only），缴获物品明细由大模型结构化输出 `缴获物品明细` 数组，
-     真实网络环境下该新格式输出需验证（旧 `物品分类` 格式不再接受）。
+     静态资源已跳过（app.py 的 `get_current_user` 对 `/static/` 返回 None），但高并发 API 场景若吃紧需加缓存。
+  2. 战果录入为仅大模型解析（LLM-only），缴获物品明细由大模型结构化输出 `缴获物品明细` 数组，
+     真实网络环境下该格式输出已多轮调优 prompt（`906585c`），换低性能模型时仍需复测。
   3. 公告板/共享文档/战果录入等前端新功能多靠 `node --check` + test client 回归，浏览器走查较少。
   4. **一键安装/卸载脚本已在开发机通过语法检查、Python 侧 sync_templates 隔离测试与 exe 冒烟测试，
      但尚未在目标机做完整「全新安装 → 更新 → 卸载」三段式实测**；首次正式发版建议在测试机走一遍。
   5. **打包用 Python 3.14（PATH 默认）时产物不支持 Win7**；需兼容 Win7 的部署必须用
      Python 3.8 打包（`-Python "C:\Users\yfjz\AppData\Local\Programs\Python\Python38\python.exe"`，
      3.8 环境需先补装 `pystray` + `pillow`）。
-  6. 前端返回按钮已从 `←` 文本字形改为 SVG 图标（Material arrow_back），5 个页面均已更新。
+  6. 各插件前端 `?v=` 版本号起点/步长不统一（case-report v28、character-graph 用日期戳、
+     trajectory-convert 无版本号因只有内联脚本的单文件）；给无版本号的插件加外部 JS/CSS 时
+     必须从一开始就带 `?v=1` 并遵守递增纪律。
 
 ## 7. 踩过的坑 —— 绝对不要踩
 
@@ -207,9 +232,45 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 9. **安装/卸载脚本编码**：`install.ps1` 必须 UTF-8 with BOM（PS 5.1 无 BOM 按 ANSI 解析，中文乱码）；
    `一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI 且**不要**加 `chcp 65001`（cmd 按系统代码页逐行解析，
    UTF-8 中文会乱码）；脚本写出的 JSON 一律 UTF-8 无 BOM（`json.load` 遇 BOM 报错）。
+   **此外两个 .bat 必须 CRLF 换行**：曾因编辑器把 bat 存成 LF（Unix 换行）导致 cmd 把相邻行拼接解析，
+   双击报 `'RC"=="0" ('`、`'安装' 不是内部或外部命令` 等碎片错误（2026-09-04 已修复根目录与
+   deploy 副本）。用 Git 时建议在 `.gitattributes` 对 `*.bat` 强制 `eol=crlf`，或改完 bat 后
+   用 PowerShell 检查字节里有无裸 `\n`。
+   **install.ps1 的 `$InstallDir` 不能在 param 里设默认值 `%LOCALAPPDATA%\...` 后留空串跑**：
+   曾因 param 默认 `""` 而注册表无记录时 `Join-Path $InstallDir $ExeName` 报
+   「无法将参数绑定到参数 Path，因为该参数为空字符串」（2026-09-04 已修复：脚本头部对空值
+   兜底 `Join-Path $env:LOCALAPPDATA $AppName`）。改 install.ps1 后必须在无注册表记录的
+   机器/账户上跑一遍全新安装路径验证。
+   **一键安装脚本只能在「含 JZToolsHub.exe 的解压目录」里跑**：在源码仓库根目录跑时，仓库里
+   开发运行产生的 `config\data_root.json` 备份指针会让脚本误判「既有安装目录→就地更新」，
+   最后因缺 exe 报「安装目录缺少 JZToolsHub.exe」（2026-09-04 已加源目录守卫：安装入口先
+   检查 `$Source` 下有无 exe，没有则明确提示解压 zip 后再执行并 exit 1）。另外仓库根目录
+   没有 `version.json`，此时安装横幅会显示版本 0.0.0——这本身就是「不在安装包内」的信号。
 10. **测试 sync_templates / install.ps1 时务必隔离数据根目录**：本机 `~/.jztoolshub` 是真实用户数据，
     直接跑会改写 `config/.app_state.json`（曾发生，已恢复）。Python 侧测试用临时目录 +
     monkeypatch `get_base_dir/get_data_root`；不要在未隔离状态下对真实数据根目录做版本变更测试。
+11. **PowerShell 里跑含引号/花括号的 `python -c "..."` 内联脚本极易翻车**（引号被 PS 重新解释）；
+    复杂断言先写到临时 .py 文件再执行（README/HANDOFF 文档自身的校验脚本也建议这么干）。
+
+## 7.5 插件后端速查表（改哪个插件先看这里）
+
+所有后端插件共用同一套模式：`register(app)` 注册路由；会话取
+`from jztools_admin.routes import get_session_user`；日志标记 `set_operation("…")`；
+数据统一存数据根目录 `plugins/<id>/`（经 `jztools_data.get_data_root_dir/get_data_root_file`）。
+
+| 插件 | 前缀 | 长任务机制 | 数据落盘（数据根目录下） |
+| --- | --- | --- | --- |
+| admin | /api/admin、/login 等 | 无 | config/admin.json + .admin_key |
+| notice-board | /api/notice-board | 无 | plugins/notice-board/data/*.json（一公告一文件，RLock 串行化） |
+| shared-docs | /api/shared-docs | 无（全局 RLock） | plugins/shared-docs/data/*.json（一文档一文件，历史上限 100） |
+| case-report | /api/case-report | ThreadPoolExecutor(2)，TASK_TTL 30min | data/*.json（一记录一文件）+ item_categories.json + config.json + prompt.json |
+| character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |
+| trajectory-convert | /api/trajectory-convert | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | .task_cache/（mp4/png/zip）+ backend/config.json（列名） |
+| qr-video-decode | /api/qr-video-decode | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘（data_b64 存任务表） |
+
+**异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` →
+后台线程池执行 → `GET /api/<id>/result/<task_id>` 轮询 `{status: pending|running|done|error}`。
+任务表加锁、结果 TTL 30 分钟清理；任务归属校验（创建者/超管可见）。
 
 ## 8. 关键信息速查
 
@@ -234,6 +295,8 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 - 插件后端写法：`plugins/<id>/backend/routes.py` 导出 `register(app)`；会话取
   `from jztools_admin.routes import get_session_user`；日志操作标签取
   `from jztools_admin.routes import set_operation`（均带 try/except 兜底）。
-- 关键文档：`README.md`（架构/API 表/日志/**打包发布流程/模板同步机制**）、
-  `插件设计规范.md`（B-1~B-8、SEC-1~6）、
-  `docs/`（登录改造与数据隔离 / 容器化与插件热插拔 两份设计文档）。
+- **改完功能必同步的文档**：`README.md`（HTTP API 表、内置插件一览、目录结构、故障排查——
+  接口有增删时至少同步 API 表）、本文件第 2 节（git 最近提交）、必要时 `插件设计规范.md`。
+- 关键文档：`README.md`（架构/API 表/日志/**代码阅读地图**/打包发布流程/模板同步机制）、
+  `插件设计规范.md`（B-1~B-21、SEC-1~11，含封装型 B 型插件全套规范）、
+  `docs/`（登录改造与数据隔离 / 容器化与插件热插拔 两份历史设计文档）。

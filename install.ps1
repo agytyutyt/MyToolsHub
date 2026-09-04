@@ -20,7 +20,7 @@
 param(
     [switch]$Uninstall,
     [switch]$KeepData,          # 卸载时保留用户数据根目录（默认删除）
-    [string]$InstallDir = ""    # 安装目录；默认 %LOCALAPPDATA%\JZToolsHub
+    [string]$InstallDir = ""    # 安装目录；留空时用 %LOCALAPPDATA%\JZToolsHub
 )
 $ErrorActionPreference = "Stop"
 
@@ -29,6 +29,10 @@ $ExeName  = "$AppName.exe"
 $Source   = $PSScriptRoot                 # 一键安装包所在目录（解压后的程序目录）
 $RegKey   = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
 $DataRoot = ""                            # 数据根目录，启动时解析
+# 默认安装目录：%LOCALAPPDATA%\JZToolsHub（不能在 param 里用 $env:，这里兜底解析）
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+    $InstallDir = Join-Path $env:LOCALAPPDATA $AppName
+}
 
 # ---------------- 版本号 ----------------
 $Version = "0.0.0"
@@ -252,12 +256,25 @@ if ($Uninstall) {
 Write-Host "==> JZToolsHub 安装 / 更新（版本 $Version）..."
 Stop-JZService
 
+# 源目录必须是完整安装包（含 JZToolsHub.exe）。在源码仓库 / 开发目录里误跑时
+# 尽早报错退出：仓库根目录常带有开发运行产生的 config\data_root.json（备份指针），
+# 会被误判为「既有安装目录 → 就地更新」，最后因缺 exe 才报错，提示语令人困惑。
+if (-not (Test-Path (Join-Path $Source $ExeName))) {
+    Write-Host ""
+    Write-Host "  [失败] 当前目录不是一键安装包：$Source"
+    Write-Host "  该目录下没有 $ExeName。请解压 JZToolsHub-v*.zip 后，"
+    Write-Host "  在解压出的目录内双击「一键安装.bat」重新执行。"
+    exit 1
+}
+
 $info = Get-InstalledInfo
 if ($info) {
     Write-Host "  检测到已安装：$($info.Dir)（版本 $($info.Version)）→ 更新到 $Version"
     $Target = $info.Dir
 } elseif (Test-Path (Join-Path $Source "config\data_root.json")) {
     # 源目录本身是既有部署（含数据目录备份指针，说明曾被运行/安装于此）→ 就地更新
+    # 注意：走到这里源目录已确认含 JZToolsHub.exe（上方守卫），
+    # 源码仓库/开发目录不会落入本分支。
     Write-Host "  检测到当前目录为既有安装目录 → 就地更新到：$Source"
     $Target = $Source
 } else {
