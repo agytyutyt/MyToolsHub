@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 兼容性预留：当前导出走 MediaStore，无需 FileProvider -->
+</paths>

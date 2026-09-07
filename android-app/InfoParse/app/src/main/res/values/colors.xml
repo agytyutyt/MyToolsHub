@@ -1,0 +1,20 @@
+<resources>
+    <!-- 主题色:公安藏蓝 -->
+    <color name="primary">#1C2F5E</color>
+    <color name="primary_dark">#121F40</color>
+    <!-- tonal(浅调)按钮容器:藏蓝系浅色/深色(HMS 夜间模式在 values-night 覆盖) -->
+    <color name="secondary_container">#D9E2F1</color>
+    <color name="on_secondary_container">#1C2F5E</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#111111</color>
+    <color name="gray_text">#666666</color>
+    <color name="scan_scrim">#66000000</color>
+    <color name="pill_bg">#CC101010</color>
+
+    <!-- 格式徽标配色:text/markdown/word/excel 各一色 -->
+    <color name="badge_text">#1E88E5</color>
+    <color name="badge_markdown">#8E24AA</color>
+    <color name="badge_word">#3949AB</color>
+    <color name="badge_excel">#43A047</color>
+    <color name="badge_file">#00897B</color>
+</resources>

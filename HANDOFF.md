@@ -1,7 +1,8 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-04（文档对齐代码实际：API 表补全、架构速记、插件后端速查表、git 状态刷新）
+> 最后更新：2026-09-07（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
+> android-app 子目录原 README/HANDOFF 已删除，移动端内容统一收敛到本文件第 8 节）
 
 ---
 
@@ -15,6 +16,9 @@
 - 管理后台（`admin`）是**核心基础设施插件**：登录鉴权、会话超时、单位/部门/人员/权限管理、
    工具访问控制、Fernet 加密存储，始终加载、不随 enabled 启停。
 - `README.md` 有完整架构说明与 HTTP API 表，改完功能记得同步它；`插件设计规范.md` 是插件开发铁律。
+- **移动端 APP**（`android-app/InfoParse/`，Kotlin，info-transfer 插件的 Android 离线接收端）：
+  功能/协议/构建运行见 README「信息传输与移动端 APP（Android）」章节，**交接细节见本文件第 8 节**；
+  协议权威定义在仓库根目录《移动端APP.md》。
 
 ### 1.1 架构速记（改代码前先看这里）
 
@@ -46,17 +50,27 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 
 ## 2. 当前 git 状态
 
-- 分支：`main`。最近提交：
+- 分支：`main`。已推送的最近提交：
+  - `37c43ab` fix: 一键安装脚本三处修复+文档对齐代码实际（bat CRLF / install.ps1 空值兜底与源目录守卫 / .gitattributes / README 补全）
   - `1d25e21` feat: 一键安装/更新/卸载机制+配置模板同步（install.ps1 / jztools_data.sync_templates / build-deploy -Version）
   - `906585c` feat: 优化战果录入大模型提示词以改善低性能模型解析
   - `3fc45c9` feat: 战果录入汇总/筛选排序与主办人匹配优化
   - 更早：战果录入导出 Excel / 主办人字段、JZIcon emoji 兼容层、数据目录可配置化、共享文档/公告板/战果录入等历史功能
+- **工作区有大量未提交变更**（截至 2026-09-07，对应「信息传输插件 + 移动端 APP」整轮工作）：
+  - 未跟踪：`plugins/info-transfer/`（信息传输插件）、`android-app/`（InfoParse APP）、
+    `移动端APP.md`（协议规范文档）、`docs/二维码视频流传输修复-todolist.md`、
+    `openh264-2.5.0-win64.dll`、`.zcode/`（会话工作目录，**不要提交**）；
+  - 已修改：`config/tools.json`（注册 info-transfer）、`install.ps1`、`README.md`（本节合并编辑）。
+  - **android-app/ 与 info-transfer 尚未纳入版本管理，是否提交由人工决定**（提交前注意排除
+    `app/build/`、`qr_test_materials/` 等产物目录）。
 - 依赖改为**按插件声明**：根 `requirements.txt` 已删除，各插件在
   `plugins/<id>/backend/requirements.txt` 声明自身依赖（缺依赖插件优雅降级并在页面提示）。
   `app.py` 保留 PyInstaller `frozen` 分支 + waitress 生产 WSGI；**打包脚本 `build-deploy.ps1`
   与打包配置 `JZToolsHub.spec` 已在仓库**（见第 5 节发布流程）。
 - 仓库根目录**没有** `version.json`（由 `build-deploy.ps1 -Version` 在部署目录生成）；
   根目录也没有 `start.bat`（由打包脚本生成进部署目录）。
+- 仓库根目录的 `openh264-2.5.0-win64.dll` 是桌面端视频编码运行时依赖（trajectory-convert /
+  info-transfer 生成 MP4 用），需随部署包分发——确认 build-deploy.ps1 是否已收集。
 
 ## 3. 内置插件一览
 
@@ -69,6 +83,7 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 | 人物关系立体星图 | `plugins/character-graph/` | 前后端一体 | python-docx/pypdf/requests | 上传文档→LLM 提取人物关系→3D 星点图（后台线程池 + task_id 轮询） |
 | 轨迹转换 | `plugins/trajectory-convert/` | 前后端一体 | openpyxl/xlrd/qrcode/opencv/numpy/zfec | Excel 轨迹→二维码视频流 / 静态二维码 ZIP |
 | QR 视频流解码 | `plugins/qr-video-decode/` | 前后端一体 | zfec | jsQR 逐帧扫码 + zfec 纠错重组 |
+| 信息传输 | `plugins/info-transfer/` | 前后端一体 | qrcode/zfec/opencv/numpy/openpyxl | 文字/文档封装为二维码（静态多张 / QR-transfer 视频流，相机传输模式每码重复 5 帧）+ 解析还原；协议 v2 `fmt=file` 原始文件完整传输；配套 Android 接收端（见第 8 节），协议规范《移动端APP.md》 |
 | 地图标点 | `plugins/map-marker/` | 纯前端 | — | 高德地图标点、二维码识别回放、移动轨迹 |
 | Base64 / JSON 格式化 / 取色器 / MD5 | `plugins/{base64,json-formatter,color-picker,md5-generator}/` | 纯前端 | — | 示例/基础工具（tools.json 中 `enabled` 控制显隐） |
 
@@ -194,7 +209,8 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 
 ## 6. 当前状态 / 卡点
 
-- **无硬性阻塞**。`main` 已推送，工作区干净（仅 `.zcode/` 未跟踪，是会话工作目录，不要提交）。
+- **无硬性阻塞**。`main` 已推送；但**工作区有大量未提交变更**（info-transfer 插件、android-app、
+  移动端APP.md 等，详见第 2 节），`.zcode/` 是会话工作目录，不要提交。
 - 以下为未充分验证/待办项（别当成已解决）：
   1. 访问日志字段仅经 Flask test client 验证（`user=admin`、`op=新增单位/发布公告/删除共享文档`
      等标签正确），未在真实浏览器/多用户环境走查；`get_session_user()` 每请求读 `config/admin.json`，
@@ -210,6 +226,9 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
   6. 各插件前端 `?v=` 版本号起点/步长不统一（case-report v28、character-graph 用日期戳、
      trajectory-convert 无版本号因只有内联脚本的单文件）；给无版本号的插件加外部 JS/CSS 时
      必须从一开始就带 `?v=1` 并遵守递增纪律。
+  7. **info-transfer `fmt=file` 端到端尚未真机验证**（桌面封装 → APP 扫码 → 导出，与原文件逐字节
+     哈希比对），是移动端当前首要待办（详见第 8.6 节）。
+  8. **android-app/ 尚未纳入版本管理**，本轮移动端全部改动从未提交（详见第 2 节）。
 
 ## 7. 踩过的坑 —— 绝对不要踩
 
@@ -267,12 +286,197 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 | character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |
 | trajectory-convert | /api/trajectory-convert | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | .task_cache/（mp4/png/zip）+ backend/config.json（列名） |
 | qr-video-decode | /api/qr-video-decode | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘（data_b64 存任务表） |
+| info-transfer | /api/info-transfer | ThreadPoolExecutor(2)，TASK_TTL 30min，任务产物与 .task_cache 双清理 | .task_cache/（mp4/png/zip/帧 PNG）+ backend/requirements.txt（qrcode/zfec/opencv/numpy/openpyxl）；无 config.json/prompt.json |
 
 **异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` →
 后台线程池执行 → `GET /api/<id>/result/<task_id>` 轮询 `{status: pending|running|done|error}`。
 任务表加锁、结果 TTL 30 分钟清理；任务归属校验（创建者/超管可见）。
 
-## 8. 关键信息速查
+## 8. 移动端 APP（android-app/InfoParse，Android 离线接收端）
+
+> 本节由 `android-app/InfoParse/HANDOFF.md` 与其 `README.md` 合并而来（2026-09-07，两份原文件已删除）；
+> 功能/协议/构建运行的「说明书」版本在根 README「信息传输与移动端 APP（Android）」章节。
+> 配套文档：**《移动端APP.md》**（仓库根目录，协议与实现规格，★代码注释反复引用它，改协议必须同步它）、
+> `plugins/info-transfer/README.md`（封装端协议与接口）。
+
+### 8.1 这个项目是什么
+
+`android-app/InfoParse` 是 JZToolsHub「信息传输」插件的 **Android 离线接收端**：
+把桌面端生成的二维码（静态多张 / QR-transfer 视频流）扫进来，还原出原始内容。
+
+- **技术栈**：Kotlin + CameraX 1.3.4 + ML Kit Barcode 17.3.0（bundled 离线模型，不依赖 GMS）+ Material3 1.12.0 + Gson。minSdk 29 / targetSdk 34。
+- **完全离线**：唯一运行时权限 CAMERA，**禁止声明 INTERNET**（《移动端APP.md》1.4 约束，勿加）。
+- 与桌面端共用一套信封协议（见《移动端APP.md》第 3 章，协议 v2 已支持 `fmt=file` 完整文件传输）。
+- 单元测试只覆盖协议层与工具层（`app/src/test/`），UI 无自动化测试。
+
+**页面架构**（三个 Activity，无 Fragment）：主页 HomeActivity（历史卡片 + FAB）→ 识别页
+ScanActivity（沉浸式，相机/图片/视频导入与分流）→ 结果页 ResultActivity（展示 + 导出/复制/分享）。
+图示见 README「页面架构」小节。
+
+- 页面间传信封用内存单例 `ResultStore.current`（避免 Intent 序列化大文本）。
+- 识别成功自动写历史：`HistoryStore.save()` → `filesDir/history/<uuid>.json`（一条结果一个文件）。
+- 多页收集暂存：`filesDir/pending_collect.json`（FR-08，「继续收集/放弃」框）。
+
+**关键源码索引**：
+
+| 文件 | 职责 | 备注 |
+| --- | --- | --- |
+| `HomeActivity.kt` | 主页：历史卡片 + FAB + 清空/删除确认 | onResume 必刷新列表 |
+| `ScanActivity.kt` | 识别页：相机扫码分流（单张/多页/视频流帧）、图片/视频导入、暂存恢复 | 逻辑最重，改动前读《移动端APP.md》3.2 判别顺序 |
+| `ResultActivity.kt` | 结果渲染 + 导出/复制/分享 + 沉浸式 | file 格式不预览内容 |
+| `history/HistoryStore.kt` | 历史持久化（Gson，一条一 JSON） | excel 回读必须走 `EnvelopeParser.jsonToRows` |
+| `protocol/Envelope.kt` | 信封模型 + 解析器 + `Fmt` 常量 + `ScanResult` | 协议核心契约 |
+| `protocol/PageCollector.kt` | 多页收集状态机（serialize/restore 暂存） | 数字按字符串保留（防 1→1.0） |
+| `protocol/QrFrame.kt` + `ZfecCompat.kt` | 视频流帧解析 + zfec 前向纠错重组 | 二期协议，勿动 |
+| `scan/CameraScanner.kt` | CameraX+ML Kit 封装；同文本去重；亮度采样（暂无调用方，见 8.6） | |
+| `scan/ImageDecoder.kt` | 图片解码（防 OOM 缩放 maxDim 2048） | |
+| `export/Exporter.kt` | 导出 mime/文件名/MediaStore Downloads/分享 intent | |
+| `util/DocxWriter.kt` | 逐段文本 → 最小 .docx（兼容旧 word 码导出） | v1.4 引入 |
+| `ui/FmtUi.kt`、`ui/HistoryAdapter.kt` | 格式徽标着色/统计文案、历史卡片适配器 | 主页与结果页共用 FmtUi |
+
+### 8.2 构建与真机环境（★先读，环境很特殊）
+
+**构建命令（可复制，离线）**——项目**没有可用的 gradle wrapper**（只有
+`gradle/wrapper/gradle-wrapper.properties`，缺 gradlew 脚本与 wrapper jar），本机也没有独立安装
+gradle。用 GradleHome 里已下载的发行版直接构建：
+
+```bash
+export JAVA_HOME="C:/Users/yfjz/.jdks/jbr-21.0.11"   # JBR 21；不要用 Android Studio 自带 JBR 25，gradle 8.7 不支持
+export GRADLE_USER_HOME="D:/GradleHome"              # 依赖缓存都在这，不设会重新联网下载
+"D:/GradleHome/wrapper/dists/gradle-8.7-bin/bhs2wmbdwecv87pi65oeuq5iu/gradle-8.7/bin/gradle" \
+  -p "D:/JZToolsHub/android-app/InfoParse" :app:assembleDebug :app:testDebugUnitTest --console=plain --offline
+```
+
+- 产物：`app/build/outputs/apk/debug/app-debug.apk`（约 37MB，含 ML Kit bundled 模型）。
+- SDK 路径：`D:/Android/Sdk`（`local.properties` 已指向）。build.gradle.kts 里 compileSdk 34。
+- 想恢复 wrapper：`gradle wrapper --gradle-version 8.7`（同上环境变量）。
+
+**adb 与真机（无线）**：
+
+```bash
+ADB="D:/Android/Sdk/platform-tools/adb.exe"   # 不在 PATH
+"$ADB" devices                                 # 无线 adb：adb-8471627e-..._adb-tls-connect._tcp，会莫名掉线，掉线重连即可
+"$ADB" install -r app/build/outputs/apk/debug/app-debug.apk
+"$ADB" logcat -b crash -d | grep -A 30 jztools   # ★崩溃排查第一步：只看 crash 缓冲
+"$ADB" logcat -b crash -c                       # 清空崩溃缓冲（安装新包前先清，便于区分新旧崩溃）
+```
+
+**这台测试机（安卓 16/国产 ROM）的限制，别浪费时间尝试**：
+
+- `adb shell input keyevent/tap` 全部被拒（`SecurityException: INJECT_EVENTS`）——ROM 的
+  「USB 调试（安全设置）」未开，**无法远程替用户点 UI**；开该开关可解，需要机主操作。
+- `ScanActivity`/`ResultActivity` 未导出，`am start` 直拉会 `Permission Denial`；只有 `HomeActivity` 可直拉。
+- 设备锁屏时 `uiautomator dump` 抓到的是 SystemUI（看到 scrim/shade 节点就是没解锁）。
+- Git Bash 会把 `/sdcard` 转义成本地路径，需 `export MSYS_NO_PATHCONV=1`。
+
+因此：**UI 层功能改动只能编译→安装→请机主人工点验**；日志验证上限是「主页能否启动 + crash 缓冲是否为空」。
+
+### 8.3 协议要点（改协议层前必读）
+
+信封：`{"jzt":1,"fmt":<fmt>,"name":<名>,"data":<载荷>}`，静态多页加 `"pg":{"i":1,"n":3}`。
+完整规范在《移动端APP.md》第 3 章（3.5 错误文案表是**逐字契约**，APP 端错误文案不得擅改）。
+
+| fmt | data | name | 状态 |
+| --- | --- | --- | --- |
+| `text` / `markdown` | 原文 string | 无扩展名基名 | v1 起在用 |
+| `word` / `excel` | 逐段文本 / 二维数组 | 无扩展名基名 | **兼容保留**（封装端不再生成，旧码仍可解析） |
+| `file` | 文件字节 base64 | **完整文件名（含扩展名）** | **v2 新增**：原始文件完整传输，导出/分享即原文件 |
+
+判别顺序不可变：`{` 开头 → JSON（有 pg → 多页收集器；无 → 信封校验）；否则按 base64 帧头 → 视频流收集器。
+
+### 8.4 版本变更历史（2026-09-05 ~ 09-07 本轮迭代）
+
+| 版本 | 内容 |
+| --- | --- |
+| v1.0（前人） | 协议实现 + 扫码页（原 MainActivity）+ 结果页；FR-01~09、暂存 |
+| v1.1 | 新增 HomeActivity 历史卡片主页 + 相机 FAB；MainActivity→ScanActivity；导入按钮重排（小字提示 + 导入图片多选/导入视频）；新增「重置」；结果页 Material3 化 |
+| v1.1+ | 识别页底部堆叠防遮挡、三个页面沉浸式系统栏 + 手势条 insets 避让、主题色公安藏蓝 #1C2F5E |
+| v1.2 | 结果页卡片化（信息卡+内容卡）；导出/复制/分享图标化；**移除「重置」**（见 8.5.1 闪退事故） |
+| v1.3 | 结果页底部 BottomNavigationView 动作栏（长按 tooltip）；去除「分享内容」 |
+| v1.4 | word 旧码导出由 .txt 改为 DocxWriter 重建 .docx；文件名防重复后缀 |
+| v1.5 + 协议 v2 | **文档完整传输**：封装端（`plugins/info-transfer/backend/routes.py`）新增 `fmt=file`（base64 直传原始文件，.doc/.wps/.pdf 同步放开），删除 python-docx/xlrd 依赖；APP 端全链路支持 file（还原原文件/不预览/字节数/复制禁用提示）；历史卡片与徽标配色适配 |
+
+### 8.5 踩坑记录（★核心章节：问题 → 根因 → 解决 → 预防）
+
+**8.5.1【最严重】识别页启动必崩：lateinit 在 insets 监听器中被提前读取**
+
+- **现象**：真机点进识别页秒崩，`crash` 缓冲：`UninitializedPropertyAccessException: lateinit property btnReset has not been initialized`，栈指向 `ScanActivity.setupImmersive`。
+- **根因**：`onCreate` 里 `setupImmersive()` 排在视图绑定**之前**执行，而它内部 `ViewCompat.setOnApplyWindowInsetsListener(btnReset)` 的写法**立即解引用 lateinit 字段**（哪怕只是注册监听）。当初为了「右上角重置按钮避让状态栏」加的这段。
+- **解决**：整体移除重置功能（用户决定）；崩溃路径物理删除。
+- **预防（本项目铁律）**：
+  1. insets 监听器里**只用局部 `findViewById`**，禁止引用 lateinit 成员——HomeActivity / ResultActivity / ScanActivity 三处 `setupImmersive()` 现在都遵守这个模式，改 UI 时别破坏；
+  2. 布局新增带 id 的控件后，Activity 里引用它的顺序是「setContentView → findViewById → 才能用」；
+  3. 排查这类问题不要猜，先 `adb logcat -b crash -d | grep jztools`。
+
+**8.5.2 Material 组件属性名想当然（两次编译失败）**
+
+- `?attr/materialButtonTonalStyle` **在 material 1.12.0 不存在** → AAPT linking failed。正解：直接引用样式 `@style/Widget.Material3.Button.TonalButton`（或 `.Icon`/`.OutlinedButton` 变体）。
+- BottomNavigationView 的图标着色属性是 **`itemIconTint`**，不是 `itemIconTintList`。
+- **通用办法**：GradleHome 缓存里有 AAR，解包查真实属性/样式名：
+  `unzip material-1.12.0.aar -d /tmp/mat` 后 grep `res/values/values.xml`（缓存路径 `D:/GradleHome/caches/modules-2/files-2.1/com.google.android.material/material/1.12.0/<hash>/`）。
+
+**8.5.3 Kotlin 表达式体函数里不能写 return**
+
+`fun restore(...)?: T = try { ... return null ... }` 直接编译错（`Returns are not allowed for functions with expression body`）。带 return 的函数一律写块体 `{ }`（`HistoryStore.restore` 已改）。
+
+**8.5.4 单元测试里的 JSON 字符串转义**
+
+测试非法 base64 时在 Kotlin 字符串模板里嵌了裸 `"`（`${'"'}`），生成的**不是合法 JSON**，Gson 解析失败走到 Invalid 分支——用例名义上测 fileBytes 实际测的是信封解析。教训：测试 JSON 的 data 值选不含引号的字符（`@@非法##`）。
+
+**8.5.5 「word 还原不了原文件」是链路设计，不是 APP 缺陷（v2 之前的根本原因）**
+
+v1 封装端把 word/excel **只提取文本**放进二维码（`routes.py` 旧注释原话："只提取文本信息…不保留宏与文档样式"），且 `name` 按规范**去掉了扩展名**——APP 端拿到的东西里根本没有原始文件，无论结果页怎么改都不可能"还原原文件"。排查这类"还原不对"的投诉，**先看封装端塞进了什么数据**（桌面端 `plugins/info-transfer/backend/routes.py` 的 `extract_doc`），再改接收端。v1.4 的过渡方案（DocxWriter 用逐段文本重建可编辑 .docx）保留用于兼容旧码；真正的修复是 v2 的 `fmt=file` 完整传输（改动涉及桌面插件 + Web 前端 + APP 三端 + 两份文档，一次改齐）。
+
+**8.5.6 编辑大文件的事故两次（同会话内）**
+
+- `ScanActivity.kt` 出现过**重复 import**（`HistoryStore` 两行）导致 Conflicting import；
+- `resetAll()` 曾被错误地插入成两份。
+- 原因：长会话中凭记忆 Edit，没先 Read。**预防**：对同一文件多次编辑后、编译报 import/重复符号错时，先 Read 全文核对；能 replace_all 清理的就 replace_all。
+
+**8.5.7 历史存储回读必须复用协议解析（数据语义陷阱）**
+
+excel 信封的单元格数字在扫码解析时**按原始文本保留**（Gson `1 → "1"`，防变 1.0）、日期已是字符串。`HistoryStore.restore` 如果自己 `asJsonPrimitive.asString` 随手解析会悄悄改变语义——必须走 `EnvelopeParser.jsonToRows`（已如此，改动时保持）。
+
+**8.5.8 协议 v2 的数据量代价（新开发者最容易忽略）**
+
+`fmt=file` 用 base64 装整个文件，体积 **+33%**；静态码每张约 20KB、上限 200 页（超出 `DataOverflowError` 报「数据量过大」）；20MB 上传上限不变。**大文件务必引导用户用二维码视频流**（QR-transfer，zfec 纠错，相机模式每码重复 5 帧）。改封装端分页参数前先读 `routes.py` 的 `_build_static_pages`。
+
+**8.5.9 桌面端改动不会热生效**
+
+`routes.py` 是随 Flask 应用启动时注册的，**改完必须重启 JZToolsHub 服务**，否则前端表现"改了没生效"。README/依赖（requirements.txt）也同步过（python-docx/xlrd 已移除）。
+
+### 8.6 当前已知问题与待办
+
+1. **「重置」功能处于移除状态**（8.5.1 事故后用户要求移除）。恢复指引：`btn_reset`/`toast_reset` 字符串、`ic_refresh` 图标、`CameraScanner` 的亮度采样回调（`onBrightness` 参数，现为 null 跳过）都还在；`resetAll` 逻辑 git 无从找回（见本节第 7 条），需按"清 PageCollector + frameCollector=null + 删暂存 + resetDedupe + 代数计数防后台回写"重写。**唯一硬性要求：insets 监听器不得引用 lateinit**（8.5.1）。
+2. `CameraScanner.averageLuminance` 亮度采样代码保留但无人调用（每 12 帧 Y 平面抽样，不影响 ML Kit）。要么接回去（重置按钮自适应配色），要么删。
+3. **file 协议端到端尚未真机验证**：桌面封装 .docx → APP 扫码/扫视频 → 导出，与原文件逐字节比对。桌面端记得先重启服务（8.5.9）。
+4. 手势条/三键导航两种模式、刘海屏、暗色模式（`values-night/colors.xml` 已配 tonal 容器色）未做真机回归。
+5. 结果页依赖 `ResultStore` 内存单例：**进程被杀后从最近任务恢复 ResultActivity 会直接 finish**（`ResultStore.current == null`）。历史卡片重新点开即可恢复，影响轻微；若要彻底修复可让 ResultActivity 兜底从 HistoryStore 取最新一条。
+6. `values-night` 只覆盖了 `secondary_container`；卡片/背景色走 Material3 默认 DayNight，未做深色专项审查。
+7. **android-app/ 未纳入版本管理，本轮全部改动没有提交过**（详见第 2 节，是否提交由人工决定）。
+
+### 8.7 回归验证清单（改完代码照此走一遍）
+
+- [ ] `assembleDebug` + `testDebugUnitTest` 全绿（命令见 8.2）
+- [ ] 主页：空状态文案 / 历史卡片（徽标四色+file 青色）/ 长按删除 / 菜单清空（有确认框）/ FAB 进识别页
+- [ ] 识别页：权限拒绝时仍可「导入图片」；同码面返回再进可重扫（resetDedupe）；多页码收齐出结果、中断后「继续收集/放弃」可用
+- [ ] 导入图片多选（一次拆分多张）、导入视频（.mp4）
+- [ ] 结果页：text/markdown/word(旧码)/excel(旧码)/file 五种徽标与统计；文本 4000 字符截断、excel 100 行截断；file 不显示内容
+- [ ] 导航栏：导出（下载目录见文件，file 带原扩展名）、复制（excel 得 TSV；file 提示改导出）、分享（file 在微信等显示原文件名）、长按出名称气泡
+- [ ] 从历史进入结果页无「重新扫描」按钮；从识别页进入有
+- [ ] 沉浸式：三个页面状态栏延伸、底部不压手势条（手势/三键两种导航各试一次）
+- [ ] file 端到端：桌面封装 → APP 还原 → 与原文件哈希一致
+
+### 8.8 关键设计决策速记（为什么这么做）
+
+- **三 Activity 而非单 Activity+Fragment**：规格文档 2.2 的约定，页面少、最简。
+- **历史一条一 JSON 文件**而非 SQLite/SharedPreferences：数量级小、单条删除/清空就是删文件、Gson 直接对齐信封结构。
+- **ResultStore 内存单例**传大文本：Intent 放 base64 大字符串会 TransactionTooLarge。
+- **错误文案逐字契约**：APP 端文案与《移动端APP.md》3.5 对照，桌面端按文案做 e2e 断言，改文案 = 改两处文档。
+- **file 只传不解析**：桌面端不再 import python-docx/xlrd（解析=丢信息的根源）；.txt/.md 保留文本提取是因为小且两端可预览。
+- **亮度采样放 CameraScanner 而非独立 ImageAnalysis**：复用同一分析管线，绝对索引读 Y 平面不移动 buffer position，对 ML Kit 无副作用。
+
+## 9. 关键信息速查
 
 - 启动：`python app.py`（默认 `0.0.0.0:5000`，`JZTOOLS_PORT`/`JZTOOLS_HOST` 可覆盖）。
 - **打包发布**：`powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "x.y.z"`
@@ -297,6 +501,11 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
   `from jztools_admin.routes import set_operation`（均带 try/except 兜底）。
 - **改完功能必同步的文档**：`README.md`（HTTP API 表、内置插件一览、目录结构、故障排查——
   接口有增删时至少同步 API 表）、本文件第 2 节（git 最近提交）、必要时 `插件设计规范.md`。
-- 关键文档：`README.md`（架构/API 表/日志/**代码阅读地图**/打包发布流程/模板同步机制）、
+  **改信息传输协议时必须四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 +
+  《移动端APP.md》（改完记得重启 JZToolsHub 服务，见 8.5.9）。
+- 关键文档：`README.md`（架构/API 表/日志/**代码阅读地图**/打包发布流程/模板同步机制/
+  「信息传输与移动端 APP」章节）、`移动端APP.md`（信息传输协议权威规范，v1.5）、
+  `plugins/info-transfer/README.md`（封装端功能与接口）、
   `插件设计规范.md`（B-1~B-21、SEC-1~11，含封装型 B 型插件全套规范）、
-  `docs/`（登录改造与数据隔离 / 容器化与插件热插拔 两份历史设计文档）。
+  `docs/`（登录改造与数据隔离 / 容器化与插件热插拔 两份历史设计文档）、
+  `android-app/InfoParse/`（移动端源码，交接见本文件第 8 节）。

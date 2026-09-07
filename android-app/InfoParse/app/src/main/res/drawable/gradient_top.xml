@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 顶部渐变遮罩:状态栏区域压暗 → 沉浸式下白色状态栏图标可读 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:angle="270"
+        android:startColor="#59000000"
+        android:endColor="#00000000" />
+</shape>

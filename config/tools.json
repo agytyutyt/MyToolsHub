@@ -118,6 +118,14 @@
       "order": 3
     },
     {
+      "id": "info-transfer",
+      "name": "信息传输",
+      "description": "把文字、txt、markdown、word、excel 封装为二维码（静态图片或动态视频流，可设定二维码版本）；解析二维码先识别文档格式，再还原纯数据内容（不含样式与宏）。",
+      "category": "office",
+      "enabled": true,
+      "order": 5
+    },
+    {
       "id": "notice-board",
       "name": "公告板",
       "description": "暂无最新公告。",

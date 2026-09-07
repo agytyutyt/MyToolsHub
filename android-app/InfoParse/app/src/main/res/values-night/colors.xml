@@ -1,0 +1,5 @@
+<resources>
+    <!-- 夜间模式:tonal 按钮容器用深藏蓝系 -->
+    <color name="secondary_container">#2C3E63</color>
+    <color name="on_secondary_container">#D9E2F1</color>
+</resources>

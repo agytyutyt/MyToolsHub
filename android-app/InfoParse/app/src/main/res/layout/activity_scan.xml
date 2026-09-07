@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootScan"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 顶部渐变:状态栏沉浸后压暗顶端,保证白色状态栏图标可读 -->
+    <View
+        android:id="@+id/topScrim"
+        android:layout_width="match_parent"
+        android:layout_height="140dp"
+        android:background="@drawable/gradient_top" />
+
+    <!-- 底部堆叠:扫码提示 + 状态 + 导入按钮,直接铺在预览上(导航栏/手势条避让由代码按 insets 处理) -->
+    <LinearLayout
+        android:id="@+id/bottomStack"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="0dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvScanHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="12dp"
+            android:background="@drawable/shape_pill"
+            android:paddingStart="14dp"
+            android:paddingTop="7dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="7dp"
+            android:text="@string/scan_hint"
+            android:textColor="@color/white"
+            android:textSize="12sp" />
+
+        <!-- 识别状态/进度(浮在预览上,加文字阴影保证可读) -->
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:gravity="center"
+            android:minHeight="36dp"
+            android:shadowColor="#80000000"
+            android:shadowDy="2"
+            android:shadowRadius="6"
+            android:textColor="@color/white"
+            android:textSize="15sp" />
+
+        <!-- 有待继续任务时显示（FR-08）:半透明底保证浮层可读 -->
+        <LinearLayout
+            android:id="@+id/boxPending"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/btnResume"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text="@string/btn_resume"
+                android:textColor="@color/white"
+                app:backgroundTint="@color/scan_scrim"
+                app:strokeColor="@color/white" />
+
+            <Button
+                android:id="@+id/btnDiscard"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/btn_discard"
+                android:textColor="@color/white"
+                app:backgroundTint="@color/scan_scrim"
+                app:strokeColor="@color/white" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnImportImage"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minHeight="46dp"
+                android:text="@string/btn_import_image"
+                android:textColor="@color/white"
+                android:textSize="14sp"
+                app:backgroundTint="@color/primary"
+                app:icon="@drawable/ic_image"
+                app:iconGravity="textStart"
+                app:iconSize="16dp"
+                app:iconTint="@color/white" />
+
+            <Button
+                android:id="@+id/btnImportVideo"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:minHeight="46dp"
+                android:text="@string/btn_import_video"
+                android:textColor="@color/white"
+                android:textSize="14sp"
+                app:backgroundTint="@color/primary"
+                app:icon="@drawable/ic_movie"
+                app:iconGravity="textStart"
+                app:iconSize="16dp"
+                app:iconTint="@color/white" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

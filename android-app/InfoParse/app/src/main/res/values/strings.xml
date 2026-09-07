@@ -1,0 +1,32 @@
+<resources>
+    <string name="app_name">信息传输解析</string>
+    <string name="scan_hint">对准二维码即可：自动识别单张 / 多张拆分码 / 视频流</string>
+
+    <!-- 识别页底部按钮 -->
+    <string name="btn_import_image">导入图片</string>
+    <string name="btn_import_video">导入视频</string>
+    <string name="btn_reset">重置</string>
+    <string name="toast_reset">已重置，可重新识别</string>
+    <string name="stream_progress">已收集 %1$d/%2$d 帧</string>
+
+    <!-- 主页（识别历史） -->
+    <string name="home_empty_title">暂无识别记录</string>
+    <string name="home_empty_hint">点击右下角相机按钮开始识别</string>
+    <string name="menu_clear_history">清空历史</string>
+    <string name="btn_scan_fab">打开识别</string>
+    <string name="delete_record_title">删除记录</string>
+    <string name="delete_record_msg">确定删除该条识别记录吗？</string>
+    <string name="clear_history_title">清空历史</string>
+    <string name="clear_history_msg">确定清空全部识别记录吗？该操作不可恢复。</string>
+    <string name="btn_delete">删除</string>
+
+    <string name="btn_export">导出文件</string>
+    <string name="btn_copy">复制全部</string>
+    <string name="btn_share_file">分享文件</string>
+    <string name="btn_rescan">重新扫描</string>
+    <string name="content_preview">内容预览</string>
+    <string name="summary_note">已去除样式与宏，仅保留数据信息</string>
+    <string name="btn_resume">继续收集</string>
+    <string name="btn_discard">放弃</string>
+    <string name="btn_cancel">取消</string>
+</resources>

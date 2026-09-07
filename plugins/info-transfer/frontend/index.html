@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<!-- 信息传输插件（前端 + Python 后端）
+ * 信息封装：文字 / txt / markdown / word / excel → JSON 信封（声明文档格式）
+ *           → 静态二维码（单张/多张）或二维码视频流（QR-transfer 协议）
+ * 信息解析：二维码图片 / 二维码视频 → 读取信封判断文档格式 → 导出纯数据文件
+ * 后端接口前缀：/api/info-transfer
+ -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>信息传输</title>
+<style>
+  :root {
+    --primary: #00897b;
+    --primary-dark: #00695c;
+    --primary-bg: #e6f2f0;
+    --bg: #f5f5f5;
+    --card: #ffffff;
+    --text: #202124;
+    --muted: #5f6368;
+    --error: #d93025;
+    --border: #dadce0;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Google Sans", "Roboto", "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+  }
+  .container { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .card {
+    background: var(--card);
+    border-radius: var(--radius);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+
+  /* ===== 内凹胶囊切换（封装 / 解析） ===== */
+  .capsule-wrap { display: flex; justify-content: center; margin-bottom: 18px; }
+  .capsule {
+    display: inline-flex;
+    padding: 5px;
+    gap: 6px;
+    background: linear-gradient(180deg, #e3e6e4 0%, #d6dbd9 100%);
+    border-radius: 999px;
+    box-shadow:
+      inset 0 2px 5px rgba(0,0,0,.16),
+      inset 0 -1px 2px rgba(255,255,255,.7);
+  }
+  .capsule button {
+    font-family: inherit;
+    border: none;
+    border-radius: 999px;
+    padding: 10px 30px;
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--muted);
+    background: transparent;
+    transition: all .18s ease;
+  }
+  .capsule button:hover:not(.active) { color: var(--primary-dark); }
+  .capsule button.active {
+    background: linear-gradient(180deg, #fdfdfd 0%, #eceeec 100%);
+    color: var(--primary-dark);
+    font-weight: 600;
+    box-shadow:
+      inset 0 2px 4px rgba(0,0,0,.18),
+      inset 0 -1px 2px rgba(0,0,0,.06);
+  }
+  .capsule button .cap-icon { margin-right: 6px; }
+
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 28px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .15s;
+    color: var(--muted);
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--primary); background: var(--primary-bg); }
+  .dropzone p:first-child { font-size: 15px; color: var(--text); }
+  .dropzone p:last-child { font-size: 12px; margin-top: 6px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-top: 14px; }
+  label.field { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+  label.field select, label.field input {
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    outline: none;
+    background: #fff;
+  }
+  label.field select:focus, label.field input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(0,137,123,.15);
+  }
+  .row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  button {
+    font-family: inherit;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: filter .15s;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .primary { background: var(--primary); color: #fff; }
+  .primary:not(:disabled):hover { filter: brightness(1.08); }
+  .secondary { background: var(--primary-bg); color: var(--primary-dark); }
+  .secondary:not(:disabled):hover { filter: brightness(.97); }
+  .progress { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin-top: 12px; }
+  .progress-fill { height: 100%; width: 0; background: var(--primary); transition: width .2s; }
+  #progressText { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .status { margin-top: 12px; font-size: 14px; color: var(--text); }
+  .status.error { color: var(--error); }
+  .status.ok { color: var(--primary-dark); }
+  .muted { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  video {
+    display: block;
+    width: min(420px, 100%, 48vh);   /* 二维码视频为正方形：按窗口高度自适应，不再铺满整行 */
+    border-radius: 8px;
+    margin: 10px auto;
+    background: #000;
+    pointer-events: none;            /* 循环播放用于相机连续采集：禁交互，避免误触暂停/进度拖动 */
+  }
+  #streamImg {
+    display: block;
+    width: min(420px, 100%, 48vh);
+    border-radius: 8px;
+    margin: 10px auto;
+    background: #fff;
+    border: 1px solid var(--border);
+  }
+  #imageGrid {
+    display: flex; flex-wrap: wrap;
+    gap: 12px; margin-top: 10px; justify-content: center;
+  }
+  #imageGrid .cell { width: min(170px, 26vw); text-align: center; }   /* 缩略图随窗口宽度收缩 */
+  #imageGrid img {
+    width: 100%; border-radius: 8px; background: #fff;
+    border: 1px solid var(--border); cursor: zoom-in; display: block;
+  }
+  #imageGrid .qr-cap { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .fmt-badge {
+    display: inline-block;
+    background: var(--primary-bg);
+    color: var(--primary-dark);
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  textarea.paste {
+    width: 100%;
+    min-height: 140px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    outline: none;
+    resize: vertical;
+    margin-top: 10px;
+  }
+  textarea.paste:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0,137,123,.15); }
+  .seg {
+    display: inline-flex;
+    gap: 6px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .seg button {
+    padding: 7px 16px;
+    font-size: 13px;
+    border-radius: 999px;
+    background: #fff;
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .seg button.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    font-weight: 600;
+  }
+  pre.data-preview {
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 12px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+    user-select: text;
+    max-height: 260px;
+    overflow: auto;
+  }
+  [hidden] { display: none !important; }
+
+  /* 浮窗 */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 24px;
+  }
+  .modal-overlay[hidden] { display: none; }
+  .modal {
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .25);
+    width: min(860px, 100%);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 20px 16px;
+  }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; }
+  .modal-head h2 { font-size: 16px; font-weight: 600; }
+  .modal-x {
+    border: none;
+    background: none;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 0 4px;
+  }
+  .modal-x:hover { color: var(--text); }
+  .modal-data {
+    flex: 1;
+    overflow: auto;
+    margin-top: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 12px;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+    user-select: text;
+    min-height: 200px;
+  }
+  .modal .row { margin-top: 14px; justify-content: flex-end; }
+  .modal-zoom {
+    width: fit-content;
+    min-width: 260px;
+    max-width: min(92vw, 860px);
+    max-height: 90vh;
+    align-items: center;
+  }
+  #zoomImg {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    border-radius: 8px;
+    margin-top: 10px;
+    background: #fff;
+    border: 1px solid var(--border);
+  }
+  .kv { font-size: 13px; margin-top: 8px; }
+  .kv b { font-weight: 600; }
+  #zoomNav {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 10px;
+    width: 100%;
+  }
+  #zoomNav[hidden] { display: none; }   /* hidden 属性优先于 flex 布局 */
+  @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>信息传输</h1>
+  <p class="subtitle">把文字 / txt / markdown / word / excel 封装为二维码（静态图片或动态视频流）；解析二维码即可还原数据，仅保留文档信息、不含样式与宏</p>
+
+  <div class="capsule-wrap">
+    <div class="capsule" role="tablist" aria-label="功能切换">
+      <button id="tabEncode" class="active" role="tab" aria-selected="true"><span class="cap-icon">📤</span>信息封装</button>
+      <button id="tabDecode" role="tab" aria-selected="false"><span class="cap-icon">📥</span>信息解析</button>
+    </div>
+  </div>
+
+  <!-- ==================== 信息封装 ==================== -->
+  <section id="encodePanel">
+    <div class="card">
+      <h2>1. 输入信息</h2>
+      <div class="seg">
+        <button id="srcFile" class="active">上传文件</button>
+        <button id="srcText">粘贴文字</button>
+      </div>
+      <div id="fileZone">
+        <div id="dropZone" class="dropzone">
+          <p>拖拽文件到此处，或点击选择</p>
+          <p>支持 文字 / .txt / .md（纯文本提取）；其他文档以原始文件完整传输（.docx/.xlsx/.pdf/.doc/.wps 等，还原即原文件）</p>
+        </div>
+        <input id="fileInput" type="file" hidden />
+        <p id="fileName" class="muted"></p>
+      </div>
+      <div id="textZone" hidden>
+        <textarea id="pasteText" class="paste" placeholder="在此粘贴要封装的文字内容…"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2. 二维码设置</h2>
+      <div class="grid">
+        <label class="field">输出形式
+          <select id="mode">
+            <option value="static">静态二维码（PNG 图片，单张/自动拆分）</option>
+            <option value="video">动态二维码视频（MP4，适合大数据量）</option>
+          </select>
+        </label>
+        <label class="field">二维码版本（1-40，越大单码容量越大）
+          <input id="qrVersion" type="number" min="1" max="40" step="1" value="15" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="encodeBtn" class="primary">开始封装</button>
+      </div>
+      <div id="progressWrap" hidden>
+        <div class="progress"><div id="progressFill" class="progress-fill"></div></div>
+        <p id="progressText"></p>
+      </div>
+      <div id="status" class="status"></div>
+    </div>
+
+    <div class="card" id="result" hidden>
+      <h2>3. 封装结果</h2>
+      <p id="resultSummary" class="muted"></p>
+      <p id="resultHint" class="muted" style="margin-top:8px;"></p>
+      <video id="videoPreview" autoplay loop muted playsinline preload="auto"></video>
+      <div id="streamPlayer" hidden>
+        <img id="streamImg" alt="二维码流" />
+        <p id="streamCap" class="muted" style="text-align:center;"></p>
+      </div>
+      <div id="imageGrid" hidden></div>
+      <div class="row">
+        <button id="downloadBtn" class="primary">下载</button>
+        <button id="reChoose" class="secondary">重新输入</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== 信息解析 ==================== -->
+  <section id="decodePanel" hidden>
+    <div class="card">
+      <h2>1. 选择二维码来源</h2>
+      <div class="seg">
+        <button id="decImage" class="active">二维码图片</button>
+        <button id="decVideo">二维码视频</button>
+      </div>
+      <div id="decImageZone">
+        <div id="decDrop" class="dropzone">
+          <p>拖拽二维码图片到此处，或点击选择（可多张）</p>
+          <p>支持 PNG / JPG；「信息封装」生成的单张或多张拆分二维码均可识别</p>
+        </div>
+        <input id="decInput" type="file" accept="image/png,image/jpeg" multiple hidden />
+        <p id="decFilesName" class="muted"></p>
+      </div>
+      <div id="decVideoZone" hidden>
+        <div id="decVDrop" class="dropzone">
+          <p>拖拽二维码视频到此处，或点击选择</p>
+          <p>支持「信息封装」生成的 MP4 二维码视频流</p>
+        </div>
+        <input id="decVInput" type="file" accept="video/mp4,video/*" hidden />
+        <p id="decVName" class="muted"></p>
+      </div>
+      <div class="row">
+        <button id="decodeBtn" class="primary" disabled>开始解析</button>
+      </div>
+      <div id="decProgressWrap" hidden>
+        <div class="progress"><div id="decProgressFill" class="progress-fill"></div></div>
+        <p id="decProgressText"></p>
+      </div>
+      <div id="decStatus" class="status"></div>
+    </div>
+
+    <div class="card" id="decResult" hidden>
+      <h2>2. 解析结果</h2>
+      <p class="kv">识别文档格式：<span id="decFmt" class="fmt-badge"></span></p>
+      <p class="kv">来源：<b id="decName"></b></p>
+      <p id="decSummary" class="muted"></p>
+      <pre id="decPreview" class="data-preview"></pre>
+      <div class="row">
+        <button id="exportBtn" class="primary">导出文件</button>
+        <button id="copyBtn" class="secondary">复制全部</button>
+        <button id="decReChoose" class="secondary">重新解析</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="zoomModal" class="modal-overlay" hidden>
+  <div class="modal modal-zoom">
+    <div class="modal-head">
+      <h2 id="zoomTitle">二维码预览</h2>
+      <button id="zoomClose" class="modal-x" title="关闭">&times;</button>
+    </div>
+    <div id="zoomNav" hidden>
+      <button id="zoomPrev" class="secondary" style="flex:0 0 auto;">‹ 上一张</button>
+      <span id="zoomPage" style="font-size:13px;color:var(--muted);"></span>
+      <button id="zoomNext" class="secondary" style="flex:0 0 auto;">下一张 ›</button>
+    </div>
+    <img id="zoomImg" alt="二维码预览" />
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const state = {
+    tab: "encode",
+    srcMode: "file",
+    decMode: "image",
+    file: null,
+    taskId: null,
+    fileName: "", fileUrl: "",
+    imageCount: 0,
+    zoomPage: 0,
+    videoObjectUrl: null,
+    streamTimer: null,
+    streamCount: 0,
+    streamIdx: 0,
+    streamImgs: null,
+    decFiles: [], decVideo: null,
+    payload: null,
+  };
+
+  function setStatus(text, isError) {
+    $("status").textContent = text;
+    $("status").className = "status" + (isError ? " error" : " ok");
+  }
+  function setDecStatus(text, isError) {
+    $("decStatus").textContent = text;
+    $("decStatus").className = "status" + (isError ? " error" : " ok");
+  }
+
+  /* 统一的 JSON 请求：非 JSON 响应（HTML 错误页/登录页）翻译为可诊断的提示 */
+  async function fetchJson(url, options) {
+    let r;
+    try {
+      r = await fetch(url, options);
+    } catch (e) {
+      throw new Error("无法连接服务器，请确认服务已启动");
+    }
+    const ct = (r.headers.get("Content-Type") || "");
+    if (!ct.includes("application/json")) {
+      let hint = "服务返回异常（HTTP " + r.status + "）";
+      if (r.status === 404) {
+        hint += "：接口不存在——插件后端未加载，请重启服务进程（新增/更新插件后必须重启）";
+      } else if (r.status === 401 || r.status === 302) {
+        hint += "：登录状态已失效，请刷新页面重新登录";
+      } else if (r.status === 405) {
+        hint += "：请求方式不匹配，请升级插件后端后重启服务";
+      } else if (r.status >= 500) {
+        hint += "：服务器内部错误，请查看服务日志";
+      }
+      throw new Error(hint);
+    }
+    return r.json();
+  }
+  function showProgress(pct, text) {
+    $("progressWrap").hidden = false;
+    $("progressFill").style.width = pct + "%";
+    $("progressText").textContent = text;
+  }
+  function showDecProgress(pct, text) {
+    $("decProgressWrap").hidden = false;
+    $("decProgressFill").style.width = pct + "%";
+    $("decProgressText").textContent = text;
+  }
+
+  /* ---------- 内凹胶囊切换 ---------- */
+  function switchTab(tab) {
+    state.tab = tab;
+    const enc = tab === "encode";
+    $("tabEncode").classList.toggle("active", enc);
+    $("tabDecode").classList.toggle("active", !enc);
+    $("tabEncode").setAttribute("aria-selected", enc);
+    $("tabDecode").setAttribute("aria-selected", !enc);
+    $("encodePanel").hidden = !enc;
+    $("decodePanel").hidden = enc;
+  }
+
+  /* ---------- 信息封装 ---------- */
+  function switchSrc(mode) {
+    state.srcMode = mode;
+    const isFile = mode === "file";
+    $("srcFile").classList.toggle("active", isFile);
+    $("srcText").classList.toggle("active", !isFile);
+    $("fileZone").hidden = !isFile;
+    $("textZone").hidden = isFile;
+    resetResult();
+    setStatus("");
+  }
+
+  function fmtLabel(fmt) {
+    return { text: "纯文本", markdown: "Markdown", word: "Word 文档", excel: "Excel 表格", file: "原始文件" }[fmt] || fmt;
+  }
+  function fmtBytes(n) {
+    if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
+    if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
+    return n + " B";
+  }
+
+  function handleFile(f) {
+    const name = (f.name || "").toLowerCase();
+    if (!/\.(txt|md|markdown)$/.test(name) && !/\.[a-z0-9]+$/.test(name)) {
+      setStatus("仅支持 文字 / .txt / .md / 带扩展名的文档文件", true);
+      return;
+    }
+    resetResult();
+    state.file = f;
+    $("fileName").textContent = `${f.name}  ·  ${fmtBytes(f.size)}`;
+    setStatus("");
+  }
+
+  async function startEncode() {
+    const version = Number($("qrVersion").value);
+    if (!isFinite(version) || version < 1 || version > 40) {
+      setStatus("二维码版本须在 1-40 之间", true);
+      return;
+    }
+    const mode = $("mode").value;
+    const isFile = state.srcMode === "file";
+    if (isFile && !state.file) { setStatus("请先选择文件", true); return; }
+    if (!isFile && !$("pasteText").value.trim()) { setStatus("请先粘贴文字内容", true); return; }
+
+    $("encodeBtn").disabled = true;
+    resetResult();
+    setStatus("");
+    showProgress(0, "正在提交…");
+
+    const fd = new FormData();
+    fd.append("mode", mode);
+    fd.append("qr_version", $("qrVersion").value);
+    if (isFile) fd.append("file", state.file);
+    else fd.append("text", $("pasteText").value);
+
+    try {
+      const d = await fetchJson("/api/info-transfer/encode", { method: "POST", body: fd });
+      if (!d.ok) { setStatus(d.detail || "提交失败", true); $("encodeBtn").disabled = false; return; }
+      state.taskId = d.task_id;
+      pollEncode();
+    } catch (e) {
+      setStatus("网络错误：" + e.message, true);
+      $("encodeBtn").disabled = false;
+    }
+  }
+
+  async function pollEncode() {
+    const startWall = performance.now();
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 500));
+      try {
+        const s = await fetchJson(`/api/info-transfer/task/${state.taskId}`);
+        if (!s.ok) { setStatus(s.detail || "任务失败", true); $("encodeBtn").disabled = false; return; }
+        if (s.status === "pending" || s.status === "running") {
+          showProgress(Math.round((s.progress || 0) * 100), s.stage || "处理中…");
+        } else if (s.status === "done") {
+          showProgress(100, "封装完成");
+          renderEncodeResult(s);
+          $("encodeBtn").disabled = false;
+          return;
+        } else if (s.status === "error") {
+          showProgress(0, "封装失败");
+          setStatus(s.detail || "封装失败", true);
+          $("encodeBtn").disabled = false;
+          return;
+        }
+      } catch (e) {
+        setStatus("网络错误：" + e.message, true);
+        $("encodeBtn").disabled = false;
+        return;
+      }
+      if (performance.now() - startWall > 900000) {
+        setStatus("任务超时，请重试（可尝试调大二维码版本）", true);
+        $("encodeBtn").disabled = false;
+        return;
+      }
+    }
+  }
+
+  function buildFileUrl(taskId, fileName) {
+    const safe = encodeURIComponent(fileName || "qrcode.mp4");
+    return `/api/info-transfer/download/${taskId}/${safe}`;
+  }
+
+  function renderEncodeResult(s) {
+    const isStatic = s.output_type === "static";
+    state.imageCount = isStatic ? (s.image_count || 1) : 0;
+    let summary = `文档格式：${fmtLabel(s.fmt)} · 来源：${s.name} · 封装数据 ${fmtBytes(s.env_size)}，`;
+    if (isStatic) {
+      if (state.imageCount > 1) {
+        state.fileName = s.zip_name || "qrcode.zip";
+        summary += `已拆分为 ${state.imageCount} 张静态二维码（ZIP ${fmtBytes(s.zip_size)}）`;
+      } else {
+        state.fileName = s.image_name || "qrcode.png";
+        summary += `生成单张静态二维码（${fmtBytes(s.image_size)}）`;
+      }
+    } else {
+      state.fileName = s.video_name || "qrcode.mp4";
+      summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}，${fmtBytes(s.video_size)}）`;
+    }
+    state.fileUrl = buildFileUrl(state.taskId, state.fileName);
+
+    $("resultSummary").textContent = summary;
+    $("resultHint").textContent = (isStatic
+      ? (state.imageCount > 1
+        ? "数据超过单张容量已自动拆分：解析时需上传全部二维码（可打包 ZIP 一次性导入「信息解析」）"
+        : "单张二维码可直接打印或发送；用任意扫码工具可读出封装 JSON，用「信息解析」可还原数据")
+      : "相机传输模式：画面循环播放、每码停留约 0.33 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；也可下载 MP4 后用「信息解析 - 二维码视频」还原")
+      + (isStatic ? "（点击缩略图可放大查看原尺寸）" : "");
+    $("downloadBtn").textContent = isStatic
+      ? (state.imageCount > 1 ? "下载全部二维码（ZIP）" : "下载二维码图片")
+      : "下载二维码视频";
+
+    $("result").hidden = false;
+    if (isStatic) {
+      $("videoPreview").removeAttribute("src");
+      $("videoPreview").style.display = "none";
+      renderStaticImages();
+    } else {
+      $("imageGrid").innerHTML = "";
+      $("imageGrid").hidden = true;
+      const frameCount = s.frame_count || 0;
+      if (frameCount > 0) {
+        // 相机传输模式：帧序列轮播（绕开视频管线，节奏由 JS 主导）
+        $("videoPreview").style.display = "none";
+        $("videoPreview").removeAttribute("src");
+        startStreamPlayer(frameCount);
+      } else {
+        $("streamPlayer").hidden = true;
+        $("videoPreview").style.display = "block";
+        playVideoBlob(state.fileUrl);
+      }
+    }
+    setStatus("封装完成 ✔ 可下载产物，或到「信息解析」验证还原", false);
+  }
+
+  /* 视频改为 blob 本地播放：网络流式播放时缓冲抖动会让浏览器丢帧"追赶"，
+     表现为播放忽快忽慢；整体取回后由本地文件源稳定供帧，循环速度恒定 */
+  async function playVideoBlob(url) {
+    const v = $("videoPreview");
+    try {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const blob = await r.blob();
+      if (state.videoObjectUrl) URL.revokeObjectURL(state.videoObjectUrl);
+      state.videoObjectUrl = URL.createObjectURL(blob);
+      v.src = state.videoObjectUrl;
+    } catch (e) {
+      v.src = url; // 取回失败退回网络直连
+    }
+    v.playbackRate = 1;
+    v.play().catch(() => {}); // muted 下无需手势
+  }
+
+  /* ---------- 相机传输模式：JS 定时轮播帧序列（绕开浏览器视频管线） ----------
+     浏览器播放视频时，渲染线程卡顿会丢帧"追赶"（表现为忽快后恢复），
+     破坏"每码停留 333ms"的一致性。改为后端落盘逐帧 PNG + 前端 setTimeout
+     固定步进轮播：每 tick 恰好推进一张，卡顿只会整体变慢、绝不跳码。 */
+  const STREAM_FRAME_MS = 333; // 与后端 frame_repeat=5（15fps × 5）一致
+  function frameUrl(n) {
+    return `/api/info-transfer/frame/${state.taskId}/${n}`;
+  }
+  function startStreamPlayer(count) {
+    stopStreamPlayer();
+    state.streamCount = count;
+    state.streamIdx = 0;
+    state.streamImgs = [];
+    // 预加载全部帧（黑白二维码 PNG 单张几 KB，全量预载无压力）
+    let loaded = 0;
+    for (let i = 1; i <= count; i++) {
+      const im = new Image();
+      im.onload = im.onerror = () => {
+        loaded++;
+        if (loaded === count) showNextStreamFrame();
+      };
+      im.src = frameUrl(i);
+      state.streamImgs.push(im);
+    }
+    $("streamPlayer").hidden = false;
+  }
+  function showNextStreamFrame() {
+    if (state.streamCount <= 0) return;
+    if (state.streamIdx >= state.streamCount) state.streamIdx = 0; // 循环
+    const im = state.streamImgs[state.streamIdx];
+    if (!im.complete || !im.naturalWidth) {
+      // 个别帧加载失败：跳到下一张（采集端靠 FEC 冗余容忍个别缺失码）
+      state.streamIdx++;
+      state.streamTimer = setTimeout(showNextStreamFrame, 0);
+      return;
+    }
+    $("streamImg").src = im.src;
+    $("streamCap").textContent =
+      `相机传输画面（循环播放，每码 0.33 秒）：${state.streamIdx + 1}/${state.streamCount}`;
+    state.streamIdx++;
+    state.streamTimer = setTimeout(showNextStreamFrame, STREAM_FRAME_MS);
+  }
+  function pauseStreamPlayer() {
+    if (state.streamTimer) { clearTimeout(state.streamTimer); state.streamTimer = null; }
+  }
+  function resumeStreamPlayer() {
+    if (!state.streamTimer && state.streamCount > 0) showNextStreamFrame();
+  }
+  function stopStreamPlayer() {
+    pauseStreamPlayer();
+    state.streamCount = 0;
+    state.streamIdx = 0;
+    state.streamImgs = null;
+    $("streamPlayer").hidden = true;
+    $("streamImg").removeAttribute("src");
+    $("streamCap").textContent = "";
+  }
+
+  function renderStaticImages() {
+    const grid = $("imageGrid");
+    grid.innerHTML = "";
+    grid.hidden = false;
+    for (let i = 1; i <= state.imageCount; i++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      const src = `/api/info-transfer/image/${state.taskId}/${i}`;
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = `二维码 ${i}/${state.imageCount}`;
+      img.loading = "lazy";
+      img.addEventListener("click", () => openZoom(src));
+      cell.appendChild(img);
+      if (state.imageCount > 1) {
+        const cap = document.createElement("div");
+        cap.className = "qr-cap";
+        cap.textContent = `${i}/${state.imageCount}`;
+        cell.appendChild(cap);
+      }
+      grid.appendChild(cell);
+    }
+  }
+
+  function zoomSrc(n) {
+    return `/api/info-transfer/image/${state.taskId}/${n}`;
+  }
+  function openZoom(src) {
+    // 多张静态二维码：启用左右切换（默认显示传入 src 对应页）
+    const count = state.imageCount || 0;
+    $("zoomNav").hidden = count < 2;
+    if (count >= 2) {
+      let page = 1;
+      for (let i = 1; i <= count; i++) {
+        if (zoomSrc(i) === src) { page = i; break; }
+      }
+      state.zoomPage = page;
+      showZoomPage(page);
+      return;
+    }
+    state.zoomPage = 0;
+    const img = $("zoomImg");
+    img.onload = fitZoom;
+    img.src = src;
+    $("zoomModal").hidden = false;
+    fitZoom();
+  }
+  function showZoomPage(page) {
+    const count = state.imageCount || 0;
+    state.zoomPage = Math.min(Math.max(page, 1), count);
+    $("zoomTitle").textContent = `二维码预览（${state.zoomPage}/${count}）`;
+    $("zoomPage").textContent = `${state.zoomPage} / ${count}`;
+    $("zoomPrev").disabled = state.zoomPage <= 1;
+    $("zoomNext").disabled = state.zoomPage >= count;
+    const img = $("zoomImg");
+    img.onload = fitZoom;
+    img.src = zoomSrc(state.zoomPage);
+    $("zoomModal").hidden = false;
+    fitZoom();
+  }
+  function zoomStep(delta) {
+    if (state.zoomPage >= 1) showZoomPage(state.zoomPage + delta);
+  }
+  function fitZoom() {
+    const img = $("zoomImg");
+    const nw = img.naturalWidth, nh = img.naturalHeight;
+    if (!nw || !nh) return;
+    const modal = $("zoomModal").querySelector(".modal");
+    const cs = getComputedStyle(modal);
+    const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const margin = parseFloat(getComputedStyle(img).marginTop) || 10;
+    const head = modal.querySelector(".modal-head") ? modal.querySelector(".modal-head").offsetHeight : 40;
+    const nav = modal.querySelector("#zoomNav") && !modal.querySelector("#zoomNav").hidden
+      ? modal.querySelector("#zoomNav").offsetHeight : 0;
+    const maxW = window.innerWidth * 0.9;
+    const maxH = window.innerHeight * 0.9 - pad - head - nav - margin;
+    const scale = Math.min(maxW / nw, maxH / nh, 1);
+    img.style.width = Math.max(1, Math.round(nw * scale)) + "px";
+    img.style.height = "auto";
+  }
+  function closeZoom() {
+    $("zoomModal").hidden = true;
+    $("zoomImg").removeAttribute("src");
+    $("zoomTitle").textContent = "二维码预览";
+  }
+
+  function downloadResult() {
+    const a = document.createElement("a");
+    a.href = state.fileUrl;
+    a.download = state.fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => document.body.removeChild(a), 100);
+  }
+
+  function resetResult() {
+    $("result").hidden = true;
+    $("progressWrap").hidden = true;
+    stopStreamPlayer();
+    $("videoPreview").removeAttribute("src");
+    if (state.videoObjectUrl) {
+      URL.revokeObjectURL(state.videoObjectUrl);
+      state.videoObjectUrl = null;
+    }
+    $("imageGrid").innerHTML = "";
+    $("imageGrid").hidden = true;
+    state.taskId = null;
+    state.fileName = "";
+    state.fileUrl = "";
+    state.imageCount = 0;
+    state.zoomPage = 0;
+  }
+
+  /* ---------- 信息解析 ---------- */
+  function switchDec(mode) {
+    state.decMode = mode;
+    const isImg = mode === "image";
+    $("decImage").classList.toggle("active", isImg);
+    $("decVideo").classList.toggle("active", !isImg);
+    $("decImageZone").hidden = !isImg;
+    $("decVideoZone").hidden = isImg;
+    resetDecode();
+    setDecStatus("");
+  }
+
+  function handleDecFiles(files) {
+    resetDecode();
+    state.decFiles = Array.from(files || []).filter((f) => /\.(png|jpe?g)$/i.test(f.name || ""));
+    if (!state.decFiles.length) { setDecStatus("请选择 PNG / JPG 二维码图片", true); return; }
+    $("decFilesName").textContent =
+      state.decFiles.length === 1
+        ? `${state.decFiles[0].name}  ·  ${fmtBytes(state.decFiles[0].size)}`
+        : `已选择 ${state.decFiles.length} 张图片`;
+    $("decodeBtn").disabled = false;
+  }
+
+  function handleDecVideo(f) {
+    resetDecode();
+    state.decVideo = f;
+    $("decVName").textContent = `${f.name}  ·  ${fmtBytes(f.size)}`;
+    $("decodeBtn").disabled = false;
+  }
+
+  async function startDecode() {
+    $("decodeBtn").disabled = true;
+    resetDecode();
+    setDecStatus("");
+    showDecProgress(5, "正在上传…");
+    const fd = new FormData();
+    try {
+      if (state.decMode === "image") {
+        if (!state.decFiles.length) { setDecStatus("请先选择二维码图片", true); $("decodeBtn").disabled = false; return; }
+        fd.append("type", state.decFiles.length > 1 ? "zip" : "image");
+        if (state.decFiles.length > 1) {
+          // 多张：前端打包 ZIP 上传（页序即文件名序）
+          const zipBlob = await packZip(state.decFiles);
+          fd.append("file", zipBlob, "qrcodes.zip");
+        } else {
+          fd.append("file", state.decFiles[0]);
+        }
+        const d = await fetchJson("/api/info-transfer/decode", { method: "POST", body: fd });
+        showDecProgress(100, "解析完成");
+        if (!d.ok) { setDecStatus(d.detail || "解析失败", true); $("decodeBtn").disabled = false; return; }
+        renderDecodeResult(d, "静态二维码");
+      } else {
+        if (!state.decVideo) { setDecStatus("请先选择二维码视频", true); $("decodeBtn").disabled = false; return; }
+        fd.append("type", "video");
+        fd.append("file", state.decVideo);
+        const d = await fetchJson("/api/info-transfer/decode", { method: "POST", body: fd });
+        if (!d.ok) { showDecProgress(0, "解析失败"); setDecStatus(d.detail || "解析失败", true); $("decodeBtn").disabled = false; return; }
+        pollDecode(d.task_id);
+      }
+    } catch (e) {
+      showDecProgress(0, "解析失败");
+      setDecStatus("网络错误：" + e.message, true);
+      $("decodeBtn").disabled = false;
+    }
+  }
+
+  // 前端把多张二维码图片打包为 ZIP（store 模式即可，PNG 已压缩）
+  async function packZip(files) {
+    const chunks = [];
+    const encoder = new TextEncoder();
+    const central = [];
+    let offset = 0;
+    const crcTable = (() => {
+      const t = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        t[n] = c >>> 0;
+      }
+      return t;
+    })();
+    const crc32 = (bytes) => {
+      let c = 0xffffffff;
+      for (let i = 0; i < bytes.length; i++) c = crcTable[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+      return (c ^ 0xffffffff) >>> 0;
+    };
+    const u16 = (v) => new Uint8Array([v & 255, (v >> 8) & 255]);
+    const u32 = (v) => new Uint8Array([v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255]);
+    const sorted = files.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "zh"));
+    for (let i = 0; i < sorted.length; i++) {
+      const f = sorted[i];
+      const data = new Uint8Array(await f.arrayBuffer());
+      const nameBytes = encoder.encode(`${String(i + 1).padStart(2, "0")}_${f.name}`.replace(/[\\/:*?"<>|]/g, "_"));
+      const crc = crc32(data);
+      const local = [
+        u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(0), u16(0),
+        u32(crc), u32(data.length), u32(data.length), u16(nameBytes.length), u16(0), nameBytes,
+      ];
+      const localLen = local.reduce((s, u) => s + u.length, 0);
+      chunks.push(...local, data);
+      central.push({
+        nameBytes, crc, size: data.length,
+        offset, localLen,
+      });
+      offset += localLen + data.length;
+    }
+    const centralStart = offset;
+    let centralSize = 0;
+    for (const e of central) {
+      const rec = [
+        u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0),
+        u32(e.crc), u32(e.size), u32(e.size), u16(e.nameBytes.length), u16(0), u16(0),
+        u16(0), u16(0), u32(0), u32(e.offset), e.nameBytes,
+      ];
+      chunks.push(...rec);
+      centralSize += rec.reduce((s, u) => s + u.length, 0);
+    }
+    const eocd = [
+      u32(0x06054b50), u16(0), u16(0), u16(sorted.length), u16(sorted.length),
+      u32(centralSize), u32(centralStart), u16(0),
+    ];
+    chunks.push(...eocd);
+    return new Blob(chunks, { type: "application/zip" });
+  }
+
+  async function pollDecode(taskId) {
+    const startWall = performance.now();
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 500));
+      try {
+        const s = await fetchJson(`/api/info-transfer/decode/${taskId}`);
+        if (!s.ok) { setDecStatus(s.detail || "任务失败", true); $("decodeBtn").disabled = false; return; }
+        if (s.status === "pending" || s.status === "running") {
+          showDecProgress(Math.round((s.progress || 0) * 100), s.stage || "解析中…");
+        } else if (s.status === "done") {
+          showDecProgress(100, "解析完成");
+          let payload;
+          try { payload = JSON.parse(s.payload_json); } catch (e) { payload = null; }
+          if (!payload) { setDecStatus("解析数据异常", true); $("decodeBtn").disabled = false; return; }
+          renderDecodeResult({
+            fmt: s.fmt, name: s.name, payload,
+          }, "二维码视频", s.data_size);
+          return;
+        } else if (s.status === "error") {
+          showDecProgress(0, "解析失败");
+          setDecStatus(s.detail || "解析失败", true);
+          $("decodeBtn").disabled = false;
+          return;
+        }
+      } catch (e) {
+        setDecStatus("网络错误：" + e.message, true);
+        $("decodeBtn").disabled = false;
+        return;
+      }
+      if (performance.now() - startWall > 900000) {
+        setDecStatus("解析超时，请重试", true);
+        $("decodeBtn").disabled = false;
+        return;
+      }
+    }
+  }
+
+  function renderDecodeResult(d, source, dataSize) {
+    state.payload = d.payload;
+    const data = d.payload && d.payload.data;
+    const isTable = d.fmt === "excel" && Array.isArray(data);
+    const isFile = d.fmt === "file" && typeof data === "string";
+    const textData = isTable ? tableToText(data) : String(data == null ? "" : data);
+    $("decFmt").textContent = fmtLabel(d.fmt);
+    $("decName").textContent = d.name || "未命名";
+    let sizeText;
+    if (isFile) {
+      const pad = data.endsWith("==") ? 2 : (data.endsWith("=") ? 1 : 0);
+      const bytes = Math.max(0, Math.floor(data.length / 4 * 3) - pad);
+      sizeText = `原始文件 ${fmtBytes(bytes)}`;
+    } else if (dataSize != null) {
+      sizeText = `还原数据 ${fmtBytes(dataSize)}`;
+    } else {
+      sizeText = isTable ? `共 ${data.length} 行` : `共 ${textData.length} 字符`;
+    }
+    $("decSummary").textContent = isFile
+      ? `来源：${source} · ${sizeText} · 完整文件传输，导出后即原始文件`
+      : `来源：${source} · ${sizeText} · 已去除样式与宏，仅保留数据信息`;
+    $("decPreview").textContent = isFile
+      ? `原始文件「${d.name || "未命名"}」已完整封装在二维码中，不展示内容预览。\n点击「导出文件」即可还原原始文件（文件名与内容与原文档一致）。`
+      : (textData.length > 4000
+        ? textData.slice(0, 4000) + "\n…（内容较长，仅显示前 4000 字符，导出文件可查看全部）"
+        : textData);
+    $("decResult").hidden = false;
+    setDecStatus(isFile ? "解析完成 ✔ 原始文件已还原，可导出" : "解析完成 ✔ 已识别文档格式，可导出纯数据文件", false);
+  }
+
+  // excel 二维数组 → 制表符文本（预览用）
+  function tableToText(rows) {
+    return rows.map((r) => Array.isArray(r) ? r.map((c) => c == null ? "" : String(c)).join("\t") : String(r == null ? "" : r)).join("\n");
+  }
+
+  async function exportFile() {
+    if (!state.payload) return;
+    setDecStatus("正在生成导出文件…");
+    try {
+      const r = await fetch("/api/info-transfer/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: state.payload }),
+      });
+      if (!r.ok || !(r.headers.get("Content-Type") || "").includes("json") && !r.headers.get("Content-Disposition")) {
+        // 导出接口正常返回文件流；仅当出错且返回 JSON 时读取详情
+        const ct = r.headers.get("Content-Type") || "";
+        if (ct.includes("application/json")) {
+          const d = await r.json();
+          setDecStatus(d.detail || "导出失败", true);
+        } else {
+          setDecStatus("导出失败（HTTP " + r.status + "）", true);
+        }
+        return;
+      }
+      const blob = await r.blob();
+      let name = "解析结果";
+      const cd = r.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+      if (m) name = decodeURIComponent(m[1]);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); document.body.removeChild(a); }, 100);
+      setDecStatus(`已导出：${name}`);
+    } catch (e) {
+      setDecStatus("网络错误：" + e.message, true);
+    }
+  }
+
+  function copyPayload() {
+    const data = state.payload && state.payload.data;
+    if (state.payload && state.payload.fmt === "file") {
+      setDecStatus("原始文件模式不提供文本复制，请使用「导出文件」", true);
+      return;
+    }
+    const text = Array.isArray(data) ? tableToText(data) : String(data == null ? "" : data);
+    const done = () => {
+      const btn = $("copyBtn"); const old = btn.textContent;
+      btn.textContent = "已复制"; setTimeout(() => { btn.textContent = old; }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+    } else { fallbackCopy(text, done); }
+  }
+  function fallbackCopy(text, done) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { /* 忽略 */ }
+    document.body.removeChild(ta);
+  }
+
+  function resetDecode() {
+    $("decResult").hidden = true;
+    $("decProgressWrap").hidden = true;
+    state.payload = null;
+  }
+
+  function resetDecodeInput() {
+    resetDecode();
+    state.decFiles = [];
+    state.decVideo = null;
+    $("decFilesName").textContent = "";
+    $("decVName").textContent = "";
+    $("decVInput").value = "";
+    $("decInput").value = "";
+    $("decodeBtn").disabled = true;
+    setDecStatus("");
+  }
+
+  /* ---------- 初始化 ---------- */
+  function init() {
+    // 胶囊切换
+    $("tabEncode").addEventListener("click", () => switchTab("encode"));
+    $("tabDecode").addEventListener("click", () => switchTab("decode"));
+
+    // 封装：输入方式
+    $("srcFile").addEventListener("click", () => switchSrc("file"));
+    $("srcText").addEventListener("click", () => switchSrc("text"));
+    const drop = $("dropZone"), input = $("fileInput");
+    drop.addEventListener("click", () => input.click());
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+    drop.addEventListener("drop", (e) => {
+      e.preventDefault(); drop.classList.remove("drag");
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+    input.addEventListener("change", () => { if (input.files.length) handleFile(input.files[0]); });
+    $("encodeBtn").addEventListener("click", startEncode);
+    // 播放速率防护：任何因素（解码器异常/扩展干扰）改动速率立即拉回 1x，
+    // 相机端按帧时间戳采码，变速会破坏"每码停留时长"的一致性
+    $("videoPreview").addEventListener("ratechange", () => {
+      const v = $("videoPreview");
+      if (Math.abs(v.playbackRate - 1) > 0.01) v.playbackRate = 1;
+    });
+    // 页面切走/最小化时暂停：浏览器会节流渲染，画面停跳让手机端误判码面切换
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        pauseStreamPlayer();
+        $("videoPreview").pause();
+      } else {
+        resumeStreamPlayer();
+        const v = $("videoPreview");
+        if (v.src && !v.ended) v.play().catch(() => {});
+      }
+    });
+    $("zoomPrev").addEventListener("click", () => zoomStep(-1));
+    $("zoomNext").addEventListener("click", () => zoomStep(1));
+    $("downloadBtn").addEventListener("click", downloadResult);
+    $("reChoose").addEventListener("click", () => {
+      resetResult();
+      state.file = null;
+      $("fileName").textContent = "";
+      $("pasteText").value = "";
+      setStatus("");
+    });
+
+    // 解析：来源
+    $("decImage").addEventListener("click", () => switchDec("image"));
+    $("decVideo").addEventListener("click", () => switchDec("video"));
+    const decDrop = $("decDrop"), decInput = $("decInput");
+    decDrop.addEventListener("click", () => decInput.click());
+    decDrop.addEventListener("dragover", (e) => { e.preventDefault(); decDrop.classList.add("drag"); });
+    decDrop.addEventListener("dragleave", () => decDrop.classList.remove("drag"));
+    decDrop.addEventListener("drop", (e) => {
+      e.preventDefault(); decDrop.classList.remove("drag");
+      if (e.dataTransfer.files.length) handleDecFiles(e.dataTransfer.files);
+    });
+    decInput.addEventListener("change", () => handleDecFiles(decInput.files));
+    const decVDrop = $("decVDrop"), decVInput = $("decVInput");
+    decVDrop.addEventListener("click", () => decVInput.click());
+    decVDrop.addEventListener("dragover", (e) => { e.preventDefault(); decVDrop.classList.add("drag"); });
+    decVDrop.addEventListener("dragleave", () => decVDrop.classList.remove("drag"));
+    decVDrop.addEventListener("drop", (e) => {
+      e.preventDefault(); decVDrop.classList.remove("drag");
+      if (e.dataTransfer.files.length) handleDecVideo(e.dataTransfer.files[0]);
+    });
+    decVInput.addEventListener("change", () => { if (decVInput.files.length) handleDecVideo(decVInput.files[0]); });
+    $("decodeBtn").addEventListener("click", startDecode);
+    $("exportBtn").addEventListener("click", exportFile);
+    $("copyBtn").addEventListener("click", copyPayload);
+    $("decReChoose").addEventListener("click", resetDecodeInput);
+
+    // 放大预览
+    $("zoomClose").addEventListener("click", closeZoom);
+    $("zoomModal").addEventListener("click", (e) => { if (e.target === $("zoomModal")) closeZoom(); });
+    window.addEventListener("resize", () => { if (!$("zoomModal").hidden) fitZoom(); });
+    document.addEventListener("keydown", (e) => {
+      if ($("zoomModal").hidden) return;
+      if (e.key === "Escape") closeZoom();
+      else if (e.key === "ArrowLeft") zoomStep(-1);
+      else if (e.key === "ArrowRight") zoomStep(1);
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 格式徽标底色形状:小圆角矩形,使用时通过 backgroundTintList 着色 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="@color/white" />
+    <corners android:radius="6dp" />
+</shape>

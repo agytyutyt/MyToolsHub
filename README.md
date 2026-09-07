@@ -27,10 +27,11 @@
     - [7.6 插件数据归属规范](#76-插件数据归属规范)
 12. [内置插件一览](#内置插件一览)
 13. [轨迹数据与二维码闭环](#轨迹数据与二维码闭环)
-14. [打包部署（可上线程序）](#打包部署可上线程序)
-15. [项目更新与数据迁移](#项目更新与数据迁移)
-16. [故障排查](#故障排查)
-17. [后期接入真实后端](#后期接入真实后端)
+14. [信息传输与移动端 APP（Android）](#信息传输与移动端-appandroid)
+15. [打包部署（可上线程序）](#打包部署可上线程序)
+16. [项目更新与数据迁移](#项目更新与数据迁移)
+17. [故障排查](#故障排查)
+18. [后期接入真实后端](#后期接入真实后端)
 
 ---
 
@@ -114,6 +115,7 @@ JZToolsHub/
 │   │   └── backend/          #   Python 后端（routes.py 等）
 │   ├── trajectory-convert/   #   插件：轨迹转换（Excel → 二维码视频流 / 静态二维码）
 │   ├── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
+│   ├── info-transfer/        #   插件：信息传输（文字/文档 → 二维码封装与还原，见「信息传输与移动端 APP」）
 │   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
 │   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
 │   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
@@ -121,6 +123,7 @@ JZToolsHub/
 │       ├── manifest.json
 │       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
 │       └── backend/          #   routes.py：鉴权、后台接口、加密存储、工具访问拦截、requirements.txt
+├── android-app/InfoParse/    # 移动端 APP：信息传输的 Android 离线接收端（Kotlin，扫码还原，见「信息传输与移动端 APP」）
 ├── static/
 │   ├── index.html            # 首页（大方块展示）
 │   ├── tool.html             # 工具外壳页（加载插件 iframe）
@@ -306,6 +309,21 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 | `GET /api/qr-video-decode/status` | 依赖可用性检查（zfec / jsQR） |
 | `POST /api/qr-video-decode/reassemble` | 提交前端逐帧识别出的分块数据，**异步 zfec 前向纠错重组，返回 `task_id`** |
 | `GET /api/qr-video-decode/reassemble/<task_id>` | 轮询重组进度与恢复结果 |
+
+**info-transfer 插件后端接口**（信息传输——文字/文档封装为二维码或二维码视频并解析还原，协议见下文「信息传输与移动端 APP」）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/info-transfer/status` | 依赖可用性检查（qrcode / zfec / cv2 / numpy / openpyxl） |
+| `GET /api/info-transfer/ping` | 探活 |
+| `POST /api/info-transfer/encode` | 封装任务：multipart `file`（或 `text`）+ `mode`(static/video) + `qr_version`(1-40)，**立即返回 `task_id`**；文档类文件按协议 v2 `fmt=file` base64 原始字节完整封装 |
+| `GET /api/info-transfer/task/<task_id>` | 封装任务轮询 |
+| `GET /api/info-transfer/download/<task_id>` | 下载产物（静态 PNG / 多张 ZIP / 视频 MP4） |
+| `GET /api/info-transfer/image/<task_id>/<index>` | 静态二维码单张预览 |
+| `GET /api/info-transfer/frame/<task_id>/<index>` | 相机传输模式单帧码图（网页 JS 轮播用，每码重复 5 帧） |
+| `POST /api/info-transfer/decode` | 解析：multipart `file` + `type`(image/zip/video)；图片同步返回、视频异步执行 |
+| `GET /api/info-transfer/decode/<task_id>` | 视频解析任务轮询 |
+| `POST /api/info-transfer/export` | 解析数据 → 导出文件：`file` 格式直接还原原始文件（文件名与字节一致） |
 
 **shared-docs 插件后端接口**（共享文档协作编辑，**数据按「单位 / 部门 / 私人」三级隔离**）：
 
@@ -772,6 +790,7 @@ def current_user_or_none():
 | character-graph | ai | ✅ | ✅ | python-docx / pypdf / requests | 上传文档 → 大模型提取人物关系 → 3D 星图展示（线程池 2 + task 轮询） |
 | trajectory-convert | dev | ✅ | ✅ | openpyxl / xlrd / qrcode / opencv / numpy / zfec | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → 生成二维码视频流，或静态二维码图片（单张/多张） |
 | qr-video-decode | dev | ✅ | ✅ | zfec | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
+| info-transfer | office | ✅ | ✅ | qrcode / zfec / opencv-python / numpy / openpyxl | 信息传输：文字 / txt / markdown / 任意文档封装为二维码（静态多张 / QR-transfer 视频流，相机传输模式每码重复 5 帧）；解析先识别信封格式再还原，v2 起 `fmt=file` 原始文件完整传输；配套 Android 离线接收端（见「信息传输与移动端 APP」） |
 | shared-docs | office | ✅ | ✅ | python-docx / openpyxl / xlrd | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、乐观锁版本冲突提示、`.docx` / `.xlsx` 导入导出、单位/部门/私人三级可见 |
 | case-report | office | ✅ | ✅ | requests / openpyxl | 输入收网报告 → 大模型抽取要素 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队），跨记录汇总 / 案件筛选 / Excel 导出 |
 | notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
@@ -813,6 +832,111 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 - 高德地图输入经纬度标点（需自备高德 Key），支持批量导入、点地图添加。
 - **二维码识别**：上传二维码图片，jsQR 识别并解析轨迹 JSON（兼容 `[{"时间": "经度,纬度"}]`、`{时间: [经度,纬度]}` 等形态），确认后按时间在地图上**标点并生成移动轨迹**。
 - **轨迹回放**：生成轨迹折线与时间标点，进度条可非线性步进，时间压缩让长跨度的轨迹在约 20 秒内播完，支持播放/暂停/进度跳转，播放时同步高亮当前点。
+
+---
+
+## 信息传输与移动端 APP（Android）
+
+「信息传输」插件（`plugins/info-transfer/`）把文字、txt、markdown 与任意文档文件封装为二维码进行**离线传输**；`android-app/InfoParse/`（InfoParse APP）是配套的 **Android 离线接收端**，扫码还原内容。整条链路无网络通信——数据靠二维码光学传输，手机与电脑之间无需任何连接。
+
+```
+文字 / 文档 ──▶ [info-transfer 封装] ──▶ 静态二维码（单张 PNG / 多张 ZIP，
+                （二维码版本 1-40）        首页带格式与文件名、续页带页码）
+                                        或 QR-transfer 视频流 MP4（zfec 前向纠错，
+                                          相机传输模式每码连续重复 5 帧）
+                                                        │
+                                                  手机摄像头扫码
+                                                        │
+        原始文本 / 原始文件 ◀── [InfoParse APP 解析还原] ◀┘
+```
+
+### 信封协议（简表）
+
+完整规范见 **《移动端APP.md》** 第 3 章（仓库根目录，★协议契约文档，改协议必须同步修订它）；
+封装端实现以 `plugins/info-transfer/backend/routes.py` 为最终裁定依据。
+
+信封 JSON：`{"jzt": 1, "fmt": ..., "name": ..., "data": ...}`；静态多页拆分加
+`"pg": {"i": 1, "n": 3}`（首页带 `fmt`/`name`，续页省略）。
+
+| fmt | data | name | 状态 |
+| --- | --- | --- | --- |
+| `text` / `markdown` | 原文 string | 无扩展名基名 | v1 起在用 |
+| `word` / `excel` | 逐段文本 / 二维数组 | 无扩展名基名 | **兼容保留**（封装端不再生成，旧二维码仍可解析） |
+| `file` | 文件字节 base64 | **完整文件名（含扩展名）** | **v2 新增**：原始文件完整传输，样式 / 宏 / 图片与原文件完全一致，导出 / 分享即原文件 |
+
+扫码内容判别顺序不可变：`{` 开头 → JSON 信封（有 `pg` → 多页收集器；无 → 信封校验）；
+否则按 base64 帧头 → QR-transfer 视频流收集器。错误文案（《移动端APP.md》3.5）是**逐字契约**，
+桌面端与 APP 端都必须逐字使用。
+
+### InfoParse APP 功能覆盖
+
+| 编号 | 能力 | 状态 |
+| --- | --- | --- |
+| FR-01 | 相机实时扫码解析（CameraX + ML Kit bundled） | ✅ |
+| FR-01a | 启动即持续识别，自动分流单张信封 / 多页拆分码 / QR-transfer 视频流（同文本去重） | ✅ |
+| FR-02 | 相册导入 PNG/JPG（多选，逐张喂同一收集器） | ✅ |
+| FR-03 | 多页拆分码收集与重组（乱序 / 覆盖 / 进度提示） | ✅ |
+| FR-04 | 结果展示：格式徽标、来源名、文本/表格预览（4000 字符 / 100 行截断）；`file` 格式不预览内容，显示文件名与字节数 | ✅ |
+| FR-05 | 导出到系统「下载」：`.txt` / `.md` / `.csv`(BOM)；旧 word 码重建 `.docx`；`file` 还原原文件 | ✅ |
+| FR-06 | 分享内容 / 文件 | ✅ |
+| FR-07 | 复制全部（excel 为 TSV；`file` 提示改用导出） | ✅ |
+| FR-08 | 多页收集本地暂存（`filesDir/pending_collect.json`，重启可续，「继续收集 / 放弃」框） | ✅ |
+| FR-09 | 二维码视频 MP4 流解析（15fps 步进 + 系统位重组） | ✅ |
+| FR-10 | 解析历史（主页历史卡片，一条结果一个 JSON 文件，长按删除 / 菜单清空） | ✅（v1.1 实现） |
+| FR-11 | 相机视频流采集（扫到 QR-transfer 帧自动进入帧收集，配合桌面端相机传输模式循环播放） | ✅ |
+
+### 页面架构（三个 Activity，无 Fragment）
+
+```
+HomeActivity（启动页/LAUNCHER）      ScanActivity（识别页，沉浸式）        ResultActivity（结果页，沉浸式）
+├─ 历史卡片列表(RecyclerView)   FAB→ ├─ 全屏相机预览+亮度渐变顶罩        ├─ 信息卡(格式徽标+统计+说明)
+├─ 空状态引导                        ├─ 底部堆叠:扫码提示胶囊+状态文字     ├─ 内容卡(文本4000字符/excel100行截断)
+├─ 长按删单条/菜单清空历史            ├─ 导入图片(多选)/导入视频按钮       ├─ 底部导航栏:导出/复制/分享文件
+└─ 点卡片→ResultActivity(历史)       └─ insets 避让手势条                └─ 重新扫描(仅非历史入口显示)
+```
+
+页面间传信封用内存单例 `ResultStore.current`（避免 Intent 序列化大文本）；识别成功自动写历史
+`filesDir/history/<uuid>.json`（一条结果一个文件）。
+
+### 技术栈与离线承诺
+
+| 项目 | 说明 |
+| --- | --- |
+| 语言 / SDK | Kotlin · minSdk 29 / targetSdk 34 · JVM 17 · Gradle 8.7 |
+| 核心依赖 | CameraX 1.3.4 · ML Kit barcode-scanning 17.3.0（**bundled 离线模型**，不依赖 GMS，国产手机可用）· Material3 1.12.0 · Gson 2.11.0 |
+| 权限 | **仅 CAMERA 一个运行时权限，禁止声明 INTERNET**（《移动端APP.md》1.4 硬约束，勿加） |
+| 单元测试 | 协议层与工具层全覆盖（信封校验 / 多页状态机 / 帧重组 / zfec 测试向量 / CSV）；UI 无自动化测试 |
+
+### 构建运行
+
+- **Android Studio**（Koala+）→ Open `android-app/InfoParse/` → 连接 Android 10+ 真机 → Run。
+- **命令行**：仓库未提交 gradle wrapper 二进制（只有 `gradle/wrapper/gradle-wrapper.properties`），
+  Android Studio 打开一次可自动生成 wrapper，或用本机 Gradle 8.7 直接构建：
+
+  ```bash
+  gradle -p android-app/InfoParse :app:assembleDebug :app:testDebugUnitTest
+  ```
+
+  开发机上的离线构建环境（依赖缓存目录、JDK 版本等）见 **HANDOFF.md 第 8 节**。
+- 产物：`app/build/outputs/apk/debug/app-debug.apk`（约 37MB，含 ML Kit bundled 模型）。
+
+### 测试
+
+1. 运行 `android-app/InfoParse/gen_test_materials.py`（或 `make_video_materials.py`）生成二维码
+   PNG/MP4 素材（`qr_test_materials/`）；
+2. 电脑屏幕显示二维码（调高亮度、关深色模式），手机 10~30cm 扫描；
+3. 用例对照《移动端APP.md》7.2 表 TC-01 ~ TC-15 执行；APP 端回归验证清单见 **HANDOFF.md 第 8 节**。
+
+### 已知边界
+
+- 二期视频缺帧时仅提示重扫：`ZfecCompat`（zfec 兼容 RS 纠错）已实现并通过测试向量，
+  但未接入 `QrFrame.Collector` 的缺帧补齐路径；
+- excel 旧码导出为 `.csv`(BOM)（移动端简化项）；`file` 格式导出原始文件；
+- 大文件注意：`fmt=file` base64 体积 +33%，静态码每张约 20KB、拆分上限 200 页、20MB 上传上限，
+  超出时引导用户改用二维码视频流。
+
+> APP 端的构建环境细节、真机调试限制、踩坑记录与回归清单统一维护在 **HANDOFF.md 第 8 节**；
+> 协议、判别流程与错误文案的权威定义在 **《移动端APP.md》**。
 
 ---
 

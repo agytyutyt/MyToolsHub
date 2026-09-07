@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 简单的「信息传输」图标：白色方框 + 箭头 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,30 h48 v48 h-48 z M36,36 v36 h36 v-36 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,54 h18 v-6 l10,8 -10,8 v-6 h-18 z" />
+</vector>

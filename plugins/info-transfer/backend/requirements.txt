@@ -1,0 +1,5 @@
+qrcode>=7.4
+zfec>=1.5
+opencv-python>=4.7
+numpy>=1.24
+openpyxl>=3.1

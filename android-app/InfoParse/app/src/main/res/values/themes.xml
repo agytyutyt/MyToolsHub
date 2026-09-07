@@ -1,0 +1,31 @@
+<resources>
+    <style name="Theme.InfoParse" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorSecondaryContainer">@color/secondary_container</item>
+        <item name="colorOnSecondaryContainer">@color/on_secondary_container</item>
+        <item name="android:statusBarColor">@color/primary_dark</item>
+    </style>
+
+    <!-- 识别页：沉浸式（相机预览延伸至状态栏/导航栏之后） -->
+    <style name="Theme.InfoParse.Scan" parent="Theme.InfoParse">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- 主页：沉浸式（品牌蓝工具栏延伸至状态栏之后，导航栏透明、手势条下内容穿透） -->
+    <style name="Theme.InfoParse.Home" parent="Theme.InfoParse">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- 结果页：沉浸式（品牌蓝工具栏延伸至状态栏之后，导航栏透明、手势条下内容穿透） -->
+    <style name="Theme.InfoParse.Result" parent="Theme.InfoParse">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- 结果页底部导航栏:纯动作栏,去掉选中态指示药丸 -->
+    <style name="Widget.InfoParse.BottomNavActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
+        <item name="android:color">@android:color/transparent</item>
+    </style>
+</resources>
