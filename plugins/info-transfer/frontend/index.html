@@ -642,7 +642,8 @@
     return n + " B";
   }
 
-  /* ---------- 多文件选择与徽标（格式白名单取自后端持久化配置） ---------- */
+  /* ---------- 多文件选择与徽标（格式白名单经 GET /formats 动态获取） ---------- */
+  const MAX_FILES = 20;
   const FALLBACK_FORMATS = [
     { ext: "docx", label: "Word 文档" }, { ext: "xlsx", label: "Excel 表格" },
     { ext: "xlsm", label: "Excel 表格" }, { ext: "xls", label: "Excel 表格" },
