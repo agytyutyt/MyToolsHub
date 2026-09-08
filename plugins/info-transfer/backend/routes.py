@@ -44,6 +44,7 @@ import mimetypes
 import os
 import re
 import shutil
+import struct
 import threading
 import time
 import uuid
@@ -117,6 +118,13 @@ except Exception:  # pragma: no cover
     xlrd = None
     XLRD_AVAILABLE = False
 
+try:
+    import olefile  # 读取旧版 .doc（OLE2 复合文档），纯 Python
+    OLEFILE_AVAILABLE = True
+except Exception:  # pragma: no cover
+    olefile = None
+    OLEFILE_AVAILABLE = False
+
 # ---- QR-transfer 编码基础量（与 trajectory-convert / qr-video-decode 一致） ----
 MAX_FEC_M = 256
 SIZE_INDEX = 3          # 帧头字段 base64 编码前字节数
@@ -157,7 +165,7 @@ FMT_EXT = {
 #   xlrd=提取二维数组(xls 97-2003) | csv=csv 模块解析 | none=不可精简（仅原件传输）
 SUPPORTED_FORMATS = {
     "docx":     {"fmt": "word",     "label": "Word 文档",    "extract": "docx"},
-    "doc":      {"fmt": "word",     "label": "Word 文档",    "extract": "none"},
+    "doc":      {"fmt": "word",     "label": "Word 文档",    "extract": "doc"},
     "xlsx":     {"fmt": "excel",    "label": "Excel 表格",   "extract": "openpyxl"},
     "xlsm":     {"fmt": "excel",    "label": "Excel 表格",   "extract": "openpyxl"},
     "xls":      {"fmt": "excel",    "label": "Excel 表格",   "extract": "xlrd"},
@@ -475,6 +483,136 @@ def _extract_csv_rows(file_bytes):
     return _trim_empty_rows([[_csv_cell(v) for v in row] for row in rows])
 
 
+def _clean_doc_text(text):
+    """doc 提取文本清洗：控制字符 → 可读文本。
+
+    \r 段落符→换行；\x0b 软换行→换行；\x07 表格单元格/行结束→制表符；
+    域代码（\x13 域开始 \x14 域分隔 \x15 域结束）→ 删指令保留结果；
+    图片锚点(\x01/\x08)、脚注标记(\x02)、可选连字符(\x1f)等 → 删除。
+    """
+    out = []
+    in_field_instr = False  # \x13..\x14 之间是域指令，丢弃
+    for ch in text:
+        if ch == "\x13":
+            in_field_instr = True
+        elif ch == "\x14":
+            in_field_instr = False
+        elif ch == "\x15":
+            in_field_instr = False
+        elif in_field_instr:
+            continue
+        elif ch == "\r" or ch == "\x0b":
+            out.append("\n")
+        elif ch == "\x07":
+            out.append("\t")
+        elif ch == "\x1e":
+            out.append("-")
+        elif ch in ("\x01", "\x02", "\x03", "\x04", "\x08", "\x1f"):
+            continue
+        else:
+            out.append(ch)
+    cleaned = "".join(out)
+    cleaned = "\n".join(line.rstrip() for line in cleaned.split("\n")).strip()
+    return cleaned
+
+
+def _extract_doc_text(file_bytes):
+    """doc（Word 97-2003 二进制，OLE2 复合文档）→ 正文文本（含表格，制表符分隔）。
+
+    实现：olefile 读 WordDocument/0Table|1Table 流 → FIB 定位 CLX →
+    解析 PlcPcd 分片表 → 按 fc 标志逐片解码（8-bit cp1252 / 16-bit UTF-16LE）。
+    仅提取主文档正文（不含页眉页脚/脚注/批注）；样式/宏/图片一律丢弃。
+    """
+    if not OLEFILE_AVAILABLE:
+        raise LeanUnsupported("服务器未安装 olefile，无法精简提取 doc")
+    try:
+        ole = olefile.OleFileIO(io.BytesIO(file_bytes))
+    except Exception as e:
+        raise LeanUnsupported("doc 精简提取失败（不是有效的 OLE2 文档）") from e
+    try:
+        if not ole.exists("WordDocument"):
+            raise LeanUnsupported("doc 精简提取失败（缺少 WordDocument 流）")
+        wd = ole.openstream("WordDocument").read()
+        if len(wd) < 0x1AA:
+            raise LeanUnsupported("doc 精简提取失败（WordDocument 流过短）")
+        wIdent, nFib = struct.unpack_from("<HH", wd, 0)
+        if wIdent != 0xA5EC:
+            raise LeanUnsupported("doc 精简提取失败（非 Word 二进制格式）")
+        if nFib < 193:
+            raise LeanUnsupported("doc 为 Word 6/95 早期格式，暂不支持精简提取")
+        flags = struct.unpack_from("<H", wd, 0x0A)[0]
+        tbl_name = "1Table" if flags & 0x0200 else "0Table"
+        tbl = ole.openstream(tbl_name).read() if ole.exists(tbl_name) else b""
+        fcClx, lcbClx = struct.unpack_from("<II", wd, 0x1A2)
+        if lcbClx <= 0 or fcClx + lcbClx > len(tbl):
+            raise LeanUnsupported("doc 精简提取失败（分片表定位异常）")
+        pieces = _parse_doc_pieces(tbl[fcClx:fcClx + lcbClx], wd)
+        if pieces is None:
+            raise LeanUnsupported("doc 精简提取失败（分片表解析失败）")
+        text = "".join(pieces)
+    except LeanUnsupported:
+        raise
+    except Exception as e:
+        raise LeanUnsupported("doc 精简提取失败（文件损坏或格式异常）") from e
+    finally:
+        try:
+            ole.close()
+        except Exception:
+            pass
+    return _clean_doc_text(text)
+
+
+def _parse_doc_pieces(clx, wd):
+    """解析 CLX → 逐片解码文本（返回拼接字符串；结构异常返回 None）。
+
+    PlcPcd = (n+1)×4B CP + n×8B PCD；PCD = 2B 头 + 4B fc + 2B prm。
+    fc bit30(0x40000000) 置位 → 8-bit cp1252，偏移 = (fc & 0x3FFFFFFF) // 2；
+    否则 16-bit UTF-16LE，偏移 = fc & 0x3FFFFFFF。片长 = CP[k+1] - CP[k] 字符。
+    """
+    try:
+        i = 0
+        pcd_data = None
+        while i < len(clx):
+            tag = clx[i]
+            if tag == 1:  # Prc：跳过
+                if i + 3 > len(clx):
+                    return None
+                cb = struct.unpack_from("<H", clx, i + 1)[0]
+                i += 3 + cb
+            elif tag == 2:  # Pcdt
+                if i + 5 > len(clx):
+                    return None
+                lcb = struct.unpack_from("<I", clx, i + 1)[0]
+                pcd_data = clx[i + 5:i + 5 + lcb]
+                break
+            else:
+                return None
+        if pcd_data is None or len(pcd_data) < 16 or (len(pcd_data) - 4) % 12:
+            return None
+        n = (len(pcd_data) - 4) // 12
+        if n < 1 or n > 100000:
+            return None
+        cps = struct.unpack_from("<%dI" % (n + 1), pcd_data, 0)
+        if cps[0] != 0:
+            return None
+        parts = []
+        pcd_base = 4 * (n + 1)
+        for k in range(n):
+            fc = struct.unpack_from("<I", pcd_data, pcd_base + k * 8 + 2)[0]
+            ln = cps[k + 1] - cps[k]
+            if cps[k + 1] < cps[k]:
+                return None
+            if fc & 0x40000000:  # 8-bit
+                off = (fc & 0x3FFFFFFF) // 2
+                parts.append(wd[off:off + ln].decode("cp1252", errors="replace"))
+            else:  # 16-bit
+                off = fc & 0x3FFFFFFF
+                parts.append(wd[off:off + 2 * ln].decode("utf-16-le", errors="replace"))
+        return parts
+    except Exception:
+        return None
+
+
 def extract_doc_lean(filename, file_bytes):
     """精简传输提取：返回 (fmt, name, data, ext)。
 
@@ -500,6 +638,8 @@ def extract_doc_lean(filename, file_bytes):
         return fmt, base, _decode_text_bytes(file_bytes), ext_decl
     if extract == "docx":
         return fmt, base, _extract_docx_text(file_bytes), ext_decl
+    if extract == "doc":
+        return fmt, base, _extract_doc_text(file_bytes), ext_decl
     if extract == "csv":
         return fmt, base, _extract_csv_rows(file_bytes), ext_decl
     if extract == "openpyxl":

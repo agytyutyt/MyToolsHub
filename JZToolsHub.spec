@@ -18,7 +18,8 @@ PACKAGES = [
     "requests",        # case-report / character-graph（大模型调用）
     "docx",            # python-docx（shared-docs / character-graph）
     "openpyxl",        # shared-docs / trajectory-convert
-    "xlrd",            # shared-docs / trajectory-convert
+    "xlrd",            # shared-docs / trajectory-convert / info-transfer(.xls)
+    "olefile",         # info-transfer(.doc 旧版二进制提取)
     "qrcode",          # trajectory-convert
     "zfec",            # trajectory-convert / qr-video-decode
     "cv2",             # trajectory-convert（opencv）
