@@ -429,10 +429,9 @@
         <div id="dropZone" class="dropzone">
           <p>拖拽文件到此处，或点击选择（可多选）</p>
           <p id="acceptHint">仅支持 Word 文档(.docx) / Excel 表格(.xlsx / .xlsm / .xls) / CSV 表格(.csv) / 纯文本(.txt) / Markdown(.md)</p>
-          <p id="dropHint">精简传输只传数据不传格式（原件传输开启后文件原样封装）；.doc/.xls 等旧版格式自动按原件传输</p>
         </div>
         <input id="fileInput" type="file" multiple hidden
-               accept=".docx,.xlsx,.xlsm,.txt,.md,.markdown" />
+               accept=".docx,.doc,.xlsx,.xlsm,.xls,.csv,.txt,.md,.markdown" />
         <div id="fileChipList"></div>
       </div>
       <div id="textZone" hidden>
@@ -725,11 +724,7 @@
   /* ---------- 原件传输开关 ---------- */
   function applyRawHint() {
     state.rawMode = $("rawMode").checked;
-    const isFile = state.srcMode === "file";
-    $("rawSwitchRow").hidden = !isFile;
-    $("dropHint").textContent = state.rawMode
-      ? "原件传输已开启：文件将原样封装（含格式/宏/图片），还原即原文件"
-      : "精简传输只传数据不传格式（个别文件解析失败时自动按原件传输）";
+    $("rawSwitchRow").hidden = state.srcMode !== "file";
   }
 
   /* 全部停止按钮显隐与复位 */
