@@ -63,6 +63,7 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 | --- | --- | --- | --- | --- |
 | 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时 |
 | 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
+| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 无第三方（后端纯标准库；渲染库 vendor 在 frontend/vendor/） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB）+ 多级分类树；全员只读在线阅读与复制（pdf.js/easyofd/mammoth/SheetJS/marked 前端渲染，无浏览器控件），`grant_all`；设计文档 `docs/知识库插件-设计文档.md` |
 | 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
 | 战果录入 | `plugins/case-report/` | 前后端一体 | requests | 收网报告→大模型五要素键值对台账（仅大模型解析），缴获物品明细结构化输出、跨记录汇总、主办大队限定一大队/二大队/三大队 |
 | 人物关系立体星图 | `plugins/character-graph/` | 前后端一体 | python-docx/pypdf/requests | 上传文档→LLM 提取人物关系→3D 星点图（后台线程池 + task_id 轮询） |
@@ -315,6 +316,7 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 | --- | --- | --- | --- |
 | admin | /api/admin、/login 等 | 无 | config/admin.json + .admin_key |
 | notice-board | /api/notice-board | 无 | plugins/notice-board/data/*.json（一公告一文件，RLock 串行化） |
+| knowledge-base | /api/knowledge-base | 无 | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/<id>.<ext>（上传原文，服务端 ID 重命名） |
 | shared-docs | /api/shared-docs | 无（全局 RLock） | plugins/shared-docs/data/*.json（一文档一文件，历史上限 100） |
 | case-report | /api/case-report | ThreadPoolExecutor(2)，TASK_TTL 30min | data/*.json（一记录一文件）+ item_categories.json + config.json + prompt.json |
 | character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |

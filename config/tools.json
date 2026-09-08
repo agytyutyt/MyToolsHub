@@ -133,6 +133,15 @@
       "enabled": true,
       "order": 1,
       "grant_all": true
+    },
+    {
+      "id": "knowledge-base",
+      "name": "知识库",
+      "description": "在线阅读 PDF / OFD / Word / Excel / Markdown 文档，分级分类管理，仅阅读与复制（只读）。",
+      "category": "office",
+      "enabled": true,
+      "order": 6,
+      "grant_all": true
     }
   ]
 }

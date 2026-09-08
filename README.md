@@ -119,6 +119,7 @@ JZToolsHub/
 │   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
 │   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
 │   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
+│   ├── knowledge-base/       #   插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读，管理员上传 + 多级分类，前端纯 JS 渲染）
 │   └── admin/                #   核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
 │       ├── manifest.json
 │       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
@@ -422,6 +423,30 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 > 时（启动登记、请求时实时求值，可按当前登录用户权限返回动态内容）以声明为准；未提供钩子时
 > 回退读取 `config/tools.json`（name/description）+ `manifest.json`（icon/accent/features）。
 > 公告板 `home_card()` 按当前用户可见范围取最新公告，以「时间 + 标题」首行、换行展示公告内容。
+
+**knowledge-base 插件后端接口**（知识库——管理员上传归档、全员在线只读阅读）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/knowledge-base/status` | 依赖自检（后端纯标准库，恒 ok） |
+| `GET /api/knowledge-base/config` | 当前用户是否可管理（`can_manage`：管理员角色/超管） |
+| `GET /api/knowledge-base/categories` | 分类树（全部登录用户；按 order + created_at 排序） |
+| `POST /api/knowledge-base/categories` | 新建分类 `{name, parent_id?}` —— 仅管理员；同层重名 409、父分类 404 |
+| `PUT /api/knowledge-base/categories/<cid>` | 改名 / 移动（parent_id 防环：不得指向自身或子孙）/ 排序 —— 仅管理员 |
+| `DELETE /api/knowledge-base/categories/<cid>` | 删除分类 —— 仅管理员；有子分类或文件 409 |
+| `GET /api/knowledge-base/files?category=&q=` | 文件列表（category 递归含子孙分类；q 模糊匹配文件名；按创建时间倒序，含上传人姓名/大小/时间） |
+| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/csv/md/markdown/txt`、≤20MB（413）、`.doc` 拒绝并提示转存；服务端生成 ID 重命名落盘 |
+| `PUT /api/knowledge-base/files/<fid>` | 改名 / 移动分类 `{name?, category_id?}` —— 仅管理员 |
+| `DELETE /api/knowledge-base/files/<fid>` | 删除文档（元数据 + 落盘文件）—— 仅管理员 |
+| `GET /api/knowledge-base/files/<fid>/raw` | **内联**读取文件内容（`Content-Disposition: inline`，无 attachment，不提供下载语义；`conditional=True` 支持 Range/304 供 pdf.js 断点续读）；ID 白名单正则防目录穿越，不可读一律 404 |
+
+> 分类与文件元数据以单库 JSON 保存在数据根目录 `plugins/knowledge-base/data/`
+> （categories.json / files.json，原子写 + 全局锁），上传的原始文件落盘 `data/files/<id>.<ext>`；
+> 记录含 `created_by / created_by_name / unit_id / department_id` 归属四字段（取自会话）。
+> 阅读为全站公共资源：列表不做单位/部门过滤（`grant_all`），管理操作仅管理员角色/超管。
+> 前端渲染全在浏览器端（pdf.js / easyofd / mammoth / SheetJS / marked，输出过 DOMPurify），
+> 库文件 vendor 于 `frontend/vendor/`（离线内网可用，见其 VENDOR.md）；
+> 仅提供阅读与复制，无编辑接口、无下载端点。设计文档：`docs/知识库插件-设计文档.md`。
 
 `GET /api/tools` 返回结构示例：
 
@@ -794,6 +819,7 @@ def current_user_or_none():
 | shared-docs | office | ✅ | ✅ | python-docx / openpyxl / xlrd | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、乐观锁版本冲突提示、`.docx` / `.xlsx` 导入导出、单位/部门/私人三级可见 |
 | case-report | office | ✅ | ✅ | requests / openpyxl | 输入收网报告 → 大模型抽取要素 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队），跨记录汇总 / 案件筛选 / Excel 导出 |
 | notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
+| knowledge-base | office | ✅ | ✅ | - （纯标准库） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB）并多级分类管理，全员在线只读阅读与复制（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
 | admin（核心） | - | ✅ | ✅ | cryptography / Flask | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置；`hidden: true`，始终加载 |
 
 > 各后端插件的完整接口清单见上文「HTTP API」各小节；每个插件的依赖声明在各自 `plugins/<id>/backend/requirements.txt`。

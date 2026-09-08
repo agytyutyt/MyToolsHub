@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>知识库</title>
+  <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
+  <link rel="stylesheet" href="./style.css?v=18">
+
+</head>
+<body>
+  <!-- ==================== 库视图 ==================== -->
+  <div id="view-list" class="view">
+    <header class="page-head">
+      <div class="page-title">
+        <h1>知识库</h1>
+        <p class="sub">在线阅读 PDF / OFD / Word / Excel / Markdown 文档（只读）</p>
+      </div>
+      <div class="head-actions">
+        <button type="button" class="btn btn-fullscreen" title="全屏显示">全屏</button>
+        <button id="btn-upload" class="btn btn-primary hidden">＋ 上传文档</button>
+      </div>
+    </header>
+
+    <div id="deps" class="deps hidden"></div>
+
+    <div class="lib-layout">
+      <!-- 左侧分类树 -->
+      <aside class="cat-panel">
+        <div class="cat-head">
+          <span class="cat-title">分类</span>
+          <button id="btn-cat-add" class="icon-btn hidden" title="新建分类">＋</button>
+        </div>
+        <nav id="cat-tree" class="cat-tree"></nav>
+      </aside>
+
+      <!-- 右侧文件区 -->
+      <section class="files-panel">
+        <div class="files-toolbar">
+          <input id="search-input" class="input search-input" type="text"
+                 placeholder="搜索文件名…" autocomplete="off">
+          <span id="files-count" class="files-count"></span>
+          <span id="cat-actions" class="cat-actions hidden">
+            <button id="btn-cat-rename" class="btn btn-sm">重命名</button>
+            <button id="btn-cat-delete" class="btn btn-sm btn-danger">删除分类</button>
+          </span>
+          <!-- 排序：内凹分段胶囊（排序字段 + 方向），靠右 -->
+          <div class="sort-group">
+            <div class="seg" id="seg-sort-key">
+              <button type="button" class="seg-btn active" data-key="time">时间</button>
+              <button type="button" class="seg-btn" data-key="name">名称</button>
+            </div>
+            <div class="seg" id="seg-sort-dir">
+              <button type="button" class="seg-btn" data-dir="asc">正序</button>
+              <button type="button" class="seg-btn active" data-dir="desc">倒序</button>
+            </div>
+          </div>
+        </div>
+        <div id="file-list" class="file-list"></div>
+        <div id="empty-tip" class="empty hidden">当前分类暂无文档</div>
+      </section>
+    </div>
+
+    <!-- 右下角上传 FAB（管理员） -->
+    <button id="fab-upload" class="fab hidden" title="上传文档">＋</button>
+  </div>
+
+  <!-- ==================== 阅读视图 ==================== -->
+  <div id="view-reader" class="view hidden">
+    <div class="reader-frame">
+      <div id="reader-status" class="reader-status hidden"></div>
+      <div id="reader-container" class="reader-container"></div>
+    </div>
+    <!-- 底部悬浮工具条（胶囊样式，宽度自适应内容） -->
+    <div class="reader-dock">
+      <button id="btn-back" class="btn btn-icon" title="返回列表">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
+      <span class="pager-sep"></span>
+      <span class="badge" id="dock-ext"></span>
+      <span class="dock-title" id="dock-title"></span>
+      <span class="pager-sep"></span>
+      <!-- PDF / OFD 专属导航（其余格式隐藏） -->
+      <span id="reader-pager" class="pager hidden">
+        <button id="btn-prev-page" class="icon-btn" title="上一页">‹</button>
+        <span class="page-indicator" id="page-indicator">1 / 1</span>
+        <button id="btn-next-page" class="icon-btn" title="下一页">›</button>
+        <span class="pager-sep"></span>
+        <button id="btn-zoom-out" class="icon-btn" title="缩小">－</button>
+        <span class="zoom-indicator" id="zoom-indicator">100%</span>
+        <button id="btn-zoom-in" class="icon-btn" title="放大">＋</button>
+        <span class="pager-sep"></span>
+      </span>
+      <button id="btn-copy" class="btn btn-primary btn-icon" title="复制">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+      <button type="button" class="btn btn-icon btn-fullscreen" title="全屏显示">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== 通用对话框 ==================== -->
+  <div id="modal-mask" class="modal-mask hidden">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3 id="modal-title" class="modal-title"></h3>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-error" class="modal-error hidden"></div>
+      <div id="modal-actions" class="modal-actions">
+        <button id="modal-del" class="btn btn-danger hidden">删除文档</button>
+        <button id="modal-cancel" class="btn">取消</button>
+        <button id="modal-ok" class="btn btn-primary">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="snackbar" class="snackbar"></div>
+
+  <script src="./reader.js?v=3"></script>
+  <script src="./app.js?v=12"></script>
+</body>
+</html>

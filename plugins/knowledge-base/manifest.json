@@ -1,0 +1,10 @@
+{
+  "id": "knowledge-base",
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "icon": "📚",
+  "accent": "#5C6BC0",
+  "entry": "index.html",
+  "features": ["在线阅读", "分级分类", "只读安全"],
+  "form": "source"
+}
