@@ -58,6 +58,94 @@ class EnvelopeTest {
         assertNull(env.fileBytes())
     }
 
+    // ---------- ext：精简传输声明的原始后缀名（v1.6） ----------
+
+    @Test
+    fun `ext 后缀声明原样保留`() {
+        val r = single("""{"jzt":1,"fmt":"word","name":"报告","ext":"docx","data":"正文"}""")
+        val env = (r as ScanResult.Single).envelope
+        assertEquals("docx", env.ext)
+    }
+
+    @Test
+    fun `ext 带点号归一化为小写无点`() {
+        val r = single("""{"jzt":1,"fmt":"excel","name":"表格","ext":".XLSX","data":[]}""")
+        val env = (r as ScanResult.Single).envelope
+        assertEquals("xlsx", env.ext)
+    }
+
+    @Test
+    fun `无 ext 字段为 null`() {
+        val r = single("""{"jzt":1,"fmt":"text","name":"x","data":"y"}""")
+        assertNull(((r as ScanResult.Single).envelope).ext)
+    }
+
+    @Test
+    fun `空 ext 字段为 null`() {
+        val r = single("""{"jzt":1,"fmt":"text","name":"x","ext":"","data":"y"}""")
+        assertNull(((r as ScanResult.Single).envelope).ext)
+    }
+
+    // ---------- zip=1 压缩信封（v1.7 精简传输 zlib 压缩） ----------
+
+    /** 与后端 build_envelope 一致：zlib 压缩 → base64 承载 */
+    private fun zipData(raw: String): String {
+        val deflater = java.util.zip.Deflater(java.util.zip.Deflater.BEST_COMPRESSION, false)
+        deflater.setInput(raw.toByteArray(Charsets.UTF_8))
+        deflater.finish()
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        while (!deflater.finished()) out.write(buf, 0, deflater.deflate(buf))
+        deflater.end()
+        return java.util.Base64.getEncoder().encodeToString(out.toByteArray())
+    }
+
+    @Test
+    fun `压缩 text 信封 解压还原原文`() {
+        val r = single("""{"jzt":1,"fmt":"word","name":"报告","ext":"docx","zip":1,"data":"${zipData("第一段\n第二段")}"}""")
+        val env = (r as ScanResult.Single).envelope
+        assertEquals("第一段\n第二段", env.textData)
+        assertEquals("docx", env.ext)
+    }
+
+    @Test
+    fun `压缩 excel 信封 解压还原二维数组`() {
+        val r = single("""{"jzt":1,"fmt":"excel","name":"表","ext":"xlsx","zip":1,"data":"${zipData("""[["甲",1],["乙",2.5],["丙",null]]""")}"}""")
+        val env = (r as ScanResult.Single).envelope
+        val rows = env.data as List<List<Any?>>
+        assertEquals(listOf("甲", "1"), listOf(rows[0][0], rows[0][1]))
+        assertEquals("2.5", rows[1][1])
+        assertEquals(null, rows[2][1])
+    }
+
+    @Test
+    fun `压缩数据损坏 提示解压失败`() {
+        val bad = java.util.Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3, 4))
+        val r = single("""{"jzt":1,"fmt":"text","name":"x","zip":1,"data":"$bad"}""")
+        assertEquals(Msg.ZIPPED_BAD, (r as ScanResult.Invalid).reason)
+    }
+
+    @Test
+    fun `压缩 base64 非法 提示解压失败`() {
+        val r = single("""{"jzt":1,"fmt":"text","name":"x","zip":1,"data":"@@##"}""")
+        assertEquals(Msg.ZIPPED_BAD, (r as ScanResult.Invalid).reason)
+    }
+
+    @Test
+    fun `多页压缩信封 重组后解压`() {
+        val c = collector()
+        // 与封装端 _build_static_pages 一致：把完整信封 JSON（含压缩 data）切成 2 页片段
+        val envJson = """{"jzt":1,"fmt":"text","name":"长文","zip":1,"data":"${zipData("甲乙丙丁戊己庚辛")}"}"""
+        val gson = com.google.gson.Gson()
+        val mid = envJson.length / 2
+        val head = """{"jzt":1,"fmt":"text","name":"长文","pg":{"i":1,"n":2},"data":${gson.toJson(envJson.substring(0, mid))}}"""
+        val rest = """{"jzt":1,"pg":{"i":2,"n":2},"data":${gson.toJson(envJson.substring(mid))}}"""
+        EnvelopeParser.handle(head, c)
+        val r = EnvelopeParser.handle(rest, c)
+        val env = (r as ScanResult.Single).envelope
+        assertEquals("甲乙丙丁戊己庚辛", env.textData)
+    }
+
     @Test
     fun `jzt 不等于 1 拒绝`() {
         val r = single("""{"jzt":2,"fmt":"text","name":"x","data":"y"}""")

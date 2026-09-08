@@ -1,20 +1,29 @@
 """信息传输 —— JZToolsHub 后端插件路由。
 
 两个功能：
-- 信息封装：把用户提供的文字 / txt / markdown / 任意文档文件封装为
-  JSON 信封 {v, fmt, name, data}，编码为静态二维码（单张或自动拆分多张）
-  或二维码视频流（QR-transfer 协议，与 trajectory-convert / qr-video-decode
-  插件互通，含 zfec 前向纠错）。word/excel/其他文档自 v2 起以「原始文件」
-  完整传输（fmt=file，data 为文件字节 base64），不再提取文本。
+- 信息封装：把用户提供的文字 / 文件封装为 JSON 信封 {v, fmt, name, ext, data}，
+  编码为静态二维码（单张或自动拆分多张）或二维码视频流（QR-transfer 协议，
+  与 trajectory-convert / qr-video-decode 插件互通，含 zfec 前向纠错）。
+  两种传输模式（encode 接口 raw 参数选择）：
+  * 精简传输（默认，raw=0）：word 提取正文文本、txt/markdown 提取文本源码、
+    excel（.xlsx/.xlsm）提取内容构建二维数组，信封声明原始文件类型（fmt）
+    与后缀名（ext）；只传输数据，不保留格式、宏等参数。其他格式自动回退
+    原件传输并在任务结果中附 note 说明。
+  * 原件传输（raw=1）：文件不做任何解析，fmt=file，data 为文件字节 base64，
+    name 为完整原始文件名（含扩展名）。
 - 信息解析：对封装产生的二维码图片（单张 / 多张 ZIP）或二维码视频流解码，
-  先读取信封判断文档格式，再还原数据；file 格式直接还原原始文件
-  （含扩展名与字节），旧格式（text/markdown/word/excel）按纯数据导出。
+  先读取信封判断文档格式与原始后缀，再还原数据；file 格式直接还原原始文件
+  （含扩展名与字节）；word → 重建 .docx，excel → 重建 .xlsx（纯数据，无样式），
+  旧格式（text/markdown）按纯数据导出。
 
 信封协议（envelope）：
-    {"jzt": 1, "fmt": "<doc fmt>", "name": "<display name>", "data": <payload>}
+    {"jzt": 1, "fmt": "<doc fmt>", "name": "<display name>",
+     "ext": "<原始后缀名，精简传输时声明>", "data": <payload>}
     - jzt   ：协议标识与版本（固定 1）
     - fmt   ：文档格式声明（text / markdown / word / excel / file）
     - name  ：显示名；fmt=file 时为完整原始文件名（含扩展名）
+    - ext   ：原始文件后缀名（如 docx / xlsx），精简传输时声明，供还原端
+              按原始类型复原；旧二维码无此字段
     - data  ：文本内容（字符串）、纯数据表格（二维数组）或文件字节 base64（fmt=file）
 
 静态二维码分页协议（单张装不下时自动拆分多张，每张独立可读一部分）：
@@ -27,16 +36,19 @@
 """
 
 import base64
+import csv as csv_mod
 import io
 import json
 import math
 import mimetypes
 import os
+import re
 import shutil
 import threading
 import time
 import uuid
 import zipfile
+import zlib
 import datetime
 from concurrent.futures import ThreadPoolExecutor
 
@@ -91,6 +103,20 @@ except Exception:  # pragma: no cover
     openpyxl = None
     OPENPYXL_AVAILABLE = False
 
+try:
+    import docx  # python-docx
+    DOCX_AVAILABLE = True
+except Exception:  # pragma: no cover
+    docx = None
+    DOCX_AVAILABLE = False
+
+try:
+    import xlrd  # 读取旧版 .xls（BIFF），xlrd 2.x 仅支持 xls
+    XLRD_AVAILABLE = True
+except Exception:  # pragma: no cover
+    xlrd = None
+    XLRD_AVAILABLE = False
+
 # ---- QR-transfer 编码基础量（与 trajectory-convert / qr-video-decode 一致） ----
 MAX_FEC_M = 256
 SIZE_INDEX = 3          # 帧头字段 base64 编码前字节数
@@ -107,7 +133,9 @@ CAMERA_FRAME_REPEAT = 5  # 相机传输模式：每码连续重复的帧数（5/
 # 依次尝试 MPEG-4 Part 2 回退；mp4v 浏览器可能无法直接播放但解码端不受影响）
 VIDEO_FOURCC_CANDIDATES = ("avc1", "mp4v")
 
-# 支持的文档格式（word/excel 为兼容保留：旧二维码仍可解析，封装端不再生成）
+# 支持的文档格式
+# - text / markdown / word / excel / csv：精简传输（只传数据，不保留格式/宏）
+# - file：原件传输（完整字节 base64，name 含扩展名）
 DOC_FORMATS = ("text", "markdown", "word", "excel", "file")
 FMT_LABELS = {
     "text": "纯文本",
@@ -119,6 +147,24 @@ FMT_LABELS = {
 FMT_EXT = {
     "text": ".txt",
     "markdown": ".md",
+    "word": ".docx",
+    "excel": ".xlsx",
+}
+
+# ===================== 可封装文件格式（内置清单） =====================
+# 支持清单为内置常量（不持久化）；extract 指定精简提取方式：
+#   text=文本解码 | docx=python-docx 提取 | openpyxl=提取二维数组(xlsx/xlsm) |
+#   xlrd=提取二维数组(xls 97-2003) | csv=csv 模块解析 | none=不可精简（仅原件传输）
+SUPPORTED_FORMATS = {
+    "docx":     {"fmt": "word",     "label": "Word 文档",    "extract": "docx"},
+    "doc":      {"fmt": "word",     "label": "Word 文档",    "extract": "none"},
+    "xlsx":     {"fmt": "excel",    "label": "Excel 表格",   "extract": "openpyxl"},
+    "xlsm":     {"fmt": "excel",    "label": "Excel 表格",   "extract": "openpyxl"},
+    "xls":      {"fmt": "excel",    "label": "Excel 表格",   "extract": "xlrd"},
+    "csv":      {"fmt": "excel",    "label": "CSV 表格",     "extract": "csv"},
+    "txt":      {"fmt": "text",     "label": "纯文本",       "extract": "text"},
+    "md":       {"fmt": "markdown", "label": "Markdown",     "extract": "text"},
+    "markdown": {"fmt": "markdown", "label": "Markdown",     "extract": "text"},
 }
 
 # 上传大小上限（与框架层面独立的前置校验，SEC-3）
@@ -132,6 +178,36 @@ TASKS_LOCK = threading.Lock()
 TASK_TTL_SECONDS = 30 * 60
 
 _TASK_DIR = jztools_data.get_data_root_dir("plugins", "info-transfer", ".task_cache")
+
+
+class TaskCanceled(Exception):
+    """用户请求停止封装（协同取消，编码循环内检查点抛出）。"""
+
+
+def _canceled(task_id):
+    with TASKS_LOCK:
+        t = TASKS.get(task_id)
+        return bool(t and t.get("cancel"))
+
+
+def _remove_task_files(task_id):
+    """清理任务产物文件/目录（含未完成的部分文件，取消时调用）。"""
+    try:
+        names = os.listdir(_TASK_DIR)
+    except OSError:
+        return
+    prefixes = (f"{task_id}.", f"{task_id}_")
+    for name in names:
+        if not name.startswith(prefixes):
+            continue
+        path = os.path.join(_TASK_DIR, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                os.remove(path)
+        except OSError:
+            pass
 
 
 def set_task(task_id, **kwargs):
@@ -236,36 +312,271 @@ def _decode_text_bytes(file_bytes):
     return file_bytes.decode("utf-8", errors="replace")
 
 
-def extract_doc(filename, file_bytes):
-    """从上传文件提取封装内容，返回 (fmt, name, data)。
+class LeanUnsupported(Exception):
+    """精简模式无法提取该文件（封装端应回退原件传输）。"""
 
-    - .txt / .md：仍按纯文本/Markdown 提取（fmt=text/markdown，data 为字符串，
-      name 不含扩展名）——文本体量小、两端可直接预览；
-    - 其余任意文档（.docx/.xlsx/.xls/.doc/.wps/.pdf/...）：**完整传输原始文件**
-      （v2 起，fmt=file，data 为文件字节的 base64，name 为完整文件名含扩展名），
-      不做任何解析，样式/宏/图片原样保留。
+
+def extract_doc_raw(filename, file_bytes):
+    """原件传输：不做任何解析，返回 (fmt="file", 完整文件名, base64 字节, ext=None)。"""
+    name = os.path.basename(filename or "未命名")
+    return "file", name, base64.b64encode(file_bytes).decode("ascii"), None
+
+
+def _json_cell(v):
+    """单元格值 → JSON 安全值（数字/布尔保留，日期转文本，None 保持 null）。"""
+    if v is None:
+        return None
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        return None
+    if isinstance(v, (int, float)):
+        return v
+    if isinstance(v, (datetime.datetime, datetime.date, datetime.time)):
+        return str(v)
+    return str(v)
+
+
+def _extract_docx_text(file_bytes):
+    """docx → 逐段纯文本（正文段落 + 表格行，按文档顺序；空段保留为空行）。
+
+    只提取文本数据，样式/宏/图片/页眉页脚一律丢弃。失败抛 LeanUnsupported。
+    """
+    if not DOCX_AVAILABLE:
+        raise LeanUnsupported("服务器未安装 python-docx")
+    try:
+        document = docx.Document(io.BytesIO(file_bytes))
+        lines = []
+        paras = iter(document.paragraphs)
+        tables = iter(document.tables)
+        for child in document.element.body.iterchildren():
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "p":
+                lines.append(next(paras).text)
+            elif tag == "tbl":
+                for row in next(tables).rows:
+                    lines.append("\t".join(cell.text.strip() for cell in row.cells))
+        return "\n".join(lines)
+    except LeanUnsupported:
+        raise
+    except StopIteration:
+        raise LeanUnsupported("docx 结构异常")
+    except Exception as e:
+        raise LeanUnsupported("docx 精简提取失败（文件损坏或格式异常）") from e
+
+
+def _trim_empty_rows(rows):
+    """去除二维数组尾部空行与超宽空列（精简载荷）。"""
+    while rows and all(v in (None, "") for v in rows[-1]):
+        rows.pop()
+    width = 0
+    for r in rows:
+        for i in range(len(r) - 1, -1, -1):
+            if r[i] not in (None, ""):
+                width = max(width, i + 1)
+                break
+    return [r[:width] for r in rows] if width else []
+
+
+def _extract_xlsx_rows(file_bytes):
+    """xlsx/xlsm → 二维数组（取活动工作表；值取缓存计算结果）。"""
+    if not OPENPYXL_AVAILABLE:
+        raise LeanUnsupported("服务器未安装 openpyxl")
+    wb = None
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+        ws = wb.active
+        if ws is None:
+            raise LeanUnsupported("工作簿没有活动工作表")
+        rows = [[_json_cell(v) for v in row] for row in ws.iter_rows(values_only=True)]
+        return _trim_empty_rows(rows)
+    except LeanUnsupported:
+        raise
+    except Exception as e:
+        raise LeanUnsupported("excel 解析失败") from e
+    finally:
+        if wb is not None:
+            try:
+                wb.close()
+            except Exception:
+                pass
+
+
+def _xls_cell(cell, datemode):
+    """xlrd 单元格 → JSON 安全值（数字整值化、日期转文本、空值→null）。"""
+    ct, v = cell.ctype, cell.value
+    if ct in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+        return None
+    if ct == xlrd.XL_CELL_NUMBER:
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return int(v) if float(v).is_integer() else v
+    if ct == xlrd.XL_CELL_DATE:
+        try:
+            dt = xlrd.xldate.xldate_as_datetime(v, datemode)
+            return dt.strftime("%Y-%m-%d %H:%M:%S") if (dt.hour or dt.minute or dt.second) \
+                else dt.strftime("%Y-%m-%d")
+        except Exception:
+            return str(v)
+    if ct == xlrd.XL_CELL_BOOLEAN:
+        return bool(v)
+    return str(v) if v is not None else None
+
+
+def _extract_xls_rows(file_bytes):
+    """xls（97-2003 二进制）→ 二维数组（取第一个工作表，依赖 xlrd）。"""
+    if not XLRD_AVAILABLE:
+        raise LeanUnsupported("服务器未安装 xlrd，无法精简提取 xls")
+    try:
+        book = xlrd.open_workbook(file_contents=file_bytes)
+        ws = book.sheet_by_index(0)
+        rows = [[_xls_cell(ws.cell(r, c), book.datemode) for c in range(ws.ncols)]
+                for r in range(ws.nrows)]
+        return _trim_empty_rows(rows)
+    except LeanUnsupported:
+        raise
+    except Exception as e:
+        raise LeanUnsupported("xls 解析失败") from e
+
+
+_CSV_INT_RE = re.compile(r"-?(0|[1-9]\d*)")
+_CSV_FLOAT_RE = re.compile(r"-?(0|[1-9]\d*)(\.\d+)?")
+_CSV_BOOL = {"true": True, "false": False}
+
+
+def _csv_cell(v):
+    """CSV 单元格类型推断：整数/小数→数值、TRUE/FALSE→布尔、前导零等保持文本。"""
+    s = (v or "").strip()
+    if s == "":
+        return ""
+    low = s.lower()
+    if low in _CSV_BOOL:
+        return _CSV_BOOL[low]
+    if _CSV_INT_RE.fullmatch(s):
+        try:
+            return int(s)
+        except ValueError:
+            return s
+    if "." in s and _CSV_FLOAT_RE.fullmatch(s):
+        try:
+            return float(s)
+        except ValueError:
+            return s
+    return s
+
+
+def _extract_csv_rows(file_bytes):
+    """csv → 二维数组（按 Excel 习惯做类型推断；编码兼容 UTF-8/GBK 系）。"""
+    text = _decode_text_bytes(file_bytes)
+    try:
+        rows = [list(row) for row in csv_mod.reader(io.StringIO(text))]
+    except Exception as e:
+        raise LeanUnsupported("csv 解析失败") from e
+    return _trim_empty_rows([[_csv_cell(v) for v in row] for row in rows])
+
+
+def extract_doc_lean(filename, file_bytes):
+    """精简传输提取：返回 (fmt, name, data, ext)。
+
+    提取方式由持久化配置（config.json）驱动：
+    - text：.txt/.md 文本解码（markdown 为源码）；
+    - docx：.docx 提取正文文本与表格（纯数据）；
+    - xlrd：.xlsx/.xlsm/.xls 提取内容构建二维数组；
+    - csv：.csv 解析构建二维数组；
+    - none（如 .doc 旧版二进制格式）：不可精简 → 抛 LeanUnsupported，
+      由调用方自动回退原件传输并提示。
     """
     name = os.path.basename(filename or "未命名")
-
     ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
-    if ext == "txt":
-        return "text", name.rsplit(".", 1)[0], _decode_text_bytes(file_bytes)
-    if ext in ("md", "markdown"):
-        return "markdown", name.rsplit(".", 1)[0], _decode_text_bytes(file_bytes)
-    # 完整文件传输：不做解析，base64 封装
-    return "file", name, base64.b64encode(file_bytes).decode("ascii")
+    base = name.rsplit(".", 1)[0] if "." in name else name
+    item = SUPPORTED_FORMATS.get(ext)
+    if item is None:
+        raise LeanUnsupported(f".{ext}" if ext else "无扩展名文件")
+    if item["extract"] == "none":
+        raise LeanUnsupported(f"{item['label']}（.{ext}）为旧版/特殊格式，不支持精简提取")
+    fmt, ext_decl = item["fmt"], ext
+    extract = item["extract"]
+    if extract == "text":
+        return fmt, base, _decode_text_bytes(file_bytes), ext_decl
+    if extract == "docx":
+        return fmt, base, _extract_docx_text(file_bytes), ext_decl
+    if extract == "csv":
+        return fmt, base, _extract_csv_rows(file_bytes), ext_decl
+    if extract == "openpyxl":
+        return fmt, base, _extract_xlsx_rows(file_bytes), ext_decl
+    return fmt, base, _extract_xls_rows(file_bytes), ext_decl
 
 
 # ===================== 信封封装 =====================
 
-def build_envelope(fmt, name, data):
-    """构造信封 JSON 字节（解析端以此判断文档格式）。"""
-    env = {"jzt": 1, "fmt": fmt, "name": name, "data": data}
+def _pack_data(fmt, data):
+    """把信封 data 序列化并按需 zlib 压缩，返回 (承载值, 是否压缩)。
+
+    - fmt=file：data 为文件字节 base64（高熵），压缩无收益 → 原样承载；
+    - str / excel 二维数组：序列化为 UTF-8 字节后 zlib 压缩（level 9），
+      仅当 base64(压缩) 确实小于原始字节时才压缩（zip=1 标记）；
+      小文本/小表格压缩不划算 → 保持原形态（旧版信封形状，全端兼容）。
+    """
+    if fmt == "file":
+        return data, False
+    if isinstance(data, str):
+        raw = data.encode("utf-8")
+    elif isinstance(data, list):
+        raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    else:
+        return data, False
+    try:
+        packed = base64.b64encode(zlib.compress(raw, 9)).decode("ascii")
+    except Exception:  # 压缩失败兜底为原样承载
+        return data, False
+    if len(packed) < len(raw):
+        return packed, True
+    return data, False
+
+
+def _unpack_data(fmt, data):
+    """解压 zip=1 信封的 data（base64 → zlib inflate → 文本/二维数组）。"""
+    try:
+        raw = zlib.decompress(base64.b64decode(data or "", validate=True))
+    except Exception:
+        raise ValueError("压缩数据解码失败")
+    if fmt == "excel":
+        try:
+            rows = json.loads(raw.decode("utf-8"))
+        except Exception:
+            raise ValueError("Excel 数据结构异常（应为二维数组）")
+        if not isinstance(rows, list):
+            raise ValueError("Excel 数据结构异常（应为二维数组）")
+        return rows
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("文本解码失败")
+
+
+def build_envelope(fmt, name, data, ext=None):
+    """构造信封 JSON 字节（解析端以此判断文档格式/原始后缀/压缩标记）。
+
+    精简传输的文本与二维数组经 zlib 压缩（zip=1）后 base64 承载，
+    消除 JSON 语法与重复文本冗余——重复度高的表格/文档典型压缩比 5-10 倍；
+    fmt=file 与压缩无收益的小数据保持原形态。
+    """
+    env = {"jzt": 1, "fmt": fmt, "name": name}
+    if ext:
+        env["ext"] = ext
+    packed, zipped = _pack_data(fmt, data)
+    if zipped:
+        env["zip"] = 1
+    env["data"] = packed
     return json.dumps(env, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 def parse_envelope(obj):
-    """校验并解析信封，返回 (fmt, name, data)；不合法时抛 ValueError。"""
+    """校验并解析信封，返回 (fmt, name, data, ext)；不合法时抛 ValueError。
+
+    - ext 为精简传输声明的原始后缀名（旧二维码无此字段时为 None）；
+    - zip=1 时 data 为 zlib 压缩载荷，自动解压还原为文本 / 二维数组。
+    """
     if not isinstance(obj, dict):
         raise ValueError("内容不是「信息传输」封装的数据（缺少信封结构）")
     if obj.get("jzt") != 1:
@@ -273,7 +584,12 @@ def parse_envelope(obj):
     fmt = obj.get("fmt")
     if fmt not in DOC_FORMATS:
         raise ValueError(f"未知的文档格式声明：{fmt}")
-    return fmt, str(obj.get("name") or "未命名"), obj.get("data")
+    ext = obj.get("ext")
+    ext = str(ext).lstrip(".").lower() if isinstance(ext, str) and ext else None
+    data = obj.get("data")
+    if obj.get("zip") == 1:
+        data = _unpack_data(fmt, data)
+    return fmt, str(obj.get("name") or "未命名"), data, ext
 
 
 # ===================== QR-transfer 编码（视频） =====================
@@ -357,7 +673,7 @@ def _open_video_writer(out_path, size):
 
 
 def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat=1,
-                    frames_dir=None):
+                    frames_dir=None, cancel_check=None):
     """把字节数据按 QR-transfer 编码为二维码视频文件。返回 (nframes, k, m)。
 
     frame_repeat：每张二维码连续写入的帧数（fps 恒为 FRAMERATE 不变，
@@ -365,6 +681,7 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
     frames_dir：可选。同时把每张二维码 PNG 落盘到该目录（frame_0001.png 起，
     0 填充保证字典序 == 播放序），供前端相机传输模式做 JS 定时轮播——
     绕开浏览器视频管线，避免其丢帧"追赶"破坏每码停留时长的一致性。
+    cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
     """
     if not (QRCODE_AVAILABLE and ZFEC_AVAILABLE and CV2_AVAILABLE and NUMPY_AVAILABLE):
         missing = [
@@ -388,6 +705,8 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
         os.makedirs(frames_dir, exist_ok=True)
     try:
         for i, code in enumerate(codes):
+            if cancel_check and cancel_check():
+                raise TaskCanceled()
             raw = code.encode("ascii")
             # 渲染并验证原始图像可解码（cv2 对个别 mask 有缺陷，失败则换 mask）
             png = _qr_png_bytes(raw, version, err)
@@ -566,18 +885,21 @@ def _build_static_pages(fmt, name, env_bytes, version, err, max_pages=200):
     return pages
 
 
-def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix):
+def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix, cancel_check=None):
     """生成静态二维码图片文件，返回 (文件路径列表, 页数)。
 
     单张装得下时输出 1 张完整信封（任何扫码器扫码即可读出 JSON）；
     装不下时自动拆分为多张，每张是独立可读的 JSON（首页带 fmt/name，
     续页带页码；解析端按页码重组完整信封）。
+    cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
     """
     if not QRCODE_AVAILABLE:
         raise RuntimeError("后端缺少 qrcode 依赖，请先安装：pip install qrcode")
     err = qrcode_constants.ERROR_CORRECT_L
     single = os.path.join(out_dir, f"{prefix}_01.png")
     try:
+        if cancel_check and cancel_check():
+            raise TaskCanceled()
         _render_verified_qr(env_bytes, version, err, single)
         return [single], 1
     except QR_OVERFLOW:
@@ -587,6 +909,8 @@ def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix):
     pages = _build_static_pages(fmt, name, env_bytes, version, err)
     paths = []
     for i, page_json in enumerate(pages):
+        if cancel_check and cancel_check():
+            raise TaskCanceled()
         p = os.path.join(out_dir, f"{prefix}_{i + 1:02d}.png")
         _render_verified_qr(page_json.encode("utf-8"), version, err, p)
         paths.append(p)
@@ -780,13 +1104,13 @@ def _parse_scanned_texts(texts):
 
 # ===================== 信封 → 导出文件 =====================
 
-def envelope_to_file(fmt, name, data):
+def envelope_to_file(fmt, name, data, ext=None):
     """把信封数据还原为 (文件字节, mimetype, 导出文件名)。
 
     - file：base64 解码直接还原原始文件（文件名 = name，mime 按扩展名推断）；
     - text / markdown：直接文本导出 .txt / .md；
-    - word（兼容旧码）：还原为 .txt（纯文本，无样式，声明格式）；
-    - excel：还原为 .xlsx（纯数据表格，无样式）。
+    - word：重建 .docx（纯文本逐段，无样式/宏；旧码与旧导出保持一致的数据形态）；
+    - excel：重建 .xlsx（纯数据表格，无样式）。
     """
     safe = "".join(ch for ch in (name or "未命名") if ch not in '\\/:*?"<>|').strip() or "未命名"
     if fmt == "file":
@@ -799,10 +1123,23 @@ def envelope_to_file(fmt, name, data):
         mime = mimetypes.guess_type(safe)[0] or "application/octet-stream"
         return raw, mime, safe
     if fmt == "excel":
-        if not OPENPYXL_AVAILABLE:
-            raise RuntimeError("后端缺少 openpyxl，无法导出 .xlsx，请执行：pip install openpyxl")
         if not isinstance(data, list):
             raise ValueError("Excel 数据结构异常（应为二维数组）")
+        # 声明为 csv → 还原为 .csv 文本（BOM + CRLF + 标准转义，Excel 打开不乱码）
+        if (ext or "").lower() == "csv":
+            buf = io.StringIO()
+            buf.write("\uFEFF")
+            writer = csv_mod.writer(buf, lineterminator="\r\n")
+            for row in data:
+                if isinstance(row, list):
+                    writer.writerow([_cell_text(v) if not isinstance(v, bool) and not isinstance(v, (int, float))
+                                     else ("TRUE" if v is True else "FALSE" if v is False else v)
+                                     for v in row])
+                else:
+                    writer.writerow([_cell_text(row)])
+            return buf.getvalue().encode("utf-8"), "text/csv", f"{safe}.csv"
+        if not OPENPYXL_AVAILABLE:
+            raise RuntimeError("后端缺少 openpyxl，无法导出 .xlsx，请执行：pip install openpyxl")
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "数据"[:31] if len("数据") <= 31 else "数据"
@@ -815,35 +1152,62 @@ def envelope_to_file(fmt, name, data):
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"{safe}.xlsx"
-    # text / markdown / word → 纯文本导出（word 声明为 txt，无样式）
+    if fmt == "word":
+        if not DOCX_AVAILABLE:
+            raise RuntimeError("后端缺少 python-docx，无法导出 .docx，请执行：pip install python-docx")
+        text = data if isinstance(data, str) else ""
+        if not text.endswith("\n"):
+            text += "\n"
+        d = docx.Document()
+        for line in text.split("\n")[:-1]:
+            d.add_paragraph(line)
+        buf = io.BytesIO()
+        d.save(buf)
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        return buf.getvalue(), mime, f"{safe}.docx"
+    # text / markdown → 纯文本导出
     text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, indent=2)
     if not text.endswith("\n"):
         text += "\n"
-    ext = FMT_EXT.get(fmt, ".txt")
+    ext_out = f".{ext}" if ext and fmt in ("text", "markdown") else FMT_EXT.get(fmt, ".txt")
+    if fmt == "markdown" and not ext_out.startswith(".m"):
+        ext_out = FMT_EXT[fmt]  # markdown 固定 .md（避免 txt 声明等异常后缀）
     mime = "text/markdown" if fmt == "markdown" else "text/plain"
-    return text.encode("utf-8"), mime, f"{safe}{ext}"
+    return text.encode("utf-8"), mime, f"{safe}{ext_out}"
 
 
 # ===================== 后台封装任务 =====================
 
-def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version, frame_repeat=1):
+def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
+                frame_repeat=1, raw_mode=False):
     try:
         set_task(task_id, status="running", created_at=time.time())
-
+        note = ""
+        if _canceled(task_id):
+            raise TaskCanceled()
         if filename is not None:
-            set_task(task_id, progress=0.05, stage="提取文档信息")
-            fmt, name, data = extract_doc(filename, file_bytes)
-            if fmt == "file":
-                set_task(task_id, progress=0.2, stage="封装原始文件")
-            elif fmt == "excel":
-                set_task(task_id, progress=0.2, stage="封装表格数据")
+            if raw_mode:
+                set_task(task_id, progress=0.05, stage="封装原始文件")
+                fmt, name, data, ext = extract_doc_raw(filename, file_bytes)
             else:
-                set_task(task_id, progress=0.2, stage="封装文本数据")
+                set_task(task_id, progress=0.05, stage="提取文档信息")
+                try:
+                    fmt, name, data, ext = extract_doc_lean(filename, file_bytes)
+                except LeanUnsupported as reason:
+                    # 白名单内但不可精简（旧版格式/解析失败）→ 自动回退原件传输并提示
+                    fmt, name, data, ext = extract_doc_raw(filename, file_bytes)
+                    note = f"{str(reason) or '文档解析失败'}，已按原件传输"
+                if fmt == "file":
+                    set_task(task_id, progress=0.2, stage="封装原始文件")
+                elif fmt == "excel":
+                    set_task(task_id, progress=0.2, stage="封装表格数据")
+                else:
+                    set_task(task_id, progress=0.2, stage="封装文本数据")
         else:
-            fmt, name, data = "text", "文字信息", text_input or ""
+            fmt, name, data, ext = "text", "文字信息", text_input or "", None
             set_task(task_id, progress=0.2, stage="封装文字数据")
 
-        env_bytes = build_envelope(fmt, name, data)
+        env_bytes = build_envelope(fmt, name, data, ext)
         # 产物命名用显示名：file 格式的 name 含扩展名，产物名去掉扩展名
         base_name = name
         if fmt == "file" and "." in base_name:
@@ -852,15 +1216,16 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version, fra
         if mode == "static":
             set_task(task_id, progress=0.4, stage="生成静态二维码")
             img_paths, count = encode_static_output(fmt, name, env_bytes, qr_version,
-                                                    _TASK_DIR, task_id)
+                                                    _TASK_DIR, task_id,
+                                                    cancel_check=lambda: _canceled(task_id))
             if count == 1:
                 single = img_paths[0]
                 size = os.path.getsize(single) if os.path.exists(single) else 0
                 set_task(task_id, status="done", progress=1.0,
-                         output_type="static", fmt=fmt, name=name,
+                         output_type="static", fmt=fmt, name=name, ext=ext,
                          env_size=len(env_bytes),
                          image_count=1, image_size=size,
-                         image_name=f"{base_name}二维码.png")
+                         image_name=f"{base_name}二维码.png", note=note)
             else:
                 zip_path = _task_file(task_id, ".zip")
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -868,10 +1233,10 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version, fra
                         zf.write(p, f"{base_name}_二维码_第{i + 1}张（共{count}张）.png")
                 size = os.path.getsize(zip_path) if os.path.exists(zip_path) else 0
                 set_task(task_id, status="done", progress=1.0,
-                         output_type="static", fmt=fmt, name=name,
+                         output_type="static", fmt=fmt, name=name, ext=ext,
                          env_size=len(env_bytes),
                          image_count=count, zip_size=size,
-                         zip_name=f"{base_name}二维码（共{count}张）.zip")
+                         zip_name=f"{base_name}二维码（共{count}张）.zip", note=note)
             return
 
         def progress(done, total):
@@ -883,14 +1248,20 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version, fra
         fdir = _frames_dir(task_id) if frame_repeat > 1 else None
         nframes, k, m = encode_to_video(env_bytes, qr_version, out_path,
                                         progress_cb=progress, frame_repeat=frame_repeat,
-                                        frames_dir=fdir)
+                                        frames_dir=fdir,
+                                        cancel_check=lambda: _canceled(task_id))
         size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
         set_task(task_id, status="done", progress=1.0,
-                 output_type="video", fmt=fmt, name=name,
+                 output_type="video", fmt=fmt, name=name, ext=ext,
                  env_size=len(env_bytes),
                  nframes=nframes, k=k, m=m, video_size=size,
                  frame_count=(nframes if fdir else 0),
-                 video_name=f"{base_name}二维码流.mp4")
+                 video_name=f"{base_name}二维码流.mp4", note=note)
+    except TaskCanceled:
+        # 用户停止：清理已写入的部分产物，任务标记为 canceled
+        _remove_task_files(task_id)
+        set_task(task_id, status="canceled", progress=0.0, stage="",
+                 detail="已停止封装")
     except ValueError as e:
         set_task(task_id, status="error", detail=str(e))
     except RuntimeError as e:
@@ -920,12 +1291,15 @@ def _run_decode(task_id, video_path):
             env = json.loads(raw.decode("utf-8"))
         except Exception:
             raise ValueError("重组数据不是「信息传输」封装的信封（可能是其他来源的二维码流）")
-        fmt, name, data = parse_envelope(env)
+        fmt, name, data, ext = parse_envelope(env)
         data_size = len(raw)
+        # payload 中 data 已解压还原（parse_envelope），与压缩前形态一致
+        payload = {"jzt": 1, "fmt": fmt, "name": name, "data": data}
+        if ext:
+            payload["ext"] = ext
         set_task(task_id, status="done", progress=1.0,
-                 fmt=fmt, name=name, data_size=data_size,
-                 payload_json=json.dumps({"jzt": 1, "fmt": fmt, "name": name, "data": data},
-                                         ensure_ascii=False))
+                 fmt=fmt, name=name, ext=ext, data_size=data_size,
+                 payload_json=json.dumps(payload, ensure_ascii=False))
     except ValueError as e:
         set_task(task_id, status="error", detail=str(e))
     except RuntimeError as e:
@@ -948,13 +1322,32 @@ def register(app) -> None:
             "cv2": CV2_AVAILABLE,
             "numpy": NUMPY_AVAILABLE,
             "openpyxl": OPENPYXL_AVAILABLE,
+            "docx": DOCX_AVAILABLE,
         })
+
+    @app.get(f"{API_PREFIX}/formats")
+    def it_formats():
+        """可封装文件格式清单（内置 SUPPORTED_FORMATS）。
+
+        返回 [{ext, fmt, label, extract}...]，extract=none 表示仅原件传输。
+        前端据此动态生成 accept 白名单与校验。
+        """
+        formats = [
+            {"ext": ext, **item} for ext, item in SUPPORTED_FORMATS.items()
+        ]
+        return jsonify({"ok": True, "formats": formats})
 
     # ---------- 信息封装 ----------
 
     @app.post(f"{API_PREFIX}/encode")
     def it_encode():
-        """接收文字 / 文件与参数，后台执行封装，立即返回 task_id。"""
+        """接收文字 / 文件与参数，后台执行封装，立即返回 task_id。
+
+        文件格式白名单：仅 Word(.docx) / Excel(.xlsx/.xlsm) / Txt / Markdown；
+        多文件由前端逐个提交、每文件一个独立任务（前端聚合多条进度条）。
+        raw=1 为原件传输（文件原样封装）；默认 raw=0 精简传输
+        （word/txt/md 提取文本、excel 构建二维数组，声明原始类型与后缀）。
+        """
         mode = request.form.get("mode", "static")
         if mode not in ("static", "video"):
             mode = "static"
@@ -964,6 +1357,7 @@ def register(app) -> None:
             version = 15
         if not 1 <= version <= 40:
             return jsonify({"ok": False, "detail": "二维码版本须在 1-40 之间"}), 400
+        raw_mode = request.form.get("raw", "0").strip().lower() in ("1", "true", "on", "yes")
 
         # 相机传输模式为视频默认行为：每码连续重复 CAMERA_FRAME_REPEAT 帧（约 0.33s），
         # 配合前端帧序列轮播与 APP 自动识别，手机对准屏幕即可传输
@@ -975,6 +1369,11 @@ def register(app) -> None:
             filename = os.path.basename(f.filename or "")
             if not filename:
                 return jsonify({"ok": False, "detail": "文件名非法"}), 400
+            ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+            if ext not in SUPPORTED_FORMATS:
+                allowed = " / ".join(sorted(SUPPORTED_FORMATS.keys()))
+                return jsonify({"ok": False,
+                                "detail": f"仅支持 {allowed} 格式文件"}), 400
             file_bytes = f.read()
             if len(file_bytes) > MAX_UPLOAD_BYTES:
                 return jsonify({"ok": False, "detail": "文件过大（上限 20MB）"}), 400
@@ -994,7 +1393,7 @@ def register(app) -> None:
         set_task(task_id, status="pending", progress=0.0, created_at=time.time(),
                  created_by=(viewer or {}).get("username", ""))
         _executor.submit(_run_encode, task_id, mode, filename,
-                         file_bytes, text_input, version, frame_repeat)
+                         file_bytes, text_input, version, frame_repeat, raw_mode)
         return jsonify({"ok": True, "task_id": task_id})
 
     @app.get(f"{API_PREFIX}/task/<task_id>")
@@ -1015,6 +1414,8 @@ def register(app) -> None:
                 "output_type": task.get("output_type"),
                 "fmt": task.get("fmt"),
                 "name": task.get("name"),
+                "ext": task.get("ext"),
+                "note": task.get("note", "") or "",
                 "env_size": task.get("env_size", 0),
             })
             if task.get("output_type") == "static":
@@ -1036,7 +1437,25 @@ def register(app) -> None:
                 })
         if task.get("status") == "error":
             payload["detail"] = task.get("detail", "任务失败")
+        if task.get("status") == "canceled":
+            payload["detail"] = task.get("detail", "已停止封装")
         return jsonify(payload)
+
+    @app.post(f"{API_PREFIX}/encode/<task_id>/cancel")
+    def it_encode_cancel(task_id):
+        """请求停止封装任务：设置取消标志，编码循环在检查点协同终止。
+
+        任务已结束（done/error/canceled）或不存在时返回 ok=false（幂等友好）。
+        """
+        task = get_task(task_id)
+        if not task:
+            return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
+        if not _task_owned_by(task, _viewer()):
+            return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
+        if task.get("status") not in ("pending", "running"):
+            return jsonify({"ok": False, "detail": "任务已结束，无需停止"}), 409
+        set_task(task_id, cancel=True)
+        return jsonify({"ok": True})
 
     @app.get(f"{API_PREFIX}/download/<task_id>")
     @app.get(f"{API_PREFIX}/download/<task_id>/<path:filename>")
@@ -1160,7 +1579,7 @@ def register(app) -> None:
             else:
                 texts = decode_image_file(file_bytes)
             env, page_info = _parse_scanned_texts(texts)
-            fmt, name, data = parse_envelope(env)
+            fmt, name, data, ext = parse_envelope(env)
         except ValueError as e:
             return jsonify({"ok": False, "detail": str(e)}), 400
         except RuntimeError as e:
@@ -1168,13 +1587,17 @@ def register(app) -> None:
         except Exception:
             return jsonify({"ok": False, "detail": "解析失败，请确认二维码清晰完整"}), 500
 
+        payload = {"jzt": 1, "fmt": fmt, "name": name, "data": data}
+        if ext:
+            payload["ext"] = ext
         return jsonify({
             "ok": True,
             "fmt": fmt,
             "name": name,
+            "ext": ext,
             "fmt_label": FMT_LABELS.get(fmt, fmt),
             "pages": (page_info or {}).get("n", 1),
-            "payload": {"jzt": 1, "fmt": fmt, "name": name, "data": data},
+            "payload": payload,
         })
 
     @app.get(f"{API_PREFIX}/decode/<task_id>")
@@ -1195,6 +1618,7 @@ def register(app) -> None:
             payload.update({
                 "fmt": task.get("fmt"),
                 "name": task.get("name"),
+                "ext": task.get("ext"),
                 "data_size": task.get("data_size", 0),
                 "payload_json": task.get("payload_json", ""),
             })
@@ -1204,20 +1628,20 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/export")
     def it_export():
-        """把解析出的数据导出为文件（txt / md / xlsx）。
+        """把解析出的数据导出为文件（txt / md / docx / xlsx）。
 
-        请求体：{"payload": {jzt,fmt,name,data}, "export": "auto"}。
+        请求体：{"payload": {jzt,fmt,name,ext,data}, "export": "auto"}。
         """
         body = request.get_json(silent=True) or {}
         payload = body.get("payload")
         if not isinstance(payload, dict):
             return jsonify({"ok": False, "detail": "缺少解析数据"}), 400
         try:
-            fmt, name, data = parse_envelope(payload)
+            fmt, name, data, ext = parse_envelope(payload)
         except ValueError as e:
             return jsonify({"ok": False, "detail": str(e)}), 400
         try:
-            content, mime, fname = envelope_to_file(fmt, name, data)
+            content, mime, fname = envelope_to_file(fmt, name, data, ext)
         except ValueError as e:
             return jsonify({"ok": False, "detail": str(e)}), 400
         except RuntimeError as e:

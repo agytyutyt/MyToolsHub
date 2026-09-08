@@ -1,10 +1,15 @@
 package com.jztools.infoparse.scan
 
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraControl
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -32,6 +37,50 @@ class CameraScanner(
     private var lastText: String? = null
     private var stopped = false
     private var frameCount = 0
+    private var camera: Camera? = null
+
+    /** 相机变焦参数（绑定成功后可用；null 表示未绑定或设备不支持变焦） */
+    var zoomInfo: ZoomInfo? = null
+        private set
+
+    /** 变焦控制句柄：查询当前/最大变焦比并设置 */
+    class ZoomInfo internal constructor(
+        private val control: CameraControl,
+        private val info: CameraInfo,
+    ) {
+        /** 最小变焦比（通常 1.0） */
+        val minRatio: Float = info.zoomState.value?.minZoomRatio ?: 1f
+
+        /** 最大变焦比（设备能力上限，超广角机型的广角镜头通常 ≥2） */
+        val maxRatio: Float = info.zoomState.value?.maxZoomRatio ?: 1f
+
+        /** 当前变焦比 */
+        val currentRatio: Float
+            get() = info.zoomState.value?.zoomRatio ?: 1f
+
+        /** 设置变焦比（超出范围由 CameraX 自动截断） */
+        fun setRatio(ratio: Float) {
+            control.setZoomRatio(ratio)
+        }
+    }
+
+    /**
+     * 主广角优先选择器（A 方案）：DEFAULT_BACK_CAMERA 只约束"后置"，多摄机型可能落到超广角上
+     * （视场角大、码面占比小、解析度低）。在后置候选内剔除变焦下限 <0.99 的超广角镜头；
+     * 特性值读不到的镜头保守保留（视为普通镜头）。剔除后无候选则回退 DEFAULT_BACK_CAMERA。
+     */
+    private fun mainWideAngleCameraSelector(provider: ProcessCameraProvider): CameraSelector {
+        val candidates = provider.availableCameraInfos.filter { info ->
+            val info2 = Camera2CameraInfo.from(info)
+            val isBack = info2.getCameraCharacteristic(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_BACK
+            val range = info2.getCameraCharacteristic(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE)
+            val isUltraWide = range != null && range.lower.toFloat() < 0.99f
+            isBack && !isUltraWide
+        }
+        return if (candidates.isEmpty()) CameraSelector.DEFAULT_BACK_CAMERA
+        else CameraSelector.Builder().addCameraFilter { candidates }.build()
+    }
 
     /** 绑定相机。view 为布局中的 PreviewView */
     fun start(lifecycleOwner: LifecycleOwner, view: PreviewView) {
@@ -48,9 +97,10 @@ class CameraScanner(
                 .build()
             analysis.setAnalyzer(executor) { proxy -> process(proxy) }
             provider.unbindAll()
-            provider.bindToLifecycle(
-                lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis
+            camera = provider.bindToLifecycle(
+                lifecycleOwner, mainWideAngleCameraSelector(provider), preview, analysis
             )
+            camera?.let { cam -> zoomInfo = ZoomInfo(cam.cameraControl, cam.cameraInfo) }
         }, ContextCompat.getMainExecutor(appContext))
     }
 
@@ -113,6 +163,8 @@ class CameraScanner(
 
     fun stop() {
         stopped = true
+        camera = null
+        zoomInfo = null
         scanner.close()
         executor.shutdown()
     }

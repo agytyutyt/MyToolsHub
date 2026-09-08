@@ -2,6 +2,8 @@
     <!-- 主题色:公安藏蓝 -->
     <color name="primary">#1C2F5E</color>
     <color name="primary_dark">#121F40</color>
+    <!-- 夜间模式 colorPrimary:浅藏蓝(深色下作为前景色/按钮文字保持可读) -->
+    <color name="primary_night">#A9C3F5</color>
     <!-- tonal(浅调)按钮容器:藏蓝系浅色/深色(HMS 夜间模式在 values-night 覆盖) -->
     <color name="secondary_container">#D9E2F1</color>
     <color name="on_secondary_container">#1C2F5E</color>

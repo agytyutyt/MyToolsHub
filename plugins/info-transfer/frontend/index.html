@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <!-- 信息传输插件（前端 + Python 后端）
- * 信息封装：文字 / txt / markdown / word / excel → JSON 信封（声明文档格式）
+ * 信息封装：文字 / 文档 → JSON 信封（声明文档格式与原始后缀名）
  *           → 静态二维码（单张/多张）或二维码视频流（QR-transfer 协议）
- * 信息解析：二维码图片 / 二维码视频 → 读取信封判断文档格式 → 导出纯数据文件
+ *   - 精简传输（默认）：word/txt/md 提取文本、excel 构建二维数组，声明原始类型与后缀
+ *   - 原件传输（开关）：文件原样 base64 封装（fmt=file）
+ * 信息解析：二维码图片 / 二维码视频 → 读取信封判断文档格式 → 还原数据文件
  * 后端接口前缀：/api/info-transfer
  -->
 <html lang="zh-CN">
@@ -89,7 +91,120 @@
   .dropzone:hover, .dropzone.drag { border-color: var(--primary); background: var(--primary-bg); }
   .dropzone p:first-child { font-size: 15px; color: var(--text); }
   .dropzone p:last-child { font-size: 12px; margin-top: 6px; }
+  /* 已选文件徽标:醒目展示文件名与大小,× 可移除 */
+  .file-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    margin-top: 12px;
+    padding: 8px 8px 8px 14px;
+    background: var(--primary-bg);
+    border: 1px solid var(--primary);
+    border-radius: 999px;
+  }
+  .file-chip .fc-icon { font-size: 15px; line-height: 1; }
+  .file-chip .fc-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--primary-dark);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-chip .fc-size { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
+  .file-chip .fc-x {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 137, 123, .15);
+    color: var(--primary-dark);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .15s;
+  }
+  .file-chip .fc-x:hover { background: var(--error); color: #fff; }
+  /* 多文件徽标列表 */
+  #fileChipList { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #fileChipList .file-chip { margin-top: 0; }
+  /* 多文件封装:逐文件进度行 */
+  #progressList { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
+  .job-row .job-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  }
+  .job-row .job-name {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .job-row .job-pct { flex: 0 0 auto; font-size: 12px; }
+  .job-row .progress { margin-top: 6px; }
+  .job-row .job-status { font-size: 12px; margin-top: 4px; }
+  .job-row.done .progress-fill { background: #2e7d32; }
+  .job-row.error .job-status, .job-row.canceled .job-status { color: var(--error); }
+  .job-row.done .job-status { color: #2e7d32; }
+  /* 多文件封装:逐文件结果块 */
+  .result-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-top: 12px;
+  }
+  .result-item .ri-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .result-item .ri-name { font-size: 14px; font-weight: 600; color: var(--text); }
+  .result-item .ri-fmt {
+    background: var(--primary-bg); color: var(--primary-dark);
+    border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600;
+  }
+  .result-item .ri-summary { font-size: 13px; color: var(--text); margin-top: 6px; }
+  .result-item .ri-hint { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .result-item .ri-preview video {
+    display: block; width: min(420px, 100%, 48vh);
+    border-radius: 8px; margin: 10px auto; background: #000; pointer-events: none;
+  }
+  .result-item .ri-preview img.ri-stream {
+    display: block; width: min(420px, 100%, 48vh);
+    border-radius: 8px; margin: 10px auto; background: #fff;
+    border: 1px solid var(--border);
+  }
+  .result-item .ri-cap { font-size: 12px; color: var(--muted); text-align: center; margin: 0 0 4px; }
+  #resultList .result-item .row { justify-content: flex-start; margin-top: 10px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; margin-top: 14px; }
+  /* 原件传输开关 */
+  .switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fafafa;
+  }
+  .switch-row .sw-text { flex: 1; min-width: 0; }
+  .switch-row .sw-title { font-size: 14px; font-weight: 600; color: var(--text); }
+  .switch-row .sw-hint { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+  .switch { position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: #c4c9c6; border-radius: 999px; transition: background .2s;
+  }
+  .switch .slider::before {
+    content: ""; position: absolute; height: 18px; width: 18px; left: 3px; top: 3px;
+    background: #fff; border-radius: 50%; transition: transform .2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+  }
+  .switch input:checked + .slider { background: var(--primary); }
+  .switch input:checked + .slider::before { transform: translateX(20px); }
+  .switch input:focus-visible + .slider { box-shadow: 0 0 0 3px rgba(0,137,123,.25); }
   label.field { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
   label.field select, label.field input {
     font-family: inherit;
@@ -120,6 +235,8 @@
   .primary:not(:disabled):hover { filter: brightness(1.08); }
   .secondary { background: var(--primary-bg); color: var(--primary-dark); }
   .secondary:not(:disabled):hover { filter: brightness(.97); }
+  .danger { background: var(--error); color: #fff; }
+  .danger:not(:disabled):hover { filter: brightness(1.08); }
   .progress { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin-top: 12px; }
   .progress-fill { height: 100%; width: 0; background: var(--primary); transition: width .2s; }
   #progressText { font-size: 12px; color: var(--muted); margin-top: 6px; }
@@ -135,24 +252,17 @@
     background: #000;
     pointer-events: none;            /* 循环播放用于相机连续采集：禁交互，避免误触暂停/进度拖动 */
   }
-  #streamImg {
-    display: block;
-    width: min(420px, 100%, 48vh);
-    border-radius: 8px;
-    margin: 10px auto;
-    background: #fff;
-    border: 1px solid var(--border);
-  }
-  #imageGrid {
+  /* 结果块内静态二维码缩略图（img-grid 类，缩略图随窗口宽度收缩） */
+  .img-grid {
     display: flex; flex-wrap: wrap;
     gap: 12px; margin-top: 10px; justify-content: center;
   }
-  #imageGrid .cell { width: min(170px, 26vw); text-align: center; }   /* 缩略图随窗口宽度收缩 */
-  #imageGrid img {
+  .img-grid .cell { width: min(170px, 26vw); text-align: center; }
+  .img-grid img {
     width: 100%; border-radius: 8px; background: #fff;
     border: 1px solid var(--border); cursor: zoom-in; display: block;
   }
-  #imageGrid .qr-cap { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .img-grid .qr-cap { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .fmt-badge {
     display: inline-block;
     background: var(--primary-bg);
@@ -298,7 +408,7 @@
 <body>
 <div class="container">
   <h1>信息传输</h1>
-  <p class="subtitle">把文字 / txt / markdown / word / excel 封装为二维码（静态图片或动态视频流）；解析二维码即可还原数据，仅保留文档信息、不含样式与宏</p>
+  <p class="subtitle">把文字 / 文档封装为二维码（静态图片或动态视频流）；精简传输只传数据不传格式，原件传输完整还原原文件</p>
 
   <div class="capsule-wrap">
     <div class="capsule" role="tablist" aria-label="功能切换">
@@ -317,14 +427,26 @@
       </div>
       <div id="fileZone">
         <div id="dropZone" class="dropzone">
-          <p>拖拽文件到此处，或点击选择</p>
-          <p>支持 文字 / .txt / .md（纯文本提取）；其他文档以原始文件完整传输（.docx/.xlsx/.pdf/.doc/.wps 等，还原即原文件）</p>
+          <p>拖拽文件到此处，或点击选择（可多选）</p>
+          <p id="acceptHint">仅支持 Word 文档(.docx) / Excel 表格(.xlsx / .xlsm / .xls) / CSV 表格(.csv) / 纯文本(.txt) / Markdown(.md)</p>
+          <p id="dropHint">精简传输只传数据不传格式（原件传输开启后文件原样封装）；.doc/.xls 等旧版格式自动按原件传输</p>
         </div>
-        <input id="fileInput" type="file" hidden />
-        <p id="fileName" class="muted"></p>
+        <input id="fileInput" type="file" multiple hidden
+               accept=".docx,.xlsx,.xlsm,.txt,.md,.markdown" />
+        <div id="fileChipList"></div>
       </div>
       <div id="textZone" hidden>
         <textarea id="pasteText" class="paste" placeholder="在此粘贴要封装的文字内容…"></textarea>
+      </div>
+      <div id="rawSwitchRow" class="switch-row">
+        <div class="sw-text">
+          <div class="sw-title">原件传输</div>
+          <div class="sw-hint" id="rawHint">默认精简传输：只传数据不传格式，二维码更少。开启后文件原样封装（保留全部字节），生成的二维码数量将大大提高。</div>
+        </div>
+        <label class="switch">
+          <input id="rawMode" type="checkbox" />
+          <span class="slider"></span>
+        </label>
       </div>
     </div>
 
@@ -343,26 +465,16 @@
       </div>
       <div class="row">
         <button id="encodeBtn" class="primary">开始封装</button>
+        <button id="cancelBtn" class="danger" hidden>全部停止</button>
       </div>
-      <div id="progressWrap" hidden>
-        <div class="progress"><div id="progressFill" class="progress-fill"></div></div>
-        <p id="progressText"></p>
-      </div>
+      <div id="progressList"></div>
       <div id="status" class="status"></div>
     </div>
 
     <div class="card" id="result" hidden>
       <h2>3. 封装结果</h2>
-      <p id="resultSummary" class="muted"></p>
-      <p id="resultHint" class="muted" style="margin-top:8px;"></p>
-      <video id="videoPreview" autoplay loop muted playsinline preload="auto"></video>
-      <div id="streamPlayer" hidden>
-        <img id="streamImg" alt="二维码流" />
-        <p id="streamCap" class="muted" style="text-align:center;"></p>
-      </div>
-      <div id="imageGrid" hidden></div>
+      <div id="resultList"></div>
       <div class="row">
-        <button id="downloadBtn" class="primary">下载</button>
         <button id="reChoose" class="secondary">重新输入</button>
       </div>
     </div>
@@ -382,7 +494,12 @@
           <p>支持 PNG / JPG；「信息封装」生成的单张或多张拆分二维码均可识别</p>
         </div>
         <input id="decInput" type="file" accept="image/png,image/jpeg" multiple hidden />
-        <p id="decFilesName" class="muted"></p>
+        <div id="decFileChip" class="file-chip" hidden>
+          <span class="fc-icon" aria-hidden="true">🖼️</span>
+          <span id="decFileChipName" class="fc-name"></span>
+          <span id="decFileChipSize" class="fc-size"></span>
+          <button id="decFileChipRemove" class="fc-x" type="button" title="移除图片" aria-label="移除图片">&times;</button>
+        </div>
       </div>
       <div id="decVideoZone" hidden>
         <div id="decVDrop" class="dropzone">
@@ -390,7 +507,12 @@
           <p>支持「信息封装」生成的 MP4 二维码视频流</p>
         </div>
         <input id="decVInput" type="file" accept="video/mp4,video/*" hidden />
-        <p id="decVName" class="muted"></p>
+        <div id="decVideoChip" class="file-chip" hidden>
+          <span class="fc-icon" aria-hidden="true">🎬</span>
+          <span id="decVideoChipName" class="fc-name"></span>
+          <span id="decVideoChipSize" class="fc-size"></span>
+          <button id="decVideoChipRemove" class="fc-x" type="button" title="移除视频" aria-label="移除视频">&times;</button>
+        </div>
       </div>
       <div class="row">
         <button id="decodeBtn" class="primary" disabled>开始解析</button>
@@ -438,18 +560,13 @@
     tab: "encode",
     srcMode: "file",
     decMode: "image",
-    file: null,
-    taskId: null,
-    fileName: "", fileUrl: "",
-    imageCount: 0,
-    zoomPage: 0,
-    videoObjectUrl: null,
-    streamTimer: null,
-    streamCount: 0,
-    streamIdx: 0,
-    streamImgs: null,
+    formats: [],                  // 可封装格式清单（GET /formats 动态获取）
+    files: [],                    // 多文件选择（每个文件独立封装任务）
+    jobs: [],                     // 进行中/已完成的封装任务
+    zoomTaskId: "", zoomCount: 0, zoomPage: 0,
     decFiles: [], decVideo: null,
     payload: null,
+    rawMode: false,
   };
 
   function setStatus(text, isError) {
@@ -485,11 +602,6 @@
     }
     return r.json();
   }
-  function showProgress(pct, text) {
-    $("progressWrap").hidden = false;
-    $("progressFill").style.width = pct + "%";
-    $("progressText").textContent = text;
-  }
   function showDecProgress(pct, text) {
     $("decProgressWrap").hidden = false;
     $("decProgressFill").style.width = pct + "%";
@@ -516,6 +628,7 @@
     $("srcText").classList.toggle("active", !isFile);
     $("fileZone").hidden = !isFile;
     $("textZone").hidden = isFile;
+    applyRawHint();
     resetResult();
     setStatus("");
   }
@@ -529,18 +642,102 @@
     return n + " B";
   }
 
-  function handleFile(f) {
-    const name = (f.name || "").toLowerCase();
-    if (!/\.(txt|md|markdown)$/.test(name) && !/\.[a-z0-9]+$/.test(name)) {
-      setStatus("仅支持 文字 / .txt / .md / 带扩展名的文档文件", true);
-      return;
-    }
+  /* ---------- 多文件选择与徽标（格式白名单取自后端持久化配置） ---------- */
+  const FALLBACK_FORMATS = [
+    { ext: "docx", label: "Word 文档" }, { ext: "xlsx", label: "Excel 表格" },
+    { ext: "xlsm", label: "Excel 表格" }, { ext: "xls", label: "Excel 表格" },
+    { ext: "csv", label: "CSV 表格" }, { ext: "txt", label: "纯文本" },
+    { ext: "md", label: "Markdown" }, { ext: "markdown", label: "Markdown" },
+    { ext: "doc", label: "Word 文档" },
+  ];
+
+  function acceptRe() {
+    const exts = state.formats.length
+      ? state.formats.map((f) => f.ext)
+      : FALLBACK_FORMATS.map((f) => f.ext);
+    return new RegExp("\\.(" + exts.join("|") + ")$", "i");
+  }
+
+  function addFiles(fileList) {
     resetResult();
-    state.file = f;
-    $("fileName").textContent = `${f.name}  ·  ${fmtBytes(f.size)}`;
+    const re = acceptRe();
+    const rejected = [];
+    const accepted = [];
+    for (const f of Array.from(fileList || [])) {
+      if (re.test(f.name || "")) accepted.push(f);
+      else rejected.push(f.name || "未命名文件");
+    }
+    state.files = state.files.concat(accepted);
+    let cut = false;
+    if (state.files.length > MAX_FILES) {
+      state.files = state.files.slice(0, MAX_FILES);
+      cut = true;
+    }
+    renderFileChips();
+    if (rejected.length || cut) {
+      const why = [];
+      if (rejected.length) why.push("不支持格式：" + rejected.join("、"));
+      if (cut) why.push(`一次最多封装 ${MAX_FILES} 个文件`);
+      setStatus(why.join("；"), true);
+    } else {
+      setStatus("");
+    }
+  }
+
+  function renderFileChips() {
+    const list = $("fileChipList");
+    list.innerHTML = "";
+    list.hidden = state.files.length === 0;
+    state.files.forEach((f, idx) => {
+      const chip = document.createElement("div");
+      chip.className = "file-chip";
+      chip.innerHTML = `
+        <span class="fc-icon" aria-hidden="true">📄</span>
+        <span class="fc-name"></span>
+        <span class="fc-size"></span>
+        <button type="button" class="fc-x" title="移除文件" aria-label="移除文件">&times;</button>`;
+      chip.querySelector(".fc-name").textContent = f.name;
+      chip.querySelector(".fc-name").title = f.name;
+      chip.querySelector(".fc-size").textContent = fmtBytes(f.size);
+      chip.querySelector(".fc-x").addEventListener("click", () => removeFile(idx));
+      list.appendChild(chip);
+    });
+    $("fileInput").value = "";
+  }
+
+  /* 移除单个已选文件（徽标 ×） */
+  function removeFile(idx) {
+    state.files.splice(idx, 1);
+    resetResult();
+    renderFileChips();
     setStatus("");
   }
 
+  /* 清空全部已选文件（重新输入） */
+  function clearAllFiles() {
+    state.files = [];
+    resetResult();
+    renderFileChips();
+    setStatus("");
+  }
+
+  /* ---------- 原件传输开关 ---------- */
+  function applyRawHint() {
+    state.rawMode = $("rawMode").checked;
+    const isFile = state.srcMode === "file";
+    $("rawSwitchRow").hidden = !isFile;
+    $("dropHint").textContent = state.rawMode
+      ? "原件传输已开启：文件将原样封装（含格式/宏/图片），还原即原文件"
+      : "精简传输只传数据不传格式（.doc/.xls 等旧版格式自动按原件传输）";
+  }
+
+  /* 全部停止按钮显隐与复位 */
+  function setCancelVisible(v) {
+    $("cancelBtn").hidden = !v;
+    if (!v) { $("cancelBtn").disabled = false; $("cancelBtn").textContent = "全部停止"; }
+  }
+
+  /* ---------- 多文件封装：每文件一个独立任务，逐文件进度条 ---------- */
   async function startEncode() {
     const version = Number($("qrVersion").value);
     if (!isFinite(version) || version < 1 || version > 40) {
@@ -549,132 +746,293 @@
     }
     const mode = $("mode").value;
     const isFile = state.srcMode === "file";
-    if (isFile && !state.file) { setStatus("请先选择文件", true); return; }
+    const raw = isFile && state.rawMode;
+    if (isFile && !state.files.length) { setStatus("请先选择文件", true); return; }
     if (!isFile && !$("pasteText").value.trim()) { setStatus("请先粘贴文字内容", true); return; }
 
     $("encodeBtn").disabled = true;
     resetResult();
     setStatus("");
-    showProgress(0, "正在提交…");
+    setCancelVisible(true);
 
+    // 构造任务列表（文件模式：每文件一个任务；文字模式：单任务）
+    const tasks = isFile
+      ? state.files.map((f) => ({ name: f.name, file: f }))
+      : [{ name: "粘贴的文字", text: $("pasteText").value }];
+    state.jobs = tasks.map((t, i) => ({
+      ...t, idx: i, taskId: null, status: "pending",
+      progress: 0, stage: "等待提交…", done: false, failed: false,
+    }));
+    renderJobRows();
+
+    // 并发提交全部任务（逐个 FormData 上传）
+    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw)));
+    pollAll();
+  }
+
+  async function submitJob(job, mode, version, raw) {
     const fd = new FormData();
     fd.append("mode", mode);
-    fd.append("qr_version", $("qrVersion").value);
-    if (isFile) fd.append("file", state.file);
-    else fd.append("text", $("pasteText").value);
-
+    fd.append("qr_version", String(version));
+    fd.append("raw", raw ? "1" : "0");
+    if (job.file) fd.append("file", job.file);
+    else fd.append("text", job.text);
     try {
       const d = await fetchJson("/api/info-transfer/encode", { method: "POST", body: fd });
-      if (!d.ok) { setStatus(d.detail || "提交失败", true); $("encodeBtn").disabled = false; return; }
-      state.taskId = d.task_id;
-      pollEncode();
+      if (!d.ok) {
+        job.status = "error"; job.failed = true; job.stage = d.detail || "提交失败";
+      } else {
+        job.taskId = d.task_id;
+        job.status = "running"; job.stage = "排队中…";
+      }
     } catch (e) {
-      setStatus("网络错误：" + e.message, true);
+      job.status = "error"; job.failed = true; job.stage = "网络错误：" + e.message;
+    }
+    renderJobRows();
+  }
+
+  /* 轮询全部未完成任务，全部到达终态后渲染结果 */
+  async function pollAll() {
+    const startWall = performance.now();
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 500));
+      let dirty = false;
+      const pending = state.jobs.filter((j) => j.taskId && !j.done);
+      await Promise.all(pending.map(async (job) => {
+        try {
+          const s = await fetchJson(`/api/info-transfer/task/${job.taskId}`);
+          if (!s.ok) {
+            job.status = "error"; job.failed = true; job.done = true;
+            job.stage = s.detail || "任务失败"; dirty = true; return;
+          }
+          if (s.status === "pending" || s.status === "running") {
+            job.status = "running";
+            job.progress = s.progress || 0;
+            if (job.stage !== (s.stage || "处理中…")) { job.stage = s.stage || "处理中…"; dirty = true; }
+          } else {
+            job.status = s.status;   // done / error / canceled
+            job.done = true; dirty = true;
+            if (s.status === "done") {
+              job.result = s;
+            } else {
+              job.failed = true;
+              job.stage = s.detail || (s.status === "canceled" ? "已停止封装" : "封装失败");
+            }
+          }
+          job.progress = s.progress || job.progress;
+        } catch (e) {
+          job.status = "error"; job.failed = true; job.done = true;
+          job.stage = "网络错误：" + e.message; dirty = true;
+        }
+      }));
+      renderJobRows();
+      if (state.jobs.every((j) => !j.taskId || j.done)) break;
+      if (performance.now() - startWall > 1200000) {
+        state.jobs.forEach((j) => { if (j.taskId && !j.done) { j.done = true; j.failed = true; j.status = "error"; j.stage = "任务超时"; } });
+        renderJobRows();
+        break;
+      }
+    }
+    finishJobs();
+  }
+
+  /* 全部任务到达终态：汇总状态、启用按钮、渲染结果区 */
+  function finishJobs() {
+    const total = state.jobs.length;
+    const ok = state.jobs.filter((j) => j.status === "done").length;
+    const canceled = state.jobs.filter((j) => j.status === "canceled").length;
+    const failed = state.jobs.filter((j) => j.status === "error").length;
+    const finished = ok + canceled + failed;
+    if (finished >= total && total > 0) {
+      $("encodeBtn").disabled = false;
+      setCancelVisible(false);
+      if (ok > 0) {
+        $("result").hidden = false;
+        renderResults();
+      }
+      const parts = [];
+      if (ok) parts.push(`${ok} 个封装完成`);
+      if (canceled) parts.push(`${canceled} 个已停止`);
+      if (failed) parts.push(`${failed} 个失败`);
+      setStatus(parts.join("，") + (ok ? " ✔ 成功结果见下方，可到「信息解析」验证还原"
+                                      : ""), failed > 0 && ok === 0);
+    } else {
+      setCancelVisible(false);
       $("encodeBtn").disabled = false;
     }
   }
 
-  async function pollEncode() {
-    const startWall = performance.now();
-    for (;;) {
-      await new Promise((res) => setTimeout(res, 500));
-      try {
-        const s = await fetchJson(`/api/info-transfer/task/${state.taskId}`);
-        if (!s.ok) { setStatus(s.detail || "任务失败", true); $("encodeBtn").disabled = false; return; }
-        if (s.status === "pending" || s.status === "running") {
-          showProgress(Math.round((s.progress || 0) * 100), s.stage || "处理中…");
-        } else if (s.status === "done") {
-          showProgress(100, "封装完成");
-          renderEncodeResult(s);
-          $("encodeBtn").disabled = false;
-          return;
-        } else if (s.status === "error") {
-          showProgress(0, "封装失败");
-          setStatus(s.detail || "封装失败", true);
-          $("encodeBtn").disabled = false;
-          return;
-        }
-      } catch (e) {
-        setStatus("网络错误：" + e.message, true);
-        $("encodeBtn").disabled = false;
-        return;
-      }
-      if (performance.now() - startWall > 900000) {
-        setStatus("任务超时，请重试（可尝试调大二维码版本）", true);
-        $("encodeBtn").disabled = false;
-        return;
-      }
+  /* 渲染逐文件进度行 */
+  function renderJobRows() {
+    const wrap = $("progressList");
+    // 按需重建（任务数少，直接重建即可）
+    wrap.innerHTML = "";
+    wrap.hidden = state.jobs.length === 0;
+    for (const job of state.jobs) {
+      const row = document.createElement("div");
+      row.className = "job-row " + (job.status === "done" ? "done" : job.status === "error" ? "error" : job.status === "canceled" ? "canceled" : "");
+      const pct = Math.round((job.progress || 0) * 100);
+      row.innerHTML = `
+        <div class="job-head">
+          <span class="job-name"></span>
+          <span class="job-pct">${job.status === "done" ? "完成" : job.status === "canceled" ? "已停止" : job.status === "error" ? "失败" : pct + "%"}</span>
+        </div>
+        <div class="progress"><div class="progress-fill" style="width:${job.status === "done" ? 100 : pct}%"></div></div>
+        <p class="job-status">${job.status === "done" ? "封装完成" : (job.stage || "")}</p>`;
+      row.querySelector(".job-name").textContent = job.name;
+      row.querySelector(".job-name").title = job.name;
+      wrap.appendChild(row);
     }
+  }
+
+  /* 全部停止：向所有未完成的后端任务发送取消请求 */
+  async function cancelEncode() {
+    if ($("cancelBtn").disabled) return;
+    $("cancelBtn").disabled = true;
+    $("cancelBtn").textContent = "正在停止…";
+    const active = state.jobs.filter((j) => j.taskId && !j.done);
+    await Promise.all(active.map(async (job) => {
+      try {
+        await fetchJson(`/api/info-transfer/encode/${job.taskId}/cancel`, { method: "POST" });
+      } catch (e) { /* 以轮询到的最终状态为准 */ }
+    }));
+    // 若没有任何后端任务（如全部提交失败），直接收敛界面
+    if (!active.length) finishJobs();
   }
 
   function buildFileUrl(taskId, fileName) {
-    const safe = encodeURIComponent(fileName || "qrcode.mp4");
+    const safe = encodeURIComponent(fileName || "qrcode.png");
     return `/api/info-transfer/download/${taskId}/${safe}`;
   }
 
-  function renderEncodeResult(s) {
+  /* ---------- 多结果展示：每文件一个结果块（预览 + 下载） ---------- */
+  function renderResults() {
+    const list = $("resultList");
+    list.innerHTML = "";
+    for (const job of state.jobs) {
+      if (job.status !== "done") continue;
+      renderJobResult(job);
+    }
+  }
+
+  function renderJobResult(job) {
+    const s = job.result;
     const isStatic = s.output_type === "static";
-    state.imageCount = isStatic ? (s.image_count || 1) : 0;
-    let summary = `文档格式：${fmtLabel(s.fmt)} · 来源：${s.name} · 封装数据 ${fmtBytes(s.env_size)}，`;
+    const count = isStatic ? (s.image_count || 1) : 0;
+    const fmtText = s.fmt === "file"
+      ? "原始文件"
+      : (fmtLabel(s.fmt) + (s.ext ? `（原 ${s.ext}）` : ""));
+    let summary = `传输模式：${s.fmt === "file" ? "原件传输" : "精简传输"} · 封装数据 ${fmtBytes(s.env_size)}，`;
+    let fileName;
     if (isStatic) {
-      if (state.imageCount > 1) {
-        state.fileName = s.zip_name || "qrcode.zip";
-        summary += `已拆分为 ${state.imageCount} 张静态二维码（ZIP ${fmtBytes(s.zip_size)}）`;
+      if (count > 1) {
+        fileName = s.zip_name || "qrcode.zip";
+        summary += `已拆分为 ${count} 张静态二维码（ZIP ${fmtBytes(s.zip_size)}）`;
       } else {
-        state.fileName = s.image_name || "qrcode.png";
+        fileName = s.image_name || "qrcode.png";
         summary += `生成单张静态二维码（${fmtBytes(s.image_size)}）`;
       }
     } else {
-      state.fileName = s.video_name || "qrcode.mp4";
+      fileName = s.video_name || "qrcode.mp4";
       summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}，${fmtBytes(s.video_size)}）`;
     }
-    state.fileUrl = buildFileUrl(state.taskId, state.fileName);
+    job.fileUrl = buildFileUrl(job.taskId, fileName);
+    job.dlName = fileName;
 
-    $("resultSummary").textContent = summary;
-    $("resultHint").textContent = (isStatic
-      ? (state.imageCount > 1
+    const item = document.createElement("div");
+    item.className = "result-item";
+    item.innerHTML = `
+      <div class="ri-head">
+        <span class="ri-name"></span>
+        <span class="ri-fmt"></span>
+      </div>
+      <div class="ri-summary"></div>
+      <div class="ri-hint"></div>
+      <div class="ri-preview"></div>
+      <div class="row">
+        <button type="button" class="ri-download primary"></button>
+      </div>`;
+    item.querySelector(".ri-name").textContent = s.name || job.name;
+    item.querySelector(".ri-fmt").textContent = fmtText;
+    item.querySelector(".ri-summary").textContent = summary;
+    item.querySelector(".ri-hint").textContent = (s.note ? s.note + "。" : "")
+      + (isStatic
+      ? (count > 1
         ? "数据超过单张容量已自动拆分：解析时需上传全部二维码（可打包 ZIP 一次性导入「信息解析」）"
         : "单张二维码可直接打印或发送；用任意扫码工具可读出封装 JSON，用「信息解析」可还原数据")
       : "相机传输模式：画面循环播放、每码停留约 0.33 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；也可下载 MP4 后用「信息解析 - 二维码视频」还原")
       + (isStatic ? "（点击缩略图可放大查看原尺寸）" : "");
-    $("downloadBtn").textContent = isStatic
-      ? (state.imageCount > 1 ? "下载全部二维码（ZIP）" : "下载二维码图片")
+    const dl = item.querySelector(".ri-download");
+    dl.textContent = isStatic
+      ? (count > 1 ? "下载全部二维码（ZIP）" : "下载二维码图片")
       : "下载二维码视频";
+    dl.addEventListener("click", () => downloadJobResult(job));
 
-    $("result").hidden = false;
+    const preview = item.querySelector(".ri-preview");
     if (isStatic) {
-      $("videoPreview").removeAttribute("src");
-      $("videoPreview").style.display = "none";
-      renderStaticImages();
+      preview.className = "ri-preview img-grid";
+      renderJobImages(job, preview, count);
     } else {
-      $("imageGrid").innerHTML = "";
-      $("imageGrid").hidden = true;
-      const frameCount = s.frame_count || 0;
-      if (frameCount > 0) {
-        // 相机传输模式：帧序列轮播（绕开视频管线，节奏由 JS 主导）
-        $("videoPreview").style.display = "none";
-        $("videoPreview").removeAttribute("src");
-        startStreamPlayer(frameCount);
-      } else {
-        $("streamPlayer").hidden = true;
-        $("videoPreview").style.display = "block";
-        playVideoBlob(state.fileUrl);
-      }
+      preview.className = "ri-preview";
+      renderJobStream(job, preview);
     }
-    setStatus("封装完成 ✔ 可下载产物，或到「信息解析」验证还原", false);
+    $("resultList").appendChild(item);
   }
 
-  /* 视频改为 blob 本地播放：网络流式播放时缓冲抖动会让浏览器丢帧"追赶"，
-     表现为播放忽快忽慢；整体取回后由本地文件源稳定供帧，循环速度恒定 */
-  async function playVideoBlob(url) {
-    const v = $("videoPreview");
+  function renderJobImages(job, grid, count) {
+    for (let i = 1; i <= count; i++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      const src = `/api/info-transfer/image/${job.taskId}/${i}`;
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = `二维码 ${i}/${count}`;
+      img.loading = "lazy";
+      img.addEventListener("click", () => openZoom(job.taskId, i, count));
+      cell.appendChild(img);
+      if (count > 1) {
+        const cap = document.createElement("div");
+        cap.className = "qr-cap";
+        cap.textContent = `${i}/${count}`;
+        cell.appendChild(cap);
+      }
+      grid.appendChild(cell);
+    }
+  }
+
+  /* 相机传输模式：每个视频结果块独立帧序列轮播（绕开浏览器视频管线） */
+  function renderJobStream(job, preview) {
+    const frameCount = job.result.frame_count || 0;
+    if (frameCount > 0) {
+      const img = document.createElement("img");
+      img.className = "ri-stream";
+      img.alt = "二维码流";
+      const cap = document.createElement("p");
+      cap.className = "ri-cap";
+      preview.appendChild(img);
+      preview.appendChild(cap);
+      startJobStream(job, img, cap, frameCount);
+    } else {
+      const v = document.createElement("video");
+      v.autoplay = true;
+      v.loop = true;
+      v.muted = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      v.addEventListener("ratechange", () => {
+        if (Math.abs(v.playbackRate - 1) > 0.01) v.playbackRate = 1;
+      });
+      preview.appendChild(v);
+      playVideoBlob(job.fileUrl, v);
+    }
+  }
+
+  /* 视频改为 blob 本地播放：网络流式播放时缓冲抖动会让浏览器丢帧"追赶" */
+  async function playVideoBlob(url, v) {
     try {
       const r = await fetch(url);
       if (!r.ok) throw new Error("HTTP " + r.status);
-      const blob = await r.blob();
-      if (state.videoObjectUrl) URL.revokeObjectURL(state.videoObjectUrl);
-      state.videoObjectUrl = URL.createObjectURL(blob);
-      v.src = state.videoObjectUrl;
+      v.src = URL.createObjectURL(await r.blob());
     } catch (e) {
       v.src = url; // 取回失败退回网络直连
     }
@@ -682,113 +1040,68 @@
     v.play().catch(() => {}); // muted 下无需手势
   }
 
-  /* ---------- 相机传输模式：JS 定时轮播帧序列（绕开浏览器视频管线） ----------
-     浏览器播放视频时，渲染线程卡顿会丢帧"追赶"（表现为忽快后恢复），
-     破坏"每码停留 333ms"的一致性。改为后端落盘逐帧 PNG + 前端 setTimeout
-     固定步进轮播：每 tick 恰好推进一张，卡顿只会整体变慢、绝不跳码。 */
+  /* 帧序列轮播：后端落盘逐帧 PNG + 前端 setTimeout 固定步进，
+     每 tick 恰好推进一张，卡顿只会整体变慢、绝不跳码 */
   const STREAM_FRAME_MS = 333; // 与后端 frame_repeat=5（15fps × 5）一致
-  function frameUrl(n) {
-    return `/api/info-transfer/frame/${state.taskId}/${n}`;
-  }
-  function startStreamPlayer(count) {
-    stopStreamPlayer();
-    state.streamCount = count;
-    state.streamIdx = 0;
-    state.streamImgs = [];
-    // 预加载全部帧（黑白二维码 PNG 单张几 KB，全量预载无压力）
+  function startJobStream(job, img, cap, count) {
+    const st = { count, idx: 0, timer: null, imgs: [], img, cap };
+    job.stream = st;
     let loaded = 0;
     for (let i = 1; i <= count; i++) {
       const im = new Image();
       im.onload = im.onerror = () => {
         loaded++;
-        if (loaded === count) showNextStreamFrame();
+        if (loaded === count) showNextJobFrame(job);
       };
-      im.src = frameUrl(i);
-      state.streamImgs.push(im);
+      im.src = `/api/info-transfer/frame/${job.taskId}/${i}`;
+      st.imgs.push(im);
     }
-    $("streamPlayer").hidden = false;
   }
-  function showNextStreamFrame() {
-    if (state.streamCount <= 0) return;
-    if (state.streamIdx >= state.streamCount) state.streamIdx = 0; // 循环
-    const im = state.streamImgs[state.streamIdx];
+  function showNextJobFrame(job) {
+    const st = job.stream;
+    if (!st || st.count <= 0) return;
+    if (st.idx >= st.count) st.idx = 0; // 循环
+    const im = st.imgs[st.idx];
     if (!im.complete || !im.naturalWidth) {
       // 个别帧加载失败：跳到下一张（采集端靠 FEC 冗余容忍个别缺失码）
-      state.streamIdx++;
-      state.streamTimer = setTimeout(showNextStreamFrame, 0);
+      st.idx++;
+      st.timer = setTimeout(() => showNextJobFrame(job), 0);
       return;
     }
-    $("streamImg").src = im.src;
-    $("streamCap").textContent =
-      `相机传输画面（循环播放，每码 0.33 秒）：${state.streamIdx + 1}/${state.streamCount}`;
-    state.streamIdx++;
-    state.streamTimer = setTimeout(showNextStreamFrame, STREAM_FRAME_MS);
+    st.img.src = im.src;
+    st.cap.textContent = `相机传输画面（循环播放，每码 0.33 秒）：${st.idx + 1}/${st.count}`;
+    st.idx++;
+    st.timer = setTimeout(() => showNextJobFrame(job), STREAM_FRAME_MS);
   }
-  function pauseStreamPlayer() {
-    if (state.streamTimer) { clearTimeout(state.streamTimer); state.streamTimer = null; }
-  }
-  function resumeStreamPlayer() {
-    if (!state.streamTimer && state.streamCount > 0) showNextStreamFrame();
-  }
-  function stopStreamPlayer() {
-    pauseStreamPlayer();
-    state.streamCount = 0;
-    state.streamIdx = 0;
-    state.streamImgs = null;
-    $("streamPlayer").hidden = true;
-    $("streamImg").removeAttribute("src");
-    $("streamCap").textContent = "";
-  }
-
-  function renderStaticImages() {
-    const grid = $("imageGrid");
-    grid.innerHTML = "";
-    grid.hidden = false;
-    for (let i = 1; i <= state.imageCount; i++) {
-      const cell = document.createElement("div");
-      cell.className = "cell";
-      const src = `/api/info-transfer/image/${state.taskId}/${i}`;
-      const img = document.createElement("img");
-      img.src = src;
-      img.alt = `二维码 ${i}/${state.imageCount}`;
-      img.loading = "lazy";
-      img.addEventListener("click", () => openZoom(src));
-      cell.appendChild(img);
-      if (state.imageCount > 1) {
-        const cap = document.createElement("div");
-        cap.className = "qr-cap";
-        cap.textContent = `${i}/${state.imageCount}`;
-        cell.appendChild(cap);
+  function pauseAllStreams() {
+    for (const job of state.jobs) {
+      if (job.stream && job.stream.timer) {
+        clearTimeout(job.stream.timer);
+        job.stream.timer = null;
       }
-      grid.appendChild(cell);
     }
   }
-
-  function zoomSrc(n) {
-    return `/api/info-transfer/image/${state.taskId}/${n}`;
+  function resumeAllStreams() {
+    for (const job of state.jobs) {
+      if (job.stream && !job.stream.timer) showNextJobFrame(job);
+    }
   }
-  function openZoom(src) {
-    // 多张静态二维码：启用左右切换（默认显示传入 src 对应页）
-    const count = state.imageCount || 0;
+  function stopAllStreams() {
+    pauseAllStreams();
+    for (const job of state.jobs) job.stream = null;
+  }
+
+  function zoomSrc(taskId, n) {
+    return `/api/info-transfer/image/${taskId}/${n}`;
+  }
+  function openZoom(taskId, page, count) {
+    state.zoomTaskId = taskId;
+    state.zoomCount = count;
     $("zoomNav").hidden = count < 2;
-    if (count >= 2) {
-      let page = 1;
-      for (let i = 1; i <= count; i++) {
-        if (zoomSrc(i) === src) { page = i; break; }
-      }
-      state.zoomPage = page;
-      showZoomPage(page);
-      return;
-    }
-    state.zoomPage = 0;
-    const img = $("zoomImg");
-    img.onload = fitZoom;
-    img.src = src;
-    $("zoomModal").hidden = false;
-    fitZoom();
+    showZoomPage(page);
   }
   function showZoomPage(page) {
-    const count = state.imageCount || 0;
+    const count = state.zoomCount || 1;
     state.zoomPage = Math.min(Math.max(page, 1), count);
     $("zoomTitle").textContent = `二维码预览（${state.zoomPage}/${count}）`;
     $("zoomPage").textContent = `${state.zoomPage} / ${count}`;
@@ -796,7 +1109,7 @@
     $("zoomNext").disabled = state.zoomPage >= count;
     const img = $("zoomImg");
     img.onload = fitZoom;
-    img.src = zoomSrc(state.zoomPage);
+    img.src = zoomSrc(state.zoomTaskId, state.zoomPage);
     $("zoomModal").hidden = false;
     fitZoom();
   }
@@ -826,10 +1139,10 @@
     $("zoomTitle").textContent = "二维码预览";
   }
 
-  function downloadResult() {
+  function downloadJobResult(job) {
     const a = document.createElement("a");
-    a.href = state.fileUrl;
-    a.download = state.fileName;
+    a.href = job.fileUrl;
+    a.download = job.dlName || "qrcode.png";
     document.body.appendChild(a);
     a.click();
     setTimeout(() => document.body.removeChild(a), 100);
@@ -837,19 +1150,14 @@
 
   function resetResult() {
     $("result").hidden = true;
-    $("progressWrap").hidden = true;
-    stopStreamPlayer();
-    $("videoPreview").removeAttribute("src");
-    if (state.videoObjectUrl) {
-      URL.revokeObjectURL(state.videoObjectUrl);
-      state.videoObjectUrl = null;
-    }
-    $("imageGrid").innerHTML = "";
-    $("imageGrid").hidden = true;
-    state.taskId = null;
-    state.fileName = "";
-    state.fileUrl = "";
-    state.imageCount = 0;
+    setCancelVisible(false);
+    stopAllStreams();
+    $("resultList").innerHTML = "";
+    $("progressList").innerHTML = "";
+    $("progressList").hidden = true;
+    state.jobs = [];
+    state.zoomTaskId = "";
+    state.zoomCount = 0;
     state.zoomPage = 0;
   }
 
@@ -869,18 +1177,46 @@
     resetDecode();
     state.decFiles = Array.from(files || []).filter((f) => /\.(png|jpe?g)$/i.test(f.name || ""));
     if (!state.decFiles.length) { setDecStatus("请选择 PNG / JPG 二维码图片", true); return; }
-    $("decFilesName").textContent =
-      state.decFiles.length === 1
-        ? `${state.decFiles[0].name}  ·  ${fmtBytes(state.decFiles[0].size)}`
-        : `已选择 ${state.decFiles.length} 张图片`;
+    if (state.decFiles.length === 1) {
+      $("decFileChipName").textContent = state.decFiles[0].name;
+      $("decFileChipName").title = state.decFiles[0].name;
+      $("decFileChipSize").textContent = fmtBytes(state.decFiles[0].size);
+    } else {
+      const total = state.decFiles.reduce((s, f) => s + (f.size || 0), 0);
+      $("decFileChipName").textContent = `已选择 ${state.decFiles.length} 张图片`;
+      $("decFileChipName").title = state.decFiles.map((f) => f.name).join("、");
+      $("decFileChipSize").textContent = fmtBytes(total);
+    }
+    $("decFileChip").hidden = false;
     $("decodeBtn").disabled = false;
+  }
+
+  /* 移除已选解析图片（徽标 ×） */
+  function removeDecFiles() {
+    state.decFiles = [];
+    $("decInput").value = "";
+    $("decFileChip").hidden = true;
+    $("decodeBtn").disabled = true;
+    setDecStatus("");
   }
 
   function handleDecVideo(f) {
     resetDecode();
     state.decVideo = f;
-    $("decVName").textContent = `${f.name}  ·  ${fmtBytes(f.size)}`;
+    $("decVideoChipName").textContent = f.name;
+    $("decVideoChipName").title = f.name;
+    $("decVideoChipSize").textContent = fmtBytes(f.size);
+    $("decVideoChip").hidden = false;
     $("decodeBtn").disabled = false;
+  }
+
+  /* 移除已选解析视频（徽标 ×） */
+  function removeDecVideo() {
+    state.decVideo = null;
+    $("decVInput").value = "";
+    $("decVideoChip").hidden = true;
+    $("decodeBtn").disabled = true;
+    setDecStatus("");
   }
 
   async function startDecode() {
@@ -993,7 +1329,7 @@
           try { payload = JSON.parse(s.payload_json); } catch (e) { payload = null; }
           if (!payload) { setDecStatus("解析数据异常", true); $("decodeBtn").disabled = false; return; }
           renderDecodeResult({
-            fmt: s.fmt, name: s.name, payload,
+            fmt: s.fmt, name: s.name, ext: s.ext, payload,
           }, "二维码视频", s.data_size);
           return;
         } else if (s.status === "error") {
@@ -1021,7 +1357,10 @@
     const isTable = d.fmt === "excel" && Array.isArray(data);
     const isFile = d.fmt === "file" && typeof data === "string";
     const textData = isTable ? tableToText(data) : String(data == null ? "" : data);
-    $("decFmt").textContent = fmtLabel(d.fmt);
+    const fmtText = d.fmt === "file"
+      ? "原始文件"
+      : (fmtLabel(d.fmt) + (d.ext ? `（原 ${d.ext}）` : ""));
+    $("decFmt").textContent = fmtText;
     $("decName").textContent = d.name || "未命名";
     let sizeText;
     if (isFile) {
@@ -1120,18 +1459,31 @@
 
   function resetDecodeInput() {
     resetDecode();
-    state.decFiles = [];
-    state.decVideo = null;
-    $("decFilesName").textContent = "";
-    $("decVName").textContent = "";
-    $("decVInput").value = "";
-    $("decInput").value = "";
-    $("decodeBtn").disabled = true;
-    setDecStatus("");
+    removeDecFiles();
+    removeDecVideo();
   }
 
   /* ---------- 初始化 ---------- */
+  /* 拉取可封装格式白名单（持久化配置），动态生成 accept 与提示 */
+  async function loadFormats() {
+    try {
+      const d = await fetchJson("/api/info-transfer/formats");
+      if (d.ok && Array.isArray(d.formats) && d.formats.length) {
+        state.formats = d.formats;
+      }
+    } catch (e) { /* 获取失败用内置回退清单 */ }
+    const parts = state.formats.length
+      ? state.formats.map((f) => f.label + "(." + f.ext + ")")
+      : FALLBACK_FORMATS.map((f) => f.label + "(." + f.ext + ")");
+    $("acceptHint").textContent = "仅支持 " + parts.join(" / ");
+    $("fileInput").setAttribute("accept",
+      state.formats.length
+        ? state.formats.map((f) => "." + f.ext).join(",")
+        : FALLBACK_FORMATS.map((f) => "." + f.ext).join(","));
+  }
+
   function init() {
+    loadFormats();
     // 胶囊切换
     $("tabEncode").addEventListener("click", () => switchTab("encode"));
     $("tabDecode").addEventListener("click", () => switchTab("decode"));
@@ -1139,43 +1491,38 @@
     // 封装：输入方式
     $("srcFile").addEventListener("click", () => switchSrc("file"));
     $("srcText").addEventListener("click", () => switchSrc("text"));
+    // 原件传输开关
+    $("rawMode").addEventListener("change", () => {
+      applyRawHint();
+      resetResult();
+      setStatus("");
+    });
     const drop = $("dropZone"), input = $("fileInput");
     drop.addEventListener("click", () => input.click());
     drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
     drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
     drop.addEventListener("drop", (e) => {
       e.preventDefault(); drop.classList.remove("drag");
-      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+      if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
     });
-    input.addEventListener("change", () => { if (input.files.length) handleFile(input.files[0]); });
+    input.addEventListener("change", () => { if (input.files.length) addFiles(input.files); });
     $("encodeBtn").addEventListener("click", startEncode);
-    // 播放速率防护：任何因素（解码器异常/扩展干扰）改动速率立即拉回 1x，
-    // 相机端按帧时间戳采码，变速会破坏"每码停留时长"的一致性
-    $("videoPreview").addEventListener("ratechange", () => {
-      const v = $("videoPreview");
-      if (Math.abs(v.playbackRate - 1) > 0.01) v.playbackRate = 1;
-    });
-    // 页面切走/最小化时暂停：浏览器会节流渲染，画面停跳让手机端误判码面切换
+    $("cancelBtn").addEventListener("click", cancelEncode);
+    // 页面切走/最小化时暂停轮播：浏览器会节流渲染，画面停跳让手机端误判码面切换
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) {
-        pauseStreamPlayer();
-        $("videoPreview").pause();
-      } else {
-        resumeStreamPlayer();
-        const v = $("videoPreview");
-        if (v.src && !v.ended) v.play().catch(() => {});
-      }
+      if (document.hidden) pauseAllStreams();
+      else resumeAllStreams();
     });
     $("zoomPrev").addEventListener("click", () => zoomStep(-1));
     $("zoomNext").addEventListener("click", () => zoomStep(1));
-    $("downloadBtn").addEventListener("click", downloadResult);
     $("reChoose").addEventListener("click", () => {
-      resetResult();
-      state.file = null;
-      $("fileName").textContent = "";
+      clearAllFiles();
       $("pasteText").value = "";
       setStatus("");
     });
+    // 解析端已选文件徽标 × 移除
+    $("decFileChipRemove").addEventListener("click", removeDecFiles);
+    $("decVideoChipRemove").addEventListener("click", removeDecVideo);
 
     // 解析：来源
     $("decImage").addEventListener("click", () => switchDec("image"));

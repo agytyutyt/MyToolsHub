@@ -74,6 +74,7 @@
                             android:textStyle="bold" />
 
                         <TextView
+                            android:id="@+id/tvSummaryNote"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
@@ -84,11 +85,14 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 内容卡:预览文本 / excel 表格(截断规则不变:4000 字符 / 100 行) -->
+            <!-- 内容卡:预览文本 / excel 表格(截断规则不变:4000 字符 / 100 行);点击调用外部应用阅读 -->
             <com.google.android.material.card.MaterialCardView
+                android:id="@+id/contentCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
+                android:clickable="true"
+                android:focusable="true"
                 app:cardCornerRadius="14dp"
                 app:cardElevation="1dp">
 
@@ -98,13 +102,29 @@
                     android:orientation="vertical"
                     android:padding="14dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="@string/content_preview"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textSize="12sp"
-                        android:textStyle="bold" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/content_preview"
+                            android:textColor="?attr/colorOnSurfaceVariant"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvOpenHint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/hint_open_with"
+                            android:textColor="?attr/colorPrimary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
 
                     <FrameLayout
                         android:layout_width="match_parent"

@@ -25,7 +25,9 @@
     <string name="btn_share_file">分享文件</string>
     <string name="btn_rescan">重新扫描</string>
     <string name="content_preview">内容预览</string>
-    <string name="summary_note">已去除样式与宏，仅保留数据信息</string>
+    <string name="summary_note">精简传输：已去除样式与宏，仅保留数据信息</string>
+    <string name="summary_note_file">原件传输：完整还原原始文件（含格式与字节）</string>
+    <string name="hint_open_with">点击卡片用其他应用打开</string>
     <string name="btn_resume">继续收集</string>
     <string name="btn_discard">放弃</string>
     <string name="btn_cancel">取消</string>

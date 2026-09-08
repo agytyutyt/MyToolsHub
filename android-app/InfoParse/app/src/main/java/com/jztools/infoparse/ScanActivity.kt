@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
@@ -48,6 +50,9 @@ class ScanActivity : AppCompatActivity() {
     private var collector = PageCollector()
     private var frameCollector: QrFrame.Collector? = null
     private var lastInvalidAt = 0L
+
+    /** 双指捏合变焦：小码/远距扫码时放大画面提升解析率 */
+    private var scaleDetector: ScaleGestureDetector? = null
 
     /** 重置代数：每次重置 +1，仍在运行的后台解析回调据此作废，避免旧结果回写界面 */
     private val generation = AtomicInteger(0)
@@ -113,7 +118,27 @@ class ScanActivity : AppCompatActivity() {
 
     private fun startCamera() {
         scanner = CameraScanner(this, onQrText = { text -> runOnUiThread { onScanned(text) } })
-        scanner.start(this, findViewById(R.id.previewView))
+        val previewView = findViewById<androidx.camera.view.PreviewView>(R.id.previewView)
+        scanner.start(this, previewView)
+        setupPinchZoom(previewView)
+    }
+
+    /** 双指捏合变焦： CameraScanner 绑定成功后调用，捏合缩放画面便于对准远处/小尺寸二维码 */
+    private fun setupPinchZoom(view: androidx.camera.view.PreviewView) {
+        val detector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(d: ScaleGestureDetector): Boolean {
+                val zi = scanner.zoomInfo ?: return false
+                val next = (zi.currentRatio * d.scaleFactor).coerceIn(zi.minRatio, zi.maxRatio)
+                zi.setRatio(next)
+                return true
+            }
+        })
+        scaleDetector = detector
+        view.setOnTouchListener { v, ev ->
+            detector.onTouchEvent(ev)
+            if (ev.actionMasked == MotionEvent.ACTION_UP) v.performClick()
+            true
+        }
     }
 
     /** 沉浸式状态栏：相机预览延伸至系统栏之后（状态栏/导航栏透明），白色系统栏图标 */

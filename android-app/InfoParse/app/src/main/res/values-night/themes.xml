@@ -1,6 +1,11 @@
 <resources>
+    <!-- 夜间模式主题：仅调整 color 角色映射。
+         colorPrimary 提升为浅藏蓝（深色下作为前景色/按钮文字可读），
+         colorOnPrimary 相应取深藏蓝（浅蓝底上的图标/文字）。
+         工具栏与底部导航背景直接引用 @color/primary（保持品牌藏蓝），不受影响。 -->
     <style name="Theme.InfoParse" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimary">@color/primary_night</item>
+        <item name="colorOnPrimary">@color/primary_dark</item>
         <item name="colorSecondaryContainer">@color/secondary_container</item>
         <item name="colorOnSecondaryContainer">@color/on_secondary_container</item>
         <item name="android:statusBarColor">@color/primary_dark</item>
@@ -27,10 +32,5 @@
     <!-- 结果页底部导航栏:纯动作栏,去掉选中态指示药丸 -->
     <style name="Widget.InfoParse.BottomNavActiveIndicator" parent="Widget.Material3.BottomNavigationView.ActiveIndicator">
         <item name="android:color">@android:color/transparent</item>
-    </style>
-
-    <!-- 藏蓝工具栏上的图标/菜单着色:白天夜间均强制白色(背景 @color/primary 恒为藏蓝) -->
-    <style name="ThemeOverlay.InfoParse.Bar" parent="">
-        <item name="colorControlNormal">@color/white</item>
     </style>
 </resources>

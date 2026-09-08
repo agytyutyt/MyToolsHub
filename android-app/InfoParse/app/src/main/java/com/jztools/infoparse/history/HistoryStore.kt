@@ -40,6 +40,7 @@ object HistoryStore {
             addProperty("time", rec.time)
             addProperty("fmt", env.fmt)
             addProperty("name", env.name)
+            env.ext?.let { addProperty("ext", it) }
             if (env.isExcel) add("data", rowsToJson(env.data as List<List<Any?>>))
             else addProperty("data", env.textData ?: "")
         }
@@ -74,13 +75,14 @@ object HistoryStore {
             val fmt = o.get("fmt")?.takeIf { it.isJsonPrimitive }?.asString ?: return null
             if (fmt !in Fmt.ALL) return null
             val name = o.get("name")?.takeIf { it.isJsonPrimitive }?.asString ?: "未命名"
+            val ext = o.get("ext")?.takeIf { it.isJsonPrimitive }?.asString
             val data: Any = if (fmt == Fmt.EXCEL) {
                 // 与扫码解码一致：数字按字符串还原、布尔还原为布尔（EnvelopeParser.jsonToRows）
                 EnvelopeParser.jsonToRows(o.getAsJsonArray("data")) ?: return null
             } else {
                 o.get("data")?.takeIf { it.isJsonPrimitive }?.asString ?: return null
             }
-            HistoryRecord(id, time, Envelope(fmt, name, data))
+            HistoryRecord(id, time, Envelope(fmt, name, data, ext))
         } catch (e: Exception) {
             null
         }

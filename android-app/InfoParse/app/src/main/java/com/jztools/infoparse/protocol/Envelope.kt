@@ -10,6 +10,7 @@ object Msg {
     const val BAD_VERSION = "信封协议版本不受支持"
     const val PAGE_MISMATCH = "该二维码页数与当前任务不一致，已忽略"
     const val EXCEL_BAD = "Excel 数据结构异常"
+    const val ZIPPED_BAD = "压缩数据异常，无法解压还原"
     const val IMAGE_NO_QR = "图片中未识别到二维码"
     const val ASSEMBLE_FAILED = "数据还原失败，请重新扫描"
     const val FRAME_MISMATCH = "该二维码与当前视频任务不一致，已忽略"
@@ -59,6 +60,8 @@ data class Envelope(
     val name: String,
     /** fmt=text/markdown/word 为 String；fmt=excel 为 List<List<Any?>>；fmt=file 为 base64 String */
     val data: Any,
+    /** 精简传输声明的原始文件后缀名（如 docx/xlsx/md/txt，无点号）；旧二维码或粘贴文字为 null */
+    val ext: String? = null,
 ) {
     val isExcel: Boolean get() = fmt == Fmt.EXCEL && data is List<*>
     val isFile: Boolean get() = fmt == Fmt.FILE && data is String
@@ -124,8 +127,16 @@ object EnvelopeParser {
             ?: return ScanResult.Invalid(Msg.NOT_ENVELOPE)
         if (fmt !in Fmt.ALL) return ScanResult.Invalid(Msg.unknownFmt(fmt))
         val name = obj.get("name")?.takeIf { it.isJsonPrimitive }?.asString ?: "未命名"
+        // 精简传输声明的原始后缀名（可选字段；去掉点号并小写归一）
+        val ext = obj.get("ext")?.takeIf { it.isJsonPrimitive }?.asString
+            ?.trim('.')?.lowercase()?.takeIf { it.isNotEmpty() }
+        // v1.7 压缩信封：data 为 base64(zlib(载荷))，解压后为文本/二维数组
+        val zipped = obj.get("zip")?.takeIf { it.isJsonPrimitive }?.asInt == 1
         val dataEl = obj.get("data") ?: return ScanResult.Invalid(Msg.NOT_ENVELOPE)
-        val data: Any = if (fmt == Fmt.EXCEL) {
+        val data: Any = if (zipped) {
+            unpackZipped(fmt, dataEl)
+                ?: return ScanResult.Invalid(Msg.ZIPPED_BAD)
+        } else if (fmt == Fmt.EXCEL) {
             if (!dataEl.isJsonArray) return ScanResult.Invalid(Msg.EXCEL_BAD)
             jsonToRows(dataEl.asJsonArray) ?: return ScanResult.Invalid(Msg.EXCEL_BAD)
         } else {
@@ -133,7 +144,32 @@ object EnvelopeParser {
             dataEl.takeIf { it.isJsonPrimitive }?.asString
                 ?: return ScanResult.Invalid(Msg.NOT_ENVELOPE)
         }
-        return ScanResult.Single(Envelope(fmt, name, data))
+        return ScanResult.Single(Envelope(fmt, name, data, ext))
+    }
+
+    /** zip=1 信封：data → base64 解码 → zlib inflate → 文本 / excel 二维数组；失败返回 null */
+    private fun unpackZipped(fmt: String, el: com.google.gson.JsonElement): Any? {
+        val b64 = el.takeIf { it.isJsonPrimitive }?.asString ?: return null
+        val packed = try {
+            java.util.Base64.getDecoder().decode(b64)
+        } catch (e: IllegalArgumentException) {
+            return null
+        }
+        val raw = try {
+            com.jztools.infoparse.util.Zlib.inflate(packed)
+        } catch (e: Exception) {
+            return null
+        }
+        return if (fmt == Fmt.EXCEL) {
+            val arr = try {
+                JsonParser.parseString(raw.toString(Charsets.UTF_8)).asJsonArray
+            } catch (e: Exception) {
+                return null
+            }
+            jsonToRows(arr) ?: return null
+        } else {
+            raw.toString(Charsets.UTF_8)
+        }
     }
 
     /** 兼容文档示例的便捷方法：合法返回信封，否则 null */
