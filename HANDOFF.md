@@ -1,7 +1,7 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-07（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
+> 最后更新：2026-09-08（v1.4 上线打包：双模式精简/原件传输+zlib 压缩+多文件封装+停止按钮+APP 1.4 签名包；§5.1 升级演练要点）（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
 > android-app 子目录原 README/HANDOFF 已删除，移动端内容统一收敛到本文件第 8 节）
 
 ---
@@ -50,27 +50,12 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 
 ## 2. 当前 git 状态
 
-- 分支：`main`。已推送的最近提交：
-  - `37c43ab` fix: 一键安装脚本三处修复+文档对齐代码实际（bat CRLF / install.ps1 空值兜底与源目录守卫 / .gitattributes / README 补全）
-  - `1d25e21` feat: 一键安装/更新/卸载机制+配置模板同步（install.ps1 / jztools_data.sync_templates / build-deploy -Version）
-  - `906585c` feat: 优化战果录入大模型提示词以改善低性能模型解析
-  - `3fc45c9` feat: 战果录入汇总/筛选排序与主办人匹配优化
-  - 更早：战果录入导出 Excel / 主办人字段、JZIcon emoji 兼容层、数据目录可配置化、共享文档/公告板/战果录入等历史功能
-- **工作区有大量未提交变更**（截至 2026-09-07，对应「信息传输插件 + 移动端 APP」整轮工作）：
-  - 未跟踪：`plugins/info-transfer/`（信息传输插件）、`android-app/`（InfoParse APP）、
-    `移动端APP.md`（协议规范文档）、`docs/二维码视频流传输修复-todolist.md`、
-    `openh264-2.5.0-win64.dll`、`.zcode/`（会话工作目录，**不要提交**）；
-  - 已修改：`config/tools.json`（注册 info-transfer）、`install.ps1`、`README.md`（本节合并编辑）。
-  - **android-app/ 与 info-transfer 尚未纳入版本管理，是否提交由人工决定**（提交前注意排除
-    `app/build/`、`qr_test_materials/` 等产物目录）。
-- 依赖改为**按插件声明**：根 `requirements.txt` 已删除，各插件在
-  `plugins/<id>/backend/requirements.txt` 声明自身依赖（缺依赖插件优雅降级并在页面提示）。
-  `app.py` 保留 PyInstaller `frozen` 分支 + waitress 生产 WSGI；**打包脚本 `build-deploy.ps1`
-  与打包配置 `JZToolsHub.spec` 已在仓库**（见第 5 节发布流程）。
-- 仓库根目录**没有** `version.json`（由 `build-deploy.ps1 -Version` 在部署目录生成）；
-  根目录也没有 `start.bat`（由打包脚本生成进部署目录）。
-- 仓库根目录的 `openh264-2.5.0-win64.dll` 是桌面端视频编码运行时依赖（trajectory-convert /
-  info-transfer 生成 MP4 用），需随部署包分发——确认 build-deploy.ps1 是否已收集。
+- 分支：`main`，最新提交 `7269cb8`（v1.4 功能全集：info-transfer 双模式精简/原件传输、
+  zlib 压缩信封、多文件封装、封装停止、格式白名单；InfoParse APP 深色模式、
+  XlsxWriter/Zlib 还原、卡片打开、版本 1.4）。
+- 工作区剩余未提交：`install.ps1` 桌面快捷方式判空修复、`HANDOFF.md` 本节更新、
+  `app/build.gradle.kts`（APP 版本 1.4 + release 签名）、`release.keystore`（APP 签名密钥）。
+- 打包产物（不入库，gitignore）：`deploy/JZToolsHub-v1.4.zip`、`deploy/InfoParse-v1.4.apk`。
 
 ## 3. 内置插件一览
 
@@ -205,6 +190,55 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 - 旧版 `install.ps1` 注册的 UninstallString 指向 `install.ps1 -Uninstall`，更新后新版
   `install.ps1` 会替换旧版，卸载入口不变。
 - `uninstall.bat` 仍保留在旧部署目录中（新包不再带它），不影响功能，可用 `一键卸载.bat` 替代。
+
+### 5.1 v1.4 上线打包与升级演练要点（2026-09-08 实测）
+
+**打包产物**（`deploy/`，`build-deploy.ps1 -Version "1.4"` 生成）：
+
+| 产物 | 说明 |
+| --- | --- |
+| `JZToolsHub-v1.4.zip` | 服务端安装包（exe + `_internal/` + 前端/插件/config + 安装卸载脚本 + version.json） |
+| `deploy\JZToolsHub\` | 同内容解包目录，可直接运行 |
+| `InfoParse-v1.4.apk` | 移动端 APP 正式签名包（单独构建，不进服务端 zip） |
+
+**APP 打包要点**（`android-app/InfoParse/`，Gradle 直接构建）：
+
+- 环境：`JAVA_HOME=C:\Users\yfjz\.jdks\jbr-21.0.11`、`GRADLE_USER_HOME=D:\GradleHome`、
+  Gradle 8.7 位于 `D:\GradleHome\wrapper\dists\gradle-8.7-bin\...\gradle-8.7\bin\gradle.bat`
+  （仓库无 gradlew，直接调本机 Gradle）；SDK `D:\Android\Sdk`（build-tools 34/36）。
+- 版本：`app/build.gradle.kts` 的 `versionCode`/`versionName` 手工维护（v1.4 = code 2）。
+- **正式签名**：`android-app/InfoParse/release.keystore`（alias `infoparse`，
+  密码 `infoparse2024`，有效期 30 年，随仓库管理）。升级包必须用同一 keystore，
+  否则用户无法覆盖安装；丢失只能换包名或卸载重装（丢历史数据）。
+- 命令：`gradle :app:testDebugUnitTest :app:assembleRelease` →
+  `app/build/outputs/apk/release/app-release.apk`，复制到 `deploy/InfoParse-v<版本>.apk`。
+- release 构建有 `lintVitalRelease` 卡点：**资源若只在 values-night 声明、
+  base values 没有同名项，release 直接失败**（MissingDefaultResource，debug 不报）。
+  新增夜间资源必须两份都有，或确保成对声明。
+- 验签：`apksigner verify --print-certs`（需 JAVA_HOME）；
+  版本核对：`aapt dump badging xxx.apk | findstr versionName`。
+
+**升级演练实测（v1.3.5 → v1.4，模拟机 + 本机真升各一遍）**：
+
+- **用户数据 100% 保留**：admin.json（账号）、case-report data（台账）、
+  logs、.task_cache 均在数据根目录，升级只替换程序目录、不触碰数据根。
+- **配置模板三项同步**（`Sync-ConfigTemplates`，与 `jztools_data.sync_templates` 双保险）：
+  - prompt.json（case-report / character-graph）：overwrite，旧值备份 `.bak-old`；
+  - tools.json：merge——用户 `site.*` / 工具启停 order 保留，新分类新工具
+    （如 info-transfer）追加；
+  - 插件 config.json：仅补缺失键（LLM key 等用户配置不动）。
+- **新插件/新依赖落地**：info-transfer 整目录覆盖进安装目录（含新前端/后端）；
+  新增 Python 依赖（python-docx / xlrd）已打进 `_internal/`，目标机无需 pip。
+- **info-transfer 无插件级 config.json**（格式清单是内置常量），升级零配置迁移。
+- **实测发现并修复的坑**：install.ps1 桌面快捷方式在「桌面路径为空」的环境
+  （重定向 profile / 服务账户）会因 Join-Path 空参数崩溃 → 已修为判空跳过
+  （卸载分支同步修复）。**教训：改了 install.ps1 必须重新打 zip**——
+  zip 内嵌的是打包时点的脚本副本，v1.4.zip 已用修复版重打（三处 MD5 一致）。
+- **升级路径判定**：注册表 Uninstall 项（优先）> 默认目录 > 源目录含
+  `config/data_root.json`（就地更新）。数据根目录解析：`~/.jztoolshub.json`
+  主指针 > 安装目录 `config/data_root.json` 备份指针 > 默认 `~/.jztoolshub`。
+- **遗留确认项**：`一键安装.bat`/`一键卸载.bat` 未演练（bat 仅转发 install.ps1）；
+  zip 覆盖安装时旧版独有文件不会删除（v1.3.5→v1.4 无差异，未来若删文件需注意）。
 
 
 ## 6. 当前状态 / 卡点

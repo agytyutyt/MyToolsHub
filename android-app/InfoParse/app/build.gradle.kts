@@ -11,8 +11,18 @@ android {
         applicationId = "com.jztools.infoparse"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.4"
+    }
+
+    // 正式签名（内部离线分发，密钥随仓库管理；丢失可用 keytool 重新生成但旧包将无法覆盖安装）
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("release.keystore")
+            storePassword = "infoparse2024"
+            keyAlias = "infoparse"
+            keyPassword = "infoparse2024"
+        }
     }
 
     buildTypes {
@@ -22,6 +32,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {

@@ -219,11 +219,12 @@ if ($Uninstall) {
     $target = if ($info) { $info.Dir } else { $InstallDir }
     $DataRoot = Get-DataRootDir -Target $target
 
-    # 清理快捷方式
-    $links = @(
-        (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"),
-        (Join-Path ([Environment]::GetFolderPath("Desktop")) "$AppName.lnk")
-    )
+    # 清理快捷方式（桌面路径可能为空：重定向 profile / 服务账户等环境）
+    $links = @( (Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk") )
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not [string]::IsNullOrWhiteSpace($desktop)) {
+        $links += (Join-Path $desktop "$AppName.lnk")
+    }
     foreach ($l in $links) { if (Test-Path $l) { Remove-Item $l -Force } }
 
     # 删除程序目录
@@ -316,8 +317,14 @@ Write-Registry -Dir $Target
 $lnkDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 New-Item -ItemType Directory -Force -Path $lnkDir | Out-Null
 New-Shortcut -Link (Join-Path $lnkDir "$AppName.lnk") -Target $exe
-New-Shortcut -Link (Join-Path ([Environment]::GetFolderPath("Desktop")) "$AppName.lnk") -Target $exe
-Write-Host "  已创建开始菜单与桌面快捷方式"
+# 桌面路径可能为空（重定向 profile / 服务账户）：为空时跳过桌面快捷方式
+$desktop = [Environment]::GetFolderPath("Desktop")
+if (-not [string]::IsNullOrWhiteSpace($desktop)) {
+    New-Shortcut -Link (Join-Path $desktop "$AppName.lnk") -Target $exe
+    Write-Host "  已创建开始菜单与桌面快捷方式"
+} else {
+    Write-Host "  已创建开始菜单快捷方式（桌面路径不可用，跳过桌面快捷方式）"
+}
 
 Write-Host ""
 Write-Host "==> 安装 / 更新完成。"
