@@ -48,6 +48,15 @@
     '#️⃣': '23-20e3.svg',   // md5-generator
     '📽️': '1f4fd.svg',     // qr-video-decode
     '🛰️': '1f6f0.svg',     // trajectory-convert
+    '📚': '1f4da.svg',     // knowledge-base
+    '📨': '1f4e8.svg',     // info-transfer
+    '✍️': '270d.svg',      // case-report 手动录入
+    '🎬': '1f3ac.svg',     // info-transfer 视频标签页
+    '📤': '1f4e4.svg',     // info-transfer 发送
+    '📥': '1f4e5.svg',     // info-transfer 接收
+    '🖼️': '1f5bc.svg',     // info-transfer 图片标签页
+    '✔': '2714.svg',       // 勾选（无变体选择符）
+    '⚠': '26a0.svg',       // 警告（无变体选择符）
   };
 
   var _supported = null;

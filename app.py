@@ -520,10 +520,12 @@ _EMOJI_ICON_FILES = {
     "🧩": "1f9e9.svg",          # json-formatter
     "🗺️": "1f5fa.svg",          # map-marker
     "#️⃣": "23-20e3.svg",        # md5-generator
-    "📢": "1f4a2.svg",          # notice-board
+    "📢": "1f4e2.svg",          # notice-board
     "📽️": "1f4fd.svg",          # qr-video-decode
     "📝": "1f4dd.svg",          # shared-docs
     "🛰️": "1f6f0.svg",          # trajectory-convert
+    "📚": "1f4da.svg",          # knowledge-base
+    "📨": "1f4e8.svg",          # info-transfer
 }
 
 
