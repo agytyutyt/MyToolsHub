@@ -1,8 +1,10 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-08（v1.4 上线打包：双模式精简/原件传输+zlib 压缩+多文件封装+停止按钮+APP 1.4 签名包；§5.1 升级演练要点）（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
-> android-app 子目录原 README/HANDOFF 已删除，移动端内容统一收敛到本文件第 8 节）
+> 最后更新：2026-09-09（v1.5 上线打包：战果录入优化——入库时间不再展示/时间筛选改按战果时间 fields.时间/主办人默认空/大模型配置防浏览器自动填充/新增手动录入卡片/返回落点修正/单位换算修复（吨/千克/毫克/大写 T-KG-G）；
+> v1.4 上线打包：双模式精简/原件传输+zlib 压缩+多文件封装+停止按钮+APP 1.4 签名包；§5.1 升级演练要点）（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
+> android-app 子目录原 README/HANDOFF 已删除，移动端内容统一收敛到本文件第 8 节；
+> 另：G2 连续曲率圆角引擎在「G2改造」分支（a8c9834，jz-radius v1.2+基准页+设计文档），未并入 main，打包不含）
 
 ---
 
@@ -192,7 +194,16 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
   `install.ps1` 会替换旧版，卸载入口不变。
 - `uninstall.bat` 仍保留在旧部署目录中（新包不再带它），不影响功能，可用 `一键卸载.bat` 替代。
 
-### 5.1 v1.4 上线打包与升级演练要点（2026-09-08 实测）
+### 5.2 v1.5 上线打包要点（2026-09-09）
+
+- 产物：`deploy/JZToolsHub-v1.5.zip`（约 103MB，2102 条目），version.json=1.5；由 `build-deploy.ps1 -Version "1.5"` 生成。
+- 内容：main 分支 8dbbd43 战果录入优化（入库时间不再展示 / 时间筛选改按战果时间 fields.时间 / 主办人默认空 / 大模型配置 autocomplete 防填充 / 手动录入卡片 / 返回落点修正 / 单位换算修复）。
+- 单位换算修复要点：aggregate_items 重量分支漏乘系数（吨=克 根因）；补毫克/mg 与大写 T/KG/G（单位 lower 归一）；前端克→吨/千克显示换算。
+- 验收：关键文件在包（case-report 前后端、app.js v32）；数据/密钥/__pycache__ 清理干净；install.ps1 与仓库 MD5 一致。
+- 未含：G2 圆角引擎（G2改造 分支，未合并 main）。APP 无变更（沿用 v1.4_lite 签名包）。
+- 后端依赖无新增（无 pip 需求）；升级路径同 5.1（数据根不触碰）。
+
+## 5.1 v1.4 上线打包与升级演练要点（2026-09-08 实测）
 
 **打包产物**（`deploy/`，`build-deploy.ps1 -Version "1.4"` 生成）：
 
