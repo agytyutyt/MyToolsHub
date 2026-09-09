@@ -709,7 +709,7 @@
     state.to = to;
     state.caseNorm = "";
     state.caseName = "";
-    refreshCases().then(function () {
+    refreshCases().catch(function () {}).then(function () {
       refreshRecords();
       refreshSummary();
     });
@@ -734,6 +734,13 @@
     return api("/api/case-report/cases" + (q.length ? "?" + q.join("&") : "")).then(function (data) {
       state.cases = data.cases || [];
       renderCaseList();
+    }).catch(function (e) {
+      // 唯一无兜底的刷新链路：服务未响应/网络异常时保留旧列表并提示，
+      // 避免"清除/应用按钮点了没反应"（筛选状态已清空，服务恢复后点刷新即可）
+      if (e && e.status !== 401) {
+        toast("案件列表加载失败：" + (e.message || "服务未响应"), "err");
+      }
+      throw e;   // 继续向上传递：调用方 then 里的台账/汇总刷新各自有 catch
     });
   }
 
@@ -797,7 +804,7 @@
 
   /* 重建侧边栏后再刷新台账与汇总（保存/删除/改名后用） */
   function syncCaseView() {
-    return refreshCases().then(function () {
+    return refreshCases().catch(function () {}).then(function () {
       refreshRecords();
       refreshSummary();
     });
@@ -1149,7 +1156,7 @@
       state.caseNorm = "";
       state.caseName = "";
       // 重建案件侧边栏与台账/汇总
-      refreshCases().then(function () {
+      refreshCases().catch(function () {}).then(function () {
         refreshRecords();
         refreshSummary();
       });
@@ -1164,7 +1171,7 @@
       state.dept = this.value || "";
       state.caseNorm = "";
       state.caseName = "";
-      refreshCases().then(function () { refreshRecords(); refreshSummary(); });
+      refreshCases().catch(function () {}).then(function () { refreshRecords(); refreshSummary(); });
     });
     // 主办人筛选：手动输入搜索（防抖）
     var userTimer = null;
@@ -1174,7 +1181,7 @@
       state.caseName = "";
       if (userTimer) clearTimeout(userTimer);
       userTimer = setTimeout(function () {
-        refreshCases().then(function () { refreshRecords(); refreshSummary(); });
+        refreshCases().catch(function () {}).then(function () { refreshRecords(); refreshSummary(); });
       }, 300);
     });
 
