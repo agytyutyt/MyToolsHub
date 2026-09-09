@@ -716,10 +716,27 @@
   }
 
   function clearPeriod() {
+    /* 「清除」= 一键重置全部筛选条件：
+       时间（起止）＋ 部门 ＋ 主办人 ＋ 案件名搜索 ＋ 选中案件 ＋ 查看范围（回到「我的战果」）。
+       超管的「全部」范围按钮随之取消激活；输入框控件同步复位。 */
     state.from = "";
     state.to = "";
+    state.dept = "";
+    state.person = "";
+    state.caseSearch = "";
+    state.caseNorm = "";
+    state.caseName = "";
+    state.itemCat = "";          // 汇总类别点击筛选也一并复位
+    state.scope = "mine";
+    state.summaryExpanded = false;
     $("#fromDate").value = "";
     $("#toDate").value = "";
+    $("#userFilter").value = "";
+    $("#caseSearch").value = "";
+    $("#deptFilter").value = "";
+    $$(".scope-btn").forEach(function (b) {
+      b.classList.toggle("active", b.dataset.scope === "mine");
+    });
     applyPeriod();
   }
 
