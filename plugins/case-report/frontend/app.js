@@ -230,6 +230,7 @@
   function onParsed(data) {
     state.currentFields = data.fields || {};
     renderFields(state.currentFields);
+    $("#manualCard").classList.add("hidden");   // 解析与手动录入互斥显示
     $("#resultCard").classList.remove("hidden");
     var badge = $("#methodBadge");
     badge.classList.remove("hidden");
@@ -263,10 +264,7 @@
       key.className = "key";
       key.textContent = k;
       var val = fields[k] == null ? "" : fields[k];
-      // 主办人：解析/兜底未给时默认填当前登录用户姓名
-      if (!val && k === "主办人" && state.user && state.user.name) {
-        val = state.user.name;
-      }
+      // 主办人默认为空：解析结果是什么就填什么，不做当前用户自动填充
       if (k === "主办大队") {
         var sel = document.createElement("select");
         sel.dataset.field = k;
@@ -279,6 +277,7 @@
       var input = document.createElement("input");
       input.dataset.field = k;
       input.value = val;
+      input.autocomplete = "off";   // 浏览器不要对抽取字段做记录/填充
       input.placeholder = k === "抓获人数" ? "如：5" : (k === "涉案价值" ? "如：80万元" : "");
       row.appendChild(key);
       row.appendChild(input);
@@ -319,7 +318,7 @@
     postJSON("/api/case-report/records", body).then(function (data) {
       if (data.duplicate && data.matches && data.matches.length) {
         btn.disabled = false;
-        showMergeDialog(data.matches);
+        showMergeDialog(data.matches, manualMergePick);
         return;
       }
       if (mode === "merge") {
@@ -337,19 +336,106 @@
     });
   }
 
-  /* 同案合并确认：后端检测到规整后案件名已存在时弹出 */
-  function showMergeDialog(matches) {
+  /* 同案合并确认：后端检测到规整后案件名已存在时弹出。
+     handler 可选：默认走解析入库的 doSave；手动录入传入自己的提交回调。 */
+  function showMergeDialog(matches, handler) {
     var m = matches[0] || {};
     var name = m.name || "";
+    var onPick = handler || function (mode, matched) { doSave(mode, matched); };
     var body = "<p class='merge-tip'>检测到台账中已存在相同案件「<b>" + esc(name) + "</b>」（" +
       matches.length + " 条已入库记录，最近一条：" + esc(m.created_at || "") + "）。" +
       "</p><p class='merge-tip'>选择<b>并入</b>后，本次战果归入该案件，战果汇总「涉及 N 起」按案件去重计算；" +
       "选择<b>作为新案件</b>则保留为一条独立台账记录。</p>";
     openDialog("检测到相同案件", body, [
-      { label: "并入该案件", primary: true, handler: function () { closeDialog(); doSave("merge", m); } },
-      { label: "作为新案件保存", handler: function () { closeDialog(); doSave("new"); } },
+      { label: "并入该案件", primary: true, handler: function () { closeDialog(); onPick("merge", m); } },
+      { label: "作为新案件保存", handler: function () { closeDialog(); onPick("new"); } },
       { label: "取消", handler: closeDialog },
     ]);
+  }
+
+  /* ==================== 手动录入（跳过大模型解析，直接填写入库） ==================== */
+  function renderManualFields() {
+    var grid = $("#manualFieldGrid");
+    grid.innerHTML = "";
+    FIELD_KEYS.forEach(function (k) {
+      var row = document.createElement("div");
+      row.className = "field-row";
+      if (k === "缴获物品") row.classList.add("hidden");  // 明细在下方编辑器里填写
+      var key = document.createElement("div");
+      key.className = "key";
+      key.textContent = k;
+      if (k === "主办大队") {
+        var sel = document.createElement("select");
+        sel.dataset.field = k;
+        sel.innerHTML = orgUnitOptions("");
+        row.appendChild(key);
+        row.appendChild(sel);
+        grid.appendChild(row);
+        return;
+      }
+      var input = document.createElement("input");
+      input.dataset.field = k;
+      input.value = "";
+      input.autocomplete = "off";   // 浏览器不要对手动录入字段做记录/填充
+      input.placeholder = k === "抓获人数" ? "如：5"
+        : (k === "涉案价值" ? "如：80万元"
+        : (k === "时间" ? "如：2026年8月20日" : ""));
+      row.appendChild(key);
+      row.appendChild(input);
+      grid.appendChild(row);
+    });
+  }
+
+  function collectManualFields() {
+    var fields = {};
+    $("#manualFieldGrid").querySelectorAll("[data-field]").forEach(function (el) {
+      fields[el.dataset.field] = el.value.trim();
+    });
+    return fields;
+  }
+
+  function submitManual(body) {
+    var btn = $("#manualSaveBtn");
+    btn.disabled = true;
+    postJSON("/api/case-report/records", body).then(function (data) {
+      toast("已入库：" + (data.record.fields["案件名"] || "战果记录"), "ok");
+      $("#manualCard").classList.add("hidden");
+      $("#manualItems").innerHTML = "";
+      syncCaseView();
+      loadCategories();
+    }).catch(function (e) {
+      toast("保存失败：" + e.message, "err");
+    }).then(function () {
+      btn.disabled = false;
+    });
+  }
+
+  // 手动录入的同案合并选择回调（与解析入库的 doSave 对齐）
+  function manualMergePick(mode, matched) {
+    var body = {
+      fields: collectManualFields(),
+      source_text: "",
+      items: collectItemsFrom("#manualItems .item-row"),
+    };
+    if (mode === "merge") {
+      body.merge_mode = "merge";
+      body.merge_case = matched.name;
+    } else {
+      body.merge_mode = "new";
+    }
+    submitManual(body);
+  }
+
+  function saveManualEntry() {
+    var fields = collectManualFields();
+    var has = FIELD_KEYS.some(function (k) { return fields[k]; });
+    if (!has) { toast("请至少填写一项要素", "err"); return; }
+    if (!fields["案件名"]) { toast("案件名为必填项", "err"); return; }
+    submitManual({
+      fields: fields,
+      source_text: "",   // 手动录入无原始报告
+      items: collectItemsFrom("#manualItems .item-row"),
+    });
   }
 
   /* ==================== 数值/战果显示 ==================== */
@@ -531,9 +617,16 @@
         } else {
           var q = fmtNum(r.quantity);
           var unit = esc(r.unit || "");
+          // 显示级单位换算：元→万元；克→吨/千克（后端统一归并为克/元）
           if (r.unit === "元" && r.quantity >= 10000) {
             q = fmtNum(Math.round(r.quantity / 10000 * 100) / 100);
             unit = "万元";
+          } else if (r.unit === "克" && r.quantity >= 1000000) {
+            q = fmtNum(Math.round(r.quantity / 1000000 * 100) / 100);
+            unit = "吨";
+          } else if (r.unit === "克" && r.quantity >= 1000) {
+            q = fmtNum(Math.round(r.quantity / 1000 * 100) / 100);
+            unit = "千克";
           }
           qtyHtml = "<span class='total'>" + q + "</span><span class='meta'>" + unit + "</span>";
         }
@@ -741,9 +834,13 @@
       caseName.textContent = f["案件名"] || ("记录 " + rec.id);
       var time = document.createElement("span");
       time.className = "time";
-      time.textContent = (f["时间"] || "") + " · 入库 " + (rec.created_at || "");
-      title.appendChild(caseName);
-      title.appendChild(time);
+      time.textContent = f["时间"] || "";   // 仅展示战果时间；入库时间不在台账展示
+      if (time.textContent) {
+        title.appendChild(caseName);
+        title.appendChild(time);
+      } else {
+        title.appendChild(caseName);
+      }
       card.appendChild(title);
 
       var chips = document.createElement("div");
@@ -818,7 +915,7 @@
     });
   }
 
-  /* 返回第一条悬浮按钮：台账第一条记录不可见时显示，可见时隐藏；
+  /* 返回悬浮按钮：台账第一条记录不可见时显示，可见时隐藏；
      按钮放在台账卡片外部、靠近卡片右侧 */
   function updateScrollTop() {
     var btn = $("#scrollTopBtn");
@@ -846,6 +943,18 @@
       btn.style.right = "";
     }
     btn.classList.toggle("hidden", !show);
+  }
+
+  /* 返回顶部：滚动到「本地战果台账卡片」与「案件筛选侧栏」齐平的位置。
+     侧栏为 position:sticky（吸附在视口 top:16px），滚动后台账卡片顶部
+     即对齐侧栏顶缘；落点是台账卡片而非其上方的战果汇总卡片。 */
+  function scrollTopFlat() {
+    var ledger = document.getElementById("ledgerCard");
+    if (!ledger) return;
+    var current = window.scrollY || document.documentElement.scrollTop || 0;
+    var top = ledger.getBoundingClientRect().top;
+    var stickyTop = 16;   // 与案件筛选侧栏 sticky top 一致
+    window.scrollTo({ top: Math.max(0, current + top - stickyTop), behavior: "smooth" });
   }
 
   function btn(text, handler, cls) {
@@ -943,7 +1052,7 @@
                "<select data-field='" + esc(k) + "'>" + orgUnitOptions(v) + "</select></div>";
       }
       return "<div class='field-row'><div class='key'>" + esc(k) + "</div>" +
-             "<input data-field='" + esc(k) + "' value='" + v + "' /></div>";
+             "<input data-field='" + esc(k) + "' value='" + v + "' autocomplete='off' /></div>";
     }).join("");
     var srcHtml = "<textarea class='edit-source' id='editSource'>" + esc(rec.source_text || "") + "</textarea>";
     var itemsHtml = "<div id='editItemRows' class='items-editor-list'></div>" +
@@ -1089,18 +1198,12 @@
       toast("正在导出…", "ok");
     });
 
-    // 本地战果台账：当第一条记录滚出可视区时显示「返回第一条」悬浮按钮
+    // 本地战果台账：当第一条记录滚出可视区时显示「返回」悬浮按钮
     var scrollTopBtn = $("#scrollTopBtn");
     if (scrollTopBtn) {
       scrollTopBtn.addEventListener("click", function () {
-        var first = document.querySelector("#recordList .record-card");
-        if (!first) return;
-        // 平滑滚动到第一条记录（旧浏览器回退为直接跳转）
-        try {
-          first.scrollIntoView({ behavior: "smooth", block: "start" });
-        } catch (e) {
-          first.scrollIntoView(true);
-        }
+        // 回到本地战果台账卡片与案件筛选卡片齐平的位置（case-layout 起点）
+        scrollTopFlat();
       });
       var scrollTimer = null;
       window.addEventListener("scroll", function () {
@@ -1110,6 +1213,29 @@
       window.addEventListener("resize", updateScrollTop, false);
     }
     updateScrollTop();
+
+    // 手动录入：展开/收起手动录入卡片（与解析录入互斥显示），字段默认全空
+    var manualBtn = $("#manualBtn");
+    var manualCard = $("#manualCard");
+    var resultCard = $("#resultCard");
+    if (manualBtn && manualCard) {
+      manualBtn.addEventListener("click", function () {
+        resultCard.classList.add("hidden");
+        manualCard.classList.remove("hidden");
+        renderManualFields();
+        if (!$("#manualItems .item-row")) {
+          $("#manualItems").appendChild(buildItemRow({}));
+        }
+        manualCard.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      $("#manualCancelBtn").addEventListener("click", function () {
+        manualCard.classList.add("hidden");
+      });
+      $("#manualAddItem").addEventListener("click", function () {
+        $("#manualItems").appendChild(buildItemRow({}));
+      });
+      $("#manualSaveBtn").addEventListener("click", saveManualEntry);
+    }
 
     // 对话框：点遮罩或按 Esc 关闭
     var dialog = $("#dialog");

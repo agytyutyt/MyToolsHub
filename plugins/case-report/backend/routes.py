@@ -499,20 +499,24 @@ def _record_manageable(user, rec):
 
 
 def _filter_by_period(recs, month, from_, to):
-    """按入库时间（created_at）过滤记录。
+    """按战果时间（fields.时间，即收网/案发时间）过滤记录。
 
     month=YYYY-MM 匹配该月；from / to 为 YYYY-MM-DD（或 YYYY-MM），按自然序比较。
+    「时间」字段经 parser.field_date_key 归一为 YYYY-MM-DD 后比较；
+    解析失败的记录不参与时间筛选匹配（视为无战果时间）。
     """
     out = recs
+    def _akey(r):
+        return parser.field_date_key((r.get("fields") or {}).get("时间"))
     if month:
         m = str(month)[:7]
-        out = [r for r in out if (r.get("created_at") or "").startswith(m)]
+        out = [r for r in out if _akey(r).startswith(m)]
     if from_:
         f = str(from_)[:10]
-        out = [r for r in out if (r.get("created_at") or "")[:10] >= f]
+        out = [r for r in out if _akey(r) and _akey(r) >= f]
     if to:
         t = str(to)[:10]
-        out = [r for r in out if (r.get("created_at") or "")[:10] <= t]
+        out = [r for r in out if _akey(r) and _akey(r) <= t]
     return out
 
 
@@ -676,7 +680,7 @@ def register(app) -> None:
         """跨记录战果汇总：类似物品归为统一类别、数量叠加；
         「涉及 N 起」按规整后的案件名去重（同一案件多条记录只计一起）。
         支持 ?case=<案件名> 仅统计该案件的记录；支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
-        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按战果时间（fields.时间）过滤。
         返回首项为「抓获人数」合计（仅统计有抓获人数字段的记录）。"""
         user = _cr_viewer()
         if user is None:
@@ -742,7 +746,7 @@ def register(app) -> None:
     def cr_cases():
         """既有案件列表（按规整案件名去重、拼音排序），供下拉筛选/入库合并/改案件名选择。
         跟随 ?scope=mine|dept|all 过滤：切到「本部门」时，下拉里出现的就是本部门所有人的案件。
-        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤。"""
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按战果时间（fields.时间）过滤。"""
         user = _cr_viewer()
         if user is None:
             return jsonify({"ok": False, "detail": "未登录或登录已过期"}), 401
@@ -809,7 +813,7 @@ def register(app) -> None:
     def cr_list():
         """本地台账列表（按入库时间倒序），支持 ?case=<案件名> 仅返回该案件的记录；
         支持 ?scope=mine|dept|all（默认 mine）按范围过滤；
-        支持 ?month=YYYY-MM 或 ?from=...&to=... 按入库时间过滤；
+        支持 ?month=YYYY-MM 或 ?from=...&to=... 按战果时间（fields.时间）过滤；
         支持 ?dept=<部门ID或名称>、?user=<用户名/姓名> 按部门/主办人过滤；
         支持 ?item_cat=<类别> 仅返回包含该类别物品的记录。"""
         user = _cr_viewer()
@@ -1014,7 +1018,8 @@ def register(app) -> None:
     def cr_export():
         """按当前筛选条件导出战果台账为 Excel（.xlsx）。
 
-        过滤参数与 /records 一致：scope / case / month / from / to / dept / user。
+        过滤参数与 /records 一致：scope / case / month / from / to / dept / user
+        （month / from / to 均按战果时间 fields.时间 过滤）。
         导出的记录包含：案件名 / 时间 / 主办大队 / 主办人 / 抓获人数 / 缴获物品 /
         缴获明细 / 录入人 / 所属部门 / 入库时间 / 原始报告。
         """

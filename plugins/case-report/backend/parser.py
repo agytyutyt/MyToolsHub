@@ -140,6 +140,37 @@ def normalize_time(text):
     return ""
 
 
+def field_date_key(text):
+    """把「时间」字段值转成 YYYY-MM-DD 机器日期（供战果时间筛选比较）。
+
+    优先复用 normalize_time 的归一化结果；已归一化的「YYYY年M月D日」直接反解。
+    解析失败返回 ""（该记录不参与时间筛选匹配，而不是误判为最小/最大日期）。
+    """
+    if not text:
+        return ""
+    normalized = normalize_time(text)
+    if not normalized:
+        return ""
+    def _int(s):
+        try:
+            return int(s.strip())
+        except (ValueError, AttributeError):
+            return None
+    iy = normalized.find("年")
+    if iy <= 0:
+        return ""
+    y = _int(normalized[max(0, iy - 4):iy])
+    im = normalized.find("月", iy)
+    iday = normalized.find("日", im)
+    if im <= 0 or iday <= 0:
+        return ""
+    m = _int(normalized[iy + 1:im])
+    d = _int(normalized[im + 1:iday])
+    if not (y and m and d and 1 <= m <= 12 and 1 <= d <= 31):
+        return ""
+    return f"{y:04d}-{m:02d}-{d:02d}"
+
+
 def assign_category(name):
     """把物品名映射到统一战果类别（找不到则归「其他」）。"""
     low = name.lower()
@@ -172,8 +203,10 @@ def apply_category_overrides(items, overrides):
 
 
 # 计量单位归并（用于跨记录累加时统一到同一单位）
-_WEIGHT_TO_GRAM = {"克": 1.0, "g": 1.0, "千克": 1000.0, "公斤": 1000.0,
-                   "kg": 1000.0, "斤": 500.0, "两": 50.0, "吨": 1000000.0}
+# 键一律小写：聚合时对记录单位 lower() 后匹配（兼容 G/KG 等大写变体）
+_WEIGHT_TO_GRAM = {"克": 1.0, "g": 1.0, "毫克": 0.001, "mg": 0.001,
+                   "千克": 1000.0, "公斤": 1000.0, "kg": 1000.0,
+                   "斤": 500.0, "两": 50.0, "吨": 1000000.0, "t": 1000000.0}
 _MONEY_TO_YUAN = {"元": 1.0, "块": 1.0, "千元": 1000.0, "万": 10000.0, "万元": 10000.0}
 _FORMAT_UNIT = {"克": "克", "元": "元"}
 
@@ -213,14 +246,18 @@ def aggregate_items(record_items, case_keys=None):
 
     out = []
     for cat, units in buckets.items():
-        if units and all(u2 in _WEIGHT_TO_GRAM for u2 in units):
-            total = sum(u["sum"] for u in units.values())
+        # 单位大小写归一（键存原文、判断用 lower）：G/KG 等变体也要进换算族
+        weight_units = [u2 for u2 in units if u2.lower() in _WEIGHT_TO_GRAM]
+        money_units = [u2 for u2 in units if u2.lower() in _MONEY_TO_YUAN]
+        if units and len(weight_units) == len(units):
+            # 重量族：换算到克累加（v1.0 漏乘系数，吨=克 的 bug 已修复）
+            total = sum(u["sum"] * _WEIGHT_TO_GRAM[u2.lower()] for u2, u in units.items())
             records = set().union(*(u["records"] for u in units.values()))
             unknown = sum(u["unknown"] for u in units.values())
             out.append({"category": cat, "quantity": _qty(total, unknown),
                         "unit": "克", "records": len(records), "unknown": unknown})
-        elif units and all(u2 in _MONEY_TO_YUAN for u2 in units):
-            total = sum(u["sum"] * _MONEY_TO_YUAN[u2] for u2, u in units.items())
+        elif units and len(money_units) == len(units):
+            total = sum(u["sum"] * _MONEY_TO_YUAN[u2.lower()] for u2, u in units.items())
             records = set().union(*(u["records"] for u in units.values()))
             unknown = sum(u["unknown"] for u in units.values())
             out.append({"category": cat, "quantity": _qty(total, unknown),
