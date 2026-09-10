@@ -23,6 +23,8 @@ config/.admin_key
 # 插件本地运行配置（含密钥，勿提交；无密钥的纯字段配置可按需跟踪）
 plugins/character-graph/backend/config.json
 plugins/case-report/backend/config.json
+plugins/file-filter/backend/config.json
+plugins/file-filter/config.json
 
 # 插件运行期用户数据（规范 S-3：backend/data/ 一律不入库）
 plugins/*/backend/data/

@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- 文件过滤器插件（前端 + Python 后端）
+ * 左侧输入区：虚线方框上传 xlsx/xls/csv（≤20MB）+ 过滤模式选择 + 保留字段勾选；
+ * 右侧输出区：过滤结果统计与过滤后文件下载。
+ * 后端接口前缀：/api/file-filter
+ -->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>文件过滤器</title>
+<link rel="stylesheet" href="./style.css?v=2" />
+</head>
+<body>
+  <div class="page">
+    <header class="page-head">
+      <h1>🧹 文件过滤器</h1>
+      <p class="subtitle">上传表格 → 字段过滤（硬过滤 / 大模型匹配）→ 文本脱敏后处理 → 下载过滤后文件</p>
+    </header>
+
+    <!-- 管理员配置面板（仅管理员可见） -->
+    <details class="card config-card" id="cfgCard" hidden>
+      <summary>⚙️ 管理配置（保留字段名单 / 后处理规则 / 大模型）</summary>
+      <div class="cfg-block">
+        <h3>保留字段名单（硬过滤精确匹配；大模型过滤的语义匹配基准）</h3>
+        <div class="chip-editor" id="cfgKeepChips"></div>
+        <div class="chip-add">
+          <input id="cfgKeepInput" type="text" placeholder="输入字段名后回车添加，如：时间" />
+          <button id="cfgKeepAdd" class="btn secondary" type="button">添加</button>
+        </div>
+      </div>
+      <div class="cfg-block">
+        <h3>后处理规则（对表头与单元格做文本替换；如「开始时间」应用规则「开始」后变为「时间」）</h3>
+        <table class="rules-table">
+          <thead>
+            <tr><th>查找内容</th><th>替换为（留空=删除）</th><th>正则</th><th>启用</th><th></th></tr>
+          </thead>
+          <tbody id="cfgRulesBody"></tbody>
+        </table>
+        <button id="cfgRuleAdd" class="btn secondary" type="button">＋ 添加规则</button>
+        <p class="muted">勾选「正则」后查找内容按正则表达式解析（如 <code>\d{11}</code> 匹配手机号）；
+          非法正则会在保存时自动跳过。</p>
+      </div>
+      <div class="cfg-block">
+        <h3>大模型配置（大模型过滤模式使用）</h3>
+        <div class="cfg-grid">
+          <label>API 地址
+            <input id="cfgBaseUrl" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>API Key
+            <input id="cfgApiKey" type="password" placeholder="sk-...（留空表示不修改）" autocomplete="new-password" />
+          </label>
+          <label>模型名称
+            <input id="cfgModel" type="text" placeholder="deepseek-v4-flash" autocomplete="off" spellcheck="false" />
+          </label>
+        </div>
+        <div class="row-actions">
+          <button id="cfgTestBtn" class="btn secondary" type="button">测试连通</button>
+          <button id="cfgSaveBtn" class="btn primary" type="button">保存配置</button>
+          <span id="cfgTestTip" class="tip hidden"></span>
+          <span id="cfgSaveTip" class="tip"></span>
+        </div>
+      </div>
+    </details>
+
+    <div class="layout">
+      <!-- 左侧：输入区 -->
+      <section class="panel">
+        <div class="panel-title">① 上传与设置</div>
+        <div class="card">
+          <div class="dropzone" id="dropzone">
+            <p>📂 点击或拖拽文件到此处</p>
+            <p class="muted">支持 xlsx / xls / csv，不超过 20MB</p>
+          </div>
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
+          <div id="fileInfo" class="file-info hidden"></div>
+        </div>
+        <div class="card">
+          <h2>过滤模式</h2>
+          <label class="radio-row">
+            <input type="radio" name="mode" value="hard" checked />
+            <span><b>硬过滤</b> — 字段名称与预设值精准匹配</span>
+          </label>
+          <label class="radio-row">
+            <input type="radio" name="mode" value="llm" />
+            <span><b>大模型过滤</b> — 通过大模型辅助判断字段的合规性</span>
+          </label>
+          <h2>保留字段</h2>
+          <div id="keepChips" class="keep-chips">
+            <p class="muted">加载中…</p>
+          </div>
+          <div class="row-actions">
+            <button id="filterBtn" class="btn primary" disabled>🧹 开始过滤</button>
+            <button id="resetBtn" class="btn">重置</button>
+            <span id="filterStatus" class="status"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右侧：输出区 -->
+      <section class="panel">
+        <div class="panel-title">② 过滤结果</div>
+        <div class="card" id="resultEmpty">
+          <p class="muted">上传文件并点击「开始过滤」后，这里将展示过滤结果。</p>
+        </div>
+        <div class="card hidden" id="resultCard">
+          <div id="resultStats" class="result-stats"></div>
+          <h2>保留字段</h2>
+          <div id="keptChips" class="chips"></div>
+          <h2>已删除字段</h2>
+          <div id="removedChips" class="chips"></div>
+          <div class="row-actions">
+            <a id="downloadBtn" class="btn primary hidden" href="#" download>⬇️ 下载过滤后文件</a>
+          </div>
+          <p class="muted" id="outNote"></p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="./app.js?v=2"></script>
+</body>
+</html>

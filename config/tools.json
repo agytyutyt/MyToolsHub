@@ -142,6 +142,14 @@
       "enabled": true,
       "order": 6,
       "grant_all": true
+    },
+    {
+      "id": "file-filter",
+      "name": "过滤器",
+      "description": "对表格文件（xlsx/xls/csv）进行脱敏过滤与合规检查：硬过滤、大模型语义匹配过滤、文本/正则后处理，输出过滤后文件供下载。",
+      "category": "office",
+      "enabled": true,
+      "order": 7
     }
   ]
 }

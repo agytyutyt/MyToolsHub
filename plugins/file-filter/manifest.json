@@ -1,0 +1,10 @@
+{
+  "id": "file-filter",
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "icon": "🧹",
+  "accent": "#00897B",
+  "entry": "index.html",
+  "features": ["脱敏过滤", "大模型匹配", "正则后处理", "xlsx/xls/csv"],
+  "form": "source"
+}

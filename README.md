@@ -119,8 +119,9 @@ JZToolsHub/
 │   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
 │   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
 │   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
-│   ├── knowledge-base/       #   插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读，管理员上传 + 多级分类，前端纯 JS 渲染）
-│   └── admin/                #   核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
+│   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读，管理员上传 + 多级分类，前端纯 JS 渲染）
+│   ├── file-filter/          # 插件：过滤器（表格脱敏过滤 + 合规检查：硬过滤/大模型语义匹配过滤/文本与正则后处理）
+│   └── admin/                # 核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
 │       ├── manifest.json
 │       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
 │       └── backend/          #   routes.py：鉴权、后台接口、加密存储、工具访问拦截、requirements.txt
@@ -447,6 +448,27 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 > 前端渲染全在浏览器端（pdf.js / easyofd / mammoth / SheetJS / marked，输出过 DOMPurify），
 > 库文件 vendor 于 `frontend/vendor/`（离线内网可用，见其 VENDOR.md）；
 > 仅提供阅读与复制，无编辑接口、无下载端点。设计文档：`docs/知识库插件-设计文档.md`。
+
+**file-filter 插件后端接口**（过滤器——表格脱敏过滤与合规检查）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/file-filter/status` | 依赖自检（openpyxl / xlrd / requests）+ 大模型是否已配置 |
+| `GET /api/file-filter/config` | 读取管理配置（保留字段名单 / 后处理规则 / LLM 配置，api_key 掩码回传，含 `can_manage`） |
+| `POST /api/file-filter/config` | 保存管理配置（keep_columns / post_rules / llm）—— 仅管理员角色/超管 |
+| `POST /api/file-filter/config/test` | 大模型连通性测试 —— 仅管理员 |
+| `POST /api/file-filter/filter` | 上传表格（multipart：`file` + `mode`(hard/llm) + `columns`?），白名单 xlsx/xls/csv、≤20MB；**异步**返回 `task_id`（硬过滤毫秒级也统一走任务轮询） |
+| `GET /api/file-filter/result/<task_id>` | 轮询过滤任务：`status / kept（字段↔匹配名单）/ removed / replace_count / rows / download`；任务归属校验（创建者或超管，其余 404） |
+| `GET /api/file-filter/download/<task_id>` | 下载过滤后文件（csv→csv、xlsx→xlsx、xls→转 xlsx 输出）；task_id 白名单正则防穿越 |
+| `POST /api/file-filter/apply` | **程序化调用接口（供其他插件）**：JSON `{rows, mode, columns?, post_rules?}`（rows 首行为表头）→ `{rows, kept, removed, replace_count}`；同步执行、不落盘；`columns`/`post_rules` 缺省用管理员配置 |
+
+> 过滤流程：硬过滤按名单规整后精确匹配保留列（去 BOM/空白、全角转半角、忽略大小写）；
+> 大模型过滤把全部表头交由大模型与名单做语义关联判断（如「开始时间」↔「时间」），匹配保留、其余删除；
+> 两种模式后统一执行管理员配置的后处理规则（文本/正则替换，作用于表头与单元格，如「开始时间」应用规则「开始」→「时间」）。
+> 任务产物落数据根目录 `plugins/file-filter/.task_cache/`（TTL 30 分钟自动清理）；
+> 管理配置存 `plugins/file-filter/config.json`（含 API Key，已 gitignore）。
+> 其他插件复用过滤能力请走 `POST /api/file-filter/apply`（B-7 禁止 import 其他插件后端模块）。
+> 设计文档：`docs/过滤器插件-设计文档.md`。
 
 `GET /api/tools` 返回结构示例：
 
@@ -820,6 +842,7 @@ def current_user_or_none():
 | case-report | office | ✅ | ✅ | requests / openpyxl | 输入收网报告 → 大模型抽取要素 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队），跨记录汇总 / 案件筛选 / Excel 导出 |
 | notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
 | knowledge-base | office | ✅ | ✅ | - （纯标准库） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB）并多级分类管理，全员在线只读阅读与复制（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
+| file-filter | office | ✅ | ✅ | openpyxl / xlrd / requests | 过滤器：表格文件（xlsx/xls/csv ≤20MB）脱敏过滤与合规检查——硬过滤（按名单精确匹配保留列）/ 大模型过滤（表头语义关联匹配）/ 文本与正则后处理；左右两栏布局（左上传右下载）；`/apply` 接口供其他插件程序化调用 |
 | admin（核心） | - | ✅ | ✅ | cryptography / Flask | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置；`hidden: true`，始终加载 |
 
 > 各后端插件的完整接口清单见上文「HTTP API」各小节；每个插件的依赖声明在各自 `plugins/<id>/backend/requirements.txt`。

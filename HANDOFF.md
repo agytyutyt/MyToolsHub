@@ -1,7 +1,9 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-09（v1.5 上线打包：战果录入优化——入库时间不再展示/时间筛选改按战果时间 fields.时间/主办人默认空/大模型配置防浏览器自动填充/新增手动录入卡片/返回落点修正/单位换算修复（吨/千克/毫克/大写 T-KG-G）；
+> 最后更新：2026-09-10（新增「过滤器」插件 `plugins/file-filter/`——表格脱敏过滤与合规检查：
+> 硬过滤 / 大模型语义匹配过滤 / 文本与正则后处理；`POST /api/file-filter/apply` 程序化接口供其他插件；
+> 设计文档 `docs/过滤器插件-设计文档.md`，本轮改动未提交）（2026-09-09 v1.5 上线打包：战果录入优化——入库时间不再展示/时间筛选改按战果时间 fields.时间/主办人默认空/大模型配置防浏览器自动填充/新增手动录入卡片/返回落点修正/单位换算修复（吨/千克/毫克/大写 T-KG-G）；
 > v1.4 上线打包：双模式精简/原件传输+zlib 压缩+多文件封装+停止按钮+APP 1.4 签名包；§5.1 升级演练要点）（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
 > android-app 子目录原 README/HANDOFF 已删除，移动端内容统一收敛到本文件第 8 节；
 > 另：G2 连续曲率圆角引擎在「G2改造」分支（a8c9834，jz-radius v1.2+基准页+设计文档），未并入 main，打包不含）
@@ -66,6 +68,7 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 | 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时 |
 | 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
 | 知识库 | `plugins/knowledge-base/` | 前后端一体 | 无第三方（后端纯标准库；渲染库 vendor 在 frontend/vendor/） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB）+ 多级分类树；全员只读在线阅读与复制（pdf.js/easyofd/mammoth/SheetJS/marked 前端渲染，无浏览器控件），`grant_all`；设计文档 `docs/知识库插件-设计文档.md` |
+| 过滤器 | `plugins/file-filter/` | 前后端一体 | openpyxl/xlrd/requests | 表格脱敏过滤与合规检查：硬过滤（名单精确匹配保留列）/ 大模型过滤（表头语义关联，OpenAI 兼容接口）/ 文本与正则后处理；异步任务（ThreadPoolExecutor 2 + TTL 30min + 归属校验）；`POST /apply` 程序化接口供其他插件（JSON rows in/out，不落盘）；设计文档 `docs/过滤器插件-设计文档.md` |
 | 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
 | 战果录入 | `plugins/case-report/` | 前后端一体 | requests | 收网报告→大模型五要素键值对台账（仅大模型解析），缴获物品明细结构化输出、跨记录汇总、主办大队限定一大队/二大队/三大队 |
 | 人物关系立体星图 | `plugins/character-graph/` | 前后端一体 | python-docx/pypdf/requests | 上传文档→LLM 提取人物关系→3D 星点图（后台线程池 + task_id 轮询） |
@@ -333,6 +336,7 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 | character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |
 | trajectory-convert | /api/trajectory-convert | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | .task_cache/（mp4/png/zip）+ backend/config.json（列名） |
 | qr-video-decode | /api/qr-video-decode | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘（data_b64 存任务表） |
+| file-filter | /api/file-filter | ThreadPoolExecutor(2)，TASK_TTL 30min，产物与任务表双清理 | .task_cache/（input/output 临时文件）+ config.json（保留字段名单 / 后处理规则 / LLM）；`POST /apply` 为程序化接口（其他插件复用过滤能力，B-7 合规方式） |
 | info-transfer | /api/info-transfer | ThreadPoolExecutor(2)，TASK_TTL 30min，任务产物与 .task_cache 双清理 | .task_cache/（mp4/png/zip/帧 PNG）+ backend/requirements.txt（qrcode/zfec/opencv/numpy/openpyxl）；无 config.json/prompt.json |
 
 **异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` →

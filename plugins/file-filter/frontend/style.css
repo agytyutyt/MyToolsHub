@@ -1,0 +1,130 @@
+/* 文件过滤器 —— Material Design 风格（与站点主题一致） */
+:root {
+  --primary: #00897b;
+  --primary-dark: #00695c;
+  --primary-bg: #e0f2f1;
+  --bg: #f5f5f5;
+  --card: #ffffff;
+  --text: #202124;
+  --muted: #5f6368;
+  --error: #d93025;
+  --warn: #e8710a;
+  --ok: #188038;
+  --border: #dadce0;
+  --radius: 12px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "Google Sans", "Roboto", "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  padding: 20px;
+  font-size: 14px;
+}
+.page { max-width: 1200px; margin: 0 auto; }
+.page-head h1 { font-size: 20px; font-weight: 600; }
+.subtitle { color: var(--muted); font-size: 13px; margin: 4px 0 16px; }
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  padding: 18px;
+  margin-bottom: 14px;
+}
+.card h2 { font-size: 14px; font-weight: 600; margin: 12px 0 8px; }
+.card h2:first-child { margin-top: 0; }
+.muted { color: var(--muted); font-size: 12px; }
+
+/* 管理配置面板 */
+.config-card { border-left: 4px solid var(--primary); }
+.config-card summary {
+  cursor: pointer; font-weight: 600; font-size: 14px; user-select: none;
+}
+.cfg-block { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.cfg-block h3 { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.cfg-grid label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+input[type="text"], input[type="password"] {
+  font-family: inherit; font-size: 13px; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; outline: none; background: #fff;
+}
+input:focus { border-color: var(--primary); }
+
+/* 芯片编辑器 */
+.chip-editor, .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--primary-bg); color: var(--primary-dark);
+  border-radius: 14px; padding: 3px 10px; font-size: 12px;
+}
+.chip .x { cursor: pointer; font-weight: 700; opacity: .7; }
+.chip .x:hover { opacity: 1; color: var(--error); }
+.chip.off { background: #f1f3f4; color: var(--muted); text-decoration: line-through; }
+.chip-add { display: flex; gap: 8px; margin-top: 8px; }
+.chip-add input { flex: 1; max-width: 280px; }
+
+/* 后处理规则表 */
+.rules-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 12px; }
+.rules-table th, .rules-table td {
+  border: 1px solid var(--border); padding: 6px 8px; text-align: left;
+}
+.rules-table th { background: #f8f9fa; font-weight: 600; }
+.rules-table input[type="text"] { width: 100%; padding: 5px 8px; font-size: 12px; }
+.rules-table .del { color: var(--error); cursor: pointer; font-weight: 700; }
+
+/* 左右布局 */
+.layout { display: flex; gap: 14px; align-items: flex-start; }
+.layout .panel { flex: 1 1 0; min-width: 0; }
+.panel-title {
+  font-size: 13px; font-weight: 700; color: var(--primary-dark);
+  margin-bottom: 8px; letter-spacing: .5px;
+}
+@media (max-width: 900px) { .layout { flex-direction: column; } }
+
+/* 虚线上传框 */
+.dropzone {
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 34px 16px; text-align: center; cursor: pointer; transition: all .15s;
+  color: var(--muted);
+}
+.dropzone:hover, .dropzone.drag { border-color: var(--primary); background: var(--primary-bg); }
+.dropzone p:first-child { font-size: 15px; color: var(--text); }
+.dropzone p:last-child { font-size: 12px; margin-top: 6px; }
+.file-info {
+  margin-top: 10px; padding: 8px 12px; background: var(--primary-bg);
+  border-radius: 8px; font-size: 13px; color: var(--primary-dark);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.file-info .name { font-weight: 600; word-break: break-all; }
+.file-info .rm { cursor: pointer; color: var(--error); font-weight: 700; flex-shrink: 0; }
+
+/* 单选与按钮 */
+.radio-row { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; cursor: pointer; }
+.radio-row input { margin-top: 2px; accent-color: var(--primary); }
+.row-actions { display: flex; gap: 10px; margin-top: 14px; align-items: center; flex-wrap: wrap; }
+button, .btn {
+  font-family: inherit; border: none; border-radius: 8px; padding: 9px 18px;
+  font-size: 13px; cursor: pointer; transition: filter .15s; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+button:disabled, .btn.disabled { opacity: .5; cursor: not-allowed; }
+.primary { background: var(--primary); color: #fff; }
+.primary:not(:disabled):hover { filter: brightness(1.08); }
+.secondary { background: var(--primary-bg); color: var(--primary-dark); }
+.secondary:not(:disabled):hover { filter: brightness(.97); }
+
+/* 状态与结果 */
+.status { font-size: 13px; }
+.status.error { color: var(--error); }
+.status.ok { color: var(--ok); }
+.result-stats { font-size: 13px; line-height: 1.9; }
+.result-stats b { color: var(--primary-dark); }
+.keep-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.keep-chips .chip { cursor: pointer; }
+.tip { font-size: 12px; }
+.tip.ok { color: var(--ok); }
+.tip.err { color: var(--error); }
+.hidden { display: none !important; }
+code { background: #f1f3f4; border-radius: 4px; padding: 0 4px; }
