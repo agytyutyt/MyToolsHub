@@ -533,6 +533,63 @@ body {
 .snackbar.show { opacity: 1; transform: translate(-50%, 0); }
 .snackbar.error { background: var(--danger); }
 
+/* ==================== 旧版格式转换提示 ==================== */
+
+/* 1) 文件卡片"已转换"角标（纯文本，不用 emoji，兼容老版 Chrome） */
+.conv-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  vertical-align: 1px;
+  color: var(--accent-dark);
+  background: var(--accent-light);
+  border: 1px solid rgba(92, 107, 192, 0.35);
+  border-radius: 4px;
+  flex: none;
+}
+
+/* 2) 上传对话框底部说明 */
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+/* 3) 阅读页顶部提示条（可关闭） */
+.reader-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #6b4e00;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-left: 3px solid #ffb300;
+  border-radius: 8px;
+}
+.reader-notice .notice-text { flex: 1; min-width: 0; }
+.reader-notice .notice-close {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #8a6d1f;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.reader-notice .notice-close:hover { background: rgba(255, 179, 0, 0.22); color: #5d4a08; }
+
 /* ==================== 响应式 ==================== */
 @media (max-width: 860px) {
   .lib-layout { flex-direction: column; }

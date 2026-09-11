@@ -26,12 +26,12 @@
   function fmtTime(s) { return (s || "").replace("T", " ").slice(0, 16); }
 
   var snackbarTimer = null;
-  function toast(msg, isError) {
+  function toast(msg, isError, duration) {
     var el = $("snackbar");
     el.textContent = msg;
     el.className = "snackbar show" + (isError ? " error" : "");
     if (snackbarTimer) clearTimeout(snackbarTimer);
-    snackbarTimer = setTimeout(function () { el.className = "snackbar"; }, 2600);
+    snackbarTimer = setTimeout(function () { el.className = "snackbar"; }, duration || 2600);
   }
 
   // ==================== API 封装（401 跳登录） ====================
@@ -70,6 +70,7 @@
     files: [],             // 当前列表
     folded: {},            // 分类折叠状态（持久化到 sessionStorage）
     readerOpen: false,
+    currentFileId: null,   // 当前阅读的文档 id（提示条关闭状态按此记录）
     listScroll: 0
   };
 
@@ -248,9 +249,15 @@
     state.files.forEach(function (f) {
       var label = EXT_LABEL[f.ext] || (f.ext || "?").toUpperCase();
       var summary = (f.summary || "").trim();
+      // 由旧版格式（.doc/.xls）自动转换而来：卡片上打"已转换"角标，悬停显示来源格式
+      var convBadge = f.converted
+        ? '<span class="conv-badge" title="上传时为 .' + esc(f.original_ext || "") +
+          '，已自动转换为 .' + esc(f.ext) + '">已转换</span>'
+        : "";
       html += '<div class="file-card" data-id="' + esc(f.id) + '">' +
         '<div class="file-card-top"><div class="file-icon ext-' + esc(f.ext) + '">' + esc(label) + "</div>" +
-        '<div class="file-main"><div class="file-name" title="' + esc(f.name) + '">' + esc(f.name) + "</div>" +
+        '<div class="file-main"><div class="file-name" title="' + esc(f.name) + '">' + esc(f.name) +
+        convBadge + "</div>" +
         '<div class="file-meta">' + esc(fmtSize(f.size)) + " · " + esc(f.created_by_name || f.created_by || "-") +
         " · " + esc(fmtTime(f.created_at)) + "</div></div>" +
         (state.canManage
@@ -432,7 +439,7 @@
       openModal("上传文档",
         '<div class="form-row"><label class="form-label">支持 PDF / OFD / Word / Excel / Markdown / 文本，≤20MB</label></div>' +
         '<div class="form-row"><div id="m-drop" class="dropzone">' +
-        '<input id="m-file" type="file" accept=".pdf,.ofd,.docx,.xlsx,.xls,.csv,.md,.markdown,.txt" hidden>' +
+        '<input id="m-file" type="file" accept=".pdf,.ofd,.docx,.doc,.xlsx,.xls,.csv,.md,.markdown,.txt" hidden>' +
         '<div class="dropzone-inner"><span class="dropzone-icon">' +
         '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>' +
         '</span><div class="dropzone-text">拖动文件到此处，或 <b>点击选择文件</b></div>' +
@@ -440,7 +447,8 @@
         '<div class="form-row"><label class="form-label">展示名称（默认取文件名）</label>' +
         '<input id="m-name" class="input" maxlength="80"></div>' +
         '<div class="form-row"><label class="form-label">保存到分类</label>' +
-        '<select id="m-cat" class="select">' + catOptions(state.currentCat === "all" ? "" : state.currentCat, true) + "</select></div>",
+        '<select id="m-cat" class="select">' + catOptions(state.currentCat === "all" ? "" : state.currentCat, true) + "</select></div>" +
+        '<div class="form-hint">旧版 .doc / .xls 会自动转换为 .docx / .xlsx 后保存（仅保留文字与表格，样式/图片不迁移）。</div>',
         function () {
           var input = $("m-file");
           if (!input.files || !input.files[0]) throw new Error("请选择要上传的文件");
@@ -454,7 +462,13 @@
           return api("POST", "/files", { body: fd }).then(function (data) {
             $("modal-ok").disabled = false;
             closeModal();
-            toast("上传成功");
+            // 服务端转换过旧版格式时给出明确提示（含原格式 → 新格式）
+            if (data && data.converted_from) {
+              toast("上传成功：已自动将 ." + data.converted_from + " 转换为 ." +
+                    (data.item && data.item.ext ? data.item.ext : ""), false, 3600);
+            } else {
+              toast("上传成功");
+            }
             return loadFiles();
           }).catch(function (e) {
             $("modal-ok").disabled = false;
@@ -529,18 +543,44 @@
   }
 
   // ==================== 阅读视图切换 ====================
+  // 转换提示条：展示"该文档由旧版格式自动转换而来"，用户可关闭；
+  // 关闭状态存于内存（同一次会话内不再重复弹出），不落本地存储（每次打开仍是新会话观感）。
+  var noticeClosed = {};
+
+  function showReaderNotice(f) {
+    var box = $("reader-notice");
+    if (!f || !f.converted || noticeClosed[f.id]) {
+      box.className = "reader-notice hidden";
+      return;
+    }
+    var from = (f.original_ext || "").toUpperCase();
+    var to = (f.ext || "").toUpperCase();
+    $("reader-notice-text").textContent =
+      "本文档由旧版 ." + (f.original_ext || "") + " 自动转换为 ." + (f.ext || "") +
+      "，" + from + " → " + to + "；仅保留正文文字与表格，原样式、图片未迁移。";
+    box.className = "reader-notice";
+  }
+
+  function hideReaderNotice() {
+    if (state.currentFileId) noticeClosed[state.currentFileId] = true;
+    $("reader-notice").className = "reader-notice hidden";
+  }
+
   function openReader(fileId) {
     var f = null;
     state.files.forEach(function (x) { if (x.id === fileId) f = x; });
     if (!f) return;
     state.listScroll = window.pageYOffset || 0;
     state.readerOpen = true;
+    state.currentFileId = fileId;
     $("view-list").className = "view hidden";
     $("view-reader").className = "view";
     // 文件信息头（徽标 + 标题）展示在底部胶囊工具条
     $("dock-ext").textContent = EXT_LABEL[f.ext] || (f.ext || "").toUpperCase();
     $("dock-ext").className = "badge ext-" + f.ext;
     $("dock-title").textContent = f.name;
+    // 转换来源提示条：仅对 .doc/.xls 自动转换的文档显示（本次会话内关闭过则不再弹）
+    showReaderNotice(f);
     $("btn-copy").disabled = true;
     $("reader-pager").className = "pager hidden";
     window.KBReader.render(f, {
@@ -568,9 +608,11 @@
 
   function closeReader() {
     state.readerOpen = false;
+    state.currentFileId = null;
     window.KBReader.destroy();
     $("view-reader").className = "view hidden";
     $("view-list").className = "view";
+    $("reader-notice").className = "reader-notice hidden";
     $("reader-status").className = "reader-status hidden";
     $("reader-container").innerHTML = "";
     $("btn-copy").title = "复制";
@@ -596,6 +638,7 @@
 
     // 返回 / 复制 / 翻页 / 缩放（阅读器接口由 reader.js 挂到 window.KBReader）
     $("btn-back").onclick = closeReader;
+    $("btn-notice-close").onclick = hideReaderNotice;
     $("btn-copy").onclick = function () {
       if (window.KBReader && KBReader.copy) KBReader.copy();
     };

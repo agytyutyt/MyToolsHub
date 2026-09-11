@@ -1,2 +1,12 @@
-# 知识库插件后端：纯 Python 标准库实现（json / uuid / threading），无第三方依赖。
-# 文档解析渲染全部由前端 vendor/ 下的纯 JS 库完成（见 frontend/vendor/VENDOR.md）。
+# 知识库插件后端依赖
+#
+# 说明：
+# - 核心功能（浏览分类 / 列表 / 内联读取）为纯 Python 标准库实现（json / uuid / threading），
+#   文档渲染全部由前端 vendor/ 下的纯 JS 库完成（见 frontend/vendor/VENDOR.md）。
+# - 下列依赖仅用于「旧版格式自动转换」：上传 .doc / .xls 时服务端转为 .docx / .xlsx。
+#   任一缺失时插件其余功能不受影响，仅该格式的自动转换不可用（页面明确提示，
+#   见 GET /api/knowledge-base/status 的 convert_legacy 字段）。
+openpyxl>=3.1     # .xls → .xlsx（写目标工作簿）
+xlrd>=2.0         # .xls → .xlsx（读旧版 BIFF 工作表）
+python-docx>=1.1  # .doc → .docx（重建文档）
+olefile>=0.46     # .doc → .docx（读 OLE2 复合文档）

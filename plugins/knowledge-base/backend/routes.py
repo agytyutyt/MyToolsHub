@@ -4,6 +4,9 @@
 - 管理员角色（role-admin）/超级管理员可上传 PDF / OFD / Word / Excel / Markdown /
   纯文本等文档，落盘到数据根目录 plugins/knowledge-base/data/files/
   （服务端生成 ID 重命名，SEC-3），并支持多级分类树管理（新建 / 改名 / 移动 / 删除）；
+- **旧版格式自动转换**：上传 `.doc` / `.xls` 时先由服务端转换为 `.docx` / `.xlsx`
+  再落盘（见 doc_convert.py），库内只保留现代格式；原格式记于 `original_ext` 字段，
+  前端据此在页面提示"已自动转换"。转换依赖缺失或文件损坏时返回 4xx 明确提示，不 500；
 - 全体登录用户可浏览分类树与文件列表，并经 /files/<id>/raw 内联读取文件内容
   供前端纯 JS 渲染（pdf.js / ofd.js / mammoth / SheetJS / marked，无浏览器控件）；
 - 本插件定位为"只读知识库"：不提供编辑接口、不提供附件下载（attachment）端点，
@@ -12,7 +15,8 @@
 数据持久化（规范 9.1/9.2）：
 - data/categories.json  分类树（单库文件）
 - data/files.json       文件元数据索引（单库文件）
-- data/files/<id>.<ext> 上传的原始文件（<id> 匹配 ^[A-Za-z0-9_-]+$，SEC-1）
+- data/files/<id>.<ext> 上传的文件（<id> 匹配 ^[A-Za-z0-9_-]+$，SEC-1；
+                        旧版格式保存的是**转换后**的 docx/xlsx）
 - 分类与文件记录均含 created_by / created_by_name / unit_id / department_id
   四个归属字段，一律取自服务端会话、禁止从请求体接收（铁律一）；
   阅读为全站公共资源，列表不做单位/部门过滤（设计文档 §3.3）。
@@ -42,6 +46,11 @@ except Exception:  # 主应用未提供日志辅助时兜底（理论上不会�
 
 import jztools_data
 
+try:
+    from . import doc_convert as _doc_convert
+except ImportError:  # 插件以脚本方式加载时的兜底（无包上下文）
+    import doc_convert as _doc_convert
+
 DATA_DIR = jztools_data.get_data_root_dir("plugins", "knowledge-base", "data")
 FILES_DIR = jztools_data.get_data_root_dir("plugins", "knowledge-base", "data", "files")
 API_PREFIX = "/api/knowledge-base"
@@ -57,8 +66,13 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024    # 20MB（SEC-3 大小上限）
 MAX_CATEGORIES = 200                   # 分类总量上限（防滥用）
 MAX_FILES = 2000                       # 文件总量上限（防滥用）
 
-# 上传扩展名白名单（SEC-3；.doc 不支持在线渲染，直接拒绝并提示）
-ALLOWED_EXTS = {"pdf", "ofd", "docx", "xlsx", "xls", "md", "markdown", "txt", "csv"}
+# 上传扩展名白名单（SEC-3）
+# 其中 doc / xls 为旧版二进制格式，服务端会先转为 docx / xlsx 再落盘（见 doc_convert.py），
+# 库内只保留现代格式，前端渲染链路无需为老格式引入额外渲染库。
+ALLOWED_EXTS = {"pdf", "ofd", "docx", "xlsx", "xls", "doc", "md", "markdown", "txt", "csv"}
+
+# 需要服务端转换的旧版格式 → 目标格式
+LEGACY_CONVERT = {"doc": "docx", "xls": "xlsx"}
 
 # raw 端点 mimetype（前端一律 fetch 字节流交渲染器，mimetype 仅供调试）
 EXT_MIME = {
@@ -67,6 +81,7 @@ EXT_MIME = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "xls": "application/vnd.ms-excel",
+    "doc": "application/msword",
     "md": "text/markdown",
     "markdown": "text/markdown",
     "txt": "text/plain",
@@ -203,6 +218,10 @@ def _file_brief(rec):
         "ext": rec.get("ext", ""),
         "size": rec.get("size", 0),
         "category_id": rec.get("category_id"),
+        # original_ext：原始上传格式（转换过的旧格式才有值，如 doc / xls）
+        # converted：是否由服务端自动转换而来（前端据此显示"已转换"提示）
+        "original_ext": rec.get("original_ext"),
+        "converted": bool(rec.get("original_ext")),
         "created_by": rec.get("created_by", ""),
         "created_by_name": rec.get("created_by_name", ""),
         "created_at": rec.get("created_at", ""),
@@ -217,8 +236,18 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/status")
     def kb_status():
-        """依赖自检：后端纯标准库实现，恒可用（B-4）。"""
-        return jsonify({"ok": True, "dependencies": {}})
+        """依赖自检（B-4）。
+
+        - 核心功能（浏览/渲染现代格式）纯标准库实现，恒可用；
+        - 旧版格式转换（.doc→.docx / .xls→.xlsx）依赖 openpyxl/xlrd/python-docx/olefile，
+          缺失时仅"自动转换"能力不可用，插件其余功能不受影响（优雅降级）。
+        """
+        deps = _doc_convert.availability()
+        return jsonify({
+            "ok": True,
+            "dependencies": deps,
+            "convert_legacy": all(deps.values()),
+        })
 
     @app.get(f"{API_PREFIX}/config")
     def kb_config():
@@ -400,8 +429,6 @@ def register(app) -> None:
         if not ext:
             return jsonify({"ok": False, "error": "无法识别文件类型（缺少扩展名）"}), 415
         if ext not in ALLOWED_EXTS:
-            if ext == "doc":
-                return jsonify({"ok": False, "error": "暂不支持旧版 .doc，请用 Word 另存为 .docx 后上传"}), 415
             return jsonify({"ok": False, "error": f"暂不支持 .{ext} 格式（支持：PDF/OFD/Word/Excel/Markdown/文本）"}), 415
 
         # 大小校验（SEC-3）：先查 Content-Length，再流式读取硬上限+1 字节防虚报
@@ -412,6 +439,24 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "文件超过 20MB 上限"}), 413
         if not blob:
             return jsonify({"ok": False, "error": "文件内容为空"}), 400
+
+        # 旧版格式（.doc / .xls）→ 服务端转换为 docx / xlsx 后再落盘。
+        # 转换失败一律 4xx 明确提示（规范 B-4：缺依赖/坏文件都不得 500）。
+        original_ext = None
+        if ext in LEGACY_CONVERT:
+            try:
+                converted = _doc_convert.convert_legacy(ext, blob)
+            except _doc_convert.ConvertError as e:
+                return jsonify({"ok": False, "error": str(e)}), 422
+            except Exception:
+                return jsonify({"ok": False, "error": f".{ext} 转换失败，请尝试另存为 "
+                                                     f".{LEGACY_CONVERT[ext]} 后上传"}), 500
+            if not converted:
+                return jsonify({"ok": False, "error": f".{ext} 转换失败（未产生有效文件）"}), 500
+            new_blob, new_ext = converted
+            if len(new_blob) > MAX_UPLOAD_BYTES:
+                return jsonify({"ok": False, "error": "文件转换后超过 20MB 上限，无法保存"}), 413
+            original_ext, blob, ext = ext, new_blob, new_ext
 
         with _LOCK:
             fstore = _load_store(_files_file())
@@ -434,6 +479,8 @@ def register(app) -> None:
                 "original_name": os.path.basename(upload.filename),
                 "ext": ext,
                 "size": len(blob),
+                # 服务端自动转换来源（None 表示原生格式，未做转换）
+                "original_ext": original_ext,
                 "category_id": category_id or None,
                 # 归属四字段：来源为会话（规范 9.2 铁律一）
                 "created_by": user.get("username", ""),
@@ -445,7 +492,10 @@ def register(app) -> None:
             }
             fstore["files"].append(rec)
             _save_store(_files_file(), fstore)
-        return jsonify({"ok": True, "id": fid, "item": _file_brief(rec)})
+        resp = {"ok": True, "id": fid, "item": _file_brief(rec)}
+        if original_ext:
+            resp["converted_from"] = original_ext   # 前端据此提示"已自动转换"
+        return jsonify(resp)
 
     @app.put(f"{API_PREFIX}/files/<fid>")
     def kb_file_update(fid):
