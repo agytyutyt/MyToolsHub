@@ -79,6 +79,10 @@ _TEMPLATE_SYNC = [
      ("plugins", "case-report", "config.json"), "ensure-keys"),
     (("plugins", "character-graph", "backend", "config.json"),
      ("plugins", "character-graph", "config.json"), "ensure-keys"),
+    # 轨迹速写：配置含保留字段名单 / 列映射 / 分析阈值 / 报告文案，
+    # 均为管理员可在插件页自定义的值 → ensure-keys（只补模板新增字段，不覆盖用户设置）。
+    (("plugins", "trajectory-sketch", "backend", "config.json"),
+     ("plugins", "trajectory-sketch", "config.json"), "ensure-keys"),
 ]
 
 # 应用版本状态文件：数据根目录 config/.app_state.json（记录上次启动的应用版本，

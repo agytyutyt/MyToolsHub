@@ -1,7 +1,12 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-10（新增「过滤器」插件 `plugins/file-filter/`——表格脱敏过滤与合规检查：
+> 最后更新：2026-09-11（新增「轨迹速写」插件 `plugins/trajectory-sketch/`——Excel 轨迹表 →
+> 调用「过滤器」插件完成字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析 → 速写报告；
+> 内置**零依赖可插拔分析引擎** `backend/engine/`（纯标准库，参考并逐项对拍 `D:\SQLRewrite` 的 v2：
+> 停留点 3 / 出行段 4，净位移·直线度·回访·判定完全一致）；设计文档
+> `docs/轨迹速写插件-设计文档.md`，插件 README 在插件目录内，本轮改动未提交）
+> （2026-09-10 新增「过滤器」插件 `plugins/file-filter/`——表格脱敏过滤与合规检查：
 > 硬过滤 / 大模型语义匹配过滤 / 文本与正则后处理；`POST /api/file-filter/apply` 程序化接口供其他插件；
 > 设计文档 `docs/过滤器插件-设计文档.md`，本轮改动未提交）（2026-09-09 v1.5 上线打包：战果录入优化——入库时间不再展示/时间筛选改按战果时间 fields.时间/主办人默认空/大模型配置防浏览器自动填充/新增手动录入卡片/返回落点修正/单位换算修复（吨/千克/毫克/大写 T-KG-G）；
 > v1.4 上线打包：双模式精简/原件传输+zlib 压缩+多文件封装+停止按钮+APP 1.4 签名包；§5.1 升级演练要点）（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
@@ -59,6 +64,9 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
   XlsxWriter/Zlib 还原、卡片打开、版本 1.4）。
 - 工作区剩余未提交：`install.ps1` 桌面快捷方式判空修复、`HANDOFF.md` 本节更新、
   `app/build.gradle.kts`（APP 版本 1.4 + release 签名）、`release.keystore`（APP 签名密钥）。
+  2026-09-11 追加未提交：`plugins/trajectory-sketch/`（新插件整目录）、
+  `docs/轨迹速写插件-设计文档.md`、`config/tools.json` 与数据根目录副本（登记新工具）、
+  `jztools_data.py` 与 `install.ps1`（新增插件配置模板同步登记）、`README.md`、本文件。
 - 打包产物（不入库，gitignore）：`deploy/JZToolsHub-v1.4.zip`、`deploy/InfoParse-v1.4.apk`。
 
 ## 3. 内置插件一览
@@ -69,6 +77,7 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 | 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
 | 知识库 | `plugins/knowledge-base/` | 前后端一体 | 无第三方（后端纯标准库；渲染库 vendor 在 frontend/vendor/） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB）+ 多级分类树；全员只读在线阅读与复制（pdf.js/easyofd/mammoth/SheetJS/marked 前端渲染，无浏览器控件），`grant_all`；设计文档 `docs/知识库插件-设计文档.md` |
 | 过滤器 | `plugins/file-filter/` | 前后端一体 | openpyxl/xlrd/requests | 表格脱敏过滤与合规检查：硬过滤（名单精确匹配保留列）/ 大模型过滤（表头语义关联，OpenAI 兼容接口）/ 文本与正则后处理；异步任务（ThreadPoolExecutor 2 + TTL 30min + 归属校验）；`POST /apply` 程序化接口供其他插件（JSON rows in/out，不落盘）；设计文档 `docs/过滤器插件-设计文档.md` |
+| 轨迹速写 | `plugins/trajectory-sketch/` | 前后端一体 | openpyxl/xlrd/requests | Excel 轨迹表 → 调「过滤器」`/apply` 做字段过滤（默认硬过滤，开关切大模型辅助）→ 轨迹分析（地点簇/自适应停留点/出行段）→ 速写报告（页内 + 5 sheet Excel）；**分析引擎 `backend/engine/` 为零依赖可插拔包**（纯标准库、零 Flask 依赖、算法版本走 registry），对拍 `D:\SQLRewrite` v2 逐项一致；两段式流程（上传即字段自检 → 确认后异步分析）；`/upload` 同步、`/analyze` 异步（线程池 2 + TTL 30min + 归属校验）；**非超管需同时拥有「过滤器」权限**；设计文档 `docs/轨迹速写插件-设计文档.md` |
 | 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
 | 战果录入 | `plugins/case-report/` | 前后端一体 | requests | 收网报告→大模型五要素键值对台账（仅大模型解析），缴获物品明细结构化输出、跨记录汇总、主办大队限定一大队/二大队/三大队 |
 | 人物关系立体星图 | `plugins/character-graph/` | 前后端一体 | python-docx/pypdf/requests | 上传文档→LLM 提取人物关系→3D 星点图（后台线程池 + task_id 轮询） |
@@ -319,6 +328,32 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
     monkeypatch `get_base_dir/get_data_root`；不要在未隔离状态下对真实数据根目录做版本变更测试。
 11. **PowerShell 里跑含引号/花括号的 `python -c "..."` 内联脚本极易翻车**（引号被 PS 重新解释）；
     复杂断言先写到临时 .py 文件再执行（README/HANDOFF 文档自身的校验脚本也建议这么干）。
+12. **Flask 视图函数名全局唯一 —— 插件路由函数必须带插件前缀**（2026-09-11 实测）。
+    插件的 `register(app)` 直接往同一个 app 上挂路由，Flask 以 `view_func.__name__` 作为 endpoint，
+    因此两个插件各写一个 `def status():` 就会在启动时抛
+    `AssertionError: View function mapping is overwriting an existing endpoint function: status`
+    （轨迹速写的 `def status()` 与 file-filter 的同名函数撞车，插件整体加载失败）。
+    **约定：插件内路由函数一律加插件前缀**（如 `ts_status` / `ts_upload` / `ts_analyze`），
+    或显式传 `endpoint="<插件id>_<动作>"`。新增插件后务必重启服务并确认
+    `app.logger` 出现「已注册后端插件：<id>」。
+13. **Werkzeug ≥ 2.3 的 test_client 会忽略手写的 Cookie 头**（2026-09-11 实测）。
+    插件之间走"进程内派发"复用彼此接口时（如轨迹速写调 file-filter 的 `/apply`），
+    若用 `test_client().post(path, headers={"Cookie": cookie})` 或
+    `environ_overrides={"HTTP_COOKIE": cookie}` 传递会话，**两种写法都会被忽略**
+    （客户端用自带 cookie jar 重写 HTTP_COOKIE），内部请求变成匿名 → 对方返回 401。
+    唯一可靠做法是逐条塞进 jar：`client.set_cookie(name, value, domain="localhost")`
+    （见 `plugins/trajectory-sketch/backend/filter_bridge.py` 的 `_client_with_session`）。
+14. **跨项目复用算法必须对齐"计量口径"，否则对拍差一个采样点**（2026-09-11 实测）。
+    把 `D:\SQLRewrite` 的 v2 算法移植到插件（pandas/numpy → 纯标准库）时踩了三处隐式口径差：
+    ① 球面距离地球半径取 **6378137**（不是平均半径 6371008.8）且结果 **`round()` 取整**，
+    否则停留窗口的 `<= D_thr` 判定会在边界翻转；
+    ② **地点簇必须建在"清洗后未去重的行"上**（质心按上报次数加权、转移边按真实切换次数统计），
+    用去重后的点建簇会让质心偏移、停留点边界差 1 个点；
+    ③ 数据质量报告的"采样间隔中位"**含 0 间隔**，而 T_thr 推导用的是**有效间隔（Δt>0）**中位数，
+    两者本就不同、不可混用。对齐后与上游 `output/v2/` 逐项一致（99 点 / 34 簇 / 噪声 610m /
+    D_thr 800m / T_thr 19.7min / 停留 3 / 出行 4，净位移·累计位移·直线度·回访·判定全等）。
+    **另注**：上游 `output/v2/` 是用 git 提交版样本生成的，仓库里的 `demoData_real.xlsx` 已被换过
+    （号码从 15728345997 变为 15700000007），对拍时用 `git show <commit>:demoData_real.xlsx` 取旧版才可比。
 
 ## 7.5 插件后端速查表（改哪个插件先看这里）
 
@@ -337,6 +372,7 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 | trajectory-convert | /api/trajectory-convert | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | .task_cache/（mp4/png/zip）+ backend/config.json（列名） |
 | qr-video-decode | /api/qr-video-decode | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘（data_b64 存任务表） |
 | file-filter | /api/file-filter | ThreadPoolExecutor(2)，TASK_TTL 30min，产物与任务表双清理 | .task_cache/（input/output 临时文件）+ config.json（保留字段名单 / 后处理规则 / LLM）；`POST /apply` 为程序化接口（其他插件复用过滤能力，B-7 合规方式） |
+| trajectory-sketch | /api/trajectory-sketch | ThreadPoolExecutor(2)，TASK_TTL 30min，上传暂存与产物双清理 | .task_cache/（`<staged_id>_upload.<ext>` 原始上传件 + `<task_id>_report.xlsx` 报告）+ config.json（保留字段名单 / 列映射 / 分析阈值 / 报告文案，无密钥）；引擎在 `backend/engine/`（纯标准库，`selftest.py` 可独立跑） |
 | info-transfer | /api/info-transfer | ThreadPoolExecutor(2)，TASK_TTL 30min，任务产物与 .task_cache 双清理 | .task_cache/（mp4/png/zip/帧 PNG）+ backend/requirements.txt（qrcode/zfec/opencv/numpy/openpyxl）；无 config.json/prompt.json |
 
 **异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` →

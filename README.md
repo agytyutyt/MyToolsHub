@@ -121,6 +121,7 @@ JZToolsHub/
 │   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
 │   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读，管理员上传 + 多级分类，前端纯 JS 渲染）
 │   ├── file-filter/          # 插件：过滤器（表格脱敏过滤 + 合规检查：硬过滤/大模型语义匹配过滤/文本与正则后处理）
+│   ├── trajectory-sketch/    # 插件：轨迹速写（Excel 轨迹表 → 调用过滤器做字段过滤 → 轨迹分析 → 速写报告）
 │   └── admin/                # 核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
 │       ├── manifest.json
 │       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
@@ -469,6 +470,32 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 > 管理配置存 `plugins/file-filter/config.json`（含 API Key，已 gitignore）。
 > 其他插件复用过滤能力请走 `POST /api/file-filter/apply`（B-7 禁止 import 其他插件后端模块）。
 > 设计文档：`docs/过滤器插件-设计文档.md`。
+
+**trajectory-sketch 插件后端接口**（轨迹速写——Excel 轨迹表 → 字段过滤 → 轨迹分析 → 速写报告）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/trajectory-sketch/status` | 依赖自检（openpyxl / xlrd / requests）+ **过滤器插件可用性** + 算法版本 + 配置提醒 |
+| `GET /api/trajectory-sketch/config` | 读取配置（保留字段名单 / 列映射 / 分析阈值 / 报告文案；含保留字段**别名展开明细**与 `can_manage`） |
+| `POST /api/trajectory-sketch/config` | 保存配置 —— 仅管理员角色/超管 |
+| `POST /api/trajectory-sketch/upload` | multipart `file`（xlsx/xls/csv ≤20MB）→ 暂存原始件 + 调用过滤器插件做**硬过滤预演** + 字段自检；**同步**返回 `{staged_id, filter{kept,removed,rows}, schema{matched,missing_required,can_analyze}, preview, llm_configured}` |
+| `POST /api/trajectory-sketch/analyze` | JSON `{staged_id, mode}`（mode=`hard`/`llm`）→ **异步**返回 `task_id`；前置校验：自检通过、保留名单未变更、llm 模式需过滤器插件已配置大模型 |
+| `GET /api/trajectory-sketch/result/<task_id>` | 轮询 `{status(pending/running/done/error), step, quality, stays, trips, report, clusters, schema, filter, warnings, download}`；任务归属校验（创建者/超管，其余 404） |
+| `GET /api/trajectory-sketch/download/<task_id>` | 下载速写报告 `.xlsx`（5 sheet：速写报告 / 速写摘要 / 停留点 / 出行段 / 数据质量）；task_id 白名单正则防穿越 |
+
+> **流程**：① 上传即做**字段自检**（用过滤器插件对真实表头做硬过滤预演，回显"必需列命中了哪个表头"、
+> 保留/删除字段、过滤后数据预览）；② 用户确认后可切换「大模型辅助判断」开关（默认硬过滤）；
+> ③ 后台线程池执行「调过滤器插件 `/apply` → 轨迹分析引擎 → 写报告工作簿」；④ 轮询取结果并下载。
+> **过滤字段由本插件自己的配置决定**（`filter.keep_columns`，可写规范列名或中文别名，调用前自动
+> 展开为该规范列的**全部别名**再做精确匹配），与过滤器插件的名单解耦。
+> **轨迹分析引擎为可插拔独立包**（`backend/engine/`）：纯 Python 标准库、零 Flask/框架依赖，
+> 输入「过滤后的二维表 + 参数」、输出纯 JSON 结果；算法版本经注册表挂载（当前 `v2`），
+> 后续算法更新只需在 `engine/algorithms/` 下新增版本目录并注册，**不动路由与前端**。
+> 算法参考 `D:\SQLRewrite` 的 v2（基站工参适配：地点簇 → 自适应停留点 → 出行段），
+> 在同一份样本上与其输出**逐项一致**（停留点 3 / 出行段 4，净位移·直线度·回访·判定全部吻合）。
+> 数据落数据根目录 `plugins/trajectory-sketch/`（`config.json` + `.task_cache/`，TTL 30 分钟）；
+> **非超管需同时拥有「轨迹速写」与「过滤器」两个工具权限**（过滤动作经由过滤器插件完成）。
+> 设计文档：`docs/轨迹速写插件-设计文档.md`。
 
 `GET /api/tools` 返回结构示例：
 
@@ -843,6 +870,7 @@ def current_user_or_none():
 | notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
 | knowledge-base | office | ✅ | ✅ | - （纯标准库） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB）并多级分类管理，全员在线只读阅读与复制（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
 | file-filter | office | ✅ | ✅ | openpyxl / xlrd / requests | 过滤器：表格文件（xlsx/xls/csv ≤20MB）脱敏过滤与合规检查——硬过滤（按名单精确匹配保留列）/ 大模型过滤（表头语义关联匹配）/ 文本与正则后处理；左右两栏布局（左上传右下载）；`/apply` 接口供其他插件程序化调用 |
+| trajectory-sketch | office | ✅ | ✅ | openpyxl / xlrd / requests | 轨迹速写：上传原始轨迹表（Excel）→ 调用「过滤器」插件做字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析（地点簇 / 自适应停留点 / 出行段）→ 速写报告（页内预览 + 5 sheet Excel）；分析引擎为零依赖可插拔包（纯标准库），非超管需同时拥有「过滤器」权限 |
 | admin（核心） | - | ✅ | ✅ | cryptography / Flask | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置；`hidden: true`，始终加载 |
 
 > 各后端插件的完整接口清单见上文「HTTP API」各小节；每个插件的依赖声明在各自 `plugins/<id>/backend/requirements.txt`。
@@ -1160,6 +1188,7 @@ powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.3.6"
   | `config/tools.json` → `config/tools.json` | **合并**：新分类/新工具追加，保留用户启停、排序、自定义字段 |
   | `plugins/case-report/backend/config.json` → `plugins/case-report/config.json` | **补键**：仅补模板新增字段，保留用户 LLM 配置（api_key 等） |
   | `plugins/character-graph/backend/config.json` → `plugins/character-graph/config.json` | **补键**：同上 |
+  | `plugins/trajectory-sketch/backend/config.json` → `plugins/trajectory-sketch/config.json` | **补键**：同上（保留管理员自定义的保留字段名单 / 列映射 / 阈值 / 报告文案） |
 
 > 用户数据（`admin.json`、`.admin_key`、插件 `data/`、日志）绝不参与模板同步，更新不会丢失。
 > **新增插件需同步模板时**，在 `jztools_data.py` 的 `_TEMPLATE_SYNC` 与 `install.ps1` 的
@@ -1197,6 +1226,10 @@ powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.3.6"
 | 静态二维码扫描报"缺少时间/经纬度" | 若为多张静态二维码中的一张，其内容是该段的 JSON 子集，可导入地图标点查看对应片段；完整轨迹请用「二维码视频流」模式 |
 | 地图标点空白/地图不显示 | 在「⚙️ 配置」中填写有效的高德 Web 服务 Key 并保存 |
 | 共享文档导入/导出不可用 | 确认已安装 `python-docx / openpyxl`（Word/Excel）与 `xlrd`（.xls）；页面顶部依赖提示会列出缺失项 |
+| 轨迹速写提示「过滤器插件不可用」 | 该插件的字段过滤依赖「过滤器」插件：在首页确认其 `enabled: true`，并在服务器重启后访问 `/api/trajectory-sketch/status` 查看 `filter_plugin.reason` |
+| 轨迹速写自检报「缺少必需字段」 | 在插件页「⚙️ 管理配置」中把缺失字段加入保留字段名单，并在「列映射」里为该表表头补别名（如中文表头「开始时间」→ `BEGINTIME`）后重新上传 |
+| 轨迹速写「大模型辅助」开关灰掉 | 大模型配置由过滤器插件持有：先在其插件页面填写 API 地址 / Key / 模型并测试连通 |
+| 轨迹速写报告里只有「位置变动」没有「有效出行」 | 属正常结论：该数据为基站工参级定位（噪声约百米~公里级），1 公里量级位移不足以判定为确定出行；可在配置中调整有效出行倍数 / 停留半径后重跑 |
 | 端口被占用 | 设置环境变量 `JZTOOLS_PORT` 换端口启动，或先停止旧进程再启动 |
 | 升级后数据不见了 | 确认数据根目录（`<用户主目录>\.jztoolshub\` 或管理员自设目录）未被误删；旧程序目录里的 `admin.json`、插件 `backend/data/` 等会在新版首次启动时自动迁移到数据根目录，升级前请勿删除旧目录 |
 | 登录提示密码错误（升级后） | 升级会连同加密密钥（`.admin_key`）一起迁移；若仅复制了 `admin.json` 而未迁移 `.admin_key`，解密会失败。请在旧程序目录或旧数据根目录中找到 `.admin_key` 一并迁入数据根目录 `config/` 下 |

@@ -1,0 +1,10 @@
+{
+  "id": "trajectory-sketch",
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "icon": "✍️",
+  "accent": "#5E35B1",
+  "entry": "index.html",
+  "features": ["轨迹分析", "字段过滤", "速写报告", "停留点/出行段"],
+  "form": "source"
+}

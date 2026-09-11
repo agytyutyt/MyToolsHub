@@ -177,10 +177,11 @@ function Sync-ConfigTemplates {
         }
     }
 
-    # 3) ensure-keys：插件 config.json 仅补缺失键（保留用户 LLM 配置）
+    # 3) ensure-keys：插件 config.json 仅补缺失键（保留用户 LLM 配置与自定义阈值）
     $cfgPairs = @(
         @("plugins\case-report\backend\config.json",    "plugins\case-report\config.json"),
-        @("plugins\character-graph\backend\config.json", "plugins\character-graph\config.json")
+        @("plugins\character-graph\backend\config.json", "plugins\character-graph\config.json"),
+        @("plugins\trajectory-sketch\backend\config.json", "plugins\trajectory-sketch\config.json")
     )
     foreach ($cp in $cfgPairs) {
         $src = Join-Path $SourceDir $cp[0]

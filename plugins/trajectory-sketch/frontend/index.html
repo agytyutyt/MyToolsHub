@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<!-- 轨迹速写插件（前端 + Python 后端）
+ * 流程：① 上传轨迹表 → ② 字段自检（调用「过滤器」插件预览）→ ③ 生成速写报告
+ * 图标：全部使用插件自带的 SVG（frontend/icons/），不使用 emoji 字符，兼容 Win7。
+ * 后端接口前缀：/api/trajectory-sketch
+ -->
+<html lang="zh-CN" data-page-node-id="EP4QMpkn0XoTRs2jFwEVTZ">
+<head data-page-node-id="iYkXbZku3JNkNtQO0V9yc7">
+<meta charset="UTF-8" data-page-node-id="3TI637Z6KSHxiD1JrgJPtl" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="u3KrGnZGF4q6EVvd1lEzVz" />
+<title>轨迹速写</title>
+<link rel="stylesheet" href="./style.css?v=1" data-page-node-id="l1LQJ2yiDR3c73oWwrcfuc" />
+</head>
+<body data-page-node-id="8j4a5227GzFsRHHFGraaen">
+<div class="page" data-page-node-id="5PA64nF8vJ3WB0lgnooZ9S">
+
+  <header class="page-head" data-page-node-id="6XT7BwNDkdBpCTJQX8LVL4">
+    <span class="head-icon" id="headIcon" data-page-node-id="GchYp8ugrhSkiACJJjS2Kv"></span>
+    <div data-page-node-id="S7zH04K2TVpwNZnabg3FSA">
+      <h1 data-page-node-id="Ui4QqBlyiv5J7s667XtpS0">轨迹速写</h1>
+      <p class="subtitle" data-page-node-id="FHGwLrkGOYK2Ra2wQlCmLb">上传原始轨迹表（Excel）→ 调用「过滤器」完成字段过滤（默认硬过滤，可切换大模型辅助）
+        → 轨迹分析 → 速写报告（停留点 / 出行段 / 报告正文 / 数据质量）</p>
+    </div>
+  </header>
+
+  <!-- 运行环境提示条 -->
+  <div class="banner" id="envBanner" hidden data-page-node-id="bPBQkqHMdjUS3byFS3y6Af"></div>
+
+  <!-- 管理员配置面板 -->
+  <details class="card config-card" id="cfgCard" hidden data-page-node-id="EW8M6Ahp8fGDTVsujBkEhx">
+    <summary data-page-node-id="Boo1g1MnU0vUEkhlM71Y9w"><span class="ic-slot" id="cfgIcon" data-page-node-id="cjYMXWQEdXW3FoUtg6Kkbl"></span> 管理配置（保留字段名单 / 列映射 / 阈值 / 报告文案）</summary>
+
+    <div class="cfg-block" data-page-node-id="LZ22omFaYkUsFljnoguE8S">
+      <h3 data-page-node-id="g12SXQDBDeYFKpD0nEj4Hz">保留字段名单<small data-page-node-id="D2KTrrntDqTxem1evzWzdt">（本插件调用「过滤器」插件时的字段白名单；可写规范列名或任意别名）</small></h3>
+      <div class="chip-editor" id="cfgKeepChips" data-page-node-id="J1qQdiusITuOF1dfHTJ5h5"></div>
+      <div class="row-actions" data-page-node-id="Gv2912gXGYzjAb76Vpubvi">
+        <input id="cfgKeepInput" type="text" placeholder="输入字段名后回车添加，如：时间 / 经度 / 地址" data-page-node-id="HS9rStBBk2Wq22HVNoX1Af" />
+        <button id="cfgKeepAdd" class="btn outlined" type="button" data-page-node-id="MbvIWsNAABeBoWpTi6e8Hv">添加</button>
+        <button id="cfgKeepReset" class="btn text" type="button" data-page-node-id="sissfjYc7IXdoTioU0g1Rs">恢复默认 7 列</button>
+      </div>
+      <p class="muted" id="cfgKeepExpand" data-page-node-id="IwtCGCowFBEAXBJKj7Vu2K"></p>
+    </div>
+
+    <div class="cfg-block" data-page-node-id="Ntw66yW9FkpovTQVHgFsMM">
+      <h3 data-page-node-id="kYBvCIG1dgw9n6Gpo0o3AU">列映射<small data-page-node-id="qMVcv65hF2yKQDaBagC5mG">（每行一条：<code data-page-node-id="BoSZdlCA3G85ol7247gm3d">规范列名 = 别名1, 别名2, …</code>；匹配时忽略大小写与首尾空白）</small></h3>
+      <textarea id="cfgColumnMap" class="mono" rows="9" spellcheck="false"></textarea>
+      <p class="muted" data-page-node-id="RBxAcWPI5eyMPucXfk69QH">必需列：<span id="cfgRequiredHint" data-page-node-id="66x24di9dg9SVloYAfcfHJ"></span>；可选列：<span id="cfgOptionalHint" data-page-node-id="yYsICBGhFmYhqb8TyCB8dZ"></span></p>
+    </div>
+
+    <div class="cfg-block" data-page-node-id="U9pTEaxWGQeAgqfsRl2hCU">
+      <h3 data-page-node-id="lWx10OZKzJbjzpl2Opl3NB">分析阈值<small data-page-node-id="sZeTv78zMpToC0Xh89APjC">（与轨迹分析引擎一一对应，改完保存即对下次分析生效）</small></h3>
+      <div class="cfg-grid" id="cfgParams" data-page-node-id="bAbOefwTKUN9zwsKOkRxth"></div>
+    </div>
+
+    <div class="cfg-block" data-page-node-id="VuVewS4JjeWmSa3qMWDB33">
+      <h3 data-page-node-id="dFC4xcdJ33Vw9yO1DHatff">报告文案</h3>
+      <div class="cfg-grid" data-page-node-id="jYZInbPHe29LMAQm0m4Dzf">
+        <label data-page-node-id="dbCpBLlbP3V8r7tuu8RaVF">抬头<textarea id="cfgHeader" rows="2"></textarea></label>
+        <label data-page-node-id="JFrXG0XXVCBmlmiP2FXDKU">落款<textarea id="cfgFooter" rows="3"></textarea></label>
+      </div>
+      <div class="row-actions" data-page-node-id="kEryCy9NpbdV0s7VWO894F">
+        <label class="switch-row" data-page-node-id="d28sG3ez79XxZRzbdIVbCo"><input type="checkbox" id="cfgSummary" data-page-node-id="DrnZZreWhVoLKfZGXomFk1" /> <span data-page-node-id="Th7AjLpJEn3Aq1AgDCJ5HU">报告首行附「速写摘要」</span></label>
+        <label class="switch-row" data-page-node-id="sNw3uecAIz5xNi41c0mYqK"><input type="checkbox" id="cfgHoles" data-page-node-id="kbbWpc6oU7xkEiO1LApKQo" /> <span data-page-node-id="zKfSidjPyAhNQp0IAFPRSa">无数据时段显式标注</span></label>
+      </div>
+    </div>
+
+    <div class="row-actions" data-page-node-id="zEcXe8aChnAFaDP76DJImA">
+      <button id="cfgSaveBtn" class="btn filled" type="button" data-page-node-id="8fEpvmWsD2I2MaN2o35lTy">保存配置</button>
+      <span id="cfgSaveTip" class="tip" data-page-node-id="RuQFPcX7dp4yIPSmHPXz3r"></span>
+    </div>
+  </details>
+
+  <div class="layout" data-page-node-id="qyuOPpTmEFClzFulo64EVT">
+    <!-- 左：输入与自检 -->
+    <section class="panel" data-page-node-id="ZhmL9oMy4OiK8z2OI4BHgf">
+      <div class="panel-title" data-page-node-id="yiAwuszdwmvAHvtUmWAtsY">① 上传与字段自检</div>
+
+      <div class="card" data-page-node-id="QN9su5fKqn77jsh7CGAsLQ">
+        <div class="dropzone" id="dropzone" data-page-node-id="xwVrVad7O8eqvyebGn4GRD">
+          <span class="dz-icon" id="dzIcon" data-page-node-id="2egnI98B5MyqlxEFz9M7xs"></span>
+          <p class="dz-main" data-page-node-id="0EByEFEdgq7RhVj4SrGZ1s">点击或拖拽轨迹表到此处</p>
+          <p class="muted" data-page-node-id="C4ulZ8AeU57tjrw5HUdJ03">支持 xlsx / xls / csv，不超过 20MB</p>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden data-page-node-id="FGgjiuzKVCKvBjKNGrRmhB" />
+        <div id="fileInfo" class="file-info" hidden data-page-node-id="OWIRolvq1CmdgOEMnPCR3h"></div>
+      </div>
+
+      <div class="card" id="checkCard" hidden data-page-node-id="AkfhEAkooBkSHSqJ2Q26rS">
+        <h2 data-page-node-id="MkTiVBFUsZDZCRAtHqDbGB"><span class="ic-slot" id="checkIcon" data-page-node-id="PJkhFEcUG1sbwxiIiu5w67"></span> 字段自检</h2>
+        <div id="checkSummary" class="check-summary" data-page-node-id="wcRBuPD6pVgIB3gxy5bHOe"></div>
+        <div class="table-wrap" data-page-node-id="FpgUJSeDN2nRiFSv9ZhVbP"><table class="data-table" id="checkTable" data-page-node-id="YOu8IJMmTexxouHZnj244W"></table></div>
+        <h3 data-page-node-id="krxMfCGxbEzE4nWq3bSL7d">过滤结果</h3>
+        <div class="field-cols" data-page-node-id="PHjDemkdwK3lFRDw8uHzdF">
+          <div data-page-node-id="SMuxhSGS6lvEuYTOAHWsP2"><p class="muted" data-page-node-id="aA5gGAEftVboaSaahHHbWq">保留字段</p><div class="chips" id="keptChips" data-page-node-id="gKBkTNYpsxO9ISEUP4YkcX"></div></div>
+          <div data-page-node-id="DqRtQAUC1437YSPj0JCLfV"><p class="muted" data-page-node-id="EbhCso5g5akhedf8Ybbmot">删除字段</p><div class="chips muted-chips" id="removedChips" data-page-node-id="PNcZk5wBCO6ee8OA7lfTeO"></div></div>
+        </div>
+        <details class="mini" data-page-node-id="lw61kVG0XmVLVGa7fKtE9O">
+          <summary data-page-node-id="2UcSGtR5ayTtrrd7IGv0nh">过滤后数据预览（前 5 行）</summary>
+          <div class="table-wrap" data-page-node-id="2dbZeJAuOTjRbQBlxuKD1B"><table class="data-table" id="previewTable" data-page-node-id="vaUng8VjY8c13i4bSy3TGk"></table></div>
+        </details>
+      </div>
+
+      <div class="card" data-page-node-id="PUDpISCm5jQUZ5GOzOOAwT">
+        <h2 data-page-node-id="XGR9o1vBnEGfckzVlIHlHz">② 过滤模式</h2>
+        <label class="mode-row" data-page-node-id="fZEdtGY4AiAE1XLxlbxc2d">
+          <input type="radio" name="mode" value="hard" checked data-page-node-id="Fp7UiPvXD7EndOt39sLWRx" />
+          <span data-page-node-id="VWKwOEZa8OYsTQqIovv4U2"><b data-page-node-id="YFJ9LUsoV8xKGEqbaTSCGJ">硬过滤</b><small data-page-node-id="JDhLCATuIN9735B6sgTNsG">字段名精确匹配保留名单（默认，毫秒级）</small></span>
+        </label>
+        <label class="mode-row" id="llmRow" data-page-node-id="6EahivLFHqTJCoeLcUnHr2">
+          <input type="radio" name="mode" value="llm" data-page-node-id="iUUVIzGl5xud05ohP9G2zt" />
+          <span data-page-node-id="LHoYHCYPfF6JFrZvOUDnNB"><b data-page-node-id="NJ2j7ClteypTvouzpxuzNY">大模型辅助判断</b><small data-page-node-id="RCNPbqciVgX62QS8eTVPmR">由大模型做表头语义关联（如「开始时间」↔「时间」），需过滤器插件已配置大模型</small></span>
+        </label>
+        <p class="muted" id="modeHint" data-page-node-id="xVzWgFR5Dj8r8YVbgzX2yQ"></p>
+        <div class="row-actions" data-page-node-id="GlFxXDDFZ7ZfVnRH4rU2G0">
+          <button id="analyzeBtn" class="btn filled" type="button" disabled data-page-node-id="y1QIIgHQWTYgEyywFhB8Ii">生成速写报告</button>
+          <button id="resetBtn" class="btn text" type="button" data-page-node-id="e9rxseBpFBlPGQJBVJndgj">重置</button>
+          <span id="runStatus" class="status" data-page-node-id="nKgBEUKHPFaFgvIRfeEZkv"></span>
+        </div>
+        <div class="progress" id="progressBar" hidden data-page-node-id="DDUbHnA8KwSYe3UBgICVAf"><div class="bar" data-page-node-id="OsMWBWBxaaqOqNMAX7nv1o"></div></div>
+      </div>
+    </section>
+
+    <!-- 右：报告 -->
+    <section class="panel" data-page-node-id="6xLfEiE2JRNN7JiIWqf574">
+      <div class="panel-title" data-page-node-id="1VqHLRSHZ9HCnFW4ubqddC">③ 速写报告</div>
+
+      <div class="card" id="resultEmpty" data-page-node-id="VE604dqFiQqeVgc8vpUqKb">
+        <p class="muted" data-page-node-id="ZhqJYvicCLFDktaQ8e72a7">上传轨迹表并通过字段自检后，点击「生成速写报告」，这里将展示速写摘要、报告正文、
+          停留点与出行段明细，并可下载 Excel 报告。</p>
+      </div>
+
+      <div id="resultBox" hidden data-page-node-id="wX9n3LWqtonCB4iMTrOYg0">
+        <div class="card" id="summaryCard" data-page-node-id="lHapjQ9bjdFV7w2ClD64Eg">
+          <h2 data-page-node-id="JIGxHaaMnqAU5DIDUORSLA"><span class="ic-slot" id="summaryIcon" data-page-node-id="20mWp8vOC4edBNvIPszFsk"></span> 速写摘要</h2>
+          <div class="stat-grid" id="statGrid" data-page-node-id="nz2eAfODp4zawBSmQMbTs9"></div>
+          <div class="row-actions" data-page-node-id="tJEEOyaU81ZXBVyXd6eggm">
+            <a id="downloadBtn" class="btn filled" href="#" download data-page-node-id="uOTGFLuVXChm2dch1td7CY"><span class="ic-slot" id="dlIcon" data-page-node-id="VKhM5ZQSgj825Ub1dovvoy"></span> 下载 Excel 报告</a>
+            <button id="copyBtn" class="btn outlined" type="button" data-page-node-id="9mbeq28BFAoRdVfXowNEWc"><span class="ic-slot" id="copyIcon" data-page-node-id="jPFpreC9vN5Ulh5X2uwakA"></span> 复制报告全文</button>
+          </div>
+          <p class="muted" id="outNote" data-page-node-id="9ooLYLj4AzI6FxGnyepwaD"></p>
+        </div>
+
+        <div class="card" data-page-node-id="CoIKYY8Ms3qJjFm0vme1Gg">
+          <h2 data-page-node-id="9hcepjwEZZ9tMq4dHrT3vb"><span class="ic-slot" id="reportIcon" data-page-node-id="lrDXHJ05PczOEwedcPusiJ"></span> 报告正文</h2>
+          <pre class="report-text" id="reportText" data-page-node-id="5MFXvWN6udPkYenlge7jwv"></pre>
+        </div>
+
+        <div class="card" data-page-node-id="BUw81TfqyLqf0tTBmXkjCI">
+          <h2 data-page-node-id="iittCZp3Rofep0ahjBoALT"><span class="ic-slot" id="stayIcon" data-page-node-id="JTiVU2gWNjiqTZkJ6hLCgr"></span> 停留点 <span class="count" id="stayCount" data-page-node-id="vD35zxH0b76N5gkfSuKi1O"></span></h2>
+          <div class="table-wrap" data-page-node-id="NG7mZKHCYuD3DHLv7ATvEv"><table class="data-table" id="stayTable" data-page-node-id="YaciJbPnr2CLdq3FSRH5oe"></table></div>
+        </div>
+
+        <div class="card" data-page-node-id="6YvgwZIZBzt9jUVoPzdQOO">
+          <h2 data-page-node-id="hAy22knAesttTjXIG1DXrQ"><span class="ic-slot" id="tripIcon" data-page-node-id="VkA73pcYBADfCou9pDllga"></span> 出行段 <span class="count" id="tripCount" data-page-node-id="UfYYV2WACoepFuh3Ep0OEY"></span></h2>
+          <p class="muted" data-page-node-id="t0hf1SaSBpX4SsvSlqXsL8">「有效出行」为净位移显著超过定位噪声的确定位移；「位置变动」为噪声量级的低速位移，
+            疑似基站切换或步行，已如实标注不确定性，请结合实际判断。</p>
+          <div class="table-wrap" data-page-node-id="qyw3BkyhLW9geeikQyRfB4"><table class="data-table" id="tripTable" data-page-node-id="IjI7gh9wEuKcRgTdjjWHOc"></table></div>
+        </div>
+
+        <details class="card mini" data-page-node-id="ZH38RFFzNYF75QiJSwQ7jY">
+          <summary data-page-node-id="GdGI8pCY54jQ1eG6cZfZRb"><span class="ic-slot" id="qualityIcon" data-page-node-id="FadXdP1H7D4ilylokR5KKI"></span> 数据质量与生效阈值</summary>
+          <div class="table-wrap" data-page-node-id="6HPG7WH5eczVXvDwa5bXtG"><table class="data-table" id="qualityTable" data-page-node-id="GQJkDFGoPVUg81OAE6kDUC"></table></div>
+          <div id="warnBox" class="warn-box" hidden data-page-node-id="RsrWuteTCVosBydqSKNune"></div>
+        </details>
+
+        <details class="card mini" data-page-node-id="rfdLh1PmQfotg0n9JeoZMu">
+          <summary data-page-node-id="kLHW1CNCc7E9kLtmnYQaH6"><span class="ic-slot" id="clusterIcon" data-page-node-id="xdBARaFMY2ZrNhGovr8pkD"></span> 地点簇（基站归并结果）</summary>
+          <p class="muted" data-page-node-id="xX9SAk6WGBHSXdT3ZDb7F7">把"经常互相切换、地理上很近"的基站合并成一个地点，是区分「真实移动」与
+            「基站切换」的基础。下表为归并后的地点（按上报次数排序，最多 500 条）。</p>
+          <div class="table-wrap" data-page-node-id="yCu0aE1k9WIM4NKtsEAAZ6"><table class="data-table" id="clusterTable" data-page-node-id="FbDZUqBhvslz9TiFvGfadL"></table></div>
+        </details>
+      </div>
+    </section>
+  </div>
+
+  <footer class="page-foot" data-page-node-id="GlBFKY8rjBqu8aafLD4PRh">
+    <span id="footAlgo" data-page-node-id="zPGUqkpyayKlEt9Peu8GlV"></span>
+  </footer>
+</div>
+
+<script src="./app.js?v=1"></script>
+</body>
+</html>

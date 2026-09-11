@@ -1,0 +1,133 @@
+{
+  "filter": {
+    "mode_default": "hard",
+    "keep_columns": [
+      "BEGINTIME",
+      "USERNUM",
+      "LAI",
+      "CI",
+      "ADDRESS",
+      "LONGITUDE",
+      "LATITUDE"
+    ],
+    "post_rules": [],
+    "use_filter_plugin_rules": false
+  },
+  "schema": {
+    "required": [
+      "BEGINTIME",
+      "LONGITUDE",
+      "LATITUDE"
+    ],
+    "optional": [
+      "USERNUM",
+      "ADDRESS",
+      "LAI",
+      "CI",
+      "SPCODE"
+    ],
+    "column_map": {
+      "BEGINTIME": [
+        "BEGINTIME",
+        "BEGIN_TIME",
+        "开始时间",
+        "时间",
+        "起始时间",
+        "上报时间"
+      ],
+      "USERNUM": [
+        "USERNUM",
+        "USER_NUM",
+        "MSISDN",
+        "号码",
+        "用户号码",
+        "手机号"
+      ],
+      "SPCODE": [
+        "SPCODE",
+        "SP_CODE"
+      ],
+      "LAI": [
+        "LAI",
+        "LAC",
+        "位置区"
+      ],
+      "CI": [
+        "CI",
+        "小区",
+        "小区号"
+      ],
+      "ADDRESS": [
+        "ADDRESS",
+        "GEO_ADDRESS",
+        "ADDRESS_CN",
+        "活动地区",
+        "地址",
+        "逆地理地址",
+        "基站地址"
+      ],
+      "LONGITUDE": [
+        "LONGITUDE",
+        "LNG",
+        "LON",
+        "经度",
+        "开源经度"
+      ],
+      "LATITUDE": [
+        "LATITUDE",
+        "LAT",
+        "纬度",
+        "开源纬度"
+      ]
+    }
+  },
+  "analysis": {
+    "algo": "v2",
+    "clean": {
+      "min_longitude": 1.0,
+      "enable_min_latitude": true,
+      "min_latitude": 0.0,
+      "geo_precision": 3,
+      "grid_seconds": 300,
+      "max_gap_seconds": 6000
+    },
+    "cluster": {
+      "enable": true,
+      "merge_same_address": true,
+      "co_site_meters": 50.0,
+      "handover_min_count": 3,
+      "handover_max_meters": 2000.0
+    },
+    "staypoint": {
+      "radius_mode": "auto",
+      "fixed_radius_meters": 800.0,
+      "radius_factor": 1.2,
+      "radius_min_meters": 300.0,
+      "radius_max_meters": 3000.0,
+      "min_stay_minutes": 15.0,
+      "adaptive_min_stay_factor": 3.0,
+      "noise_percentile": 95.0,
+      "slow_speed_kmh": 5.0,
+      "max_window_points": 2000
+    },
+    "trip": {
+      "high_conf_factor": 3.0,
+      "mid_conf_factor": 1.5,
+      "straightness_min": 0.5,
+      "walk_speed_kmh": 4.0,
+      "merge_on_revisit": true,
+      "revisit_gap_minutes": 60.0,
+      "min_trip_minutes": 5.0,
+      "include_leading_trailing": true
+    }
+  },
+  "report": {
+    "header": "内部资料 严禁外传",
+    "footer": "（此件为内部资料，严格控制知悉范围，严禁通过互联网、手机、微信等传播使用和对外发布，严禁向无关人员转发）",
+    "append_summary": true,
+    "split_by_day": false,
+    "fill_holes": true,
+    "append_quality": false,
+    "time_formats": []
+  }
+}

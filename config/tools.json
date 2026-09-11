@@ -150,6 +150,14 @@
       "category": "office",
       "enabled": true,
       "order": 7
+    },
+    {
+      "id": "trajectory-sketch",
+      "name": "轨迹速写",
+      "description": "上传原始轨迹表（Excel），先调用过滤器插件完成字段过滤（默认硬过滤，可切换大模型辅助），再做轨迹分析并生成速写报告：停留点、出行段、报告正文与数据质量，可下载 Excel。",
+      "category": "office",
+      "enabled": true,
+      "order": 8
     }
   ]
 }
