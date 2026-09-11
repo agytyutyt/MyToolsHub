@@ -1,7 +1,29 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-11（新增「轨迹速写」插件 `plugins/trajectory-sketch/`——Excel 轨迹表 →
+> 最后更新：2026-09-11（**知识库插件：旧版 .doc/.xls 上传自动转换**——新模块
+> `plugins/knowledge-base/backend/doc_convert.py`（纯 Python：olefile 解析 Word 二进制 FIB/CLX +
+> python-docx 重建 / xlrd+openpyxl 重建表格，不依赖 WPS/Office COM——服务账户与无 Office 机器可用）；
+> 上传白名单加 `.doc`，转换后落盘（库内只留 docx/xlsx），元数据记 `original_ext`，
+> 页面三处提示：上传 Snackbar / 卡片"已转换"角标 / 阅读页可关闭说明条；依赖缺失优雅降级
+> （`/status` 返回 `convert_legacy`，上传 422 明确提示）；端到端测试 + 真机浏览器走查通过，
+> 本轮改动未提交，详见 `docs/知识库插件-设计文档.md` §11 阶段 6）
+> （2026-09-11 **打包上线 v1.6**——`deploy/JZToolsHub/` 已重生、生成 `deploy/JZToolsHub-v1.6.zip`
+> （约 102 MB）；二进制用 Python 3.14 + PyInstaller 6.22.2 + numpy 2.5 + opencv 5.0 等打包，
+> 隔离 venv 在 `C:\Users\yfjz\.workbuddy\binaries\python\envs\build-314`；用「源码 + waitress」
+> 启动 `app.py` 验证了登录 / 模板下载 / CSV 导出 / 导入预览（dry_run）/ 真实写盘 API 全链路
+> 通过。所有临时数据根（`C:\Users\yfjz\AppData\Local\Temp\test_v16*`）、pointer 文件
+> （`~/.jztoolshub.json`）已还原到生产路径，用户零感知改动）
+> （2026-09-11 管理后台新增**单位/部门/人员 批量导入导出**——新模块
+> `plugins/admin/backend/batch_io.py`（同包子模块，依赖注入挂载，不反向 import routes.py），
+> 三页头部各加「下载模板 / 导出 / 批量导入」；导入为**两步式**（`dry_run=1` 预览逐行结果 → 确认写入，
+> 预览与执行共用同一推演代码，保证「预览所见=执行所得」）；支持 xlsx/csv、三种导入模式、
+> 上级组织自动创建、留空=不修改 / `-`=清空的字段语义、超级管理员防降权护栏；
+> **并对单元格格式做了系统加固**：合并单元格自动补全、表头不在首行/多工作表/多分隔符自动识别、
+> 数字型长数字丢精度与「公式无缓存值」阻断并给出修法、全角与不可见字符归一化（详见 §4.5）；
+> 设计文档 `docs/管理后台批量导入导出-设计文档.md`；后端 67 项 + 格式 64 项冒烟、
+> 73 次模糊请求 0 个 5xx、浏览器实测通过）
+> （2026-09-11 新增「轨迹速写」插件 `plugins/trajectory-sketch/`——Excel 轨迹表 →
 > 调用「过滤器」插件完成字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析 → 速写报告；
 > 内置**零依赖可插拔分析引擎** `backend/engine/`（纯标准库，参考并逐项对拍 `D:\SQLRewrite` 的 v2：
 > 停留点 3 / 出行段 4，净位移·直线度·回访·判定完全一致）；设计文档
@@ -64,18 +86,29 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
   XlsxWriter/Zlib 还原、卡片打开、版本 1.4）。
 - 工作区剩余未提交：`install.ps1` 桌面快捷方式判空修复、`HANDOFF.md` 本节更新、
   `app/build.gradle.kts`（APP 版本 1.4 + release 签名）、`release.keystore`（APP 签名密钥）。
+  2026-09-11 追加未提交：管理后台批量导入导出（`plugins/admin/backend/batch_io.py` 新增、
+  `routes.py` / `requirements.txt` / `manifest.json` / `frontend/js/admin-common.js` /
+  `admin-{unit,dept,user}.js` / `admin-{unit,department,user,}.html` / `css/admin.css` ，
+  详见 §4.5）、`docs/管理后台批量导入导出-设计文档.md`、`README.md`、本文件。
   2026-09-11 追加未提交：`plugins/trajectory-sketch/`（新插件整目录）、
   `docs/轨迹速写插件-设计文档.md`、`config/tools.json` 与数据根目录副本（登记新工具）、
   `jztools_data.py` 与 `install.ps1`（新增插件配置模板同步登记）、`README.md`、本文件。
+  2026-09-11 追加未提交：知识库插件旧版 `.doc`/`.xls` 上传自动转换（详见 `docs/知识库插件-设计文档.md` §11 阶段 6）：
+  新增 `plugins/knowledge-base/backend/doc_convert.py`（olefile+python-docx / xlrd+openpyxl 纯 Python，
+  不依赖 WPS/Office COM——服务账户与无 Office 机器可用），改 `routes.py`（白名单加 `doc`、
+  上传时转换后落盘、`original_ext` 元数据、`/status` 自检 `convert_legacy`）、
+  改 `frontend/app.js` + `frontend/index.html` + `frontend/style.css`（上传 Snackbar + 卡片角标 + 阅读页可关闭说明条三处提示）、
+  `backend/requirements.txt`（声明四个新依赖：openpyxl / xlrd / python-docx / olefile）、
+  `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md` / 本文件。
 - 打包产物（不入库，gitignore）：`deploy/JZToolsHub-v1.4.zip`、`deploy/InfoParse-v1.4.apk`。
 
 ## 3. 内置插件一览
 
 | 插件 | 目录 | 类型 | 依赖 | 说明 |
 | --- | --- | --- | --- | --- |
-| 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时 |
+| 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask / openpyxl | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时、单位/部门/人员批量导入导出（见 §4.5） |
 | 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
-| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 无第三方（后端纯标准库；渲染库 vendor 在 frontend/vendor/） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB）+ 多级分类树；全员只读在线阅读与复制（pdf.js/easyofd/mammoth/SheetJS/marked 前端渲染，无浏览器控件），`grant_all`；设计文档 `docs/知识库插件-设计文档.md` |
+| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 后端标准库；渲染库 vendor 在 frontend/vendor/；**旧版格式转换**：openpyxl/xlrd/python-docx/olefile（缺库优雅降级） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面三处提示**）+ 多级分类树；全员只读在线阅读与复制（pdf.js/easyofd/mammoth/SheetJS/marked 前端渲染，无浏览器控件），`grant_all`；设计文档 `docs/知识库插件-设计文档.md` |
 | 过滤器 | `plugins/file-filter/` | 前后端一体 | openpyxl/xlrd/requests | 表格脱敏过滤与合规检查：硬过滤（名单精确匹配保留列）/ 大模型过滤（表头语义关联，OpenAI 兼容接口）/ 文本与正则后处理；异步任务（ThreadPoolExecutor 2 + TTL 30min + 归属校验）；`POST /apply` 程序化接口供其他插件（JSON rows in/out，不落盘）；设计文档 `docs/过滤器插件-设计文档.md` |
 | 轨迹速写 | `plugins/trajectory-sketch/` | 前后端一体 | openpyxl/xlrd/requests | Excel 轨迹表 → 调「过滤器」`/apply` 做字段过滤（默认硬过滤，开关切大模型辅助）→ 轨迹分析（地点簇/自适应停留点/出行段）→ 速写报告（页内 + 5 sheet Excel）；**分析引擎 `backend/engine/` 为零依赖可插拔包**（纯标准库、零 Flask 依赖、算法版本走 registry），对拍 `D:\SQLRewrite` v2 逐项一致；两段式流程（上传即字段自检 → 确认后异步分析）；`/upload` 同步、`/analyze` 异步（线程池 2 + TTL 30min + 归属校验）；**非超管需同时拥有「过滤器」权限**；设计文档 `docs/轨迹速写插件-设计文档.md` |
 | 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
@@ -119,6 +152,95 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 
 > **注意**：迁移是「移动」而非「复制」；`.admin_key` 与 `admin.json` 密文必须同目录一起迁，否则解密失败。
 > 前端 emoji 图标在旧浏览器（Chrome 72/78）可能显示异常，已把首页 `.tool-icon` 显式指定 emoji 字体栈缓解。
+
+## 4.5 管理后台：单位 / 部门 / 人员 批量导入导出（2026-09-11，未提交）
+
+**需求**：组织架构三层（单位 → 部门 → 人员）过去只能逐条手工录入，批量初始化 / 系统迁移
+需要可用的导入导出通道。
+
+**改动文件**
+
+| 文件 | 说明 |
+| --- | --- |
+| `plugins/admin/backend/batch_io.py`（新增） | 批量导入导出全部后端逻辑：模块列规格 / 解析 / 校验推演 / 导出 / 模板 |
+| `plugins/admin/backend/routes.py` | 新增 `_load_batch_io()` 与 `_register_batch_io(app)`，在 `register()` 末尾以**依赖注入**方式挂载 |
+| `plugins/admin/backend/requirements.txt` | 增加 `openpyxl>=3.1`（缺库时自动降级为仅 CSV） |
+| `plugins/admin/frontend/js/admin-common.js` | 新增通用 `batchImport()`（两步式浮窗）与 `download()`（Blob 下载，处理 401 与中文文件名） |
+| `plugins/admin/frontend/js/admin-{unit,dept,user}.js` | 三页接入「下载模板 / 导出 / 批量导入」 |
+| `plugins/admin/frontend/admin-{unit,department,user}.html`、`admin.html` | 头部按钮组 + 静态资源版本号（`admin-common.js?v=4`、`admin.css?v=4`） |
+| `plugins/admin/frontend/css/admin.css` | `.batch-*` / `.admin-head-actions` 样式（**刻意不用 emoji**，见 §4 的 emoji 字体坑） |
+| `plugins/admin/manifest.json` | 版本 1.1.0 → 1.2.0，features 增加「批量导入导出」 |
+| `docs/管理后台批量导入导出-设计文档.md`（新增） | 字段规格 / 接口契约 / 语义与护栏 |
+
+**接口**（完整表见 README「登录 / 管理后台接口」）
+
+- `GET  /api/admin/batch/<module>/template?format=xlsx|csv`
+- `GET  /api/admin/batch/<module>/export?format=xlsx|csv`（默认不导出 API Key 明文，`?sensitive=1` 才导出）
+- `POST /api/admin/batch/<module>/import`（multipart：`file` / `mode=upsert|insert|update` /
+  `dry_run=1|0` / `auto_create_parent=1|0` / `on_error=abort|skip`）
+
+`<module>` = `unit` / `department` / `user`，分别要求对应管理模块权限。
+路由挂在 `/api/admin/` 下，`_enforce_tool_access` 见到首段 `admin` 会直接放行，
+所以**必须在视图内自行做模块权限校验**（`batch_io._check_access`）。
+
+**关键设计（改这段代码前必读）**
+
+1. **预览 = 执行**：`_run_import()` 在 `copy.deepcopy(cfg)` 上推演；`dry_run=1` 只回传逐行计划，
+   `dry_run=0` 才 `save_admin_config(work)`。两条路径共用同一份代码，且前端「确认导入」复用预览时
+   的选项（`state.opts`），因此预览显示什么、执行就是什么。
+2. **不做反向 import**：`batch_io` 不 import `routes`（否则循环依赖），由 `routes` 注入
+   `load_admin_config / save_admin_config / load_registry / find_unit / find_dept / find_user /
+   iter_users / encrypt_field / decrypt_field / role_super_admin / registered_tool_ids /
+   get_session_user / set_operation`。
+3. **字段语义**：留空 = 不修改；填 `-`（及 无/空/清空/none/clear）= 清空。唯一键 = 单位名称 /
+   所属单位+部门名称 / 登录名。权限点接受工具 ID 或工具名称，多值可用顿号/分号/空格分隔
+   （CSV 中用逗号需给整个单元格加双引号）。
+4. **幂等**：内容未变时一律回「跳过」（单位/部门比描述；人员比姓名/角色/权限点/身份证/大模型，
+   加密字段先 `decrypt_field` 再比对），不写盘也不误报「更新」。
+5. **护栏**：超级管理员账号不允许通过批量导入改角色 / 权限点（其余字段可同步），
+   防止整批导入把 admin 降权后无人能进后台。
+6. **错误行策略**：默认 `on_error=abort` —— 有错误行则后端 `blocked=true` 整批不落盘，
+   前端同时禁用「确认导入」并给出醒目提示；可切 `skip` 跳过错误行继续导入。
+
+**单元格格式健壮性（2026-09-11 第二轮实测后加固）**
+
+用户交上来的表格格式五花八门，解析层（`batch_io.py` 的「数据读取」段）已按结构层 + 值层兜底，
+逐条都有回归用例（`jz_format_smoke.py`，64 项）：
+
+| 情形 | 加固前的问题 | 现在的行为 |
+| --- | --- | --- |
+| 表头上方有标题/说明行 | 把标题行当表头，误建"单位名称"这类垃圾记录 | 向下探 8 行，按「必填列齐全 > 精确匹配列数 > 匹配列数」择优；`header_row` 回传并显示在预览里 |
+| 数据不在第一张工作表 | 读空表报"未解析到数据行" | 每个工作表/每种 CSV 分隔符都作为候选，取表头匹配度最高者；`sheet` 回传 |
+| 纵向合并单元格 | openpyxl 只在左上角给值，下方行集体"缺值" | 按合并区域补全（`_fill_merged`）。**只读模式拿不到 `merged_cells`，故改用普通模式加载** |
+| 重复表头行 / 空行 / 多余列 | 形成垃圾记录 | 重复表头行忽略并提示；空行跳过；多余列记入 `ignored_columns` |
+| CSV 分号/制表符/竖线分隔 | 整行挤成一列 → 缺列报错 | 四种分隔符各解析一份择优；`.tsv` 优先制表符 |
+| **≥16 位长数字按「数字」存储**（身份证） | 静默存入被 Excel 改写过的号码 | **阻断该行**并给出改写后的值 + 改文本格式的操作指引 |
+| **公式无缓存计算结果** | `data_only` 读出空 → 必填列莫名"不能为空" | 第二遍 `data_only=False` 比对定位；必填列阻断，非必填列提示后按空处理 |
+| 全角/空白/不可见字符 | 登录名、身份证变成无法匹配的脏数据 | 标识字段全角转半角 + 去空白；表头清 BOM/零宽字符；控制字符（CSV 常见）清除，保留 `\n\t` |
+| 百分比/日期/布尔/科学计数 | 取值口径不明 | 一律取**底层值**（格式只是显示）；日期转可读文本、布尔转「是/否」 |
+| 超行数/超体积/损坏文件 | 大文件吃内存、坏文件可能 500 | 读取阶段按行数上限截断；体积前置校验；模糊测试 73 次请求 **0 个 5xx** |
+
+已知限制（不改，已写进文档）：表头须为单行；`00123` 被 Excel 存成数字后前导零无法还原；
+`.xls` 不支持（提示另存）；导入值一律按文本入库。
+
+**验证方式（可复用，脚本在 `%TEMP%`，如长期使用建议移入项目）**
+
+- 后端冒烟：`jz_batch_smoke.py` —— 把 `jztools_data.get_data_root` 打桩到临时目录 + Flask
+  `test_client`，67 项断言覆盖模板/导出/三种导入模式/外键缺失/自动建上级/角色与权限点解析/
+  身份证与大模型字段/幂等回导/越权 403/异常输入。**这个打桩手法可用于任何插件后端的隔离测试**
+  （先 patch `get_data_root` 再 import app，避免污染 `~/.jztoolshub`）。
+- 格式健壮性：`jz_format_smoke.py` —— 64 项，覆盖上表全部条目 + 公式检测与值归一化单元测试。
+- 模糊测试：`jz_fuzz.py` —— 真实 Excel 样例（含 `D:\SQLRewrite\demoData_real.xlsx`）× 3 模块、
+  25 份随机字节、截断 zip、超宽（500 列）/超行（4001 行）/超大（18MB）文件、控制字符等；
+  判定标准是「任何输入都只能是 4xx，不能 5xx」，结果 73 次请求 0 个 5xx。
+- 界面实测：`jz_ui_server.py` 启动隔离数据根目录实例（端口 5099），`agent-browser` 走
+  登录 → 选文件 → 预览 → 确认 → 列表刷新全流程。
+  **坑**：agent-browser 默认视口约 1080×480，模态框高于视口时真实鼠标点击会落到遮罩上把浮窗关掉
+  （合成 `el.click()` 不受影响）——实测前先 `agent-browser set viewport 1440 1000`。
+- 本轮实测拦截并修复的真实缺陷：① 列规格字段直接下标访问 `c["required"]` 触发 KeyError（改 `c.get`）；
+  ② 超级管理员账号回导时被误判「不支持批量修改角色/权限点」（改成只在值真的不同时才拦）；
+  ③ 默认「整批回滚」下错误行仍可点确认导入（会显示「导入完成」但实际未写入）；
+  另修 2 处误导性提示（身份证 / 大模型 / 描述未变却报「已更新」）。
 
 ## 5. 最新功能：一键安装/更新/卸载 + 配置模板同步（本会话）
 
@@ -205,6 +327,26 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 - 旧版 `install.ps1` 注册的 UninstallString 指向 `install.ps1 -Uninstall`，更新后新版
   `install.ps1` 会替换旧版，卸载入口不变。
 - `uninstall.bat` 仍保留在旧部署目录中（新包不再带它），不影响功能，可用 `一键卸载.bat` 替代。
+
+### 5.3 v1.6 上线打包要点（2026-09-11）
+
+- 产物：`deploy/JZToolsHub-v1.6.zip`（约 **102 MB**，**2143 条目**），`version.json = "1.6"`，由隔离 venv `C:\Users\yfjz\.workbuddy\binaries\python\envs\build-314` + `pyinstaller --clean -y JZToolsHub.spec` 然后 Python 装配脚本（见 `4.5 节第一段`）整合而成。
+- 内容：管理后台的**批量导入导出**与**单元格格式健壮性加固**（详见 §4.5）。核心交付：
+  - 新模块 `plugins/admin/backend/batch_io.py`（约 700 行，依赖注入挂载，不反向 import routes.py）
+  - `routes.py` 注册 `/api/admin/batch/<unit|department|user>/{template,export,import}` 三接口
+  - 前端 `admin-common.js` 通用 `batchImport()` 浮窗 + 三页接线 + `admin.css` 新增样式
+  - 文档：`docs/管理后台批量导入导出-设计文档.md`（含 §10 格式健壮性、§11 测试脚本）、`plugins/admin/README.md`、README 接口表 + 插件表
+- 打包环境：Python 3.14.7 + PyInstaller 6.22.2 + numpy 2.5 + opencv 5.0（与 v1.5 同代 ABI）；隔离 venv 装齐 spec 列出的 13 个第三方包（waitress / cryptography / requests / docx / openpyxl / xlrd / olefile / qrcode / zfec / cv2 / numpy / pypdf / pystray / Pillow），全部与 3.14 ABI 兼容。
+- 验收：
+  1. zip 含关键文件：exe / start.bat / version.json / batch_io.py (54.7KB) / admin-common.js (21.7KB) / python314.dll ✓
+  2. 解包后用「源码 + waitress」启动 `app.py`（临时数据根 `C:\Users\yfjz\AppData\Local\Temp\test_v16_src`，生产 pointer 已复原）
+     - `/api/login` 返回 200 + Set-Cookie ✓
+     - `/api/admin/batch/unit/export?format=csv` 返回 200，Content-Disposition 中文文件名 UTF-8 编码正确，文件 BOM + UTF-8 内容正确 ✓
+     - `/api/admin/batch/unit/import`（dry_run）→ preview 命中 1 行 `create`，回传 `sheet / header_row / notes / summary` ✓
+     - `/api/admin/batch/unit/import`（真实写）→ `applied=true`，单位列表新增「请测试大队」✓
+  3. `.jztoolshub.json` pointer 已从临时路径恢复为 `C:\\Users\\yfjz\\.jztoolshub`（生产路径）
+- 升级路径：与 §5.1 / §5.2 完全一致（数据根目录不动；首次安装由 install.ps1 自动迁移旧版数据；插件运行时数据清空后由程序按需重建）。**注意：批量导入是新增能力，不破坏现有 admin.json / .admin_key / 用户数据，升级安全**。
+- 未做：未跑真实 frozen exe (`deploy/JZToolsHub/JZToolsHub.exe`) 的 headless 启动（pystray 无桌面会失败，但 main 流程 try/except 已吞——服务端验证已通过源码 + waitress 等价路径覆盖）。
 
 ### 5.2 v1.5 上线打包要点（2026-09-09）
 
@@ -354,6 +496,34 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
     D_thr 800m / T_thr 19.7min / 停留 3 / 出行 4，净位移·累计位移·直线度·回访·判定全等）。
     **另注**：上游 `output/v2/` 是用 git 提交版样本生成的，仓库里的 `demoData_real.xlsx` 已被换过
     （号码从 15728345997 变为 15700000007），对拍时用 `git show <commit>:demoData_real.xlsx` 取旧版才可比。
+15. **openpyxl 读取行为有 4 个必须知道的坑**（2026-09-11 实测，批量导入解析层因此重写过）：
+    ① **只读模式（`read_only=True`）读不到合并单元格**——`ReadOnlyWorksheet` 没有 `merged_cells`
+    属性，而合并区域只有左上角单元格有值，其余全是 `None`（"所属单位"纵向合并 3 行 → 下面 2 行
+    集体缺值）。要处理合并就必须用**普通模式**加载（本项目导入文件已限 10MB，代价可接受）；
+    ② **`data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`**（openpyxl 只读缓存值，
+    脚本生成的文件没有缓存），要判断"是不是公式"必须再用 `data_only=False` 加载一遍比对；
+    ③ **Excel 数字只保留 15 位有效数字**，18 位身份证按数字存 → 末尾被静默改写
+    （`110101199001011234` → 读回来 `1.101011990010112e+17` → 末 4 位变 0），
+    且 Excel 里显示的还是原值——**必须靠"原始单元格是 float 且 ≥1e15"来识别，不能靠显示值**；
+    ④ **openpyxl 拒绝写入 XML 非法控制字符**（`\x00`、`\x07` 等抛 `IllegalCharacterError`），
+    所以造测试夹具时不能塞控制字符；但 **CSV 可以携带它们**，取值时要清理，否则污染入库数据。
+16. **不要把"会造成数据失真"的格式问题只做成提示**（2026-09-11 二审修正）：数字型身份证丢精度
+    最初只给行内提示、该行仍按"新增"照写，等于把错的身份证号存进系统。改为**阻断该行**
+    （`item["errors"]`，在推演之前拦下，保证工作副本不被污染），配合默认整批回滚 → 文件不改好就导不进去。
+    判据：**这个值写进去以后还有没有意义**——没意义的一律阻断（身份证丢精度、必填列是未算公式），
+    只是"不如预期"的给提示（非必填列是公式、格式被转换）。
+17. **Word 二进制 `.doc` 流解析有 5 个易错点**（2026-09-11 实测，`plugins/knowledge-base/backend/doc_convert.py`）：
+    ① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指到 `0Table`/`1Table` 流里的 CLX 分片；
+    ② PlcPcd 用可变长度 CPs（1/2 字节前缀表示下条 CP 字节数），不能按定长解析；
+    ③ **控制字符里 `\x07\x07` 是行结束标志**（空缓冲的连续两个 `\x07`）——单 `\x07` 是单元格结束，
+    `\r` 是段落结束；状态机要把这三种符号的边界都识别清楚才能正确切分表格；
+    ④ **闭包捕获 `buf = []` 会读到旧列表**：状态机里 `buf_text()` 捕获了 `buf` 这个列表对象，
+    函数里一旦 `buf = []`（重绑定），外层 `buf_text()` 仍读到旧列表 → 幻影内容。
+    解决：原地 `del buf[:]`；
+    ⑤ **`close_row()` 不得给空缓冲区补单元格**，否则 Word 行结束符自身被当成一列 → 出现「凭空多出的空列」。
+18. **知识库「三处提示」要记忆关闭状态**（2026-09-11 实测）。阅读页横幅关闭按钮必须用**会话级**
+    缓存（`sessionStorage`），不能用 `localStorage`——因为一个文件被多个用户先后打开，
+    张三关了不影响李四打开再看到一次提示。同一会话内重开同文件时不再弹即可。
 
 ## 7.5 插件后端速查表（改哪个插件先看这里）
 
@@ -363,9 +533,9 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 
 | 插件 | 前缀 | 长任务机制 | 数据落盘（数据根目录下） |
 | --- | --- | --- | --- |
-| admin | /api/admin、/login 等 | 无 | config/admin.json + .admin_key |
+| admin | /api/admin、/api/admin/batch、/login 等 | openpyxl（批量导入导出的 xlsx，缺库降级 CSV） | config/admin.json + .admin_key |
 | notice-board | /api/notice-board | 无 | plugins/notice-board/data/*.json（一公告一文件，RLock 串行化） |
-| knowledge-base | /api/knowledge-base | 无 | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/<id>.<ext>（上传原文，服务端 ID 重命名） |
+| knowledge-base | /api/knowledge-base | 无 | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/<id>.<ext>（上传原文经旧版转换后落盘 `.docx`/`.xlsx`，服务端 ID 重命名；元数据 `original_ext` 记录来源格式） |
 | shared-docs | /api/shared-docs | 无（全局 RLock） | plugins/shared-docs/data/*.json（一文档一文件，历史上限 100） |
 | case-report | /api/case-report | ThreadPoolExecutor(2)，TASK_TTL 30min | data/*.json（一记录一文件）+ item_categories.json + config.json + prompt.json |
 | character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |

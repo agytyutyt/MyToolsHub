@@ -42,7 +42,8 @@
 pip install Flask>=3.0 cryptography>=41.0
 
 # 2. 按需安装各插件后端依赖（无需全部安装，缺依赖的插件会优雅降级并在页面提示）
-#    核心必备：admin（Flask/cryptography，已含）
+#    核心必备：admin（Flask/cryptography，已含；openpyxl 用于单位/部门/人员批量导入导出的 xlsx 支持，
+#    缺失时批量导入导出自动降级为仅 CSV）
 pip install -r plugins/admin/backend/requirements.txt
 #    其他插件可选用插件自带 requirements 安装，例如：
 #    pip install -r plugins/character-graph/backend/requirements.txt
@@ -258,6 +259,9 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 | `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门管理 CRUD（需 `department` 权限）；创建/编辑需指定 `unit_id`；删除前需清空其下人员 |
 | `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员管理 CRUD（需 `user` 权限）；支持字段：`username`、`name`、`password`、`unit_id`、`department_id`、`role`、`idcard`（身份证号）、`permissions`（权限点 = tools.json 插件 ID 数组）、`llm`（`{base_url, api_key, model}`）；密码/身份证/API Key 以 Fernet 加密存储；密码为空时保持不变，删除当前登录账号会被拒绝。返回的用户条目含 `super_admin` 标记（前端据此区分角色）。权限点不在 Web 界面展示，仅后端读取并据此拦截工具访问 |
 | `GET\|POST /api/admin/permissions`、`PUT\|DELETE /api/admin/permissions/<id>` | 权限（角色）管理 CRUD（需 `user` 权限，**已并入「人员管理」模块**），可勾选模块为 `unit` / `department` / `user` / `permission`；`modules` 可为空（纯工具角色，如办案员） |
+| `GET /api/admin/batch/<module>/template?format=xlsx\|csv` | **批量导入模板下载**（`<module>` = `unit` / `department` / `user`，需对应模块权限）；xlsx 模板附「填写说明」工作表（列含义 / 必填 / 留空与清空语义） |
+| `GET /api/admin/batch/<module>/export?format=xlsx\|csv` | **批量导出**（列结构与导入模板完全一致，可直接改后回导）；密码列恒为空，大模型 API Key 默认留空，需明文时加 `?sensitive=1`（谨慎） |
+| `POST /api/admin/batch/<module>/import` | **批量导入**（multipart，需对应模块权限）：`file`（.xlsx/.csv）、`mode=upsert\|insert\|update`（默认 upsert）、`dry_run=1\|0`（默认 1，仅预览校验不落盘）、`auto_create_parent=1\|0`（上级单位/部门不存在时自动创建）、`on_error=abort\|skip`（默认 abort，有错误行则整批回滚）。返回逐行结果（`create`/`update`/`skip`/`error` 与说明）及汇总 `summary`，另回传 `sheet`（识别到的工作表）、`header_row`（表头行号）、`notes`（结构层提示：跳过的行/补全的合并单元格等）、`ignored_columns`（未识别列） |
 
 > **权限点与工具访问控制**：账号的 `permissions` 字段为 `config/tools.json` 中插件 ID 的列表。
 > 已登录的非超级管理员账号只能访问权限点内的工具：
@@ -279,6 +283,30 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 > （来源于 `/api/tools/visibility`）。管理员角色显示全部模块（含管理后台，只读）；办案员等其他角色
 > 不展示「管理后台」，可勾选该人员可访问的工具后保存（写回该用户的 `permissions` 字段）。
 > 新建办案员账号默认授予全部工具（不含管理后台），管理员可在「权限」浮窗中再调整。
+
+> **批量导入导出（单位 / 部门 / 人员）**：三个管理页头部均提供「下载模板 / 导出 / 批量导入」。
+> 流程为**两步式**：先「预览校验」（`dry_run=1`，逐行给出 新增/更新/跳过/错误 与原因，不落盘），
+> 确认后再执行写入 —— 预览与执行走同一套推演代码，保证「预览所见 = 执行所得」。
+> 关键语义：
+> - **唯一键**：单位 = 单位名称；部门 = 所属单位 + 部门名称；人员 = 登录名。命中唯一键则视为更新。
+> - **留空 = 不修改**（更新场景）；需要清空某字段时填半角 `-`（角色、身份证、大模型三项、权限点均适用）。
+> - **权限点**可填工具 ID 或工具名称，多个用顿号/分号分隔（CSV 中若用逗号需给整个单元格加双引号）；
+>   新增人员留空时默认授予全部工具（不含管理后台），与 `POST /api/admin/users` 行为一致。
+> - 勾选「上级单位/部门不存在时自动创建」后，导入部门/人员可顺带建出缺失的上级组织。
+> - 超级管理员账号（如 `admin`）**不允许**通过批量导入改动角色与权限点，防止误降权导致无法登录后台；
+>   其余字段（姓名/密码/身份证/大模型/归属）仍可同步。
+> - 支持 `.xlsx` 与 `.csv`（UTF-8-SIG / GBK 自适应，导出 CSV 带 BOM 便于 Excel 直接打开）；
+>   单文件上限 10 MB、单次上限 3000 行；表头允许少量别名与多余列（多余列忽略并在结果中回传）。
+> - **单元格格式与文件结构都已做兜底**（详见 `docs/管理后台批量导入导出-设计文档.md` §10）：
+>   表头上方可有标题行/说明行（自动向下探 8 行定位表头，界面会显示"表头在第 N 行"）；
+>   数据放哪张工作表都行；纵向**合并单元格**会自动补全（"所属单位"合并 3 行不用逐行填）；
+>   CSV 的**分号/制表符/竖线**分隔都能识别；百分比/货币/日期等**显示格式不影响取值**（取底层数值）；
+>   登录名、身份证等标识字段做全角转半角 + 去空白；表头里的 BOM/零宽字符自动清除。
+>   两类会造成**数据失真**的格式会被明确拦下（阻断该行并说明怎么改）：
+>   ① 18 位身份证按「数字」存储（Excel 只保留 15 位有效数字，末尾已被改写）；
+>   ② 公式单元格从未保存过计算结果（`data_only` 读出来是空）。
+>   已知限制：表头须为单行；`00123` 这类前导零若被 Excel 存成数字则无法还原（建议该列设为文本）。
+> - 导入同样受权限模块约束：`unit` / `department` / `user` 各自的批量接口只对有相应模块权限的账号开放。
 
 **character-graph 插件后端接口**（演示含后端插件的 API 模式）：
 
@@ -430,14 +458,14 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /api/knowledge-base/status` | 依赖自检（后端纯标准库，恒 ok） |
+| `GET /api/knowledge-base/status` | 依赖自检（核心功能纯标准库恒 ok；`convert_legacy` 表示旧版格式转换能力：openpyxl/xlrd/python-docx/olefile 齐备） |
 | `GET /api/knowledge-base/config` | 当前用户是否可管理（`can_manage`：管理员角色/超管） |
 | `GET /api/knowledge-base/categories` | 分类树（全部登录用户；按 order + created_at 排序） |
 | `POST /api/knowledge-base/categories` | 新建分类 `{name, parent_id?}` —— 仅管理员；同层重名 409、父分类 404 |
 | `PUT /api/knowledge-base/categories/<cid>` | 改名 / 移动（parent_id 防环：不得指向自身或子孙）/ 排序 —— 仅管理员 |
 | `DELETE /api/knowledge-base/categories/<cid>` | 删除分类 —— 仅管理员；有子分类或文件 409 |
 | `GET /api/knowledge-base/files?category=&q=` | 文件列表（category 递归含子孙分类；q 模糊匹配文件名；按创建时间倒序，含上传人姓名/大小/时间） |
-| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/csv/md/markdown/txt`、≤20MB（413）、`.doc` 拒绝并提示转存；服务端生成 ID 重命名落盘 |
+| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/doc/csv/md/markdown/txt`、≤20MB（413）；**旧版 `.doc`/`.xls` 服务端自动转换为 `.docx`/`.xlsx` 后落盘**（依赖缺失/文件损坏 422 明确提示），响应含 `converted_from`，元数据记 `original_ext`；服务端生成 ID 重命名落盘 |
 | `PUT /api/knowledge-base/files/<fid>` | 改名 / 移动分类 `{name?, category_id?}` —— 仅管理员 |
 | `DELETE /api/knowledge-base/files/<fid>` | 删除文档（元数据 + 落盘文件）—— 仅管理员 |
 | `GET /api/knowledge-base/files/<fid>/raw` | **内联**读取文件内容（`Content-Disposition: inline`，无 attachment，不提供下载语义；`conditional=True` 支持 Range/304 供 pdf.js 断点续读）；ID 白名单正则防目录穿越，不可读一律 404 |
@@ -868,10 +896,10 @@ def current_user_or_none():
 | shared-docs | office | ✅ | ✅ | python-docx / openpyxl / xlrd | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、乐观锁版本冲突提示、`.docx` / `.xlsx` 导入导出、单位/部门/私人三级可见 |
 | case-report | office | ✅ | ✅ | requests / openpyxl | 输入收网报告 → 大模型抽取要素 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队），跨记录汇总 / 案件筛选 / Excel 导出 |
 | notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
-| knowledge-base | office | ✅ | ✅ | - （纯标准库） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB）并多级分类管理，全员在线只读阅读与复制（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
+| knowledge-base | office | ✅ | ✅ | openpyxl / xlrd / python-docx / olefile（仅旧版格式自动转换，缺失时优雅降级） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面提示**）并多级分类管理，全员在线只读阅读与复制（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
 | file-filter | office | ✅ | ✅ | openpyxl / xlrd / requests | 过滤器：表格文件（xlsx/xls/csv ≤20MB）脱敏过滤与合规检查——硬过滤（按名单精确匹配保留列）/ 大模型过滤（表头语义关联匹配）/ 文本与正则后处理；左右两栏布局（左上传右下载）；`/apply` 接口供其他插件程序化调用 |
 | trajectory-sketch | office | ✅ | ✅ | openpyxl / xlrd / requests | 轨迹速写：上传原始轨迹表（Excel）→ 调用「过滤器」插件做字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析（地点簇 / 自适应停留点 / 出行段）→ 速写报告（页内预览 + 5 sheet Excel）；分析引擎为零依赖可插拔包（纯标准库），非超管需同时拥有「过滤器」权限 |
-| admin（核心） | - | ✅ | ✅ | cryptography / Flask | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置；`hidden: true`，始终加载 |
+| admin（核心） | - | ✅ | ✅ | cryptography / Flask / openpyxl | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置 + **单位/部门/人员批量导入导出**（xlsx/csv，两步式预览 + 执行）；`hidden: true`，始终加载 |
 
 > 各后端插件的完整接口清单见上文「HTTP API」各小节；每个插件的依赖声明在各自 `plugins/<id>/backend/requirements.txt`。
 
