@@ -1,10 +1,13 @@
 /* 人员管理：列表表格、新建/编辑浮窗（单位→部门级联、身份证、大模型配置）、
- * 按人分配工具权限（权限弹窗）、角色管理（原权限管理模块并入本页）、删除确认 */
+ * 按人分配工具权限（权限弹窗）、角色管理（原权限管理模块并入本页）、删除确认、
+ * 批量导入导出（模板下载 / 导出 / 两步式导入浮窗） */
 (function () {
-  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog } = window.AdminCommon;
+  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog,
+          batchImport, download } = window.AdminCommon;
 
   const wrapEl = document.getElementById('user-wrap');
   const roleListEl = document.getElementById('role-list');
+  const BATCH_URL = '/api/admin/batch/user';
   let units = [];
   let depts = [];
   let roles = [];
@@ -243,6 +246,21 @@
   });
 
   document.getElementById('btn-new').addEventListener('click', () => openForm(null));
+
+  /* ==================== 批量导入导出 ==================== */
+  document.getElementById('btn-template').addEventListener('click', () => {
+    download(BATCH_URL + '/template?format=xlsx').catch(e => showToast('下载模板失败：' + e.message, true));
+  });
+  document.getElementById('btn-export').addEventListener('click', () => {
+    // 默认不含大模型 API Key 明文（需要时用 ?sensitive=1，详见 README）
+    download(BATCH_URL + '/export?format=xlsx').catch(e => showToast('导出失败：' + e.message, true));
+  });
+  document.getElementById('btn-import').addEventListener('click', () => {
+    batchImport({
+      module: 'user', label: '人员', title: '批量导入人员',
+      allowAutoParent: true, onDone: load,
+    });
+  });
 
   /* ==================== 权限设置（按人勾选可访问的功能模块） ==================== */
   async function openPermModal(user) {

@@ -1,8 +1,10 @@
-/* 部门管理：列表渲染（含所属单位）、新建/编辑浮窗（单位下拉）、删除确认 */
+/* 部门管理：列表渲染（含所属单位）、新建/编辑浮窗（单位下拉）、删除确认、批量导入导出 */
 (function () {
-  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog } = window.AdminCommon;
+  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog,
+          batchImport, download } = window.AdminCommon;
 
   const listEl = document.getElementById('dept-list');
+  const BATCH_URL = '/api/admin/batch/department';
   let units = [];
 
   async function load() {
@@ -121,6 +123,20 @@
   });
 
   document.getElementById('btn-new').addEventListener('click', () => openForm(null));
+
+  /* ==================== 批量导入导出 ==================== */
+  document.getElementById('btn-template').addEventListener('click', () => {
+    download(BATCH_URL + '/template?format=xlsx').catch(e => showToast('下载模板失败：' + e.message, true));
+  });
+  document.getElementById('btn-export').addEventListener('click', () => {
+    download(BATCH_URL + '/export?format=xlsx').catch(e => showToast('导出失败：' + e.message, true));
+  });
+  document.getElementById('btn-import').addEventListener('click', () => {
+    batchImport({
+      module: 'department', label: '部门', title: '批量导入部门',
+      allowAutoParent: true, onDone: load,
+    });
+  });
 
   (async () => {
     const ok = await requireModule('department');

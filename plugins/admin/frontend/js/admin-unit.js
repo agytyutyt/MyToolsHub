@@ -1,8 +1,10 @@
-/* 单位管理：列表渲染、新建/编辑浮窗、删除确认 */
+/* 单位管理：列表渲染、新建/编辑浮窗、删除确认、批量导入导出 */
 (function () {
-  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog } = window.AdminCommon;
+  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog,
+          batchImport, download } = window.AdminCommon;
 
   const listEl = document.getElementById('unit-list');
+  const BATCH_URL = '/api/admin/batch/unit';
 
   async function load() {
     try {
@@ -102,6 +104,18 @@
   });
 
   document.getElementById('btn-new').addEventListener('click', () => openForm(null));
+
+  /* ==================== 批量导入导出 ==================== */
+  // 模板下载 / 导出为直接下载；批量导入走两步式浮窗（预览校验 → 确认导入）
+  document.getElementById('btn-template').addEventListener('click', () => {
+    download(BATCH_URL + '/template?format=xlsx').catch(e => showToast('下载模板失败：' + e.message, true));
+  });
+  document.getElementById('btn-export').addEventListener('click', () => {
+    download(BATCH_URL + '/export?format=xlsx').catch(e => showToast('导出失败：' + e.message, true));
+  });
+  document.getElementById('btn-import').addEventListener('click', () => {
+    batchImport({ module: 'unit', label: '单位', title: '批量导入单位', onDone: load });
+  });
 
   (async () => {
     const ok = await requireModule('unit');

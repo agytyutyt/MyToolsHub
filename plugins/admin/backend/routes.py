@@ -31,7 +31,6 @@ from flask import g, jsonify, redirect, request, send_from_directory, session, u
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import jztools_data
-
 # 会话超时默认值（config/admin.json 的 session 节可覆盖）
 SESSION_IDLE_MINUTES = 30    # 空闲超时：连续这么久没有任何请求，自动登出
 SESSION_ABSOLUTE_HOURS = 12  # 绝对有效期：登录满这么久必须重新登录
@@ -588,6 +587,46 @@ def _protect_admin_ops():
         if get_session_user() is None:
             return jsonify({"error": "未登录或登录已过期"}), 401
     return None
+
+
+# ===================== 批量导入导出（同包子模块） =====================
+
+def _load_batch_io():
+    """载入同包 batch_io 子模块（单位/部门/人员 批量导入导出）。
+
+    优先按包内相对导入加载（app.py 以 jztools_admin 包名动态加载本文件）；
+    极端情况下（模块被单独按路径执行）回退为按文件路径加载。
+    """
+    try:
+        from . import batch_io  # noqa: WPS433 - 包内相对导入为常规路径
+        return batch_io
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_io.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_batch_io", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+def _register_batch_io(app):
+    """挂载批量导入导出路由，注入本模块的内部依赖（避免循环导入）。"""
+    batch_io = _load_batch_io()
+    batch_io.register(app, {
+        "load_admin_config": load_admin_config,
+        "save_admin_config": save_admin_config,
+        "load_registry": load_registry,
+        "find_unit": find_unit,
+        "find_dept": find_dept,
+        "find_user": find_user,
+        "iter_users": iter_users,
+        "encrypt_field": encrypt_field,
+        "decrypt_field": decrypt_field,
+        "role_super_admin": _role_super_admin,
+        "registered_tool_ids": _registered_tool_ids,
+        "get_session_user": get_session_user,
+        "set_operation": set_operation,
+    })
 
 
 # ===================== 路由注册 =====================
@@ -1257,4 +1296,14 @@ def register(app):
         if err:
             return jsonify({"error": err}), 400
         return jsonify({"ok": True, "data_root": root, "migrated": moved})
+
+    # ---------------- 批量导入导出（单位 / 部门 / 人员） ----------------
+
+    # 挂载同包 batch_io 子模块提供的 模板下载 / 导出 / 导入 接口；
+    # 加载失败仅告警，不影响登录鉴权等核心能力。
+    try:
+        _register_batch_io(app)
+        app.logger.info("admin 批量导入导出接口已挂载（单位 / 部门 / 人员）")
+    except Exception as e:  # pragma: no cover - 依赖缺失等异常
+        app.logger.warning(f"admin 批量导入导出接口挂载失败：{e}")
 
