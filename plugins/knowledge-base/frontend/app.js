@@ -58,6 +58,56 @@
     });
   }
 
+  // ==================== 下载（原件） ====================
+  // 走独立 fetch（响应是文件流不是 JSON），401 与 api() 同样跳登录。
+  var DL_SVG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>';
+
+  // 从 Content-Disposition 解析文件名：优先 RFC 5987 的 filename*=UTF-8''，回退 filename=
+  function parseDispositionName(header) {
+    var m = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header || "");
+    if (m) {
+      try { return decodeURIComponent(m[1]); } catch (e) { return m[1]; }
+    }
+    m = /filename\s*=\s*"([^"]+)"/i.exec(header || "");
+    if (m) return m[1];
+    m = /filename\s*=\s*([^;]+)/i.exec(header || "");
+    return m ? String(m[1]).trim() : "";
+  }
+
+  function downloadFile(f) {
+    if (!f || !f.id) return;
+    fetch(API + "/files/" + encodeURIComponent(f.id) + "/download").then(function (res) {
+      if (res.status === 401) {
+        location.href = "/login?next=" + encodeURIComponent("/tool/knowledge-base");
+        return null;
+      }
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (d) {
+          throw new Error(d.error || ("下载失败（" + res.status + "）"));
+        });
+      }
+      var name = parseDispositionName(res.headers.get("Content-Disposition")) ||
+        f.original_name || (f.name + "." + (f.original_ext || f.ext || ""));
+      return res.blob().then(function (blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+      });
+    }).catch(function (e) { if (e && e.message) toast(e.message, true); });
+  }
+
+  function fileById(id) {
+    for (var i = 0; i < state.files.length; i++) {
+      if (state.files[i].id === id) return state.files[i];
+    }
+    return null;
+  }
+
   // ==================== 全局状态 ====================
   var state = {
     canManage: false,
@@ -71,6 +121,10 @@
     folded: {},            // 分类折叠状态（持久化到 sessionStorage）
     readerOpen: false,
     currentFileId: null,   // 当前阅读的文档 id（提示条关闭状态按此记录）
+    currentNoticeKey: null,// 当前提示条种类（关闭状态键）
+    currentRenderedPreview: false, // 当前阅读视图是否已切到原样式预览渲染
+    pdfPoll: null,         // PDF 生成中轮询定时器
+    pdfTicks: 0,
     listScroll: 0
   };
 
@@ -185,7 +239,8 @@
   }
 
   // ==================== 文件列表 ====================
-  function loadFiles() {
+  // silent=true 时不弹错误提示（轮询静默刷新用）
+  function loadFiles(silent) {
     var url = "/files?";
     if (state.currentCat === "root") url += "category=root&";
     else if (state.currentCat !== "all") url += "category=" + encodeURIComponent(state.currentCat) + "&";
@@ -194,8 +249,59 @@
       state.files = sortFiles(data.items || []);
       renderFiles();
     }).catch(function (e) {
-      toast(e.message, true);
+      if (!silent) toast(e.message, true);
     });
+  }
+
+  // ==================== 预览生成状态轮询（异步转换管线） ====================
+  // Word → PDF 预览（pdf_* 字段）；Excel → 表格 HTML 预览（html_* 字段，阶段 3）
+  function isSheetFile(f) { return f.ext === "xlsx" || f.ext === "xls"; }
+
+  function previewStatus(f) {
+    return isSheetFile(f) ? (f.html_status || "none") : (f.pdf_status || "none");
+  }
+
+  function previewPending(f) { return previewStatus(f) === "pending"; }
+
+  function previewReady(f) {
+    return isSheetFile(f) ? !!f.html_ready : !!f.pdf_ready;
+  }
+
+  function hasPendingPreview() {
+    for (var i = 0; i < state.files.length; i++) {
+      if (previewPending(state.files[i])) return true;
+    }
+    return false;
+  }
+
+  function stopPdfPoll() {
+    if (state.pdfPoll) clearInterval(state.pdfPoll);
+    state.pdfPoll = null;
+    state.pdfTicks = 0;
+  }
+
+  // 列表里还有 pending 时每 3s 静默刷新；全部收敛（ok/failed）即停，最多 3 分钟兜底。
+  // 兜底时长 ≥ 后端转换超时（pdf_convert.DEFAULT_TIMEOUT=180s）：实测 LibreOffice
+  // 冷启动一次 40~90s，早期 20 次（60s）的兜底会让角标卡在「生成中」不再更新。
+  // （Excel 表格渲染为秒级，复用同一轮询，先就绪先切换。）
+  function startPdfPoll() {
+    if (state.pdfPoll) return;
+    state.pdfPoll = setInterval(function () {
+      state.pdfTicks++;
+      loadFiles(true).then(function () {
+        // 正在阅读的文件预览就绪 → 自动重渲染切到原样式视图
+        if (state.readerOpen && state.currentFileId && !state.currentRenderedPreview) {
+          var f = fileById(state.currentFileId);
+          if (f && previewReady(f)) {
+            state.currentRenderedPreview = true;
+            showReaderNotice(f);
+            if (window.KBReader) window.KBReader.render(f, readerCbs());
+          }
+        }
+        // 全部收敛（ok/failed）即停；最多 3 分钟（60 × 3s）兜底，避免坏状态无限轮询
+        if (!hasPendingPreview() || state.pdfTicks >= 60) stopPdfPoll();
+      });
+    }, 3000);
   }
 
   // 排序：key = time（上传时间）/ name（名称拼音）；dir = asc / desc（默认 time + desc）
@@ -254,12 +360,27 @@
         ? '<span class="conv-badge" title="上传时为 .' + esc(f.original_ext || "") +
           '，已自动转换为 .' + esc(f.ext) + '">已转换</span>'
         : "";
+      // 预览状态角标：生成中（蓝）/ 生成失败已降级（琥珀，悬停看原因）
+      var prevBadge = "";
+      if (previewPending(f)) {
+        prevBadge = '<span class="pdf-badge pending" title="' +
+          (isSheetFile(f) ? "表格预览生成中，完成后自动切换" : "PDF 预览生成中，完成后自动切换") +
+          '">' + (isSheetFile(f) ? "预览生成中" : "PDF 生成中") + "</span>";
+      } else if (previewStatus(f) === "failed") {
+        prevBadge = '<span class="pdf-badge degraded" title="' +
+          esc(isSheetFile(f)
+            ? (f.html_error || "表格预览生成失败，已回退简化渲染")
+            : (f.pdf_error || "PDF 预览生成失败，已回退简化渲染")) + '">预览降级</span>';
+      }
       html += '<div class="file-card" data-id="' + esc(f.id) + '">' +
         '<div class="file-card-top"><div class="file-icon ext-' + esc(f.ext) + '">' + esc(label) + "</div>" +
         '<div class="file-main"><div class="file-name" title="' + esc(f.name) + '">' + esc(f.name) +
-        convBadge + "</div>" +
+        convBadge + prevBadge + "</div>" +
         '<div class="file-meta">' + esc(fmtSize(f.size)) + " · " + esc(f.created_by_name || f.created_by || "-") +
         " · " + esc(fmtTime(f.created_at)) + "</div></div>" +
+        // 下载：全员可见（下载原件，不属管理操作）
+        '<button type="button" class="card-dl" data-dl="' + esc(f.id) + '" title="下载原始文档">' +
+        DL_SVG + "</button>" +
         (state.canManage
           ? '<button type="button" class="card-edit" data-edit="' + esc(f.id) + '" title="编辑">' +
             '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>'
@@ -270,14 +391,22 @@
     });
     wrap.innerHTML = html;
     wrap.onclick = function (ev) {
-      var editBtn = ev.target.closest ? ev.target.closest(".card-edit") : null;
+      var t = ev.target;
+      var dlBtn = t.closest ? t.closest(".card-dl") : null;
+      if (dlBtn) {
+        downloadFile(fileById(dlBtn.getAttribute("data-dl")));
+        return;
+      }
+      var editBtn = t.closest ? t.closest(".card-edit") : null;
       if (editBtn) {
         openFileEdit(editBtn.getAttribute("data-edit"));
         return;
       }
-      var card = ev.target.closest ? ev.target.closest(".file-card") : null;
+      var card = t.closest ? t.closest(".file-card") : null;
       if (card) openReader(card.getAttribute("data-id"));
     };
+    // 列表里存在「预览生成中」→ 启动轮询，状态收敛后自动停
+    if (hasPendingPreview()) startPdfPoll();
   }
 
   // 文档编辑对话框（仅管理员）：名称 / 简介 / 归类 / 删除
@@ -448,7 +577,9 @@
         '<input id="m-name" class="input" maxlength="80"></div>' +
         '<div class="form-row"><label class="form-label">保存到分类</label>' +
         '<select id="m-cat" class="select">' + catOptions(state.currentCat === "all" ? "" : state.currentCat, true) + "</select></div>" +
-        '<div class="form-hint">旧版 .doc / .xls 会自动转换为 .docx / .xlsx 后保存（仅保留文字与表格，样式/图片不迁移）。</div>',
+        '<div class="form-hint">旧版 .doc / .xls 会自动转换为 .docx / .xlsx 后保存（仅保留文字与表格，样式/图片不迁移）。' +
+        'Word / Excel 均生成原样式预览（Word 需服务器安装 LibreOffice 转为 PDF；Excel 由服务端还原为连续单页网页表格，不分页）；' +
+        '无论哪种格式，下载拿到的都是您上传的原始文档。</div>',
         function () {
           var input = $("m-file");
           if (!input.files || !input.files[0]) throw new Error("请选择要上传的文件");
@@ -466,6 +597,10 @@
             if (data && data.converted_from) {
               toast("上传成功：已自动将 ." + data.converted_from + " 转换为 ." +
                     (data.item && data.item.ext ? data.item.ext : ""), false, 3600);
+            } else if (data && data.pdf_status === "pending") {
+              toast("上传成功，PDF 预览生成中（完成后自动生效）", false, 3600);
+            } else if (data && data.html_status === "pending") {
+              toast("上传成功，表格预览生成中（完成后自动生效）", false, 3600);
             } else {
               toast("上传成功");
             }
@@ -545,45 +680,53 @@
   // ==================== 阅读视图切换 ====================
   // 转换提示条：展示"该文档由旧版格式自动转换而来"，用户可关闭；
   // 关闭状态存于内存（同一次会话内不再重复弹出），不落本地存储（每次打开仍是新会话观感）。
+  // 优先级：PDF 生成中 > PDF 生成失败（已降级）> 旧版格式转换提示。
   var noticeClosed = {};
 
   function showReaderNotice(f) {
     var box = $("reader-notice");
-    if (!f || !f.converted || noticeClosed[f.id]) {
+    var key = null, text = "", extra = "";
+    if (!f) {
+      state.currentNoticeKey = null;
       box.className = "reader-notice hidden";
       return;
     }
-    var from = (f.original_ext || "").toUpperCase();
-    var to = (f.ext || "").toUpperCase();
-    $("reader-notice-text").textContent =
-      "本文档由旧版 ." + (f.original_ext || "") + " 自动转换为 ." + (f.ext || "") +
-      "，" + from + " → " + to + "；仅保留正文文字与表格，原样式、图片未迁移。";
-    box.className = "reader-notice";
+    if (previewPending(f)) {
+      key = "prev-pending";
+      text = isSheetFile(f)
+        ? "表格预览生成中，当前为简化渲染；生成完成后会自动切换，也可先下载原件查看完整样式。"
+        : "PDF 预览生成中，当前为简化渲染；生成完成后会自动切换，也可先下载原件查看完整样式。";
+      extra = " info";
+    } else if (previewStatus(f) === "failed") {
+      key = "prev-failed";
+      text = isSheetFile(f)
+        ? "表格预览生成失败，已回退为简化渲染；可下载原件查看完整样式。"
+        : "PDF 预览生成失败，已回退为简化渲染；可下载原件查看完整样式。";
+    } else if (f.converted) {
+      key = "conv:" + f.id;
+      var from = (f.original_ext || "").toUpperCase();
+      var to = (f.ext || "").toUpperCase();
+      text = "本文档由旧版 ." + (f.original_ext || "") + " 自动转换为 ." + (f.ext || "") +
+        "，" + from + " → " + to + "；仅保留正文文字与表格，原样式、图片未迁移。";
+    }
+    state.currentNoticeKey = key;
+    if (!key || noticeClosed[key]) {
+      box.className = "reader-notice hidden";
+      return;
+    }
+    $("reader-notice-text").textContent = text;
+    box.className = "reader-notice" + extra;
   }
 
   function hideReaderNotice() {
-    if (state.currentFileId) noticeClosed[state.currentFileId] = true;
+    if (state.currentNoticeKey) noticeClosed[state.currentNoticeKey] = true;
+    state.currentNoticeKey = null;
     $("reader-notice").className = "reader-notice hidden";
   }
 
-  function openReader(fileId) {
-    var f = null;
-    state.files.forEach(function (x) { if (x.id === fileId) f = x; });
-    if (!f) return;
-    state.listScroll = window.pageYOffset || 0;
-    state.readerOpen = true;
-    state.currentFileId = fileId;
-    $("view-list").className = "view hidden";
-    $("view-reader").className = "view";
-    // 文件信息头（徽标 + 标题）展示在底部胶囊工具条
-    $("dock-ext").textContent = EXT_LABEL[f.ext] || (f.ext || "").toUpperCase();
-    $("dock-ext").className = "badge ext-" + f.ext;
-    $("dock-title").textContent = f.name;
-    // 转换来源提示条：仅对 .doc/.xls 自动转换的文档显示（本次会话内关闭过则不再弹）
-    showReaderNotice(f);
-    $("btn-copy").disabled = true;
-    $("reader-pager").className = "pager hidden";
-    window.KBReader.render(f, {
+  // 阅读器回调（打开时与 PDF 就绪自动重渲染时共用）
+  function readerCbs() {
+    return {
       onReady: function (cap) {
         $("btn-copy").disabled = false;
         // 图标按钮：范围说明放 title 悬停提示，不改 textContent（会清掉图标）
@@ -602,13 +745,38 @@
         $("reader-status").textContent = msg;
         $("reader-status").className = "reader-status";
       }
-    });
+    };
+  }
+
+  function openReader(fileId) {
+    var f = fileById(fileId);
+    if (!f) return;
+    state.listScroll = window.pageYOffset || 0;
+    state.readerOpen = true;
+    state.currentFileId = fileId;
+    state.currentRenderedPreview = previewReady(f);
+    $("view-list").className = "view hidden";
+    $("view-reader").className = "view";
+    // 文件信息头（徽标 + 标题）展示在底部胶囊工具条
+    $("dock-ext").textContent = EXT_LABEL[f.ext] || (f.ext || "").toUpperCase();
+    $("dock-ext").className = "badge ext-" + f.ext;
+    $("dock-title").textContent = f.name;
+    // 提示条：PDF 生成中 / 生成失败 / 旧版格式转换（本次会话内关闭过则不再弹）
+    showReaderNotice(f);
+    $("btn-copy").disabled = true;
+    $("reader-pager").className = "pager hidden";
+    window.KBReader.render(f, readerCbs());
+    // 仍在生成 PDF：轮询等待，就绪后自动重渲染切到 PDF 视图
+    if (previewPending(f)) startPdfPoll();
     window.scrollTo(0, 0);
   }
 
   function closeReader() {
     state.readerOpen = false;
     state.currentFileId = null;
+    state.currentNoticeKey = null;
+    state.currentRenderedPreview = false;
+    stopPdfPoll();
     window.KBReader.destroy();
     $("view-reader").className = "view hidden";
     $("view-list").className = "view";
@@ -641,6 +809,10 @@
     $("btn-notice-close").onclick = hideReaderNotice;
     $("btn-copy").onclick = function () {
       if (window.KBReader && KBReader.copy) KBReader.copy();
+    };
+    // 下载原件（Word/Excel 下载的是原始文档，不是 PDF 版）
+    $("btn-download").onclick = function () {
+      downloadFile(fileById(state.currentFileId));
     };
     $("btn-prev-page").onclick = function () { if (window.KBReader) KBReader.prevPage(); };
     $("btn-next-page").onclick = function () { if (window.KBReader) KBReader.nextPage(); };

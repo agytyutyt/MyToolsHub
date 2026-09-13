@@ -2,6 +2,9 @@
 
 ## 环境与工具（先看这里，能省很多时间）
 
+- **本会话工具坑（2026-09-11 实测）**：Bash 工具 PATH 损坏（ls/wc/tail/dirname command not found，
+  仅内建 echo 可用）；PowerShell 执行正常但 **stdout 被吞**——探测类命令写临时文件再 Read，
+  用完删掉；Read/Glob/Grep/Write/Edit 不受影响，优先用它们。
 - **本机无自带 Flask**。已建隔离 venv（本会话创建）：
   `C:\Users\yfjz\.workbuddy\binaries\python\envs\default\Scripts\python.exe`
   （flask 3.1.3 / cryptography / openpyxl 3.1.5）。跑源码调试与测试都用它，别污染系统 Python。
@@ -11,7 +14,30 @@
   - `curl` 访问本机服务必须加 `--noproxy '*'`，否则返回 502。
   - **默认视口约 1080×480**：模态框高于视口时，真实鼠标点击会落到遮罩上把浮窗关掉
     （合成 `el.click()` 不受影响）。实测前先 `agent-browser set viewport 1440 1000`。
-  - 登录态不跨 CLI 调用保持：**登录 + 后续操作要在同一次 Bash 调用内链式执行**。
+  - 命令在 `D:\OpenClaw\npm-global\agent-browser.cmd`，**只能用 PowerShell 调**（Bash 缺 sed/uname 跑不了；
+    Bash 的 PATH 本来就残废）。PowerShell 里用 `Out-File -Encoding utf8` 落盘再 Read（`>` 出来是 UTF-16）。
+  - **每次 CLI 调用都是新会话**：登录态不跨调用，必须把「登录 + 操作」放进**同一次
+    `agent-browser batch "cmd1" "cmd2" ...`**（batch 内共享 daemon）。
+  - **batch 按空格切分参数**，JS 里的空格和 `|` 会被 cmd 拆掉 → `eval` 脚本要么写成无空格表达式，
+    要么改用 `get text/count/attr`。
+  - **插件前端跑在 iframe 里**：`/tool/<id>` 是外壳页，`/plugin/<id>/index.html` 才是插件页。
+    `click <css>` / `eval` 默认作用于父文档会 "Element not found"，登录后直接开
+    `/plugin/<id>/index.html`（同源，Cookie 有效）最省事。
+
+## 给「外部转换程序」做测试夹具（无需真装程序）
+
+要验证调用外部可执行程序（如 LibreOffice soffice）的链路，不必在机器上真装：
+在临时目录写 `soffice.bat`（`@echo off` + `"<venv python>" "%~dp0fake_soffice.py" %*`，
+Windows 的 `subprocess.run` 能直接跑 .bat 但不能跑 .py），Python 脚本解析 `--outdir` 与源文件参数、
+输出一份**最小但结构合法**的 PDF（含正确 xref 偏移，pdf.js 能打开），
+测试里把探测函数打桩指向这个 bat 即可。失败态可在脚本里读一个标志文件控制退出码。
+
+## 浏览器走查不要污染真实数据
+
+跑真机走查时**不要把测试数据上传进用户真实的 `~/.jztoolshub`**：
+把数据根整目录 `copytree` 到临时目录（约 10MB/200 文件），在副本的 JSON 里直接注入预置记录与
+配套文件，再用「patch `jztools_data.get_data_root` → 起 app」的隔离套路启动服务（端口用 5099
+避开用户的 5000）。真实库全程只读。
 
 ## 隔离测试套路（务必遵守，保护用户真实数据 `~/.jztoolshub`）
 
@@ -45,3 +71,29 @@
    单元格的百分比/货币/日期等**显示格式不影响取值**，取到的是底层值。
 4. **openpyxl 拒绝写入 XML 非法控制字符**（`\x00`/`\x07` 抛 `IllegalCharacterError`），
    造测试夹具时别塞；但 **CSV 可以携带**，解析时要清理。
+
+## 插件 backend 共享模块 import 必须两步式兜底
+
+`from . import X` 在主应用包上下文加载时 OK，**但** importlib/补偿测试/重启后的实例可能无包上下文，
+裸 `import X` 兜底缺失 + except 太宽（`except Exception` 吞掉 ImportError）会导致实例永远判定「模块不存在」。
+**所有插件 backend 内跨模块引用**都写：
+```python
+try:
+    from . import X as _X
+except ImportError:
+    try:
+        import X as _X
+    except ImportError:
+        _X = None
+```
+（与项目里 doc_convert 的写法一致）
+
+## LibreOffice headless 转换经验
+
+- **管理安装解包** `msiexec /a <msi> /qn TARGETDIR=D://LibreOffice` —— 非管理员可装 Windows 大型应用，
+  解出完整目录可直接运行（soffice.exe），无需注册表注册
+- **profile 复用提速**：每次新建临时 profile 37~40s，**复用固定 profile**（`<数据根>/.lo-profile/`）15~18s；
+  失败时重置 profile 再试一次（避免「一次损坏、永久失败」）
+- `soffice --version` 在解包版会启动后不退出（URE 未注册），超时压到 10s 兜底；版本信息仅展示用，丢失不影响可用性
+- `URE_BOOTSTRAP`/`SAL_*` 环境变量无效（实测），不要加
+- 中文 PDF 渲染依赖 Windows 系统字体（宋体/微软雅黑/黑体）—— 这些都在 C://Windows//Fonts 自带

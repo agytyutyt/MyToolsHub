@@ -120,7 +120,7 @@ JZToolsHub/
 │   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
 │   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
 │   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
-│   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读，管理员上传 + 多级分类，前端纯 JS 渲染）
+│   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读 + Word 转 PDF / Excel 手绘 HTML 表格原样式预览 + 原件下载，管理员上传 + 多级分类，前端纯 JS 渲染）
 │   ├── file-filter/          # 插件：过滤器（表格脱敏过滤 + 合规检查：硬过滤/大模型语义匹配过滤/文本与正则后处理）
 │   ├── trajectory-sketch/    # 插件：轨迹速写（Excel 轨迹表 → 调用过滤器做字段过滤 → 轨迹分析 → 速写报告）
 │   └── admin/                # 核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
@@ -458,25 +458,36 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /api/knowledge-base/status` | 依赖自检（核心功能纯标准库恒 ok；`convert_legacy` 表示旧版格式转换能力：openpyxl/xlrd/python-docx/olefile 齐备） |
+| `GET /api/knowledge-base/status` | 依赖自检（核心功能纯标准库恒 ok；`convert_legacy` 表示旧版格式转换能力：openpyxl/xlrd/python-docx/olefile 齐备；`pdf_engine` 报告 LibreOffice 探测结果（Word 类 PDF 预览），`xlsx_render` 报告 openpyxl 表格渲染能力（`xlsx_preview`），`?refresh=1` 强制重探 LibreOffice——仅管理员生效） |
 | `GET /api/knowledge-base/config` | 当前用户是否可管理（`can_manage`：管理员角色/超管） |
 | `GET /api/knowledge-base/categories` | 分类树（全部登录用户；按 order + created_at 排序） |
 | `POST /api/knowledge-base/categories` | 新建分类 `{name, parent_id?}` —— 仅管理员；同层重名 409、父分类 404 |
 | `PUT /api/knowledge-base/categories/<cid>` | 改名 / 移动（parent_id 防环：不得指向自身或子孙）/ 排序 —— 仅管理员 |
 | `DELETE /api/knowledge-base/categories/<cid>` | 删除分类 —— 仅管理员；有子分类或文件 409 |
 | `GET /api/knowledge-base/files?category=&q=` | 文件列表（category 递归含子孙分类；q 模糊匹配文件名；按创建时间倒序，含上传人姓名/大小/时间） |
-| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/doc/csv/md/markdown/txt`、≤20MB（413）；**旧版 `.doc`/`.xls` 服务端自动转换为 `.docx`/`.xlsx` 后落盘**（依赖缺失/文件损坏 422 明确提示），响应含 `converted_from`，元数据记 `original_ext`；服务端生成 ID 重命名落盘 |
+| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/doc/csv/md/markdown/txt`、≤20MB（413）；**旧版 `.doc`/`.xls` 服务端自动转换为 `.docx`/`.xlsx` 后落盘**（依赖缺失/文件损坏 422 明确提示），响应含 `converted_from`，元数据记 `original_ext`；服务端生成 ID 重命名落盘；**原件与渲染件双份保存**，Word 上传即返回 `pdf_status=pending` 后台异步转 PDF，Excel 上传即返回 `html_status=pending` 后台异步渲染表格 HTML |
 | `PUT /api/knowledge-base/files/<fid>` | 改名 / 移动分类 `{name?, category_id?}` —— 仅管理员 |
 | `DELETE /api/knowledge-base/files/<fid>` | 删除文档（元数据 + 落盘文件）—— 仅管理员 |
-| `GET /api/knowledge-base/files/<fid>/raw` | **内联**读取文件内容（`Content-Disposition: inline`，无 attachment，不提供下载语义；`conditional=True` 支持 Range/304 供 pdf.js 断点续读）；ID 白名单正则防目录穿越，不可读一律 404 |
+| `GET /api/knowledge-base/files/<fid>/raw` | **内联**读取渲染件（`Content-Disposition: inline`，无 attachment；`conditional=True` 支持 Range/304 供 pdf.js 断点续读）；ID 白名单正则防目录穿越，不可读一律 404 |
+| `GET /api/knowledge-base/files/<fid>/pdf` | **内联**读取展示用 PDF（仅 `pdf_status=ok` 且文件存在；inline + `conditional=True`）；未就绪/失败/不存在一律 404 —— Word 类的"原样式"预览数据源 |
+| `GET /api/knowledge-base/files/<fid>/preview` | Excel 表格预览 JSON（各 sheet 的手绘 HTML 片段，仅 `html_status=ok`；未就绪/失败/不存在一律 404）—— 连续单页不分页，合并/列宽/边框/填充/字体/数字日期格式已还原 |
+| `GET /api/knowledge-base/files/<fid>/download` | **附件下载原件**（`download_name` 用 `original_name`，中文名由 Flask 处理 RFC 5987）—— 全体登录用户；Word/Excel 下载的是原始文档 **不是 PDF 版** |
+| `POST /api/knowledge-base/files/<fid>/pdf-retry` | 重试 PDF 转换（Word 类）—— 仅管理员；仅 `failed` 记录可重试（其余 409），重置为 `pending` 重新入队 |
+| `POST /api/knowledge-base/files/<fid>/preview-retry` | 重试 Excel 表格预览渲染 —— 仅管理员；仅 `failed` 记录可重试（其余 409），重置为 `pending` 重新入队 |
 
 > 分类与文件元数据以单库 JSON 保存在数据根目录 `plugins/knowledge-base/data/`
-> （categories.json / files.json，原子写 + 全局锁），上传的原始文件落盘 `data/files/<id>.<ext>`；
-> 记录含 `created_by / created_by_name / unit_id / department_id` 归属四字段（取自会话）。
+> （categories.json / files.json，原子写 + 全局锁），上传的文件落盘 `data/files/<id>.<ext>`；
+> 上传后**最多四件套**：原件 `<id>.<original_ext>`（下载专用）+ 降级渲染件 `<id>.docx/.xlsx`
+> （旧版格式转换产物）+ 展示用 PDF `<id>.pdf`（Word 类，服务端 LibreOffice headless 异步生成）
+> + 表格预览 `<id>.json`（Excel 类，服务端 xlsx_render 手绘 HTML 异步生成）。
+> 记录含 `created_by / created_by_name / unit_id / department_id` 归属四字段（取自会话），
+> 以及 `pdf_status` / `html_status`（均 none|pending|ok|failed）及配套 size/error 预览状态字段。
 > 阅读为全站公共资源：列表不做单位/部门过滤（`grant_all`），管理操作仅管理员角色/超管。
 > 前端渲染全在浏览器端（pdf.js / easyofd / mammoth / SheetJS / marked，输出过 DOMPurify），
 > 库文件 vendor 于 `frontend/vendor/`（离线内网可用，见其 VENDOR.md）；
-> 仅提供阅读与复制，无编辑接口、无下载端点。设计文档：`docs/知识库插件-设计文档.md`。
+> 无编辑接口；阅读与**下载原件**对全员开放（下载为需求级变更，见优化方案设计文档 §9）。
+> Word/Excel 已生成 PDF 时用 pdf.js 按原样式渲染，否则回退降级渲染（未装 LibreOffice 时体验同前）。
+> 设计文档：`docs/知识库插件-设计文档.md`、`docs/插件库优化方案-设计文档.md`。
 
 **file-filter 插件后端接口**（过滤器——表格脱敏过滤与合规检查）：
 
@@ -896,7 +907,7 @@ def current_user_or_none():
 | shared-docs | office | ✅ | ✅ | python-docx / openpyxl / xlrd | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、乐观锁版本冲突提示、`.docx` / `.xlsx` 导入导出、单位/部门/私人三级可见 |
 | case-report | office | ✅ | ✅ | requests / openpyxl | 输入收网报告 → 大模型抽取要素 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队），跨记录汇总 / 案件筛选 / Excel 导出 |
 | notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
-| knowledge-base | office | ✅ | ✅ | openpyxl / xlrd / python-docx / olefile（仅旧版格式自动转换，缺失时优雅降级） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面提示**）并多级分类管理，全员在线只读阅读与复制（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
+| knowledge-base | office | ✅ | ✅ | openpyxl / xlrd / python-docx / olefile（仅旧版格式自动转换，缺失时优雅降级）；**PDF 预览需目标机安装 LibreOffice**（外部程序，非 pip 包，缺失时阅读回退降级渲染） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面提示**）并多级分类管理；**Word/Excel 服务端异步转 PDF，阅读按原文档样式展示（pdf.js），原件 + PDF 双份保存**；全员在线只读阅读、复制与**下载原始文档**（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
 | file-filter | office | ✅ | ✅ | openpyxl / xlrd / requests | 过滤器：表格文件（xlsx/xls/csv ≤20MB）脱敏过滤与合规检查——硬过滤（按名单精确匹配保留列）/ 大模型过滤（表头语义关联匹配）/ 文本与正则后处理；左右两栏布局（左上传右下载）；`/apply` 接口供其他插件程序化调用 |
 | trajectory-sketch | office | ✅ | ✅ | openpyxl / xlrd / requests | 轨迹速写：上传原始轨迹表（Excel）→ 调用「过滤器」插件做字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析（地点簇 / 自适应停留点 / 出行段）→ 速写报告（页内预览 + 5 sheet Excel）；分析引擎为零依赖可插拔包（纯标准库），非超管需同时拥有「过滤器」权限 |
 | admin（核心） | - | ✅ | ✅ | cryptography / Flask / openpyxl | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置 + **单位/部门/人员批量导入导出**（xlsx/csv，两步式预览 + 执行）；`hidden: true`，始终加载 |

@@ -250,6 +250,22 @@ body {
   transition: background .15s, color .15s;
 }
 .card-edit:hover { background: var(--accent-light); color: var(--accent-dark); }
+/* 卡片下载按钮（全员可见，下载原始文档） */
+.card-dl {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s, color .15s;
+}
+.card-dl:hover { background: var(--accent-light); color: var(--accent-dark); }
 /* 简介区：最多两行截断 */
 .file-summary {
   margin-top: 10px;
@@ -425,6 +441,27 @@ body {
   top: 0;
 }
 
+/* Excel 表格预览（服务端 xlsx_render 手绘 HTML）——样式尽量由单元格 inline style
+ * 还原；这里只补默认网格线与兜底字体。inline 的 border 覆盖网格线，未指定边的
+ * 单元格显示浅灰网格线（模拟 Excel 视图）。注意不要给 .kb-xlsx-table 加 padding，
+ * 行高/列宽由 <col> 与 tr height 控制。 */
+.kb-xlsx-table {
+  font-family: Calibri, "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 14.7px;   /* Excel 默认 11pt */
+  background: #fff;
+}
+.kb-xlsx-table td {
+  border: 1px solid #d9d9d9;
+  padding: 0 3px;
+  min-width: 0;
+}
+.kb-xlsx-table.kb-nogrid td { border-color: transparent; }
+.kb-xlsx-table .kb-xlsx-more td {
+  border-color: transparent;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
 /* PDF 页面容器 —— 仅保留页与页之间的间隔，不做卡片投影；水平居中 */
 .pdf-page-box { background: #fff; }
 .pdf-page-box canvas { display: block; }
@@ -551,6 +588,34 @@ body {
   flex: none;
 }
 
+/* PDF 预览状态角标（纯文本，不用 emoji，兼容老版 Chrome）
+   pending = 生成中（靛蓝） / degraded = 生成失败已降级（琥珀） */
+.pdf-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  vertical-align: 1px;
+  border-radius: 4px;
+  flex: none;
+  white-space: nowrap;
+}
+.pdf-badge.pending {
+  color: #283593;
+  background: #e8eaf6;
+  border: 1px solid rgba(57, 73, 171, 0.35);
+  animation: pdf-pulse 1.4s ease-in-out infinite;
+}
+.pdf-badge.degraded {
+  color: #8a6d1f;
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  cursor: help;
+}
+@keyframes pdf-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
 /* 2) 上传对话框底部说明 */
 .form-hint {
   margin-top: 4px;
@@ -589,6 +654,16 @@ body {
   cursor: pointer;
 }
 .reader-notice .notice-close:hover { background: rgba(255, 179, 0, 0.22); color: #5d4a08; }
+
+/* 阅读页提示条「信息态」：PDF 生成中（蓝），区别于默认的警示态（琥珀） */
+.reader-notice.info {
+  color: #1a3a6b;
+  background: #eaf2fd;
+  border-color: #bbd6f5;
+  border-left-color: #42a5f5;
+}
+.reader-notice.info .notice-close { color: #1a3a6b; }
+.reader-notice.info .notice-close:hover { background: rgba(66, 165, 245, 0.22); color: #0d2a52; }
 
 /* ==================== 响应式 ==================== */
 @media (max-width: 860px) {

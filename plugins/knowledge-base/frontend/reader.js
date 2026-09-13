@@ -1,8 +1,13 @@
 /* 知识库插件 —— 阅读视图渲染器
- * 按扩展名分派：pdf(PDF.js) / ofd(EasyOFD) / docx(mammoth) / xlsx·xls·csv(SheetJS) /
- * md·markdown(marked) / txt(原生 textContent)。
+ * 分派：html_ready(Excel 表格预览：服务端手绘 HTML，原样式连续单页无分页) /
+ * pdf_ready(PDF.js 渲染服务端转出的 PDF，Word 类专用) / pdf(PDF.js) / ofd(EasyOFD) /
+ * docx(mammoth) / xlsx·xls·csv(SheetJS 降级) / md·markdown(marked) / txt(原生)。
+ * Excel 上传后由服务端 xlsx_render 渲染为各 sheet 的 HTML 片段（保留合并单元格/
+ * 列宽/边框/填充/字体/数字日期格式），html_ready 时优先走表格预览；未就绪/失败时
+ * 回退 SheetJS 简化渲染（无 openpyxl 环境体验同降级链）。
+ * Word 类仍由服务端转 PDF，pdf_ready 时走 PDF.js（保留原文档样式）。
  * 所有第三方库自 frontend/vendor/ 惰性按需注入（离线内网，禁止运行时 CDN）；
- * mammoth / marked 输出一律经 DOMPurify 消毒后再 innerHTML（防 XSS）。
+ * mammoth / marked / 表格预览输出一律经 DOMPurify 消毒后再 innerHTML（防 XSS）。
  * 只读保证：渲染容器不可编辑，仅提供选择复制。
  */
 (function () {
@@ -83,8 +88,10 @@
   }
 
   // 阅读视图每次打开都重新拉取字节流（Range 缓存由框架处理）
-  function fetchRaw(file) {
-    return fetch("/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/raw")
+  // url 为空 = 默认 /raw（渲染件）；word/excel 的 PDF 预览传 /pdf
+  function fetchUrl(file, url) {
+    if (!url) url = "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/raw";
+    return fetch(url)
       .then(function (res) {
         if (res.status === 401) {
           location.href = "/login?next=" + encodeURIComponent("/tool/knowledge-base");
@@ -92,6 +99,94 @@
         }
         if (!res.ok) throw new Error("文件读取失败（" + res.status + "）");
         return res.arrayBuffer();
+      });
+  }
+
+  function fetchRaw(file) { return fetchUrl(file, null); }
+
+  function pdfUrl(file) {
+    return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/pdf";
+  }
+
+  function previewUrl(file) {
+    return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/preview";
+  }
+
+  // ==================== 渲染器：Excel 表格预览（服务端手绘 HTML） ====================
+  // 后端 xlsx_render 生成各 sheet 的 <table> 片段（合并/列宽/边框/填充/字体/
+  // 数字日期格式已还原），前端只负责页签切换与展示。404 = 未就绪/失败 → 调用方
+  // 回退 SheetJS。服务端已转义，这里仍过 DOMPurify（纵深防御）。
+  function fetchPreview(file) {
+    return fetch(previewUrl(file)).then(function (res) {
+      if (res.status === 401) {
+        location.href = "/login?next=" + encodeURIComponent("/tool/knowledge-base");
+        return new Promise(function () {});
+      }
+      if (!res.ok) throw new Error("表格预览读取失败（" + res.status + "）");
+      return res.json();
+    });
+  }
+
+  function renderSheetHtml(file) {
+    return Promise.all([fetchPreview(file), loadScript(V + "purify/purify.min.js?v=1")])
+      .then(function (results) {
+        var data = results[0];
+        var sheets = (data && data.sheets) || [];
+        if (!sheets.length) throw new Error("表格预览数据为空");
+        sheets.forEach(function (s) {
+          s.html = window.DOMPurify.sanitize(s.html || "", { USE_PROFILES: { html: true } });
+        });
+        var tabs = document.createElement("div");
+        tabs.className = "sheet-tabs";
+        var wrap = document.createElement("div");
+        wrap.className = "sheet-table-wrap";
+        container().appendChild(tabs);
+        container().appendChild(wrap);
+        function show(name) {
+          for (var i = 0; i < sheets.length; i++) {
+            if (sheets[i].name === name) wrap.innerHTML = sheets[i].html;
+          }
+          Array.prototype.forEach.call(tabs.children, function (b) {
+            b.className = b.textContent === name ? "sheet-tab active" : "sheet-tab";
+          });
+        }
+        sheets.forEach(function (s) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = "sheet-tab";
+          b.textContent = s.name;
+          b.onclick = function () { show(s.name); };
+          tabs.appendChild(b);
+        });
+        show(sheets[0].name);
+        status(null);
+        callbacks.onReady(sheets.length > 1 ? "复制本表" : "复制全文");
+        var activeName = sheets[0].name;
+        tabs.onclick = function (ev) {
+          var t = ev.target;
+          if (t.className.indexOf("sheet-tab") >= 0) activeName = t.textContent;
+        };
+        return {
+          copy: function () {
+            // 从当前展示的表格提取纯文本（保留行列制表分隔）
+            var html = "";
+            for (var i = 0; i < sheets.length; i++) {
+              if (sheets[i].name === activeName) html = sheets[i].html;
+            }
+            var tmp = document.createElement("div");
+            tmp.innerHTML = html;
+            var rows = tmp.querySelectorAll("tr");
+            var lines = [];
+            for (var r = 0; r < rows.length; r++) {
+              if (rows[r].className.indexOf("kb-xlsx-more") >= 0) continue;
+              var cells = rows[r].querySelectorAll("td,th");
+              var parts = [];
+              for (var c = 0; c < cells.length; c++) parts.push(cells[c].textContent);
+              lines.push(parts.join("\t"));
+            }
+            return lines.join("\n");
+          }
+        };
       });
   }
 
@@ -220,8 +315,10 @@
   // ==================== 渲染器：PDF（PDF.js） ====================
   var pdfState = null;
 
-  function renderPdf(file) {
-    return Promise.all([fetchRaw(file), loadScript(V + "pdf/pdf.min.js?v=1")])
+  // url 为空 = 默认 /raw（渲染件）；word/excel 的 PDF 预览传 /pdf
+  function renderPdf(file, opts) {
+    var src = (opts && opts.url) ? fetchUrl(file, opts.url) : fetchRaw(file);
+    return Promise.all([src, loadScript(V + "pdf/pdf.min.js?v=1")])
       .then(function (results) {
         var buf = results[0];
         var pdfjs = window.pdfjsLib;
@@ -395,15 +492,38 @@
     txt: renderText
   };
 
-  var NAV_FORMATS = { pdf: 1, ofd: 1 }; // 需要页码导航的格式
+  // 需要页码导航的格式（按**实际使用的渲染器**判定，不按扩展名：
+  // word/excel 转出 PDF 后同样需要翻页/缩放）
+  var NAV_FORMATS = { pdf: 1, ofd: 1 };
 
   function render(file, cbs) {
     destroy();
     callbacks = cbs || {};
     current = file;
-    var fn = RENDERERS[file.ext];
+    // ★预览分派（阶段 3）：
+    //   Excel（xlsx/xls）→ html_ready 时走服务端手绘表格预览（原样式、连续单页）；
+    //   Word（docx/doc） → pdf_ready 时走 PDF.js（保留原文档样式）。
+    //   两者未就绪/失败 → 按扩展名回退降级渲染（SheetJS / mammoth）。
+    var isSheetExt = file.ext === "xlsx" || file.ext === "xls";
+    var isWordExt = file.ext === "docx" || file.ext === "doc";
+    var fn;
+    if (isSheetExt && file.html_ready) {
+      var sheetFallback = RENDERERS[file.ext];
+      fn = function () {
+        return renderSheetHtml(file).catch(function (e) {
+          // 预览数据拉取/渲染失败 → 自动回退 SheetJS 简化渲染（不阻断阅读）
+          if (!sheetFallback) throw e;
+          status("表格预览不可用，已回退简化渲染");
+          return sheetFallback(file);
+        });
+      };
+    } else if (isWordExt && file.pdf_ready) {
+      fn = function () { return renderPdf(file, { url: pdfUrl(file) }); };
+    } else {
+      fn = RENDERERS[file.ext];
+    }
     if (!fn) {
-      status("暂不支持在线阅读 ." + file.ext + " 格式");
+      status("暂不支持在线阅读 ." + file.ext + " 格式，可下载原件查看");
       return;
     }
     status("加载中…");

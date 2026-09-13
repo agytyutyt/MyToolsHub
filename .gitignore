@@ -29,6 +29,9 @@ plugins/file-filter/config.json
 # 插件运行期用户数据（规范 S-3：backend/data/ 一律不入库）
 plugins/*/backend/data/
 
+# 本地测试产物（xlsx_render / routes 自测脚本的输出目录）
+plugins/knowledge-base/backend/out/
+
 # 插件临时产物（轨迹转换视频任务缓存）
 plugins/*/backend/.task_cache/
 

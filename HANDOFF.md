@@ -1,7 +1,39 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-11（**知识库插件：旧版 .doc/.xls 上传自动转换**——新模块
+> 最后更新：2026-09-13（**知识库：Excel 预览弃 PDF 改 Python 手绘 HTML 表格**——
+> 用户反馈 xlsx 转 PDF 预览按打印分页、宽表被切碎不利阅读。新模块
+> `plugins/knowledge-base/backend/xlsx_render.py`（openpyxl 手绘 `<table>`，零新增 pip 依赖；
+> 参考 GitHub Apkawa/xlsx2html 思路重写，修正其主题色丢弃/列宽换算偏窄/字号 11pt 当 11px/
+> 数字格式依赖 babel 四处失真）：还原合并单元格/列宽/行高/隐藏行列/边框/填充（theme+tint）/
+> 字体/对齐/数字与日期显示格式，单 sheet 3000 行/120 列/12 万格/4MB 封顶截断提示，>15MB 直接
+> failed 回退 SheetJS。`routes.py`：Excel 走 `html_status` 异步渲染管线（独立线程池，
+> 与 Word 的 LibreOffice 长任务分池），新端点 `GET /files/<id>/preview`、
+> `POST /files/<id>/preview-retry`，删除扩为四件套，历史 Excel 记录 `pdf_status` 复位 none；
+> Word 类 PDF 预览不变。前端 reader.js 新增表格预览渲染器（页签 + DOMPurify + TSV 复制，
+> 失败自动回退 SheetJS），app.js 角标/轮询双轨适配，资源版本 v21/v5/v15。
+> 验证：格式化矩阵 40+ 用例 + test_client 全链路 + 浏览器目检样式还原全过；
+> 自测脚本 `backend/test_xlsx_render.py`、`backend/test_routes_preview.py` 留存。
+> 改动未提交，等用户拍板。详见 `docs/插件库优化方案-设计文档.md` 阶段 7）。
+> （2026-09-11 **知识库优化方案：全部阶段（0~5）完成，含真实 LibreOffice 端到端验证**——
+> 在前轮（阶段 1~3）基础上本轮新增：
+> ⑥ 引擎安装：`msiexec /a` 非管理员解包 LibreOffice 25.8.7 到 `D:\LibreOffice`（1.5GB），
+> 注册表无 LibreOffice；通过 `<数据根>/plugins/knowledge-base/config.json` 的 `pdf.soffice_path` 显式指定；
+> ⑦ `pdf_convert.py` **改用固定 profile**（`<数据根>/.lo-profile`，实测 37~40s → 15~18s，
+> profile 损坏自动重置重试一次）；`soffice --version` 解包版会挂起，超时压到 10s 兜底；
+> ⑧ 前端轮询上限 20×3s → 60×3s（与 180s 转换超时对齐，避免角标卡「生成中」）；
+> ⑨ **修真实缺陷**：routes.py `pdf_convert` import 缺裸 `import pdf_convert` 兜底，
+> 脚本方式加载（如补偿测试）的实例会永远判定「引擎不存在」置 failed；
+> ⑩ 真机验证：含中文/表格/图片/页眉页脚的 docx → PDF 105KB / 2 页 / 45s 首转 18s 热；
+> 3 sheet xlsx（含 `SUM(E3:E7)=120200` 公式）→ PDF 230KB / 3 页 / 18s；浏览器目视 PDF
+> 在 pdf.js 中渲染，中文无方块、表格边框/红字/列表/页眉/图片/数字格式全保留；
+> 重启补偿 ok；全链路测试 **16/16 通过**（`%TEMP%\kb_phase4_smoke.py`）。
+> 改动未提交，等用户拍板）。
+> （2026-09-11 **插件库优化方案设计定稿**——
+> `docs/插件库优化方案-设计文档.md`：Word/Excel 上传转 PDF 预览（LibreOffice headless 主选 +
+> 探测降级链）、原件+降级件+PDF 三件套存储、全类型下载（Word/Excel 下载给原件）、
+> 异步转换管线；实施按该文档 §12 TODO 断点续作）
+> （2026-09-11 **知识库插件：旧版 .doc/.xls 上传自动转换**——新模块
 > `plugins/knowledge-base/backend/doc_convert.py`（纯 Python：olefile 解析 Word 二进制 FIB/CLX +
 > python-docx 重建 / xlrd+openpyxl 重建表格，不依赖 WPS/Office COM——服务账户与无 Office 机器可用）；
 > 上传白名单加 `.doc`，转换后落盘（库内只留 docx/xlsx），元数据记 `original_ext`，
@@ -100,6 +132,26 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
   改 `frontend/app.js` + `frontend/index.html` + `frontend/style.css`（上传 Snackbar + 卡片角标 + 阅读页可关闭说明条三处提示）、
   `backend/requirements.txt`（声明四个新依赖：openpyxl / xlrd / python-docx / olefile）、
   `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md` / 本文件。
+  2026-09-11 追加未提交（**知识库优化方案实施**，《插件库优化方案-设计文档》阶段 1~3）：
+  新增 `plugins/knowledge-base/backend/pdf_convert.py`；改 `routes.py`（三件套存储、下载端点、
+  `/pdf` 与 `/pdf-retry` 端点、`/status` 的 `pdf_engine`、异步转换管线、启动补偿、删除三件套）、
+  改 `backend/requirements.txt`（说明 PDF 预览依赖外部 LibreOffice，非 pip 包）、
+  改 `frontend/reader.js` + `frontend/app.js` + `frontend/index.html` + `frontend/style.css`
+  （pdf.js 预览短路、下载按钮、状态角标、轮询、提示条；资源版本 v20/v4/v14）、
+  `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md` /
+  `docs/插件库优化方案-设计文档.md` / 本文件。
+  2026-09-11 追加未提交（仅设计文档）：`docs/插件库优化方案-设计文档.md`（知识库 Word/Excel 转 PDF
+  预览 + 全类型下载的实施方案，含分阶段 TODO；**代码部分已在上一行条目中实施**）。
+  2026-09-13 追加未提交（**Excel 表格 HTML 预览**，《插件库优化方案-设计文档》阶段 7）：
+  新增 `plugins/knowledge-base/backend/xlsx_render.py` + 自测脚本 `test_xlsx_render.py` /
+  `test_routes_preview.py`；改 `routes.py`（PDF_SOURCE_EXTS 收窄为 Word、XLSX_SOURCE_EXTS 新增、
+  html_status 管线、/preview 与 /preview-retry 端点、删除四件套、迁移复位 Excel 的 pdf_status、
+  /status 报 xlsx_render）、`frontend/reader.js`（renderSheetHtml + 分派改造）、
+  `frontend/app.js`（previewStatus/Pending/Ready 辅助 + 角标/轮询/提示条/上传提示）、
+  `frontend/style.css`（.kb-xlsx-table 网格线/兜底字体）、`frontend/index.html`（v21/v5/v15）、
+  `backend/requirements.txt`（openpyxl 注释补表格预览用途）、`.gitignore`（backend/out/ 测试产物）、
+  `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md`（阶段 8）/
+  `docs/插件库优化方案-设计文档.md`（阶段 7）/ 本文件。
 - 打包产物（不入库，gitignore）：`deploy/JZToolsHub-v1.4.zip`、`deploy/InfoParse-v1.4.apk`。
 
 ## 3. 内置插件一览
@@ -108,7 +160,7 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 | --- | --- | --- | --- | --- |
 | 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask / openpyxl | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时、单位/部门/人员批量导入导出（见 §4.5） |
 | 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
-| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 后端标准库；渲染库 vendor 在 frontend/vendor/；**旧版格式转换**：openpyxl/xlrd/python-docx/olefile（缺库优雅降级） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面三处提示**）+ 多级分类树；全员只读在线阅读与复制（pdf.js/easyofd/mammoth/SheetJS/marked 前端渲染，无浏览器控件），`grant_all`；设计文档 `docs/知识库插件-设计文档.md` |
+| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 后端标准库；渲染库 vendor 在 frontend/vendor/；**旧版格式转换 + Excel 表格预览**：openpyxl/xlrd/python-docx/olefile（缺库优雅降级）；**Word PDF 预览**：目标机装 LibreOffice（外部程序、非 pip，缺则阅读回退降级渲染） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面三处提示**）+ 多级分类树；**Word 服务端异步转 PDF 走 pdf.js；Excel 服务端 xlsx_render 手绘 HTML 表格预览（连续单页不分页，`html_status` 管线，失败回退 SheetJS）；上传后四件套落盘（原件 + 降级渲染件 + 展示 PDF + 表格预览 JSON），全员可下载原始文档**；`grant_all`；设计文档 `docs/知识库插件-设计文档.md`（基线）+ `docs/插件库优化方案-设计文档.md`（本轮改造，阶段 7 = Excel 表格预览） |
 | 过滤器 | `plugins/file-filter/` | 前后端一体 | openpyxl/xlrd/requests | 表格脱敏过滤与合规检查：硬过滤（名单精确匹配保留列）/ 大模型过滤（表头语义关联，OpenAI 兼容接口）/ 文本与正则后处理；异步任务（ThreadPoolExecutor 2 + TTL 30min + 归属校验）；`POST /apply` 程序化接口供其他插件（JSON rows in/out，不落盘）；设计文档 `docs/过滤器插件-设计文档.md` |
 | 轨迹速写 | `plugins/trajectory-sketch/` | 前后端一体 | openpyxl/xlrd/requests | Excel 轨迹表 → 调「过滤器」`/apply` 做字段过滤（默认硬过滤，开关切大模型辅助）→ 轨迹分析（地点簇/自适应停留点/出行段）→ 速写报告（页内 + 5 sheet Excel）；**分析引擎 `backend/engine/` 为零依赖可插拔包**（纯标准库、零 Flask 依赖、算法版本走 registry），对拍 `D:\SQLRewrite` v2 逐项一致；两段式流程（上传即字段自检 → 确认后异步分析）；`/upload` 同步、`/analyze` 异步（线程池 2 + TTL 30min + 归属校验）；**非超管需同时拥有「过滤器」权限**；设计文档 `docs/轨迹速写插件-设计文档.md` |
 | 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
@@ -524,6 +576,56 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 18. **知识库「三处提示」要记忆关闭状态**（2026-09-11 实测）。阅读页横幅关闭按钮必须用**会话级**
     缓存（`sessionStorage`），不能用 `localStorage`——因为一个文件被多个用户先后打开，
     张三关了不影响李四打开再看到一次提示。同一会话内重开同文件时不再弹即可。
+19. **元数据字段迁移的幂等判定必须用「键是否存在」，不能用取值**（2026-09-11 实测，
+    `plugins/knowledge-base/backend/routes.py::_migrate_files`）。`pdf_size` 在未生成 PDF 时恒为
+    `None`，写成 `if rec.get("pdf_size") is None: 补齐; changed = True` 会让**每次启动都判定需迁移**
+    并重写 files.json（实测二次迁移返回 True 才发现）。正确写法：`if "pdf_size" not in rec:`。
+    同类字段（`pdf_error=""`、`original_size=0`）一律照此办理。
+20. **Windows 上给外部转换程序做测试夹具：用 `.bat` 转调 Python**（2026-09-11 实测）。
+    `subprocess.run` 不能直接执行 `.py`，但可以执行 `.bat`（CreateProcess 支持 .bat/.cmd）。
+    做法：临时目录写 `soffice.bat`（`@echo off` + `"<venv python>" "%~dp0fake_soffice.py" %*`），
+    脚本解析 `--outdir` 与源文件参数，向 outdir 写一份**最小但结构合法**的 PDF（含正确 xref 偏移，
+    pdf.js 能直接打开），再把 `pdf_convert.detect_soffice` 打桩指向这个 bat —— 无需在机器上
+    真装 LibreOffice 就能全链路验证异步转换管线。
+21. **插件前端在 iframe 里跑，浏览器自动化要直接开插件页**（2026-09-11 实测）。
+    `/tool/<id>` 是外壳页，插件内容在 `<iframe src="/plugin/<id>/index.html">` 内：
+    agent-browser 的 `click <css选择器>` 默认打在**父文档**上，会报 "Element not found"；
+    而 `eval document.querySelector(...)` 也只作用于父文档。绕法：登录后直接
+    `open http://127.0.0.1:5099/plugin/knowledge-base/index.html`（同源，登录 Cookie 照常有效）。
+22. **agent-browser 的每次 CLI 调用都是新会话，登录态不跨调用保持**（2026-09-11 复测）。
+    必须把「登录 + 后续操作」放进**同一次 `agent-browser batch "..."`**里（batch 内多条命令共用
+    一个 daemon 会话）；另外 batch 参数按空格切分，JS 里的**空格和 `|` 会被 cmd 当管道拆掉**
+    —— `eval` 的脚本要么写成无空格表达式，要么改用 `get text` / `get count` / `get attr` 这类命令。
+23. **Flask `send_file` 的 `download_name` 已自动处理 RFC 5987**（中文名老浏览器可用），
+    前端不要自己拼 `Content-Disposition`；前端下载走 `fetch → blob → createObjectURL → <a download>`
+    时，文件名从响应头解析（`filename*=UTF-8''` 优先，回退 `filename=`），不要硬编码。
+24. **`pdf_convert` import 兜底必须两步式**（2026-09-11 真坑）。`try: from . import pdf_convert except Exception: _pdf_convert=None`
+    这种写法**缺少裸 `import pdf_convert` 的 fallback**——脚本方式加载（importlib 加载、补偿测试、重启后的实例）
+    的 routes 模块永远把引擎当作「不存在」置 failed，前端上传后状态卡 pending → 240s 后 failed。
+    与 `doc_convert` 一致：
+    ```python
+    try:
+        from . import pdf_convert as _pdf_convert
+    except ImportError:
+        try:
+            import pdf_convert as _pdf_convert
+        except ImportError:
+            _pdf_convert = None
+    ```
+    规则：插件 backend 内**任何**共享模块的 import 都走两步式（包优先 + 裸脚本兜底）。
+25. **`/files?category=root` 只返回已归类文件**（2026-09-11 实测）。上传未指定分类时 `category_id=None`，
+    `category=root`（root 及其子孙）的过滤集**不包含 None**，结果接口返回 0 条——轮询时永远 timeout。
+    隔离测试 / 兜底轮询时用 `category=all`（不过滤）。**用户**看不到未分类文件是设计如此
+    （上传 UI 应强制选分类；待办）。
+26. **`/api/logout` 是 POST 不是 GET**（2026-09-11 实测）。admin 插件 `routes.py:704` 是
+    `@app.post("/api/logout")`，GET 会 405；测试脚本登出用 POST。
+27. **profile 从「每次新建临时」改为「固定复用」**（2026-09-11 实测提速）。解包版 LibreOffice 冷启动
+    每次新建临时 profile 需 37~40s，**复用固定 profile 只 15~18s**。profile 放在数据根下
+    `<data_root>/.lo-profile/`，转换失败时重置 profile 再试一次（避免「一次损坏、永久失败」）。
+28. **管理安装解包的 LibreOffice `soffice --version` 会挂起**（2026-09-11 实测）。`msiexec /a` 解包
+    的 soffice.exe 在 URE 未注册场景，启动后不退出（实测 60s+）。`pdf_convert._version_of` 超时
+    压到 10s 并把异常吞掉返 None（版本仅展示用，不影响可用性）。设置 `URE_BOOTSTRAP` /
+    `SAL_DISABLE_USERMIGRATION` 等环境变量**不改善**耗时（实测 17.5s vs 17.8s 基线），不要加。
 
 ## 7.5 插件后端速查表（改哪个插件先看这里）
 
@@ -535,7 +637,7 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 | --- | --- | --- | --- |
 | admin | /api/admin、/api/admin/batch、/login 等 | openpyxl（批量导入导出的 xlsx，缺库降级 CSV） | config/admin.json + .admin_key |
 | notice-board | /api/notice-board | 无 | plugins/notice-board/data/*.json（一公告一文件，RLock 串行化） |
-| knowledge-base | /api/knowledge-base | 无 | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/<id>.<ext>（上传原文经旧版转换后落盘 `.docx`/`.xlsx`，服务端 ID 重命名；元数据 `original_ext` 记录来源格式） |
+| knowledge-base | /api/knowledge-base | 线程池 ×2（Word PDF 转换：`_PDF_POOL` + `pdf_convert` 模块级锁双重串行；Excel 表格渲染：`_HTML_POOL` 独立串行，openpyxl 秒级不与 LibreOffice 长任务互塞队；两者 `register()` 启动补偿重入队 pending，failed 不自动重试，管理员 `POST /files/<id>/pdf-retry`、`/preview-retry` 手动重转） | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/ 四件套：`<id>.<original_ext>` **原件**（下载端点专用）/ `<id>.docx·.xlsx` 渲染件（doc·xls 经 doc_convert 转换，前端降级渲染）/ `<id>.pdf` 展示用 PDF（仅 Word 类，**LibreOffice headless**：`pdf_convert.convert_to_pdf`，独立 user profile 复用 `<数据根>/.lo-profile/`，180s 超时）/ `<id>.json` Excel 表格预览（仅 xlsx·xls 类，`xlsx_render.render_xlsx` 手绘 HTML，单 sheet 3000 行/120 列/12 万格/4MB 截断，>15MB failed）；服务端 ID 重命名；元数据 `original_ext`（恒有值=上传格式）+ `pdf_status`、`html_status`(none/pending/ok/failed)；`_migrate_files()` 启动时幂等补字段（含历史 Excel 记录 pdf_status 复位 none） |
 | shared-docs | /api/shared-docs | 无（全局 RLock） | plugins/shared-docs/data/*.json（一文档一文件，历史上限 100） |
 | case-report | /api/case-report | ThreadPoolExecutor(2)，TASK_TTL 30min | data/*.json（一记录一文件）+ item_categories.json + config.json + prompt.json |
 | character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |
