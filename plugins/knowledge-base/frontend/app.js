@@ -122,9 +122,6 @@
     readerOpen: false,
     currentFileId: null,   // 当前阅读的文档 id（提示条关闭状态按此记录）
     currentNoticeKey: null,// 当前提示条种类（关闭状态键）
-    currentRenderedPreview: false, // 当前阅读视图是否已切到原样式预览渲染
-    pdfPoll: null,         // PDF 生成中轮询定时器
-    pdfTicks: 0,
     listScroll: 0
   };
 
@@ -253,57 +250,6 @@
     });
   }
 
-  // ==================== 预览生成状态轮询（异步转换管线） ====================
-  // Word → PDF 预览（pdf_* 字段）；Excel → 表格 HTML 预览（html_* 字段，阶段 3）
-  function isSheetFile(f) { return f.ext === "xlsx" || f.ext === "xls"; }
-
-  function previewStatus(f) {
-    return isSheetFile(f) ? (f.html_status || "none") : (f.pdf_status || "none");
-  }
-
-  function previewPending(f) { return previewStatus(f) === "pending"; }
-
-  function previewReady(f) {
-    return isSheetFile(f) ? !!f.html_ready : !!f.pdf_ready;
-  }
-
-  function hasPendingPreview() {
-    for (var i = 0; i < state.files.length; i++) {
-      if (previewPending(state.files[i])) return true;
-    }
-    return false;
-  }
-
-  function stopPdfPoll() {
-    if (state.pdfPoll) clearInterval(state.pdfPoll);
-    state.pdfPoll = null;
-    state.pdfTicks = 0;
-  }
-
-  // 列表里还有 pending 时每 3s 静默刷新；全部收敛（ok/failed）即停，最多 3 分钟兜底。
-  // 兜底时长 ≥ 后端转换超时（pdf_convert.DEFAULT_TIMEOUT=180s）：实测 LibreOffice
-  // 冷启动一次 40~90s，早期 20 次（60s）的兜底会让角标卡在「生成中」不再更新。
-  // （Excel 表格渲染为秒级，复用同一轮询，先就绪先切换。）
-  function startPdfPoll() {
-    if (state.pdfPoll) return;
-    state.pdfPoll = setInterval(function () {
-      state.pdfTicks++;
-      loadFiles(true).then(function () {
-        // 正在阅读的文件预览就绪 → 自动重渲染切到原样式视图
-        if (state.readerOpen && state.currentFileId && !state.currentRenderedPreview) {
-          var f = fileById(state.currentFileId);
-          if (f && previewReady(f)) {
-            state.currentRenderedPreview = true;
-            showReaderNotice(f);
-            if (window.KBReader) window.KBReader.render(f, readerCbs());
-          }
-        }
-        // 全部收敛（ok/failed）即停；最多 3 分钟（60 × 3s）兜底，避免坏状态无限轮询
-        if (!hasPendingPreview() || state.pdfTicks >= 60) stopPdfPoll();
-      });
-    }, 3000);
-  }
-
   // 排序：key = time（上传时间）/ name（名称拼音）；dir = asc / desc（默认 time + desc）
   var SORTERS = {
     time: function (a, b) {
@@ -360,22 +306,10 @@
         ? '<span class="conv-badge" title="上传时为 .' + esc(f.original_ext || "") +
           '，已自动转换为 .' + esc(f.ext) + '">已转换</span>'
         : "";
-      // 预览状态角标：生成中（蓝）/ 生成失败已降级（琥珀，悬停看原因）
-      var prevBadge = "";
-      if (previewPending(f)) {
-        prevBadge = '<span class="pdf-badge pending" title="' +
-          (isSheetFile(f) ? "表格预览生成中，完成后自动切换" : "PDF 预览生成中，完成后自动切换") +
-          '">' + (isSheetFile(f) ? "预览生成中" : "PDF 生成中") + "</span>";
-      } else if (previewStatus(f) === "failed") {
-        prevBadge = '<span class="pdf-badge degraded" title="' +
-          esc(isSheetFile(f)
-            ? (f.html_error || "表格预览生成失败，已回退简化渲染")
-            : (f.pdf_error || "PDF 预览生成失败，已回退简化渲染")) + '">预览降级</span>';
-      }
       html += '<div class="file-card" data-id="' + esc(f.id) + '">' +
         '<div class="file-card-top"><div class="file-icon ext-' + esc(f.ext) + '">' + esc(label) + "</div>" +
         '<div class="file-main"><div class="file-name" title="' + esc(f.name) + '">' + esc(f.name) +
-        convBadge + prevBadge + "</div>" +
+        convBadge + "</div>" +
         '<div class="file-meta">' + esc(fmtSize(f.size)) + " · " + esc(f.created_by_name || f.created_by || "-") +
         " · " + esc(fmtTime(f.created_at)) + "</div></div>" +
         // 下载：全员可见（下载原件，不属管理操作）
@@ -405,8 +339,6 @@
       var card = t.closest ? t.closest(".file-card") : null;
       if (card) openReader(card.getAttribute("data-id"));
     };
-    // 列表里存在「预览生成中」→ 启动轮询，状态收敛后自动停
-    if (hasPendingPreview()) startPdfPoll();
   }
 
   // 文档编辑对话框（仅管理员）：名称 / 简介 / 归类 / 删除
@@ -578,7 +510,7 @@
         '<div class="form-row"><label class="form-label">保存到分类</label>' +
         '<select id="m-cat" class="select">' + catOptions(state.currentCat === "all" ? "" : state.currentCat, true) + "</select></div>" +
         '<div class="form-hint">旧版 .doc / .xls 会自动转换为 .docx / .xlsx 后保存（仅保留文字与表格，样式/图片不迁移）。' +
-        'Word / Excel 均生成原样式预览（Word 需服务器安装 LibreOffice 转为 PDF；Excel 由服务端还原为连续单页网页表格，不分页）；' +
+        'Word / Excel 由服务端渲染引擎按需生成原样式预览（连续单页网页展示，不分页，可在线复制）；' +
         '无论哪种格式，下载拿到的都是您上传的原始文档。</div>',
         function () {
           var input = $("m-file");
@@ -597,10 +529,6 @@
             if (data && data.converted_from) {
               toast("上传成功：已自动将 ." + data.converted_from + " 转换为 ." +
                     (data.item && data.item.ext ? data.item.ext : ""), false, 3600);
-            } else if (data && data.pdf_status === "pending") {
-              toast("上传成功，PDF 预览生成中（完成后自动生效）", false, 3600);
-            } else if (data && data.html_status === "pending") {
-              toast("上传成功，表格预览生成中（完成后自动生效）", false, 3600);
             } else {
               toast("上传成功");
             }
@@ -691,18 +619,7 @@
       box.className = "reader-notice hidden";
       return;
     }
-    if (previewPending(f)) {
-      key = "prev-pending";
-      text = isSheetFile(f)
-        ? "表格预览生成中，当前为简化渲染；生成完成后会自动切换，也可先下载原件查看完整样式。"
-        : "PDF 预览生成中，当前为简化渲染；生成完成后会自动切换，也可先下载原件查看完整样式。";
-      extra = " info";
-    } else if (previewStatus(f) === "failed") {
-      key = "prev-failed";
-      text = isSheetFile(f)
-        ? "表格预览生成失败，已回退为简化渲染；可下载原件查看完整样式。"
-        : "PDF 预览生成失败，已回退为简化渲染；可下载原件查看完整样式。";
-    } else if (f.converted) {
+    if (f.converted) {
       key = "conv:" + f.id;
       var from = (f.original_ext || "").toUpperCase();
       var to = (f.ext || "").toUpperCase();
@@ -754,7 +671,6 @@
     state.listScroll = window.pageYOffset || 0;
     state.readerOpen = true;
     state.currentFileId = fileId;
-    state.currentRenderedPreview = previewReady(f);
     $("view-list").className = "view hidden";
     $("view-reader").className = "view";
     // 文件信息头（徽标 + 标题）展示在底部胶囊工具条
@@ -767,7 +683,6 @@
     $("reader-pager").className = "pager hidden";
     window.KBReader.render(f, readerCbs());
     // 仍在生成 PDF：轮询等待，就绪后自动重渲染切到 PDF 视图
-    if (previewPending(f)) startPdfPoll();
     window.scrollTo(0, 0);
   }
 
@@ -775,8 +690,6 @@
     state.readerOpen = false;
     state.currentFileId = null;
     state.currentNoticeKey = null;
-    state.currentRenderedPreview = false;
-    stopPdfPoll();
     window.KBReader.destroy();
     $("view-reader").className = "view hidden";
     $("view-list").className = "view";

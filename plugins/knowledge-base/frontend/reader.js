@@ -1,13 +1,12 @@
 /* 知识库插件 —— 阅读视图渲染器
- * 分派：html_ready(Excel 表格预览：服务端手绘 HTML，原样式连续单页无分页) /
- * pdf_ready(PDF.js 渲染服务端转出的 PDF，Word 类专用) / pdf(PDF.js) / ofd(EasyOFD) /
- * docx(mammoth) / xlsx·xls·csv(SheetJS 降级) / md·markdown(marked) / txt(原生)。
- * Excel 上传后由服务端 xlsx_render 渲染为各 sheet 的 HTML 片段（保留合并单元格/
- * 列宽/边框/填充/字体/数字日期格式），html_ready 时优先走表格预览；未就绪/失败时
- * 回退 SheetJS 简化渲染（无 openpyxl 环境体验同降级链）。
- * Word 类仍由服务端转 PDF，pdf_ready 时走 PDF.js（保留原文档样式）。
+ * 分派（阶段 8）：office(docx/doc → dhr 引擎、xlsx/xls → xhr 引擎：服务端按需渲染的
+ * HTML 片段，样式还原、连续单页不分页、有磁盘缓存) / pdf(PDF.js，原生 PDF 文件) /
+ * ofd(EasyOFD) / docx(mammoth 降级) / xlsx·xls·csv(SheetJS 降级) / md(marked) / txt(原生)。
+ * Office 预览由 GET /preview 返回 {kind, html, warnings}：Word 注入流式文档，
+ * Excel 注入自带页签的表格（前端只做页签显隐接线，与引擎 runtime 行为一致）；
+ * 拉取/渲染失败自动回退 mammoth / SheetJS 简化渲染（不阻断阅读）。
  * 所有第三方库自 frontend/vendor/ 惰性按需注入（离线内网，禁止运行时 CDN）；
- * mammoth / marked / 表格预览输出一律经 DOMPurify 消毒后再 innerHTML（防 XSS）。
+ * mammoth / marked / 引擎 HTML 一律经 DOMPurify 消毒后再 innerHTML（防 XSS）。
  * 只读保证：渲染容器不可编辑，仅提供选择复制。
  */
 (function () {
@@ -104,81 +103,81 @@
 
   function fetchRaw(file) { return fetchUrl(file, null); }
 
-  function pdfUrl(file) {
-    return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/pdf";
-  }
-
-  function previewUrl(file) {
+  function officePreviewUrl(file) {
     return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/preview";
   }
 
-  // ==================== 渲染器：Excel 表格预览（服务端手绘 HTML） ====================
-  // 后端 xlsx_render 生成各 sheet 的 <table> 片段（合并/列宽/边框/填充/字体/
-  // 数字日期格式已还原），前端只负责页签切换与展示。404 = 未就绪/失败 → 调用方
-  // 回退 SheetJS。服务端已转义，这里仍过 DOMPurify（纵深防御）。
+  // ==================== 渲染器：Office 预览（服务端 xhr/dhr 双引擎） ====================
+  // 后端按需渲染并缓存：Word = dhr 流式文档片段（<style>+<div class="kbdoc">）；
+  // Excel = xhr 表格片段（<div class="kbsheet">，含 .kbsheet-tabs 页签与多个
+  // .kbsheet-sheet[hidden]）。前端只负责注入与页签显隐接线（行为对齐引擎 runtime：
+  // 点 .kbsheet-tab → 同步 aria-selected + 兄弟 sheet 的 hidden）。404 = 引擎缺失/
+  // 渲染失败 → 调用方回退降级渲染器。引擎输出全部文本已转义且 URL/字体白名单，
+  // 这里仍过 DOMPurify（纵深防御）。
   function fetchPreview(file) {
-    return fetch(previewUrl(file)).then(function (res) {
+    return fetch(officePreviewUrl(file)).then(function (res) {
       if (res.status === 401) {
         location.href = "/login?next=" + encodeURIComponent("/tool/knowledge-base");
         return new Promise(function () {});
       }
-      if (!res.ok) throw new Error("表格预览读取失败（" + res.status + "）");
+      if (!res.ok) throw new Error("预览读取失败（" + res.status + "）");
       return res.json();
     });
   }
 
-  function renderSheetHtml(file) {
+  function renderOffice(file) {
     return Promise.all([fetchPreview(file), loadScript(V + "purify/purify.min.js?v=1")])
       .then(function (results) {
         var data = results[0];
-        var sheets = (data && data.sheets) || [];
-        if (!sheets.length) throw new Error("表格预览数据为空");
-        sheets.forEach(function (s) {
-          s.html = window.DOMPurify.sanitize(s.html || "", { USE_PROFILES: { html: true } });
-        });
-        var tabs = document.createElement("div");
-        tabs.className = "sheet-tabs";
-        var wrap = document.createElement("div");
-        wrap.className = "sheet-table-wrap";
-        container().appendChild(tabs);
-        container().appendChild(wrap);
-        function show(name) {
-          for (var i = 0; i < sheets.length; i++) {
-            if (sheets[i].name === name) wrap.innerHTML = sheets[i].html;
-          }
-          Array.prototype.forEach.call(tabs.children, function (b) {
-            b.className = b.textContent === name ? "sheet-tab active" : "sheet-tab";
-          });
+        if (!data || !data.ok || !data.html) throw new Error("预览数据为空");
+        var isSheet = data.kind === "sheet";
+        // DOMPurify 会整块丢弃 <style> 元素（引擎的 class 型 CSS 全在里面），
+        // 因此先把 <style> 摘出来，只对正文消毒，CSS 原样挂回——CSS 为引擎生成
+        // 的静态内容（字体名白名单、无 URL 注入面），不经过消毒是安全的。
+        var cssParts = [];
+        var body = data.html.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi,
+          function (m0, css) { cssParts.push(css); return ""; });
+        var box = document.createElement("div");
+        box.className = "kb-office" + (isSheet ? " kb-office-sheet" : " kb-office-word");
+        box.innerHTML = window.DOMPurify.sanitize(body, { USE_PROFILES: { html: true } });
+        if (cssParts.length) {
+          var st = document.createElement("style");
+          st.textContent = cssParts.join("\n");
+          box.insertBefore(st, box.firstChild);
         }
-        sheets.forEach(function (s) {
-          var b = document.createElement("button");
-          b.type = "button";
-          b.className = "sheet-tab";
-          b.textContent = s.name;
-          b.onclick = function () { show(s.name); };
-          tabs.appendChild(b);
-        });
-        show(sheets[0].name);
+        container().appendChild(box);
+        // Excel 页签接线（与 xhr 引擎 runtime 同款逻辑：hidden 属性切显隐）
+        var activeSheet = null;
+        if (isSheet) {
+          box.addEventListener("click", function (ev) {
+            var t = ev.target;
+            if (!t || !t.className || String(t.className).indexOf("kbsheet-tab") < 0) return;
+            var idx = t.getAttribute("data-target");
+            var tabs = box.querySelectorAll(".kbsheet-tab");
+            var sheets = box.querySelectorAll(".kbsheet-sheet");
+            for (var i = 0; i < tabs.length; i++) {
+              tabs[i].setAttribute("aria-selected", String(i === Number(idx)));
+            }
+            for (var j = 0; j < sheets.length; j++) {
+              sheets[j].hidden = String(j) !== idx;
+            }
+          });
+          var sheets = box.querySelectorAll(".kbsheet-sheet");
+          for (var k = 0; k < sheets.length; k++) {
+            if (!sheets[k].hidden) { activeSheet = sheets[k]; break; }
+          }
+        }
         status(null);
-        callbacks.onReady(sheets.length > 1 ? "复制本表" : "复制全文");
-        var activeName = sheets[0].name;
-        tabs.onclick = function (ev) {
-          var t = ev.target;
-          if (t.className.indexOf("sheet-tab") >= 0) activeName = t.textContent;
-        };
+        callbacks.onReady(isSheet ? (box.querySelectorAll(".kbsheet-tab").length > 1 ? "复制本表" : "复制全文")
+                                  : "复制全文");
         return {
           copy: function () {
-            // 从当前展示的表格提取纯文本（保留行列制表分隔）
-            var html = "";
-            for (var i = 0; i < sheets.length; i++) {
-              if (sheets[i].name === activeName) html = sheets[i].html;
-            }
-            var tmp = document.createElement("div");
-            tmp.innerHTML = html;
-            var rows = tmp.querySelectorAll("tr");
+            if (!isSheet) return box.innerText || "";
+            // 当前展示 sheet 的表格提取纯文本（保留行列制表分隔）
+            var host = activeSheet || box;
+            var rows = host.querySelectorAll("tr");
             var lines = [];
             for (var r = 0; r < rows.length; r++) {
-              if (rows[r].className.indexOf("kb-xlsx-more") >= 0) continue;
               var cells = rows[r].querySelectorAll("td,th");
               var parts = [];
               for (var c = 0; c < cells.length; c++) parts.push(cells[c].textContent);
@@ -500,25 +499,21 @@
     destroy();
     callbacks = cbs || {};
     current = file;
-    // ★预览分派（阶段 3）：
-    //   Excel（xlsx/xls）→ html_ready 时走服务端手绘表格预览（原样式、连续单页）；
-    //   Word（docx/doc） → pdf_ready 时走 PDF.js（保留原文档样式）。
-    //   两者未就绪/失败 → 按扩展名回退降级渲染（SheetJS / mammoth）。
-    var isSheetExt = file.ext === "xlsx" || file.ext === "xls";
-    var isWordExt = file.ext === "docx" || file.ext === "doc";
+    // ★预览分派（阶段 8）：Word/Excel → 服务端 xhr/dhr 引擎按需渲染的 HTML
+    //   预览（样式还原、连续单页），失败自动回退降级渲染器（mammoth / SheetJS）；
+    //   其余格式按扩展名分派（原生 PDF 仍走 PDF.js）。
     var fn;
-    if (isSheetExt && file.html_ready) {
-      var sheetFallback = RENDERERS[file.ext];
+    if (file.ext === "docx" || file.ext === "doc" ||
+        file.ext === "xlsx" || file.ext === "xls") {
+      var officeFallback = RENDERERS[file.ext];
       fn = function () {
-        return renderSheetHtml(file).catch(function (e) {
-          // 预览数据拉取/渲染失败 → 自动回退 SheetJS 简化渲染（不阻断阅读）
-          if (!sheetFallback) throw e;
-          status("表格预览不可用，已回退简化渲染");
-          return sheetFallback(file);
+        return renderOffice(file).catch(function () {
+          // 预览拉取/渲染失败 → 自动回退简化渲染（不阻断阅读）
+          if (!officeFallback) throw new Error("预览不可用");
+          status("样式预览不可用，已回退简化渲染");
+          return officeFallback(file);
         });
       };
-    } else if (isWordExt && file.pdf_ready) {
-      fn = function () { return renderPdf(file, { url: pdfUrl(file) }); };
     } else {
       fn = RENDERERS[file.ext];
     }

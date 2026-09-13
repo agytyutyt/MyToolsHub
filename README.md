@@ -120,7 +120,7 @@ JZToolsHub/
 │   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
 │   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
 │   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
-│   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读 + Word 转 PDF / Excel 手绘 HTML 表格原样式预览 + 原件下载，管理员上传 + 多级分类，前端纯 JS 渲染）
+│   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读 + Word/Excel 由 xhr/dhr 双引擎按需渲染原样式预览（连续单页）+ 原件下载，管理员上传 + 多级分类，前端纯 JS 渲染）
 │   ├── file-filter/          # 插件：过滤器（表格脱敏过滤 + 合规检查：硬过滤/大模型语义匹配过滤/文本与正则后处理）
 │   ├── trajectory-sketch/    # 插件：轨迹速写（Excel 轨迹表 → 调用过滤器做字段过滤 → 轨迹分析 → 速写报告）
 │   └── admin/                # 核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
@@ -458,30 +458,28 @@ init_data_root()                    # ① 迁移旧数据 + 解析数据根目�
 
 | 接口 | 说明 |
 | --- | --- |
-| `GET /api/knowledge-base/status` | 依赖自检（核心功能纯标准库恒 ok；`convert_legacy` 表示旧版格式转换能力：openpyxl/xlrd/python-docx/olefile 齐备；`pdf_engine` 报告 LibreOffice 探测结果（Word 类 PDF 预览），`xlsx_render` 报告 openpyxl 表格渲染能力（`xlsx_preview`），`?refresh=1` 强制重探 LibreOffice——仅管理员生效） |
+| `GET /api/knowledge-base/status` | 依赖自检（核心功能纯标准库恒 ok；`convert_legacy` 表示旧版格式转换能力：openpyxl/xlrd/python-docx/olefile 齐备；`office_render` 报告 vendor 双引擎可用性与可选 LibreOffice（`office_preview`）） |
 | `GET /api/knowledge-base/config` | 当前用户是否可管理（`can_manage`：管理员角色/超管） |
 | `GET /api/knowledge-base/categories` | 分类树（全部登录用户；按 order + created_at 排序） |
 | `POST /api/knowledge-base/categories` | 新建分类 `{name, parent_id?}` —— 仅管理员；同层重名 409、父分类 404 |
 | `PUT /api/knowledge-base/categories/<cid>` | 改名 / 移动（parent_id 防环：不得指向自身或子孙）/ 排序 —— 仅管理员 |
 | `DELETE /api/knowledge-base/categories/<cid>` | 删除分类 —— 仅管理员；有子分类或文件 409 |
 | `GET /api/knowledge-base/files?category=&q=` | 文件列表（category 递归含子孙分类；q 模糊匹配文件名；按创建时间倒序，含上传人姓名/大小/时间） |
-| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/doc/csv/md/markdown/txt`、≤20MB（413）；**旧版 `.doc`/`.xls` 服务端自动转换为 `.docx`/`.xlsx` 后落盘**（依赖缺失/文件损坏 422 明确提示），响应含 `converted_from`，元数据记 `original_ext`；服务端生成 ID 重命名落盘；**原件与渲染件双份保存**，Word 上传即返回 `pdf_status=pending` 后台异步转 PDF，Excel 上传即返回 `html_status=pending` 后台异步渲染表格 HTML |
+| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/doc/csv/md/markdown/txt`、≤20MB（413）；**旧版 `.doc`/`.xls` 服务端自动转换为 `.docx`/`.xlsx` 后落盘**（依赖缺失/文件损坏 422 明确提示），响应含 `converted_from`，元数据记 `original_ext`；服务端生成 ID 重命名落盘；**原件与渲染件双份保存**（旧版 .doc/.xls 自动转为 .docx/.xlsx） |
 | `PUT /api/knowledge-base/files/<fid>` | 改名 / 移动分类 `{name?, category_id?}` —— 仅管理员 |
 | `DELETE /api/knowledge-base/files/<fid>` | 删除文档（元数据 + 落盘文件）—— 仅管理员 |
 | `GET /api/knowledge-base/files/<fid>/raw` | **内联**读取渲染件（`Content-Disposition: inline`，无 attachment；`conditional=True` 支持 Range/304 供 pdf.js 断点续读）；ID 白名单正则防目录穿越，不可读一律 404 |
-| `GET /api/knowledge-base/files/<fid>/pdf` | **内联**读取展示用 PDF（仅 `pdf_status=ok` 且文件存在；inline + `conditional=True`）；未就绪/失败/不存在一律 404 —— Word 类的"原样式"预览数据源 |
-| `GET /api/knowledge-base/files/<fid>/preview` | Excel 表格预览 JSON（各 sheet 的手绘 HTML 片段，仅 `html_status=ok`；未就绪/失败/不存在一律 404）—— 连续单页不分页，合并/列宽/边框/填充/字体/数字日期格式已还原 |
+| `GET /api/knowledge-base/files/<fid>/preview` | Office（Word/Excel）预览 JSON `{kind, html, warnings, truncated}`——docx/doc/xlsx/xls 由 vendor 双引擎（dhr/xhr）**按需同步渲染**并缓存 `<id>.preview.json`；失败/引擎缺失/非 Office 类一律 404（前端自动回退 mammoth/SheetJS）——样式还原、连续单页不分页 |
 | `GET /api/knowledge-base/files/<fid>/download` | **附件下载原件**（`download_name` 用 `original_name`，中文名由 Flask 处理 RFC 5987）—— 全体登录用户；Word/Excel 下载的是原始文档 **不是 PDF 版** |
-| `POST /api/knowledge-base/files/<fid>/pdf-retry` | 重试 PDF 转换（Word 类）—— 仅管理员；仅 `failed` 记录可重试（其余 409），重置为 `pending` 重新入队 |
-| `POST /api/knowledge-base/files/<fid>/preview-retry` | 重试 Excel 表格预览渲染 —— 仅管理员；仅 `failed` 记录可重试（其余 409），重置为 `pending` 重新入队 |
+
 
 > 分类与文件元数据以单库 JSON 保存在数据根目录 `plugins/knowledge-base/data/`
 > （categories.json / files.json，原子写 + 全局锁），上传的文件落盘 `data/files/<id>.<ext>`；
-> 上传后**最多四件套**：原件 `<id>.<original_ext>`（下载专用）+ 降级渲染件 `<id>.docx/.xlsx`
-> （旧版格式转换产物）+ 展示用 PDF `<id>.pdf`（Word 类，服务端 LibreOffice headless 异步生成）
-> + 表格预览 `<id>.json`（Excel 类，服务端 xlsx_render 手绘 HTML 异步生成）。
-> 记录含 `created_by / created_by_name / unit_id / department_id` 归属四字段（取自会话），
-> 以及 `pdf_status` / `html_status`（均 none|pending|ok|failed）及配套 size/error 预览状态字段。
+> 上传后落盘：原件 `<id>.<original_ext>`（下载专用）+ 渲染件 `<id>.docx/.xlsx`
+> （旧版格式转换产物）+ 预览缓存 `<id>.preview.json`（Word/Excel 类，xhr/dhr 双引擎
+> 按需渲染，首阅生成）。
+> 记录含 `created_by / created_by_name / unit_id / department_id` 归属四字段（取自会话）；
+> 预览为按需渲染 + 磁盘缓存，无后台状态字段（旧版 pdf_status/html_status 已废弃）。
 > 阅读为全站公共资源：列表不做单位/部门过滤（`grant_all`），管理操作仅管理员角色/超管。
 > 前端渲染全在浏览器端（pdf.js / easyofd / mammoth / SheetJS / marked，输出过 DOMPurify），
 > 库文件 vendor 于 `frontend/vendor/`（离线内网可用，见其 VENDOR.md）；

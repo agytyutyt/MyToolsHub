@@ -1,7 +1,23 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-13（**知识库：Excel 预览弃 PDF 改 Python 手绘 HTML 表格**——
+> 最后更新：2026-09-13（**知识库：Office 预览引擎整体替换为 xhr/dhr 双引擎**——
+> 用户指定采用 `D:\TestWorkSpace\xlsx-html-preview` 项目的转换引擎，Word（doc/docx）
+> 与 Excel（xls/xlsx）预览**舍弃原方案**（阶段 2 的 LibreOffice 转 PDF +
+> 阶段 7 的 xlsx_render openpyxl 手绘 HTML）。落地：`backend/vendor/{xhr,dhr}`
+> 零改动拷贝（纯标准库 53 个 .py，dhr 依赖顶层 xhr → sys.path 注入接入）+
+> 适配层 `backend/office_render.py`（XHR_SOFFICE 配置注入/渲染锁/错误码映射）；
+> routes.py 删除 pdf_status/html_status 全套异步状态机与 /pdf、/pdf-retry、
+> /preview-retry 端点，`GET /files/<id>/preview` 改**按需同步渲染 + 磁盘缓存**
+> `<id>.preview.json`（引擎亚秒级：50 页 Word 约 0.25s、实测首渲染 19~70ms），
+> 失败 404 前端自动回退 mammoth/SheetJS；删除清理改为「原件+渲染件+预览缓存+
+> 历史 PDF 残留」。前端 reader.js `renderOffice`（页签接线/TSV 复制）——
+> **实测坑：DOMPurify 整块丢弃 `<style>` 元素**，xhr 的 class 型 CSS 全灭，
+> 解法：摘取 style 块 → 正文过 DOMPurify → CSS 原样挂回（引擎生成静态内容无注入面）；
+> 资源版本 v22/v6/v16。验证：四格式模块渲染（.xls/.doc 经 soffice 归一化/兜底通道）+
+> test_client 全链路 + 浏览器目检全过。改动未提交，等用户拍板。
+> 详见 `docs/插件库优化方案-设计文档.md` 阶段 8）。
+> （2026-09-13 **知识库：Excel 预览弃 PDF 改 Python 手绘 HTML 表格**——
 > 用户反馈 xlsx 转 PDF 预览按打印分页、宽表被切碎不利阅读。新模块
 > `plugins/knowledge-base/backend/xlsx_render.py`（openpyxl 手绘 `<table>`，零新增 pip 依赖；
 > 参考 GitHub Apkawa/xlsx2html 思路重写，修正其主题色丢弃/列宽换算偏窄/字号 11pt 当 11px/
@@ -152,6 +168,17 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
   `backend/requirements.txt`（openpyxl 注释补表格预览用途）、`.gitignore`（backend/out/ 测试产物）、
   `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md`（阶段 8）/
   `docs/插件库优化方案-设计文档.md`（阶段 7）/ 本文件。
+  2026-09-13 追加未提交（**Office 预览引擎替换为 xhr/dhr 双引擎**，《插件库优化方案
+  -设计文档》阶段 8）：新增 `plugins/knowledge-base/backend/vendor/{xhr,dhr}/`（引擎
+  原样拷贝 + README）、`backend/office_render.py`（适配层）、`backend/_build_phase8.py`
+  （目检页生成器）；**删除** `backend/pdf_convert.py`、`backend/xlsx_render.py`、
+  `backend/test_xlsx_render.py`；改 `routes.py`（删状态机与 /pdf、/pdf-retry、
+  /preview-retry，/preview 改按需渲染+缓存，`_migrate_files` 精简，删除清理改四件）、
+  `backend/requirements.txt`（LibreOffice 注释改窄路径可选）、`frontend/reader.js`
+  （renderOffice + style 摘取挂回 + 页签接线）、`frontend/app.js`（删轮询/角标/提示
+  pending 分支）、`frontend/style.css`（删手绘样式，增 .kb-office）、
+  `frontend/index.html`（v22/v6/v16）、`README.md` / `plugins/knowledge-base/README.md` /
+  `docs/知识库插件-设计文档.md`（阶段 9）/ `docs/插件库优化方案-设计文档.md`（阶段 8）/ 本文件。
 - 打包产物（不入库，gitignore）：`deploy/JZToolsHub-v1.4.zip`、`deploy/InfoParse-v1.4.apk`。
 
 ## 3. 内置插件一览
@@ -160,7 +187,7 @@ tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务
 | --- | --- | --- | --- | --- |
 | 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask / openpyxl | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时、单位/部门/人员批量导入导出（见 §4.5） |
 | 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
-| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 后端标准库；渲染库 vendor 在 frontend/vendor/；**旧版格式转换 + Excel 表格预览**：openpyxl/xlrd/python-docx/olefile（缺库优雅降级）；**Word PDF 预览**：目标机装 LibreOffice（外部程序、非 pip，缺则阅读回退降级渲染） | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面三处提示**）+ 多级分类树；**Word 服务端异步转 PDF 走 pdf.js；Excel 服务端 xlsx_render 手绘 HTML 表格预览（连续单页不分页，`html_status` 管线，失败回退 SheetJS）；上传后四件套落盘（原件 + 降级渲染件 + 展示 PDF + 表格预览 JSON），全员可下载原始文档**；`grant_all`；设计文档 `docs/知识库插件-设计文档.md`（基线）+ `docs/插件库优化方案-设计文档.md`（本轮改造，阶段 7 = Excel 表格预览） |
+| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 后端标准库；前端渲染库 vendor 在 frontend/vendor/；**Office 预览引擎** vendor 在 backend/vendor/（xhr/dhr，纯标准库）；**旧版格式转换**：openpyxl/xlrd/python-docx/olefile（缺库优雅降级）；LibreOffice（外部程序）仅 .xls 高保真/.doc 归一化两条窄路径可选 | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面三处提示**）+ 多级分类树；**Word/Excel 预览由 xhr/dhr 双引擎按需渲染 + 磁盘缓存（`GET /preview`，连续单页不分页，失败回退 mammoth/SheetJS，无后台状态机）；上传后落盘原件 + 渲染件 + 预览缓存，全员可下载原始文档**；`grant_all`；设计文档 `docs/知识库插件-设计文档.md`（基线）+ `docs/插件库优化方案-设计文档.md`（阶段 8 = 引擎替换） |
 | 过滤器 | `plugins/file-filter/` | 前后端一体 | openpyxl/xlrd/requests | 表格脱敏过滤与合规检查：硬过滤（名单精确匹配保留列）/ 大模型过滤（表头语义关联，OpenAI 兼容接口）/ 文本与正则后处理；异步任务（ThreadPoolExecutor 2 + TTL 30min + 归属校验）；`POST /apply` 程序化接口供其他插件（JSON rows in/out，不落盘）；设计文档 `docs/过滤器插件-设计文档.md` |
 | 轨迹速写 | `plugins/trajectory-sketch/` | 前后端一体 | openpyxl/xlrd/requests | Excel 轨迹表 → 调「过滤器」`/apply` 做字段过滤（默认硬过滤，开关切大模型辅助）→ 轨迹分析（地点簇/自适应停留点/出行段）→ 速写报告（页内 + 5 sheet Excel）；**分析引擎 `backend/engine/` 为零依赖可插拔包**（纯标准库、零 Flask 依赖、算法版本走 registry），对拍 `D:\SQLRewrite` v2 逐项一致；两段式流程（上传即字段自检 → 确认后异步分析）；`/upload` 同步、`/analyze` 异步（线程池 2 + TTL 30min + 归属校验）；**非超管需同时拥有「过滤器」权限**；设计文档 `docs/轨迹速写插件-设计文档.md` |
 | 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
@@ -400,6 +427,36 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 - 升级路径：与 §5.1 / §5.2 完全一致（数据根目录不动；首次安装由 install.ps1 自动迁移旧版数据；插件运行时数据清空后由程序按需重建）。**注意：批量导入是新增能力，不破坏现有 admin.json / .admin_key / 用户数据，升级安全**。
 - 未做：未跑真实 frozen exe (`deploy/JZToolsHub/JZToolsHub.exe`) 的 headless 启动（pystray 无桌面会失败，但 main 流程 try/except 已吞——服务端验证已通过源码 + waitress 等价路径覆盖）。
 
+### 5.3.1 知识库 Office 预览引擎（阶段 8）打包要点（2026-09-13）
+
+- **pip 依赖零新增**：xhr/dhr 双引擎纯 Python 标准库（zipfile/xml.etree/re/colorsys/
+  decimal…），xlrd 是**已有**依赖（doc_convert 用，spec PACKAGES 已列），仅被引擎的
+  `.xls` 兜底通道共用；LibreOffice 仍是**外部可选程序**（仅 .xls 高保真 / .doc 归一化
+  两条窄路径，目标机不装不影响其它功能）。**`JZToolsHub.spec` 的 PACKAGES 不要为
+  xhr/dhr 加条目**——spec 注释说"插件动态导入的第三方库必须显式 collect_all"，
+  那是针对 pip 包的；纯标准库引擎源码随插件目录分发，PyInstaller 不感知、也不需要。
+- **vendor 随包分发**：`build-deploy.ps1` 整树拷贝 `plugins/` →
+  `backend/vendor/{xhr,dhr}`（53 个 .py）自动进部署包；引擎在运行时由
+  `office_render.py` 以 `__file__` 推导 vendor 路径注入 sys.path 加载——插件后端
+  本就是 exe 同层源码（importlib 动态加载），frozen 环境不受影响。
+- **打包清理逻辑的三个影响**（`build-deploy.ps1` 会从拷贝后的插件树删除
+  `data` / `.task_cache` / `__pycache__` / `out` 目录与 `*.pyc` / `config.json` 文件）：
+  1. `backend/out/`（渲染引擎测试产物，已 gitignore）不会入包——清理清单已含 `out`；
+  2. 仓库侧 `backend/config.json`（若有）不入包——它是开发机的 soffice 路径配置，
+     属机器本地文件；**目标机的配置在数据根** `<数据根>/plugins/knowledge-base/config.json`
+     （`office.soffice_path`），一键安装/升级不动数据根，配置与 LibreOffice 安装路径
+     均持久，升级后无需重配；
+  3. vendor 内的 `__pycache__` 自动清理，无需手工处理。
+- **Python 版本**：引擎 requires-python ≥3.10（pyproject）；打包 venv build-314
+  （3.14.7）满足，与 v1.6 同代 ABI。
+- **打包后验收（新增两条）**：
+  1. zip 含 `plugins/knowledge-base/backend/vendor/xhr/__init__.py` 与
+     `vendor/dhr/__init__.py`（vendor 完整随包），且**不含** `backend/out/`；
+  2. 源码 + waitress 冒烟：`GET /api/knowledge-base/status` 返回
+     `office_preview: true`；上传一份 xlsx / docx 后 `GET /files/<id>/preview`
+     返回 `kind=sheet/word` 的 HTML（尤其在无 LibreOffice 的机器上再抽查
+     `.xls`/`.doc` 走降级链路：预览 404 → 前端回退 SheetJS/mammoth，不报 500）。
+
 ### 5.2 v1.5 上线打包要点（2026-09-09）
 
 - 产物：`deploy/JZToolsHub-v1.5.zip`（约 103MB，2102 条目），version.json=1.5；由 `build-deploy.ps1 -Version "1.5"` 生成。
@@ -626,6 +683,37 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
     的 soffice.exe 在 URE 未注册场景，启动后不退出（实测 60s+）。`pdf_convert._version_of` 超时
     压到 10s 并把异常吞掉返 None（版本仅展示用，不影响可用性）。设置 `URE_BOOTSTRAP` /
     `SAL_DISABLE_USERMIGRATION` 等环境变量**不改善**耗时（实测 17.5s vs 17.8s 基线），不要加。
+29. **DOMPurify 会整块丢弃 `<style>` 元素**（2026-09-13 实测，知识库 Office 预览）。xhr/dhr
+    引擎是 class 型 CSS（`<style>` 去重声明），`sanitize(html, {USE_PROFILES:{html:true}})`
+    之后 Excel 全裸、Word 表格无边框。解法：reader.js 先正则摘取全部 `<style>` 块 → 仅正文
+    过 DOMPurify → CSS 用 `createElement("style")` 原样挂回。CSS 是引擎生成的静态内容
+    （字体名白名单、无 URL），无注入面，这样处理是安全的。**改 reader.js 注入逻辑时别把
+    这段摘取逻辑当冗余删掉。**
+30. **dhr 的表格内部还有第二个 `<style>`**（嵌在 `<table>` 里，单元格 padding 覆盖用）。
+    `<style>` 出现在 `<table>` 内会被 HTML 解析器 foster-parent，innerHTML 注入行为不定——
+    所以上述摘取必须用全局正则（`/<style[^>]*>([\s\S]*?)<\/style>/gi`），别只摘第一个。
+31. **xhr 渲染器对 XML 缺失格取 `style_table[0]` 不是「默认样式」**（2026-09-13 实测，
+    「集成测试表格」预览出现 179 个蓝格子的根因）。`StyleTable.intern` 按首次出现顺序分配
+    id，`[0]` 是首个被解析单元格的样式（该文件恰是 A1 蓝底大标题）——凡「工作簿首个带样式
+    单元格非默认 + used_range 内有缺格」的文件都会把空白区染色。已在 vendor 副本打补丁
+    （缺格一律按无样式渲染，见 `backend/vendor/README.md`）；**上游 TestWorkSpace 同 bug
+    待同步**。教训：dedup 表的 `[0]` 语义是「最先出现」，永远不要当「默认值」用。
+32. **改了引擎 / 升级 vendor 后必须删旧预览缓存**。`<id>.preview.json` 按文件 id 永久缓存
+    （文件不可变所以设计无失效逻辑），用户看到的可能是修复前的旧产物——删掉受影响文件的
+    缓存（或整个 `data/files/*.preview.json`）才生效，无需重启服务。
+33. **vendor 引擎接入方式**：dhr 顶层 `from xhr.core import ...`，两包必须同为顶层可导入——
+    `office_render.py` 用 `sys.path` 注入 `backend/vendor/`（上游 demo 同款）。soffice 路径经
+    插件 `config.json`（`office.soffice_path` 新键，兼容旧 `pdf.soffice_path`）写入环境变量
+    `XHR_SOFFICE`——引擎每次调用都读该变量，**改配置免重启**。
+34. **xhr 的 `model.meta` 是 MetaInfo 对象不是 dict**（取 `meta.warnings` 属性，不能 `.get()`）；
+    模块 docstring 含 Windows 路径（`D:\TestWorkSpace\x…`）会触发 `\x` unicode 转义错误——
+    docstring 要用 raw 字符串前缀。
+35. **Bash 工具 heredoc 会吃反斜杠**（2026-09-13 两次实测：补丁里 `"\t"`/`"\n"` 落盘成真实
+    制表符/换行，JS 语法错误；与 MEMORY 记的「PATH 损坏」同属 Bash 工具坑）。含转义序列的
+    补丁一律用 **Write 工具写脚本文件再 `python 执行`**，不要 heredoc 内嵌。
+36. **LibreOffice `.doc→docx` 归一化回环对微型表格会退化**（2026-09-13 实测：合成 1 行表格
+    经 doc 往返变成制表符段落，内容保留、结构丢失）。真实链路 `.doc` 上传走 doc_convert
+    转换件（docx），不经过该通道；仅历史转换失败记录会踩到，属上游引擎边界。
 
 ## 7.5 插件后端速查表（改哪个插件先看这里）
 
@@ -637,7 +725,7 @@ build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
 | --- | --- | --- | --- |
 | admin | /api/admin、/api/admin/batch、/login 等 | openpyxl（批量导入导出的 xlsx，缺库降级 CSV） | config/admin.json + .admin_key |
 | notice-board | /api/notice-board | 无 | plugins/notice-board/data/*.json（一公告一文件，RLock 串行化） |
-| knowledge-base | /api/knowledge-base | 线程池 ×2（Word PDF 转换：`_PDF_POOL` + `pdf_convert` 模块级锁双重串行；Excel 表格渲染：`_HTML_POOL` 独立串行，openpyxl 秒级不与 LibreOffice 长任务互塞队；两者 `register()` 启动补偿重入队 pending，failed 不自动重试，管理员 `POST /files/<id>/pdf-retry`、`/preview-retry` 手动重转） | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/ 四件套：`<id>.<original_ext>` **原件**（下载端点专用）/ `<id>.docx·.xlsx` 渲染件（doc·xls 经 doc_convert 转换，前端降级渲染）/ `<id>.pdf` 展示用 PDF（仅 Word 类，**LibreOffice headless**：`pdf_convert.convert_to_pdf`，独立 user profile 复用 `<数据根>/.lo-profile/`，180s 超时）/ `<id>.json` Excel 表格预览（仅 xlsx·xls 类，`xlsx_render.render_xlsx` 手绘 HTML，单 sheet 3000 行/120 列/12 万格/4MB 截断，>15MB failed）；服务端 ID 重命名；元数据 `original_ext`（恒有值=上传格式）+ `pdf_status`、`html_status`(none/pending/ok/failed)；`_migrate_files()` 启动时幂等补字段（含历史 Excel 记录 pdf_status 复位 none） |
+| knowledge-base | /api/knowledge-base | 无后台任务线程池（阶段 8 起预览为**按需同步渲染**：`office_render._RENDER_LOCK` 串行，引擎亚秒级；`GET /files/<id>/preview` 首阅渲染 + 原子缓存 `<id>.preview.json`，失败 404 前端回退） | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/：`<id>.<original_ext>` **原件**（下载端点专用）/ `<id>.docx·.xlsx` 渲染件（doc·xls 经 doc_convert 转换）/ `<id>.preview.json` Office 预览缓存（vendor xhr/dhr 双引擎，`office_render.render_word/render_sheet`，CSS class 型输出，Excel 页签前端接线）/ 历史 `<id>.pdf` 残留（不再消费，删除时清理）；服务端 ID 重命名；元数据 `original_ext`（恒有值=上传格式）；预览引擎 soffice 路径经 config.json（`office.soffice_path`，兼容旧键 `pdf.soffice_path`）注入 `XHR_SOFFICE` 环境变量 |
 | shared-docs | /api/shared-docs | 无（全局 RLock） | plugins/shared-docs/data/*.json（一文档一文件，历史上限 100） |
 | case-report | /api/case-report | ThreadPoolExecutor(2)，TASK_TTL 30min | data/*.json（一记录一文件）+ item_categories.json + config.json + prompt.json |
 | character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |

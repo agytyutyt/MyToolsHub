@@ -58,10 +58,11 @@ New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "config") | Out-Nul
 Copy-Item -Force (Join-Path $Root "config\tools.json") (Join-Path $AppDir "config")
 
 # 清理插件目录中的运行时数据 / 密钥 / 缓存（全新部署由程序自动重建）
+# out 为插件本地测试产物目录（如 knowledge-base 渲染引擎的目检样例，已 gitignore）
 $pluginDir = Join-Path $AppDir "plugins"
 if (Test-Path $pluginDir) {
   Get-ChildItem -Recurse -Directory $pluginDir |
-    Where-Object { $_.Name -in @("data", ".task_cache", "__pycache__") } |
+    Where-Object { $_.Name -in @("data", ".task_cache", "__pycache__", "out") } |
     Remove-Item -Recurse -Force
   Get-ChildItem -Recurse -File $pluginDir |
     Where-Object { $_.Name -like "*.pyc" -or $_.Name -eq "config.json" } |

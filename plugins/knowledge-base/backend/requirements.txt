@@ -3,20 +3,22 @@
 # 说明：
 # - 核心功能（浏览分类 / 列表 / 内联读取）为纯 Python 标准库实现（json / uuid / threading），
 #   文档渲染全部由前端 vendor/ 下的纯 JS 库完成（见 frontend/vendor/VENDOR.md）。
-# - 下列依赖用于「旧版格式自动转换」（上传 .doc / .xls 时服务端转为 .docx / .xlsx）
-#   与「Excel 表格预览」（xlsx_render.py 用 openpyxl 手绘 HTML，阶段 3 起）。
+# - 下列依赖用于「旧版格式自动转换」（上传 .doc / .xls 时服务端转为 .docx / .xlsx）。
+#   Office 预览（阶段 8）用 vendor/ 下的 xhr/dhr 双引擎，纯标准库零第三方依赖，
+#   不列在下面（PyInstaller spec 的 PACKAGES 也无需为它们加条目）；vendor 的
+#   .xls 高保真/.doc 归一化通道可选用到 LibreOffice（外部程序）。
+#   注意：引擎要求 Python >= 3.10（xhr/dhr 的 pyproject 声明），打包 venv
+#   build-314（3.14.x）满足；降级到 3.8 打包会使引擎不可用（预览回退降级渲染）。
 #   任一缺失时插件其余功能不受影响，仅该格式的自动转换不可用（页面明确提示，
 #   见 GET /api/knowledge-base/status 的 convert_legacy 字段）。
 #
-# - Word/Excel 的**PDF 预览**不引入任何 pip 依赖：由 pdf_convert.py 调用
-#   LibreOffice 的 soffice（headless 模式）完成，LibreOffice 是**目标机可选外部程序**
-#   （约 300MB，支持内网离线分发安装），不是 Python 包，因此不列在下面。
-#   未安装 LibreOffice 时：上传 / 阅读 / 下载全部照常可用，仅阅读回退为降级渲染
-#   （mammoth / SheetJS），`GET /api/knowledge-base/status` 的 pdf_engine 会报告未检测到。
-#   管理员也可在 plugins/knowledge-base/config.json 里显式指定路径：
-#   { "pdf": { "soffice_path": "C:\\Program Files\\LibreOffice\\program\\soffice.exe" } }
+# - LibreOffice（外部程序，非 pip 包）仅两条窄路径可选：.xls 的高保真归一化、
+#   .doc 的归一化渲染（xhr/dhr 引擎调用）；缺失时 .xls 自动走 xlrd 兜底、.doc 明确
+#   报错回退，上传/阅读/下载全部照常（B-4）。可经 config.json 指定路径：
+#   { "office": { "soffice_path": "C:\\Program Files\\LibreOffice\\program\\soffice.exe" } }
+#   （兼容旧键 { "pdf": { "soffice_path": ... } }）
 #
-openpyxl>=3.1     # .xls → .xlsx（写目标工作簿）；xlsx_render 读 xlsx 手绘表格预览 HTML
-xlrd>=2.0         # .xls → .xlsx（读旧版 BIFF 工作表）
+openpyxl>=3.1     # .xls → .xlsx（写目标工作簿，doc_convert 用）
+xlrd>=2.0         # .xls → .xlsx（读旧版 BIFF 工作表）；xhr 引擎 .xls 兜底通道共用
 python-docx>=1.1  # .doc → .docx（重建文档）
 olefile>=0.46     # .doc → .docx（读 OLE2 复合文档）

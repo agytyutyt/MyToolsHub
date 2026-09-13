@@ -441,31 +441,15 @@ body {
   top: 0;
 }
 
-/* Excel 表格预览（服务端 xlsx_render 手绘 HTML）——样式尽量由单元格 inline style
- * 还原；这里只补默认网格线与兜底字体。inline 的 border 覆盖网格线，未指定边的
- * 单元格显示浅灰网格线（模拟 Excel 视图）。注意不要给 .kb-xlsx-table 加 padding，
- * 行高/列宽由 <col> 与 tr height 控制。 */
-.kb-xlsx-table {
-  font-family: Calibri, "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 14.7px;   /* Excel 默认 11pt */
-  background: #fff;
-}
-.kb-xlsx-table td {
-  border: 1px solid #d9d9d9;
-  padding: 0 3px;
-  min-width: 0;
-}
-.kb-xlsx-table.kb-nogrid td { border-color: transparent; }
-.kb-xlsx-table .kb-xlsx-more td {
-  border-color: transparent;
-  font-size: 13px;
-  padding: 6px 10px;
-}
+/* Office 预览容器（dhr/xhr 引擎自带样式，前缀 kbdoc/kbsheet）——仅约束布局 */
+.kb-office { width: 100%; background: #fff; }
+.kb-office .kbsheet-sheet { overflow: auto; }
+.kb-office table { max-width: none; }
 
 /* PDF 页面容器 —— 仅保留页与页之间的间隔，不做卡片投影；水平居中 */
 .pdf-page-box { background: #fff; }
 .pdf-page-box canvas { display: block; }
-#reader-container > div:first-child:not(.paper):not(.sheet-tabs) {
+#reader-container > div:first-child:not(.paper):not(.sheet-tabs):not(.kb-office) {
   display: flex;
   flex-direction: column;
   align-items: center;
