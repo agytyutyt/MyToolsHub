@@ -1,7 +1,21 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-13（**知识库：Office 预览引擎整体替换为 xhr/dhr 双引擎**——
+> 最后更新：2026-09-14（**知识库：阅读页背景卡片改为贴合预览内容宽度**——
+> 用户反馈预览界面背景卡片通栏太宽、两侧大片空白。`.reader-frame` 由固定通栏
+> 改 `width: fit-content` 收缩居中：宽度由预览件实际宽度决定（Word dhr 版心
+> max-width / Excel xhr 表格显式 px 宽 / PDF 画布 / `.paper` 860px 版心），
+> 上限仍为视口宽，老内核回退 `width:auto` 同旧行为。配套：≥600px 视口 520px
+> 最小宽兜底（窄表/加载态）；`.kb-office-word{overflow-x:auto}` 让 Word 超版心
+> 固定宽表格在卡片内横向滚动；`.reader-notice` 限宽 640px 不撑宽卡片。
+> 同日续修（8.7.1）：用户实测「会话开发文档」出现横向滚动条——根因是该 docx
+> 参数表「说明」列的无空格长 token（chat.completion/chat.completion.chunk）把
+> auto 表格列 min-content 撑到 345px、整表超版心 47px。根修 `.kb-office-word`
+> 加 `overflow-wrap:anywhere`（断词且参与 min-content 计算）→ 表格收缩回版心
+> 滚动条根除；`.paper` 同步加防溢出；guard 滚动仅对真正超宽固定表生效。
+> 纯前端 CSS，style.css v24（reader.js/app.js 未动）。浏览器实测全过
+> （详见 `docs/插件库优化方案-设计文档.md` 阶段 8.7/8.7.1）。改动未提交，等用户拍板）。
+> （2026-09-13 **知识库：Office 预览引擎整体替换为 xhr/dhr 双引擎**——
 > 用户指定采用 `D:\TestWorkSpace\xlsx-html-preview` 项目的转换引擎，Word（doc/docx）
 > 与 Excel（xls/xlsx）预览**舍弃原方案**（阶段 2 的 LibreOffice 转 PDF +
 > 阶段 7 的 xlsx_render openpyxl 手绘 HTML）。落地：`backend/vendor/{xhr,dhr}`

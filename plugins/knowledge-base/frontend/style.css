@@ -354,13 +354,23 @@ body {
   color: var(--text);
 }
 
+/* 背景卡片贴合内容：宽度由预览件实际宽度决定（Word 版心 / Excel 表格 /
+   PDF 画布 / .paper 版心），收缩居中，上限为视口宽；不支持 fit-content
+   的老内核回退 width:auto（通栏，同旧行为） */
 .reader-frame {
+  width: -moz-fit-content;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   min-height: 60vh;
   padding: 16px 16px 90px; /* 底部留出胶囊工具条空间 */
-  padding-bottom: 90px;
+}
+/* 桌面端兜底最小宽：极窄内容（一两列的表格、加载/错误提示）不出现细条卡片 */
+@media (min-width: 600px) {
+  .reader-frame { min-width: 520px; }
 }
 .reader-status { text-align: center; color: var(--text-2); padding: 60px 0; font-size: 14px; }
 .reader-container { overflow: auto; }
@@ -374,6 +384,8 @@ body {
   line-height: 1.75;
   font-size: 15px;
   user-select: text;
+  /* 无空格长 token（URL/代码标识符）断词，防撑破贴合内容的卡片 */
+  overflow-wrap: anywhere;
 }
 .paper h1, .paper h2, .paper h3, .paper h4 { line-height: 1.4; margin: 1.2em 0 .5em; }
 .paper h1 { font-size: 24px; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
@@ -445,6 +457,12 @@ body {
 .kb-office { width: 100%; background: #fff; }
 .kb-office .kbsheet-sheet { overflow: auto; }
 .kb-office table { max-width: none; }
+/* Word 正文防横向溢出：无空格长 token（URL/点分标识符）与 NBSP 缩进的长行
+   不可折行，会把 auto 表格的列 min-content 一并撑大（实测「说明」列被
+   chat.completion/chat.completion.chunk 撑到 345px，整表超版心 47px）。
+   anywhere 允许断词且参与 min-content 计算（break-word 不参与），
+   列即可收缩回版心，滚动条根除 */
+.kb-office-word { overflow-x: auto; overflow-wrap: anywhere; }
 
 /* PDF 页面容器 —— 仅保留页与页之间的间隔，不做卡片投影；水平居中 */
 .pdf-page-box { background: #fff; }
@@ -613,6 +631,7 @@ body {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  max-width: 640px; /* 长文案换行，不参与撑宽「贴合内容」的背景卡片 */
   margin-bottom: 14px;
   padding: 10px 12px;
   font-size: 13px;
