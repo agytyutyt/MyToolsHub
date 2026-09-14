@@ -12,17 +12,20 @@
 #       确需同号重打时加 -Force。
 #       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json，并在与基线
 #       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
-#       默认会把仓库 runtime\ 下的离线运行组件（Chrome / LibreOffice 安装包）一并打进包，
-#       供无外网目标机部署；只想做瘦包时加 -SkipOfflineRuntime。
+#       默认**不**把离线运行组件打进包（主包瘦身，约 100 MB 级）：Chrome 与 LibreOffice
+#       改由独立的「离线组件包」分发，目标机按需一键安装（见 tools\build-offline-component.ps1
+#       与 docs\LibreOffice核心组件一键安装评估.md）。要出旧式「组件随包」的胖包时加
+#       -WithOfflineRuntime；-SkipOfflineRuntime 为旧开关，现已等价于默认行为（保留仅为兼容）。
 #       LibreOffice 若已生成裁剪核心包（runtime\libreoffice\libreoffice-core.zip，
-#       用 tools\build-libreoffice-core.py 生成），打包时默认「用它替代原始 MSI」，
+#       用 tools\build-libreoffice-core.py 生成），随包时默认「用它替代原始 MSI」，
 #       包内体积由 357.5 MB 降到约 166 MB；仍要随包带完整 MSI 时加 -KeepFullLibreOffice。
 param(
     [string]$Python = "python",
     [string]$DeployName = "JZToolsHub",
     [string]$Version = "",
     [switch]$Force,
-    [switch]$SkipOfflineRuntime,   # 不打包 runtime\ 离线运行组件（产出瘦包）
+    [switch]$WithOfflineRuntime,   # 随包携带离线运行组件（Chrome / LibreOffice）；默认不带
+    [switch]$SkipOfflineRuntime,   # 旧开关：等价于默认行为，保留以免旧命令行报错
     [switch]$KeepFullLibreOffice,  # 保留原始 LibreOffice MSI（不用裁剪核心包替代）
     [switch]$ZipOnly               # 跳过 PyInstaller 与目录组装，仅用既有部署目录重生成 zip
 )
@@ -180,8 +183,15 @@ Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留"
 #   源 B：tools\offline-runtime\    —— 随包脚本与说明（入库，随每版一起更新）
 #   组装后：<AppDir>\runtime\{ manifest.json, README.md, 安装离线组件.bat, setup-offline-runtime.ps1,
 #                              chrome\*.msi, libreoffice\{libreoffice-core.zip,.json} 或 libreoffice\*.msi }
-if ($SkipOfflineRuntime) {
-    Write-Host "==> 跳过离线运行组件（-SkipOfflineRuntime）"
+#   $offlineSummary 记录随包的离线组件（写进 version.json.offline）；默认瘦包时为空串。
+$offlineSummary = @()
+#   默认**不**组装（主包瘦身）：Chrome 与 LibreOffice 由独立的「离线组件包」分发，
+#   目标机按需一键安装，从而既缩小分发体积，又让组件可独立升级/卸载。
+#   要出旧式「组件随包」的胖包：加 -WithOfflineRuntime。
+if (-not $WithOfflineRuntime) {
+    Write-Host "==> 主包不含离线运行组件（默认瘦身）"
+    Write-Host "    组件另发：tools\build-offline-component.ps1 → 目标机一键安装"
+    if ($SkipOfflineRuntime) { Write-Host "    注：-SkipOfflineRuntime 已是默认行为，可省略" }
 } else {
     Write-Host "==> 组装离线运行组件（Chrome / LibreOffice）..."
     $rtSrc   = Join-Path $Root "runtime"
@@ -333,9 +343,9 @@ Set-Content -Path (Join-Path $AppDir "start.bat") -Value $startBat -Encoding Def
 if (Test-Path (Join-Path $AppDir "JZToolsHub.exe")) {
     $zip = Join-Path $Deploy "JZToolsHub-v$Version.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
-    # 离线组件约 500MB（MSI 本身已是压缩格式），用 Fastest 换时间：体积影响极小、
-    # 打包时长从数分钟降到可接受范围。解压兼容性不受影响。
-    Write-Host "==> 压缩安装包（含离线组件，体积较大请耐心等待）..."
+    # 离线组件（仅 -WithOfflineRuntime 随包）约 330MB 且本身已是压缩格式，用 Fastest 换时间：
+    # 体积影响极小、打包时长从数分钟降到可接受范围。解压兼容性不受影响。
+    Write-Host "==> 压缩安装包..."
     Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $zip -CompressionLevel Fastest
     $zipMB = [math]::Round((Get-Item $zip).Length / 1MB, 1)
     Write-Host "==> 已生成安装包：$zip（$zipMB MB）"

@@ -14,34 +14,53 @@
 3. **打包不传 `-Version` 也自动递增 patch**；版本号与上一版相同 → `build-deploy.ps1` 报错中止
    （除非 `-Force`）。原因：版本号不变 → 目标机 `sync_templates()` 判未升级 → 模板同步全跳过。
 
-## B 离线部署包 `deploy/JZToolsHub-v<版本>.zip`
+## B 分发物：主包（默认瘦身）+ 独立离线组件包
 
-- v1.8 **实测**：zip **437.5MB**、部署 **584.6MB / 2891 文件**、`runtime/` **324.1MB / 7 文件**
-  （v1.7 为 zip 618.4MB / 部署 777.5MB）。大头：Chrome 企业版 MSI 159.6MB +
-  LibreOffice **裁剪核心包** 164.5MB（用核心包时原始 MSI **已移出包外**）。
-- **五件套（改一个看另外四个）**：`tools/offline-components.json`（清单含 `derived` 段，入库）→
-  `tools/fetch-offline-bundle.py`（下载/校验，`--core` 顺带出核心包）→
-  `tools/build-libreoffice-core.py`（MSI→裁剪→zip）→ `tools/offline-runtime/*`（随包脚本）→
-  `build-deploy.ps1` 3.2.2 段（组装 + core 包替代 MSI + 按 manifest 校验）。
-- **★ LibreOffice 只用"核心"，不要完整版**：应用只有 `.doc→.docx`（dhr）/ `.xls→.xlsx`（xhr）两条
-  soffice 转换，不需 UI/帮助/词典/语言包/图标主题/字体。1522.6MB/19418 文件 → **557.9MB/2824 文件**；
-  zip **164.5MB**（原 MSI 357.5MB）；目标机从 `msiexec /a` 95~130s 降到**解压约 24s**。
+- **主包 `deploy/JZToolsHub-v<版本>.zip` 默认不含 Chrome / LibreOffice**（第六轮定，约 **122MB**；
+  部署目录约 260MB / 2888 文件，**无 `runtime/` 目录**）。`-WithOfflineRuntime` 才回退到胖包
+  （约 437MB，含 `runtime/`）；`-SkipOfflineRuntime` 是旧开关，已等价于默认。
+  原因：v1.8 的 437.5MB 里 324MB 是组件，而组件只服务部分目标机。
+- **组件包（`tools/build-offline-component.ps1` 产出，与主包并列分发）**：
+  `JZToolsHub-离线组件-LibreOffice核心-<v>.zip` ≈163MB（**免管理员**）/
+  `JZToolsHub-离线组件-Chrome-<v>.zip` ≈160MB（**需管理员**）。
+- **★ LibreOffice 组件 = 一键安装、对目标机隐身、零副作用**（用户明确要求，已实测）：
+  双击 `安装LibreOffice核心组件.bat` → `install-libreoffice-core.ps1` **纯解压**
+  `libreoffice-core.zip` 到 `<程序目录>\runtime\libreoffice\`（恰好命中应用探测链第三条路径），
+  **不跑 msiexec、不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"** → 目标机
+  Office/WPS 与默认应用不受影响、无 LibreOffice 图标、免管理员；写
+  `runtime\libreoffice-core.installed.json` 标记；`-Uninstall` 只删该目录与标记。
+  **别再给它加注册/建快捷方式类动作**，否则"隐身"这条就破了。
+- **装完即生效、无需重启**：`office_render._apply_soffice_env()` 每次渲染都重新探测（**无缓存**），
+  所以 **不要在该链路加进程级缓存**。
+- `install.ps1` 判定"是否处理离线组件"看的是**源包** `runtime\manifest.json`
+  （`$rtCarried = Test-Path (Join-Path $Source "runtime\manifest.json")`），**不是**目标目录 ——
+  否则旧胖装残留的 `runtime\` 会让瘦包路径误触发；瘦包时只打印组件安装指引。
+- 实测（模拟目标机）：安装 rc=0 / 12.7s / 557.9MB / 2824 文件 + 内置冒烟通过；随后应用
+  `.doc→.docx` 8169B、`.xls→.xlsx` 5933B（内容回环 A2="测试"/B2=42）；卸载 rc=0、目录与标记清除。
+- **LibreOffice 只用"裁剪核心包"**：应用只有 `.doc→.docx`（dhr）/ `.xls→.xlsx`（xhr）两条转换，
+  不需 UI/帮助/词典/语言包/图标主题。1522.6MB/19418 文件 → **557.9MB/2824 文件**，zip **164.5MB**
+  （原 MSI 357.5MB）。重建 `tools/build-libreoffice-core.py`；`-KeepFullLibreOffice` 保留完整 MSI。
 - **★ 裁剪两个致命坑**：① **`presets\` 绝不能删**（删了 soffice 在**全新 profile** 下 rc=77
   `Fatal Error 安装无法完成`；`help\`/`readmes\` 反而安全）——应用每次转换都用唯一临时 profile =
   每次首启动，所以**测裁剪安全性必须每次全新 profile，否则是假阳性**。② **`msiexec /a` 忽略
   `ADDLOCAL`**（只点 378 个功能仍解出全量）→ 官方功能选择这路是死的，只能全量解包后裁。
+- **组件链路的六件套（改一个看其余五个）**：`tools/offline-components.json`（清单含 `derived` 段，入库）
+  → `tools/fetch-offline-bundle.py`（下载/校验，`--core` 顺带出核心包）→
+  `tools/build-libreoffice-core.py`（MSI→裁剪→zip）→ `tools/offline-runtime/*`（随包/随组件分发的脚本）
+  → `tools/build-offline-component.ps1`（组件包组装器）→ `build-deploy.ps1`（3.2.2 段组装胖包 + 校验）。
 - `.NET` 的 `ZipFile.ExtractToDirectory` **没有 `bool` 重载**（传 `$true` 会绑到 `entryNameEncoding`
-  抛类型转换错）→ 要覆盖解压用逐条 `ZipFileExtensions::ExtractToFile($e,$p,$true)`。
+  抛类型转换错）→ 要覆盖解压用逐条 `ZipFileExtensions::ExtractToFile($e,$p,$true)`；
+  解包器用**三级回退**（整档 → 逐条 → `Expand-Archive`）。
 - 应用零配置探测 soffice 优先级：插件配置 `office.soffice_path` > 环境变量 `XHR_SOFFICE` >
   `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时有限深度 glob）。
-- Chrome 是全机 MSI 需管理员、LibreOffice 不需。`setup-offline-runtime.ps1` 对 Chrome 提权失败
+- Chrome 是全机 MSI 需管理员、LibreOffice 不需。胖包下 `setup-offline-runtime.ps1` 对 Chrome 提权失败
   **只打印指引不报错**（离线组件失败绝不能阻断安装）；`install.ps1` 调它必须走**子进程**
   （该脚本以 `exit` 结尾，dot-source 会终止安装流程）。
-- 打包耗时：v1.8 全量实测**在 10min 前台窗口内一次跑完**（PyInstaller 约 4.3min；瘦身后比
-  777MB 时代的 ≈16min 快很多）；只重出 zip 用 `-ZipOnly` ≈2min（**先把新文件复制进 `deploy/JZToolsHub/`**）；
-  瘦包用 `-SkipOfflineRuntime`。**先 commit 再打包**（否则 `version.json.commit` 记 `<sha>-dirty`）；
-  发版前 `fetch-offline-bundle.py --pin` 校准（Chrome 用固定 URL `stable`，内容随 Google 变）。
-- **未实测**：Chrome 静默安装（需提权）、真断网机器完整链路。
+- `Expand-PayloadZip` 返回 `$true`，裸调用会打出 `True` → 用 `$null = Expand-PayloadZip ...` 抑制。
+- 打包耗时：全量约 5~10min（PyInstaller 约 4.3min）；只重出 zip 用 `-ZipOnly` ≈2min
+  （**先把新文件复制进 `deploy/JZToolsHub/`**）。**先 commit 再打包**（否则 `version.json.commit`
+  记 `<sha>-dirty`）；发版前 `fetch-offline-bundle.py --pin` 校准（Chrome 用固定 URL `stable`）。
+- **未实测**：Chrome 静默安装（需提权）、真断网无 Office 机器的完整链路。
 
 ## C Python 版本基线
 
@@ -51,7 +70,7 @@
 - 口径：**最低 3.12 / 推荐与打包 3.14**，**排除 3.10**（2026-10-31 EOL）。
 - `plugins/knowledge-base/backend/vendor/xhr/__init__.py` 曾用 `Optional` 却未 import（3.8/3.13 导入即
   `NameError`，3.14 因 PEP649 惰性注解掩盖）→ **已修**。属「vendor 升级后必须重打」清单，与
-  `renderer/table.py` 补丁同级，登记在 `vendor/README.md`。
+  `renderer/table.py` 补丁同级，登记在 `vendor/README.md`。**别用 3.14 的"能跑"判断第三方代码正确性。**
 - **★ zfec 无 cp314 wheel**：必须 `pip install --find-links wheels ...`（用随仓库分发的
   `wheels/zfec-1.6.0.0-cp314-*.whl`），否则退化为源码编译（要 MSVC）。重建 `tools/build-zfec-wheel.py`。
   **zfec 是 GPL-2+，再分发需确认合规口径。** wheel 类型：`cpXX-cpXX` 版本锁定（zfec/numpy/pillow）
@@ -71,11 +90,15 @@
   `Start-Process` 与 Bash→PowerShell 均被安全策略**直接拒绝**；
   后台模式（`run_in_background`）**默认 120s 就被杀** —— 长构建必须走**前台 + `timeout: 600000`**
   （前台超时只转后台、不杀进程）。脚本里 `*>` 的重定向是 **UTF-16LE**，读日志要 `decode('utf-16')`。
-- **Bash 工具 PATH 损坏**（ls/wc/tail/dirname 找不到）；**PowerShell 正常但 stdout 会被吞** →
+- **★ PowerShell 工具对"长命令"有硬限制，报的却是权限拒绝**：多行/体积大的 PowerShell 命令稳定失败，
+  报 `[SandboxError] … CreateProcessW 失败 (win32_err=5, ERROR_ACCESS_DENIED) [target=…powershell.EXE]`
+  ——**不是真的权限问题，是命令规模触发的沙箱限制**。短命令正常，长命令必挂；`Set-ExecutionPolicy`
+  本身也会触发。对策：长逻辑写进 `.ps1`，命令只留 `powershell.exe … -File <脚本> -短参数`；或拆成多条短命令。
+- **Bash 工具 PATH 损坏**（ls/wc/dirname 找不到）；**PowerShell 正常但 stdout 会被吞** →
   探测类命令写临时文件再 Read，用完删。Read/Glob/Grep/Write/Edit 不受影响，优先用它们。
 - **沙箱会误报，以脚本自身日志为准**：命令含 `C:\Windows\System32\...` 路径、用 `Start-Process`、
   长任务收尾的文件访问都可能触发 `SandboxError`（曾把一次成功的打包判成 failed）。**别当事实结论。**
-  （注意：2026-09-14 那次"构建失败"的真因是**执行策略 + 后台 120s 超时**，不是沙箱 —— 先查这两项。）
+  （2026-09-14 那次"构建失败"的真因是**执行策略 + 后台 120s 超时**，不是沙箱 —— 先查这两项。）
 - HTTP 走代理 `http://127.0.0.1:49237`（`http_proxy`/`https_proxy`，`urllib.getproxies()` 即可）；
   大文件下载用 Python urllib + Range 续传比 PowerShell 稳，输出前 `sys.stdout.reconfigure(encoding="utf-8")`。
 - **venv**（跑源码调试与测试，勿污染系统 Python）：
@@ -87,6 +110,7 @@
   点击会落到遮罩关掉模态框）；**每次 CLI 调用都是新会话**，登录+操作必须放**同一次 `batch`**；
   batch 按空格切参数（eval 写无空格表达式或改用 `get text/count/attr`）；插件页直开
   `/plugin/<id>/index.html`（同源 Cookie 有效）最省事。
+- **编码约定**：`.ps1` = UTF-8 BOM + CRLF；`.bat` = GBK + CRLF（**不要 `chcp 65001`**）；脚本写的 JSON 一律 UTF-8 无 BOM。
 
 ## E 测试隔离（保护真实数据 `~/.jztoolshub`）
 
@@ -99,6 +123,8 @@
 4. **外部程序夹具**：临时目录写 `soffice.bat`（`@echo off` + `"<venv python>" fake_soffice.py %*`，
    Windows `subprocess.run` 能跑 .bat 不能跑 .py），脚本解析 `--outdir`/源文件、输出**结构合法最小
    PDF**（xref 偏移要对，pdf.js 能开）；测试把探测函数打桩指向它，失败态用标志文件控退出码。
+   验证 LibreOffice 链路时，**每次转换都要用唯一临时 profile**（同一 profile 连跑两次会因
+   单实例限制失败，rc=4294967295 —— 也正是应用线上的真实行为）。
 
 ## F 其它高频坑
 
@@ -119,3 +145,5 @@
   `_TEMPLATE_SYNC` 与 `install.ps1` 仍登记 → 升级必告警；改提示词只能改 `llm_client.py` 内置默认值。
 - **前端图标**：目标环境含旧浏览器（Chrome 72/78），emoji 渲染不稳（CSS `content` 可能显示方块）→
   新样式用纯文本或自绘 SVG，别依赖 emoji 字体。
+- **往包里塞东西前先问"该不该做成组件包"**：可独立分发/升级/卸载、目标机按需安装 → 走组件包，
+  别把主包撑大。

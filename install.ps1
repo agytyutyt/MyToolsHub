@@ -331,10 +331,14 @@ $DataRoot = Get-DataRootDir -Target $Target
 Write-Host "  用户数据根目录：$DataRoot"
 Sync-ConfigTemplates -SourceDir $Source -DataDir $DataRoot -Version $Version
 
-# ---- 离线运行组件（Chrome / LibreOffice，随包分发；缺省不阻断安装）----
-$rtDir = Join-Path $Target "runtime"
-$rtSetup = Join-Path $rtDir "setup-offline-runtime.ps1"
-if (Test-Path $rtSetup) {
+# ---- 离线运行组件（Chrome / LibreOffice）----
+# 组件默认**不**随主包分发（主包瘦身）。判断依据用**源包**是否带 runtime\manifest.json，
+# 而不是目标目录下有没有 setup 脚本：目标目录可能残留上一版胖包的 runtime\，
+# 若按目标目录判断，就会在每次更新时被旧脚本误触发一遍。
+$rtDir     = Join-Path $Target "runtime"
+$rtSetup   = Join-Path $rtDir "setup-offline-runtime.ps1"
+$rtCarried = Test-Path (Join-Path $Source "runtime\manifest.json")
+if ($rtCarried -and (Test-Path $rtSetup)) {
     Write-Host ""
     Write-Host "  ---- 离线运行组件（Chrome / LibreOffice）----"
     # 用子进程执行：setup 脚本以 exit 结束，dot-source 会连带终止本次安装流程
@@ -344,7 +348,11 @@ if (Test-Path $rtSetup) {
         Write-Host "         可稍后重跑：powershell -ExecutionPolicy Bypass -File `"$rtSetup`""
     }
 } else {
-    Write-Host "  （包内无 runtime\setup-offline-runtime.ps1，跳过离线组件；目标机需自备浏览器）"
+    Write-Host ""
+    Write-Host "  ---- 离线运行组件（本包未携带，按需另装）----"
+    Write-Host "    浏览器    ：用目标机已有的 Chrome / Edge 即可，无需额外安装"
+    Write-Host "    高保真预览：解压「离线组件包」后双击「安装LibreOffice核心组件.bat」"
+    Write-Host "                （免管理员、无快捷方式、不改文件关联与默认应用，对使用者不可见）"
 }
 
 # ---- 注册表与快捷方式 ----

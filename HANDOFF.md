@@ -1,15 +1,18 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（第五轮：**LibreOffice 改随包分发"裁剪核心包"** —— 只保留
-> `.doc→.docx` / `.xls→.xlsx` 需要的那套，包内占用 357.5 MB → 164.5 MB（省 193 MB），
-> 目标机安装从 `msiexec /a` 的 95~130 秒降到约 24 秒解压；新增
-> `tools/build-libreoffice-core.py`。第四轮为**打通离线部署** —— 部署包内置 Chrome 与
-> LibreOffice 并自动安装/解包，目标机无外网即可完整部署；新增
-> `tools/fetch-offline-bundle.py` 组件获取器、`docs/离线部署包说明.md`。第三轮为取消 Win7 +
-> vendor `Optional` 补丁 + zfec wheel 落库；第二轮为 P0 六项修复；第一轮为文档全面重写）。
+> 最后更新：2026-09-14（第六轮：**主包默认瘦身，Chrome 与 LibreOffice 一并移出打包文件，
+> 改为按需分发的「离线组件包」**；其中 LibreOffice 核心组件做成**一键安装、对目标机隐身、
+> 零副作用**的便携解包 —— 不写注册表 / 不建快捷方式 / 不改文件关联 / 不进"程序和功能"，
+> 目标机 Office/WPS 与默认应用均不受影响，应用装完即生效（无需重启）。新增
+> `tools/offline-runtime/install-libreoffice-core.ps1`（+ 装卸两个 bat）、
+> `tools/build-offline-component.ps1`、`docs/LibreOffice核心组件一键安装评估.md`。
+> 第五轮为 LibreOffice 改随包分发"裁剪核心包"（357.5 MB → 164.5 MB）；第四轮为打通离线部署；
+> 第三轮为取消 Win7 + vendor `Optional` 补丁 + zfec wheel 落库；第二轮为 P0 六项修复；
+> 第一轮为文档全面重写）。
 > 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
 > `docs/离线部署包说明.md`（离线包的组成、安装与适用场景）、
+> `docs/LibreOffice核心组件一键安装评估.md`（组件一键安装的评估与实测证据）、
 > `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（P0 修复方案与实测）、
 > `docs/Python版本选型评估.md`（版本基线的完整实测依据）、`wheels/README.md`（zfec wheel 的来源与重建）。
 
@@ -47,7 +50,7 @@
 | 操作系统 | **Windows 10 及以上（x64）** | **不支持 Windows 7**（2026-09-14 起取消，3.8 打包支线已删除） |
 | Python | **3.14**（打包与生产唯一基线） | 开发机最低 3.12；3.15 发布后不急于跟进（见 `docs/Python版本选型评估.md` §6） |
 | 浏览器 | **Chrome ≥ 72**（Edge ≥ 79、同内核国产浏览器） | 与 OS 基线**互相独立**：§7.3 的旧浏览器兼容措施不能删 |
-| 网络 | 目标机**可完全无外网** | 部署包自带 Chrome / LibreOffice 离线安装包（`runtime/`），依赖全部随包；装完不联网即可跑。见 `docs/离线部署包说明.md` |
+| 网络 | 目标机**可完全无外网** | 主包**默认瘦身**（不含组件，≈122 MB）；Chrome / LibreOffice 以**独立组件包**按需分发，LibreOffice 组件免管理员、对目标机隐身。见 `docs/离线部署包说明.md` |
 | 许可证 | Chrome（专有）/ LibreOffice（MPL-2.0） | 再分发口径与替代方案见 `runtime/README.md` §6 |
 
 > ⚠️ **最容易犯的错：把"取消 Win7"理解成"可以删掉旧浏览器兼容代码"**。两者触发条件不同——
@@ -92,14 +95,15 @@ python app.py
 | 项 | 值 |
 | --- | --- |
 | 当前分支 | `main` |
-| HEAD | **本提交**（第四轮收尾：核心包出包 + manifest 组件名同步 + 文档实测数据回写） |
-| 第四轮（核心包瘦身） | `6ad5a6b` LibreOffice 核心包替代 MSI（分发包 618.4 → **437.5 MB**，并改写包内 manifest）；`0bc30ab` 补写 manifest 组件名与文档实测数据；`9c8b0af` 打包标注脏工作区 + `-ZipOnly` |
-| 第三轮（离线部署） | `fd06e32` 离线部署包随包分发 Chrome / LibreOffice；`9bc0d53` 取消 Win7 兼容 + OS/浏览器双基线 |
-| 第二轮（P0 修复三连） | `e907b5e` 日志补记 / `05cc6ea` 仓库卫生与文档 / `03137d7` 路由前缀与加载隔离 / `8d0301d` 模板命名分离与打包防呆 |
-| 第一轮（文档重写） | `7d2d3dc` README/HANDOFF 全面重写 + 新增 20260914 评估报告 |
+| HEAD | **本提交**（第六轮：主包瘦身 + LibreOffice/Chrome 组件包 + LibreOffice 核心一键安装） |
+| 第六轮（组件包 / 一键安装） | 主包默认不含离线组件（瘦身），新增 `tools/build-offline-component.ps1` 出「离线组件包」；LibreOffice 核心组件做成**一键安装、对目标机隐身**（`install-libreoffice-core.ps1` + 装卸两 bat），实测装/卸/调用全通 |
+| 第五轮（核心包瘦身） | `6ad5a6b` LibreOffice 核心包替代 MSI（分发包 618.4 → **437.5 MB**，并改写包内 manifest）；`0bc30ab` 补写 manifest 组件名与文档实测数据；`9c8b0af` 打包标注脏工作区 + `-ZipOnly` |
+| 第四轮（离线部署） | `fd06e32` 离线部署包随包分发 Chrome / LibreOffice；`9bc0d53` 取消 Win7 兼容 + OS/浏览器双基线 |
+| 第三轮（P0 修复三连） | `e907b5e` 日志补记 / `05cc6ea` 仓库卫生与文档 / `03137d7` 路由前缀与加载隔离 / `8d0301d` 模板命名分离与打包防呆 |
+| 第二轮（文档重写） | `7d2d3dc` README/HANDOFF 全面重写 + 新增 20260914 评估报告 |
 | 此前基线 | `ca69141`（2026-09-14）知识库阅读页背景卡片贴合预览内容宽度 + 长 token 撑破版心的横向滚动条修复 |
-| 工作区 | **干净**（无未提交改动，无未跟踪文件） |
-| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`；`main` **已同步**（最近一次推送 `ca69141..a425917`，2026-09-14，含离线部署与核心包两轮） |
+| 工作区 | **干净**（本轮改动已随本提交入库；`deploy/*.zip` 与 `runtime/` 已 gitignore） |
+| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`；`main` 已同步至 `a425917`（第五轮收尾），**第六轮改动尚未推送** |
 | 其他分支 | `G2改造`、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造`（均为历史功能分支，未合并） |
 
 > 早前版本文档记录的"大量未提交改动"与"最新提交 7269cb8"已过时：相关改动已随后续提交入库。
@@ -107,28 +111,50 @@ python app.py
 
 ### 2.2 产物状态
 
-**最新产物：v1.8 离线部署包（2026-09-14）**
+**最新产物：v1.9 主包（默认瘦身）+ 独立离线组件包（2026-09-14 第六轮）**
+
+主包 `deploy/JZToolsHub-v1.9.zip`：
 
 | 项 | 值 |
 | --- | --- |
-| 部署目录 | `deploy/JZToolsHub/` — **584.6 MB / 2891 个文件** |
-| 分发包 | `deploy/JZToolsHub-v1.8.zip` — **437.5 MB** |
-| 版本 | `1.8`（上一版 1.7，脚本自动递增） |
+| 部署目录 | `deploy/JZToolsHub/` — 约 **260 MB / 2888 个文件**（**无 `runtime/` 目录**） |
+| 分发包 | `deploy/JZToolsHub-v1.9.zip` — 约 **122 MB** |
+| 版本 | `1.9`（上一版 1.8） |
 | 打包解释器 | Python **3.14.7**（基线 3.14，符合） |
-| 构建提交 | `6ad5a6b`（写入 `version.json.commit`；构建时工作区干净，**无 `-dirty`**） |
-| 离线组件 | Chrome 企业版 MSI 159.6 MB + LibreOffice 26.8.0 **裁剪核心包** 164.5 MB（`runtime/` 合计 324.1 MB） |
-| 包内新改动 | LibreOffice 裁剪核心包随包（省约 181 MB）+ 知识库 Office 预览引擎改造 + P0 六项修复 + 离线部署能力 |
+| 离线组件 | **主包不含**（`version.json.offline` 为空串）；Chrome/LibreOffice 由组件包单独分发 |
+| 体积构成 | `_internal/` 224.4 MB、`JZToolsHub.exe` 19.0 MB、`plugins/` 16.1 MB，其余不足 1 MB |
 
-体积构成：`_internal/` 224.4 MB（Python 运行时与依赖）、`runtime/` 324.1 MB（离线组件）、
-`JZToolsHub.exe` 19.0 MB、`plugins/` 16.1 MB，其余不足 1 MB。
+离线组件包（`tools/build-offline-component.ps1` 产出，与主包**并列分发**）：
 
-> LibreOffice 由**完整版 MSI（357.5 MB）改为裁剪核心包（164.5 MB）**：应用只用到
-> `.doc→.docx`（dhr）与 `.xls→.xlsx`（xhr）两条 soffice 转换，UI / 帮助 / 词典 / 语言包 /
-> 图标主题都是死重。打包时自动替代并**改写包内 `manifest.json`**（`install=zip-unpack`、
-> `core_pruned=true`、`source_msi`、`unpacked_bytes`）；仍要随包带完整版加 `-KeepFullLibreOffice`
-> （体积回到约 630 MB）。核心包重建用 `tools/build-libreoffice-core.py`，裁剪理由与清单见
-> `docs/离线部署包说明.md` §3。
-> 不想带离线组件：`build-deploy.ps1 -SkipOfflineRuntime` 出瘦包。
+| 组件 | 产物 | 体积 | 安装方式与影响面 |
+| --- | --- | --- | --- |
+| LibreOffice 核心 | `deploy/JZToolsHub-离线组件-LibreOffice核心-<版本>.zip` | 约 163 MB | 解压后双击 `安装LibreOffice核心组件.bat`（**免管理员**）；**对目标机隐身**：不写注册表 / 不建快捷方式 / 不改文件关联 / 不进"程序和功能"；`卸载LibreOffice核心组件.bat` 可单独移除 |
+| Chrome | `deploy/JZToolsHub-离线组件-Chrome-<版本>.zip` | 约 160 MB | 双击 `安装Chrome.bat`（**需管理员**，全机静默安装）；目标机已有 Chrome/Edge 时不必装 |
+
+**为什么移出主包**：v1.8 主包 437.5 MB 里 324.1 MB 是离线组件（Chrome MSI + LibreOffice 核心包），
+而组件只服务于**部分**目标机（有 Office/WPS 且不需要高保真预览的机器根本用不上）。移出后主包降到
+约 122 MB，组件按需安装、可独立升级与卸载，且"装组件"从"安装流程的一部分"变成"用户主动的一次操作"。
+
+**LibreOffice 核心组件的关键性质（本轮实测验证）**：
+
+- **零副作用 / 对目标机隐身**：安装＝把 `libreoffice-core.zip` 纯解压到 `<程序目录>\runtime\libreoffice\`，
+  **不执行 `msiexec`**、不写注册表、不建快捷方式、不改文件关联、不进控制面板。目标机的
+  MS Office / WPS 与默认应用**完全不受影响**，也没有任何 LibreOffice 图标出现在桌面/开始菜单；
+  `soffice.exe` 只在 `runtime\` 内部，用户不会"看见"它。评估与实测证据见
+  `docs/LibreOffice核心组件一键安装评估.md`。
+- **装完即生效、无需重启**：应用侧 `office_render._apply_soffice_env()` **每次渲染都重新探测**
+  （无缓存），所以装完组件立刻就能打开 `.doc`/`.xls` 高保真预览。
+- **免管理员**：纯解压，不碰需要提权的注册表 HKLM / Program Files。
+- **可单独卸载**：`卸载LibreOffice核心组件.bat` 只删 `runtime\libreoffice\` 与安装标记，不动程序与数据。
+- 实测：模拟目标机安装 rc=0、解压 12.7 s、557.9 MB / 2824 文件、内置冒烟测试通过；随后应用
+  `.doc→.docx`（8169 B）与 `.xls→.xlsx`（5933 B，内容回环校验 A2="测试" / B2=42）均成功；
+  卸载 rc=0、目录与标记被清除、程序目录其余部分未动。
+
+> **想回到"组件随主包"的旧形态**：`build-deploy.ps1 -WithOfflineRuntime` 出胖包（约 437 MB），
+> 由 `runtime\安装离线组件.bat` → `setup-offline-runtime.ps1` 在安装流程里就地处理。
+> `-SkipOfflineRuntime` 为旧开关，已等价于默认行为，仅为兼容旧命令行保留。
+> LibreOffice 组件仍使用**裁剪核心包**（`-KeepFullLibreOffice` 可改回完整 MSI，体积回到约 630 MB）；
+> 核心包重建用 `tools/build-libreoffice-core.py`，裁剪理由见 `docs/离线部署包说明.md` §3。
 > 只改了文档要重出 zip：`build-deploy.ps1 -ZipOnly`（跳过 PyInstaller 与组装，实测约 2 分钟，
 > 但**要先把新文件复制进 `deploy/JZToolsHub/`**）。全量打包实测在 10 分钟内跑完。
 
@@ -147,6 +173,7 @@ python app.py
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-14 | **主包瘦身 + 离线组件包 + LibreOffice 核心一键安装** | 主包**默认不再携带** Chrome / LibreOffice（`build-deploy.ps1` 用 `-WithOfflineRuntime` 才随包），体积 437.5 MB → 约 122 MB；新增 `tools/build-offline-component.ps1` 把组件打成可独立分发的「离线组件包」；LibreOffice 核心组件做成**一键安装 / 对目标机隐身 / 零副作用**（`tools/offline-runtime/install-libreoffice-core.ps1` + `安装LibreOffice核心组件.bat` + `卸载LibreOffice核心组件.bat`）：纯解压到 `<程序目录>\runtime\libreoffice\`，**不执行 msiexec、不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"**，目标机 Office/WPS 与默认应用不受影响、无任何 LibreOffice 图标，装完**无需重启**即生效（应用每次渲染都重新探测 soffice）。`install.ps1` 的离线组件判定改为看**源包**（`runtime\manifest.json`）以防旧胖装残留误触发，瘦包时只打印组件安装指引。实测：安装 rc=0 / 12.7s / 557.9MB / 2824 文件 + 内置冒烟通过；应用 `.doc→.docx` 8169B、`.xls→.xlsx` 5933B（回环校验通过）；卸载 rc=0。评估见 `docs/LibreOffice核心组件一键安装评估.md` |
 | 2026-09-14 | **LibreOffice 裁剪核心包 + v1.8 发版** | 应用只需 `.doc→.docx` / `.xls→.xlsx` 两条 soffice 转换，故不再随包分发完整版 MSI：新增 `tools/build-libreoffice-core.py`（`msiexec /a` 解包 → 裁剪 → **构建期全新 profile 冒烟测试** → zip + 溯源元数据），1522.6MB / 19418 文件 → **557.9MB / 2824 文件**、zip 164.5MB；`build-deploy.ps1` 默认用核心包替代 MSI 并改写包内 `manifest.json`（`-KeepFullLibreOffice` 可保留完整版，且校验核心包与源 MSI 的 sha256）；`setup-offline-runtime.ps1` 优先解压核心包（三级回退）→ 安装从 95~130s 降到约 24s；`fetch-offline-bundle.py` 加 `--core`。产出 `JZToolsHub-v1.8.zip`（**437.5MB**，较 v1.7 少约 181MB）。**关键坑：`presets\` 不能删（全新 profile 下 rc=77），且测裁剪安全性必须每次用全新 profile；`msiexec /a` 忽略 `ADDLOCAL`** |
 | 2026-09-14 | **离线部署包打通 + v1.7 发版** | `runtime/` 随包分发 Chrome 企业版 MSI（159.6MB）与 LibreOffice 26.8.0 MSI（357.5MB）；新增 `tools/fetch-offline-bundle.py`（断点续传 + sha256 冻结校验，清单入 `tools/offline-components.json`）与 `tools/offline-runtime/setup-offline-runtime.ps1`（Chrome 静默安装 / **LibreOffice `msiexec /a` 免管理员解包**）；`office_render` 新增便携 soffice 三级探测（**零配置**）；`install.ps1` 安装末尾自动处理离线组件且**失败不阻断**，并修掉覆盖 `version.json` 溯源字段的缺陷；打包脚本新增**离线组件完整性自检**与 `-SkipOfflineRuntime` / `-ZipOnly`；产出 `JZToolsHub-v1.7.zip`（618.4MB）。文档见 `docs/离线部署包说明.md`。实测：`.xls→.xlsx` 归一化、应用自动探测、`render_sheet` 真实渲染全绿 |
 | 2026-09-14 | 知识库阅读体验收尾 | `.reader-frame` 改 `width: fit-content` 贴合预览内容宽度；Word 超版心固定宽表格在卡片内横向滚动；长 token 断词修复横向滚动条（style.css v24） |
@@ -189,8 +216,8 @@ python app.py
 | 11 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
 | 12 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
 | 13 | 在 `/api/tools` 暴露 `plugin_errors`（默认空 dict），首页对加载失败的插件显示"暂不可用"（本轮只做了日志与 `_plugin_load_errors` 记录） |
-| 14 | **离线包真机验证**：在一台**真的断网**机器上走完整链路（解压 → 一键安装 → Chrome 安装 → LibreOffice 解包 → 启动 → 知识库打开 `.doc`/`.xls`）。开发机已验证 `msiexec /a` 解包（免管理员）与渲染链路，但 **Chrome 静默安装需提权**，开发会话无管理员权限未能实测 |
-| 15 | 每次发版前校准 `runtime/` 组件版本：Chrome 组件用固定 URL `stable`（内容随 Google 更新而变），冻结的 `sha256` 会随之失配 → 需重跑 `fetch-offline-bundle.py --pin`，或改用带版本号的下载地址 |
+| 14 | **离线组件真机验证**：在一台**真的断网、无 Office 环境**的机器上走完整链路（解压主包 → 一键安装 → 解压 LibreOffice 组件包 → 双击 `安装LibreOffice核心组件.bat` → 启动 → 知识库打开 `.doc`/`.xls`）。开发机已用**模拟目标机**验证了解压安装（免管理员）/ 应用探测 / 两条转换链路 / 卸载，但 **Chrome 组件静默安装需提权**，开发会话无管理员权限未能实测 |
+| 15 | 每次发版前校准离线组件版本：Chrome 组件用固定 URL `stable`（内容随 Google 更新而变），冻结的 `sha256` 会随之失配 → 需重跑 `fetch-offline-bundle.py --pin`，或改用带版本号的下载地址。`build-offline-component.ps1` 会在打包前按 `tools/offline-components.json` 校验核心包体积与 sha256 |
 
 ### P2（体验与规范）
 
@@ -335,6 +362,11 @@ python app.py
 30. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
 31. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
 32. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。
+    * **组件已移出主包（2026-09-14 第六轮）**：主包默认不含 Chrome / LibreOffice，`install.ps1` 判断"是否处理离线组件"改为看**源包**里有没有 `runtime\manifest.json`（`$rtCarried = Test-Path (Join-Path $Source "runtime\manifest.json")`），而不是看目标目录——否则旧胖装残留的 `runtime\` 会让瘦包路径误触发。瘦包时只打印一句指引（浏览器用目标机自带 Chrome/Edge；高保真预览去装组件包）。
+    * **LibreOffice 组件的一键安装是"纯解压"而非 `msiexec`**：`install-libreoffice-core.ps1` 把 `libreoffice-core.zip` 解到 `<程序目录>\runtime\libreoffice\`（恰好命中应用探测链的第三条路径），**不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"**，因此免管理员且对目标机使用者不可见（目标机 MS Office/WPS 与默认应用不受影响）。脚本最后写一个 `runtime\libreoffice-core.installed.json` 标记；`-Uninstall` 只删该目录与标记。
+    * **不要给这个安装器加"注册"类动作**：一旦写 `HKLM`/`HKCR`、建开始菜单项或改文件关联，"对目标机不可见"这条就破了——需求明确要求不影响目标机默认打开方式。
+    * **应用侧每次都重新探测 soffice**（`office_render._apply_soffice_env()` 无缓存），所以装/卸组件**无需重启工具箱**即生效；这也意味着不要在该链路上加进程级缓存。
+    * `Expand-PayloadZip` 会返回 `$true`，裸调用会在控制台打出 `True` → 调用处用 `$null = Expand-PayloadZip ...` 抑制。
 33. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
 34. **打包前先提交，否则 `version.json` 的 `commit` 指向错误的提交**：`build-deploy.ps1` 记的是**构建那一刻的 HEAD**，工作区若有未提交改动，包内代码其实来自"HEAD + 改动"，事后无法据此定位源码。2026-09-14 已加防护：`git status --porcelain` 非空时把 `commit` 记成 `<sha>-dirty`。**正确姿势是先 commit 再打包**；若已用脏工作区打了包，要么重打，要么手工把 `version.json.commit` 校正为实际对应的提交（v1.7 首版就是后者）。
 35. **只重出 zip 用 `-ZipOnly`**：跳过 PyInstaller 与目录组装，实测约 2 分钟（全量打包约 16 分钟）。**前提是先把新文件复制进 `deploy\JZToolsHub\`**——它不重新组装，只压缩既有目录。另注意变量名不能叫 `$zipOnly`（PowerShell 变量名不分大小写，会与开关参数撞成同一变量）。
@@ -371,6 +403,12 @@ python app.py
 46. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
 47. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
 48. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
+49. **PowerShell 工具对"长命令"有硬限制，报的却是"权限拒绝"**（2026-09-14 实测，极易误判）：
+    多行 / 体积大的 PowerShell 命令会稳定失败，报
+    `[SandboxError] executable not found in sandbox PATH … CreateProcessW 失败 (win32_err=5, ERROR_ACCESS_DENIED) [target=…\powershell.EXE]`
+    ——**这不是真的权限问题，而是命令规模触发的沙箱限制**。短命令正常，长命令必挂；`Set-ExecutionPolicy` 本身也会触发。
+    对策：把长逻辑写进 `.ps1` 文件，命令只留 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <脚本> -短参数`；
+    或把命令拆成多条短命令。**别据此断定"沙箱禁止了 PowerShell"**。偶尔连短命令也失败是环境瞬时不稳，重试即可。
 
 ---
 
@@ -485,9 +523,14 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
   → .workbuddy/memory/YYYY-MM-DD.md（当日工作日志）
 ```
 
-改动**打包 / 安装 / 离线组件**链路时，另外三处必须一起改：
-`build-deploy.ps1` ↔ `install.ps1` ↔ `tools/offline-runtime/`（脚本副本会随包分发到 `runtime/`）
-+ `docs/离线部署包说明.md`（包体组成与体积数字）+ `tools/offline-components.json`（组件清单）。
+改动**打包 / 安装 / 离线组件**链路时，另外几处必须一起改：
+`build-deploy.ps1` ↔ `install.ps1` ↔ `tools/offline-runtime/`（脚本副本会随**胖包**分发到 `runtime/`，
+或随**组件包**分发）↔ `tools/build-offline-component.ps1`（组件包组装器，改组件目录结构要同步改它）
++ `docs/离线部署包说明.md`（包体组成与体积数字）+ `tools/offline-components.json`（组件清单）
++ `docs/LibreOffice核心组件一键安装评估.md`（改一键安装行为时）。
+
+> **主包瘦身是默认行为**：往包里塞东西之前先确认是不是应该做成"组件包"（可独立分发 / 升级 / 卸载、
+> 目标机按需安装）。默认瘦包这条线是 2026-09-14 第六轮定的，`-WithOfflineRuntime` 才回退到胖包。
 
 改信息传输协议时**四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 + 《移动端APP.md》（改完记得重启服务）。
 改 vendor 引擎时**必须同步 `vendor/README.md` 的补丁清单**（升级 vendor 整目录替换后要重打两个补丁）。
@@ -504,17 +547,23 @@ python app.py
 
 # 下载离线运行组件（Chrome / LibreOffice，约 517MB，支持断点续传；--verify-only 只校验）
 python tools/fetch-offline-bundle.py
+python tools/fetch-offline-bundle.py --core          # 顺带生成 LibreOffice 裁剪核心包
 python tools/fetch-offline-bundle.py --verify-only
 
 # 打包（-Version 省略会自动递增；写出的 version.json 含 commit/built_at/python/offline）
-powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
-powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -SkipOfflineRuntime   # 瘦包
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.9.0"   # 默认瘦包（不含组件）
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -WithOfflineRuntime # 胖包（组件随包）
+
+# 打离线组件包（与主包并列分发，产出在 deploy/）
+powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1                 # LibreOffice 核心
+powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1 -Component All  # 另加 Chrome
 
 # 重建 zfec 预编译 wheel（换 Python 小版本后）
 python tools/build-zfec-wheel.py
 
-# 目标机：解压 zip → 双击 一键安装.bat → start.bat 启动；卸载双击 一键卸载.bat
-#         离线组件可单独重跑：右键 runtime\安装离线组件.bat → 以管理员身份运行
+# 目标机：解压主包 zip → 双击 一键安装.bat → start.bat 启动；卸载双击 一键卸载.bat
+#         高保真 Office 预览：解压 LibreOffice 组件包 → 双击 安装LibreOffice核心组件.bat（免管理员、对目标机隐身）
+#         胖包形态下组件随包，可重跑：runtime\安装离线组件.bat（装 Chrome 需管理员）
 ```
 
 ```python
