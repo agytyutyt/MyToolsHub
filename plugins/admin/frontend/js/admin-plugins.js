@@ -3,12 +3,16 @@
  * 与后端约定（plugins/admin/backend/plugin_admin.py）：
  *   GET  /api/admin/plugins              盘点
  *   POST /api/admin/plugins/upload       上传+只读校验 → 计划
- *   POST /api/admin/plugins/apply        应用（服务端会重新校验）
- *   POST /api/admin/plugins/rollback     回滚
+ *   POST /api/admin/plugins/apply        应用（服务端会重新校验；成功且含后端改动则自动停服重启）
+ *   POST /api/admin/plugins/rollback     回滚（成功后同样自动重启）
  *   POST /api/admin/plugins/enable       启用/停用
  *   GET  /api/admin/plugins/index        读共享盘索引并比对版本
- *   POST /api/admin/plugins/batch-apply  批量应用
- *   POST /api/admin/plugins/restart      重启服务（仅打包运行）
+ *   POST /api/admin/plugins/batch-apply  批量应用（全部成功后统一重启一次）
+ *   POST /api/admin/plugins/restart      重启服务（仅打包运行；自动重启关闭/失败时的手工兜底）
+ *
+ * 升级主流程（管理员只需两步：选包 → 确认）：
+ *   上传 .zip → 后端只读校验出计划 → 确认应用 → 备份 → 替换 → 自动停服重启 → 本页自动刷新。
+ *   响应里的 restarting=true 表示服务端即将退出并自拉起，前端轮询等待后刷新。
  */
 (function () {
   const { api, showToast, getSession, renderUserMenu, esc, confirmDialog } = window.AdminCommon;
@@ -146,39 +150,74 @@
     }
   }
 
+  // 服务自重启期间轮询，等它重新可用后自动刷新
+  // （比固定 8 秒延时稳：慢机器也不会刷到"服务未启动"；最多等 90 秒）
+  function waitAndReload(maxMs = 90000) {
+    const started = Date.now();
+    const tick = async () => {
+      if (Date.now() - started > maxMs) { location.reload(); return; }
+      try {
+        const r = await fetch('/api/admin/plugins', { credentials: 'same-origin', cache: 'no-store' });
+        if (r.status < 500) { location.reload(); return; }   // 401 也算"起来了"，刷新后跳登录
+      } catch (err) { /* 重启中，继续等 */ }
+      setTimeout(tick, 1500);
+    };
+    setTimeout(tick, 4000);   // 先给旧进程退出留出时间，避免打到还没停的实例
+  }
+
   function applyPackage() {
     if (!lastUpload) { showToast('请先上传并校验插件包', true); return; }
     const targetName = nm(lastUploadId);
+    const autoRestart = document.getElementById('opt-auto-restart').checked;
     const body = {
       file: lastUpload,
       force: document.getElementById('opt-force').checked,
       purge_unknown: document.getElementById('opt-purge').checked,
       update_entry: document.getElementById('opt-update-entry').checked,
+      auto_restart: autoRestart,
     };
-    confirmDialog(`确认将该插件包应用到「${targetName}」？应用会先备份旧版，再替换插件代码（用户数据不受影响）。`, async () => {
+    confirmDialog(`确认将该插件包应用到「${targetName}」？应用会先备份旧版，再替换插件代码（用户数据不受影响）。`
+      + (autoRestart
+        ? '\n若包含后端改动，应用后会自动重启服务（约 5~10 秒不可用），本页随后自动刷新。'
+        : '\n已关闭自动重启：应用后需点上方「立即重启服务」。'), async () => {
       const box = document.getElementById('inspect-result');
       box.innerHTML = '<div class="plugin-plan-line">应用中…</div>';
       try {
         const res = await api('/api/admin/plugins/apply', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
-        box.innerHTML = `<div class="plugin-plan">
-          <div class="plugin-plan-head">已应用：<b>${esc(nm(res.id, res.name))}</b>
+        lastUpload = '';
+        lastUploadId = '';
+        document.getElementById('pkg-file').value = '';
+        const head = `<div class="plugin-plan-head">已应用：<b>${esc(nm(res.id, res.name))}</b>
             <span class="plugin-id">${esc(res.id)}</span>
             ${esc(res.from_version || '（未安装）')} → <b>${esc(res.to_version)}</b></div>
           <div class="plugin-plan-line">写入 ${res.written} 个文件，删除 ${res.deleted} 个，
             保留未知 ${res.kept_unknown} 个</div>
-          <div class="plugin-plan-line plugin-muted">备份：${esc(res.backup || '（全新安装，无旧版备份）')}</div>
+          <div class="plugin-plan-line plugin-muted">备份：${esc(res.backup || '（全新安装，无旧版备份）')}</div>`;
+        if (res.restarting) {
+          box.innerHTML = `<div class="plugin-plan">${head}
+            <div class="plugin-plan-line warn">${esc(res.restart_message || '服务正在重启…')}
+              <div class="plugin-plan-files">请勿关闭本页，恢复后会自动刷新。</div></div>
+          </div>`;
+          showToast('已应用，服务正在重启…');
+          waitAndReload();
+          return;                       // 服务马上要停，别再发盘点请求
+        }
+        box.innerHTML = `<div class="plugin-plan">${head}
           ${res.restart_needed
-            ? '<div class="plugin-plan-line warn">后端有改动：请点上方「立即重启服务」使其生效</div>'
+            ? `<div class="plugin-plan-line warn">${esc(res.restart_message || '后端有改动：请点上方「立即重启服务」使其生效')}</div>`
             : '<div class="plugin-plan-line">前端已生效，页面按 Ctrl+F5 强刷一次即可</div>'}
         </div>`;
         showToast('已应用');
-        lastUpload = '';
-        lastUploadId = '';
-        document.getElementById('pkg-file').value = '';
         await load();
       } catch (err) {
+        // 极端时序：响应还没拿到进程就已退出（fetch 直接失败）→ 视作正在重启
+        if (/fetch|network|failed|abort/i.test(err.message || '')) {
+          box.innerHTML = '<div class="plugin-plan-line warn">服务正在重启，本页恢复后会自动刷新…</div>';
+          waitAndReload();
+          return;
+        }
         box.innerHTML = `<div class="plugin-plan-line warn">应用失败：${esc(err.message)}</div>`;
         showToast('应用失败', true);
       }
@@ -220,6 +259,14 @@
             showToast(`已回滚 ${nm(id, res.name)}：${res.from_version} → ${res.to_version}`);
             if (res.dropped && res.dropped.length) {
               showToast(`注意：有 ${res.dropped.length} 个文件未包含在备份中，已丢弃`, true);
+            }
+            if (res.restarting) {
+              showToast(res.restart_message || '服务正在重启…');
+              waitAndReload();
+              return;
+            }
+            if (res.restart_needed) {
+              showToast(res.restart_message || '需重启后生效，可点上方「立即重启服务」', true);
             }
             await load();
           } catch (err) { showToast(err.message, true); }
@@ -311,9 +358,18 @@
           const lines = (res.results || []).map(r => r.ok
             ? `<div class="plugin-plan-line">✅ ${esc(nm(r.id, r.name))}（${esc(r.id)}）：${esc(r.from_version || '（未安装）')} → ${esc(r.to_version)}</div>`
             : `<div class="plugin-plan-line warn">❌ ${esc(nm(r.id, r.name))}（${esc(r.id)}）：${esc(r.error)}</div>`).join('');
+          if (res.restarting) {
+            box.innerHTML = `<div class="plugin-plan">${lines}
+              <div class="plugin-plan-line warn">${esc(res.restart_message || '服务正在重启…')}
+                <div class="plugin-plan-files">请勿关闭本页，恢复后会自动刷新。</div></div></div>`;
+            showToast(`批量升级完成：成功 ${res.applied}，失败 ${res.failed}；服务正在重启…`);
+            waitAndReload();
+            return;
+          }
           box.innerHTML = `<div class="plugin-plan">${lines}
-            ${res.restart_needed ? '<div class="plugin-plan-line warn">有后端改动：请点上方「立即重启服务」</div>'
-                                 : '<div class="plugin-plan-line">前端已生效（Ctrl+F5 强刷）</div>'}</div>`;
+            ${res.restart_needed
+              ? `<div class="plugin-plan-line warn">${esc(res.restart_message || '有后端改动：请点上方「立即重启服务」')}</div>`
+              : '<div class="plugin-plan-line">前端已生效（Ctrl+F5 强刷）</div>'}</div>`;
           showToast(`批量升级完成：成功 ${res.applied}，失败 ${res.failed}`);
           await load();
         } catch (err) {
@@ -331,14 +387,14 @@
           const res = await api('/api/admin/plugins/restart', { method: 'POST' });
           if (res.ok) {
             showToast(res.message || '服务正在重启…');
-            setTimeout(() => location.reload(), 8000);
+            waitAndReload();
           } else {
             showToast(res.message || res.error || '未能自动重启', true);
           }
         } catch (err) {
           // 服务重启瞬间请求会失败，属预期
           showToast('服务正在重启，稍后刷新页面…');
-          setTimeout(() => location.reload(), 8000);
+          waitAndReload();
         }
       });
     });

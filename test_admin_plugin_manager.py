@@ -181,6 +181,9 @@ class AdminPluginManagerTest(unittest.TestCase):
         client = appmod.app.test_client()
 
         data_tree_before = tree_hash(os.path.join(DATA, "plugins"))
+        # 仓库插件目录基线快照（收尾断言用：本测试全程只应碰沙箱，不能动真实仓库）
+        with open(os.path.join(REPO_PLUGINS, "knowledge-base", "manifest.json"), encoding="utf-8") as f:
+            kb_manifest_before = json.load(f)
 
         # ---- 鉴权：未登录一律拒绝 ----
         r = client.get("/api/admin/plugins")
@@ -232,6 +235,9 @@ class AdminPluginManagerTest(unittest.TestCase):
         self.assertTrue(rep["restart_needed"])
         self.assertIn("knowledge-base", rep["restart_pending"])
         self.assertTrue(os.path.isfile(rep["backup"]))
+        # 源码模式不真重启，但必须给出 restarting / restart_message 供前端判断
+        self.assertFalse(rep["restarting"])
+        self.assertIn("源码", rep["restart_message"])
         # 程序目录已更新、用户数据逐字节未变
         with open(os.path.join(APP, "plugins", "knowledge-base", "manifest.json"), encoding="utf-8") as f:
             man = json.load(f)
@@ -273,6 +279,9 @@ class AdminPluginManagerTest(unittest.TestCase):
         r = client.post("/api/admin/plugins/rollback", json={"id": "knowledge-base"})
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
         self.assertTrue(r.get_json()["ok"])
+        # 回滚是整目录替换 → 一律需重启（源码模式给出提示而不是真重启）
+        self.assertTrue(r.get_json()["restart_needed"])
+        self.assertFalse(r.get_json()["restarting"])
         with open(os.path.join(APP, "plugins", "knowledge-base", "manifest.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["version"], "0.9.0")
         self.assertEqual(tree_hash(os.path.join(DATA, "plugins")), data_tree_before)
@@ -315,6 +324,8 @@ class AdminPluginManagerTest(unittest.TestCase):
         res = r.get_json()
         self.assertEqual(res["applied"], 2, res)
         self.assertTrue(res["restart_needed"])            # knowledge-base 含后端改动
+        self.assertFalse(res["restarting"])
+        self.assertIn("源码", res["restart_message"])
         for pid in ("knowledge-base", "base64"):
             with open(os.path.join(APP, "plugins", pid, "manifest.json"), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["version"], "1.0.1")
@@ -343,10 +354,26 @@ class AdminPluginManagerTest(unittest.TestCase):
         self.assertIn("源码", res["message"])
         self.assertIn("knowledge-base", res["pending"])
 
+        # ---- 关闭「应用后自动重启」：只提示，不自作主张重启 ----
+        pkg_noauto = make_package("knowledge-base", "1.0.2", backend_extra="# v3\n")
+        with open(pkg_noauto, "rb") as f:
+            r = client.post("/api/admin/plugins/upload",
+                            data={"file": (f, "noauto.zip")}, content_type="multipart/form-data")
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        r = client.post("/api/admin/plugins/apply",
+                        json={"file": r.get_json()["file"], "auto_restart": False})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        rep2 = r.get_json()
+        self.assertTrue(rep2["ok"], rep2)
+        self.assertTrue(rep2["restart_needed"])
+        self.assertFalse(rep2["restarting"])
+        self.assertIn("跳过", rep2["restart_message"])
+
         # ---- 收尾安全断言：仓库里的 plugins 没被本测试碰过 ----
         with open(os.path.join(REPO_PLUGINS, "knowledge-base", "manifest.json"), encoding="utf-8") as f:
             man = json.load(f)
-        self.assertEqual(man["version"], "1.0.0", "仓库插件目录被改动了！沙箱隔离失效")
+        # 断言"与测试开始时一致"而不是写死版本号：插件自身发版不应让本测试失败
+        self.assertEqual(man, kb_manifest_before, "仓库插件目录被改动了！沙箱隔离失效")
         self.assertEqual(os.path.abspath(sys.modules["jztools_data"].get_base_dir()), os.path.abspath(APP))
 
 

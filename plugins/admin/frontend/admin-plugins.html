@@ -23,7 +23,8 @@
       <div>
         <h1>插件管理</h1>
         <div class="admin-sub">
-          用「插件包」单独升级某一个插件（不必重出整包）：先校验、再备份、后替换，可一键回滚。
+          用「插件包」单独升级某一个插件（不必重出整包）：管理员在这里上传 .zip，
+          程序自动完成<b>校验 → 备份 → 替换 → 停服重启</b>，全程无需人工解压或敲命令；出问题可一键回滚。
           插件的用户数据全程不受影响。
         </div>
       </div>
@@ -65,14 +66,19 @@
       <h3>离线升级包（单个插件）</h3>
       <p class="settings-desc">
         选择由 <code>tools\build-plugin-package.ps1</code> 生成的
-        <code>JZToolsHub-插件-&lt;插件id&gt;-v&lt;版本&gt;.zip</code>。
-        上传后先做只读校验并给出计划，确认无误再应用（应用前会自动备份旧版）。
+        <code>JZToolsHub-插件-&lt;插件id&gt;-v&lt;版本&gt;.zip</code>（<b>不要解压</b>，整包上传即可）。
+        上传后先做只读校验并给出计划，确认应用后：自动备份旧版 → 替换代码 →
+        若含后端改动则自动停服重启，本页随后自动刷新。
       </p>
       <div class="settings-form">
         <div class="form-row">
           <input type="file" id="pkg-file" class="admin-input" accept=".zip">
           <button type="button" class="admin-btn primary" id="btn-inspect">校验并预览</button>
         </div>
+        <label class="plugin-check">
+          <input type="checkbox" id="opt-auto-restart" checked>
+          应用后自动重启服务（默认开启；取消则由管理员手工点「立即重启服务」）
+        </label>
         <label class="plugin-check">
           <input type="checkbox" id="opt-force"> 强制（允许同版本重装 / 降级 / 越过版本区间）
         </label>
@@ -90,7 +96,7 @@
       <h3>共享盘批量更新</h3>
       <p class="settings-desc">
         指向内网共享盘上由出包工具维护的 <code>index.json</code>（与包文件同一目录）。
-        检查更新只读索引与包文件；批量升级会按顺序应用勾选的包，后端有改动时统一重启一次。
+        检查更新只读索引与包文件；批量升级会按顺序应用勾选的包，全部成功后若含后端改动则自动统一重启一次。
       </p>
       <div class="settings-form">
         <label for="index-path">索引文件路径</label>
@@ -107,6 +113,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="/plugin/admin/js/admin-common.js?v=5"></script>
-  <script src="/plugin/admin/js/admin-plugins.js?v=1"></script>
+  <script src="/plugin/admin/js/admin-plugins.js?v=2"></script>
 </body>
 </html>

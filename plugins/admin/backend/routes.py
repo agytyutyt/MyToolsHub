@@ -684,6 +684,42 @@ def _spawn_self_restart():
     return True, ""
 
 
+def _maybe_auto_restart(report, needed=None, auto=True):
+    """应用 / 回滚成功后如需重启：打包模式自动「停服 → 重新拉起」，源码模式只给提示。
+
+    就地给 report 补两个字段供前端决定行为：
+      restarting       —— 本进程即将退出并自动拉起（前端应等待并自动刷新）
+      restart_message  —— 给管理员看的中文说明
+    needed 缺省取 report["restart_needed"]；回滚没有该字段，由调用方显式传 True。
+
+    注意：打包模式下本函数会安排 0.6 秒后 os._exit(0)，调用方必须在本函数之后
+    立刻 return 响应（不能再做耗时操作），否则响应发不出去。
+    """
+    if needed is None:
+        needed = bool(report.get("restart_needed"))
+    report["restart_needed"] = needed
+    if not needed:
+        return report
+    if not report.get("ok"):
+        report["restarting"] = False
+        report["restart_message"] = "本次操作未完全成功，已跳过自动重启；请处理后手工重启"
+        return report
+    if not auto:
+        report["restarting"] = False
+        report["restart_message"] = "已按设置跳过自动重启，可点上方「立即重启服务」手工重启"
+        return report
+    if not getattr(sys, "frozen", False):
+        report["restarting"] = False
+        report["restart_message"] = ("源码开发模式不自动重启：Flask 调试重载通常会自行重启；"
+                                     "若未生效请手工重启 python app.py")
+        return report
+    ok, err = _spawn_self_restart()
+    report["restarting"] = bool(ok)
+    report["restart_message"] = ("服务正在重启，约 5~10 秒后本页会自动重新加载" if ok
+                                 else "自动重启失败：%s（可点上方「立即重启服务」重试）" % err)
+    return report
+
+
 # ===================== 路由注册 =====================
 
 def register(app):
@@ -1511,6 +1547,8 @@ def register(app):
                                      if r["restart_pending"]]
         report["name"] = _plugin_display_name(str(inspected["meta"].get("id") or ""),
                                                inspected["meta"].get("tools_entry"))
+        # 应用成功且含后端改动 → 自动停服重启（data.auto_restart=false 可关闭）
+        _maybe_auto_restart(report, auto=data.get("auto_restart", True))
         return jsonify(report), (200 if report.get("ok") else 500)
 
     @app.get("/api/admin/plugins/backups")
@@ -1551,6 +1589,8 @@ def register(app):
         report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
                                      if r["restart_pending"]]
         report["name"] = _plugin_display_name(pid)
+        # 回滚是整目录替换，一律需要重启；同样走自动停服重启
+        _maybe_auto_restart(report, needed=True, auto=data.get("auto_restart", True))
         return jsonify(report), (200 if report.get("ok") else 500)
 
     @app.post("/api/admin/plugins/enable")
@@ -1606,6 +1646,8 @@ def register(app):
         res = plugin_admin.batch_apply(PROJECT_DIR, jztools_data.get_data_root(), index_path, ids)
         res["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
                                   if r["restart_pending"]]
+        # 批量应用：全部成功后统一重启一次
+        _maybe_auto_restart(res, auto=data.get("auto_restart", True))
         return jsonify(res)
 
     @app.post("/api/admin/plugins/restart")
