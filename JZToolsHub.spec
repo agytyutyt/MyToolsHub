@@ -12,7 +12,12 @@
 from PyInstaller.utils.hooks import collect_all
 
 # 插件后端动态导入的第三方库（app.py 未直接 import，需显式收集）
+# 注：本清单同时是「插件依赖白名单」的唯一真源——出包工具 build-plugin-package.ps1 的
+#     C-4 校验据此判断插件后端引用的第三方库是否在整包内（规范 U-2）。因此下面两项虽由
+#     flask 的 hook 间接带进包，也必须显式登记，否则 admin 插件出包会被误判为"依赖未打包"。
 PACKAGES = [
+    "flask",           # Web 框架本体（app.py 直接 import；admin 插件后端也直接 import）
+    "werkzeug",        # flask 的依赖；admin 插件后端用 werkzeug.security 做口令散列
     "waitress",        # 生产 WSGI 服务器（frozen 分支）
     "cryptography",    # admin 插件（Fernet 加密）
     "requests",        # case-report / character-graph（大模型调用）
