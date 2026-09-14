@@ -10,6 +10,8 @@
 #       未传 -Version 时自动在上一版基础上递增 patch；若最终版本号与上一版相同会直接报错中止
 #       （版本号不变 → 目标机 sync_templates() 判定未升级 → 全部配置模板同步被跳过），
 #       确需同号重打时加 -Force。
+#       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json，并在与基线
+#       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
 param(
     [string]$Python = "python",
     [string]$DeployName = "JZToolsHub",
@@ -18,11 +20,26 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# 打包解释器基线（与 Windows 10+ 目标机配套；见 docs/Python版本选型评估.md）
+$PyBaseline = "3.14"
+
 $Root    = $PSScriptRoot
 $Dist    = Join-Path $Root "dist"
 $Deploy  = Join-Path $Root "deploy"
 $AppDir  = Join-Path $Deploy $DeployName
 $WorkDir = Join-Path $Root "build"
+
+# 打包解释器及其版本（尽早取，便于出错时定位）
+$PyExe = (Get-Command $Python -ErrorAction SilentlyContinue).Source
+if (-not $PyExe) { $PyExe = $Python }
+$PyVer = ""
+try { $PyVer = (& $Python -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null | Select-Object -First 1) } catch {}
+if (-not $PyVer) { $PyVer = "unknown" }
+$PyShort = if ($PyVer -match '^(\d+\.\d+)') { $matches[1] } else { "unknown" }
+Write-Host "  [解释器] $Python → $PyVer（$PyExe）"
+if ($PyShort -ne $PyBaseline) {
+    Write-Warning "打包解释器版本 $PyShort 与基线 $PyBaseline 不一致！产物可能功能残缺（如知识库 Office 预览引擎）。建议用 Python $PyBaseline 打包。"
+}
 
 # 上一版版本号：读取既有部署目录的 version.json（必须在下方清理旧产物之前读取）
 $PrevVer = ""
@@ -47,6 +64,30 @@ if (Test-Path $Dist)  { Remove-Item -Recurse -Force $Dist }
 if (Test-Path $AppDir){ Remove-Item -Recurse -Force $AppDir }
 if (Test-Path $WorkDir){ Remove-Item -Recurse -Force $WorkDir }
 
+# 1.5 前置检查：打包解释器必须已装齐 spec 里 collect_all 的第三方库
+#     （插件后端由 importlib 动态加载，PyInstaller 静态扫描看不到；缺库不会报错，
+#       只会打出功能残缺的包，所以在这里显式拦一下）
+Write-Host "==> 检查打包解释器的依赖完整性..."
+$depCheck = @"
+import importlib
+pkgs = ['waitress','cryptography','requests','docx','openpyxl','xlrd','olefile',
+        'qrcode','zfec','cv2','numpy','pypdf','pystray','PIL']
+missing = []
+for p in pkgs:
+    try:
+        importlib.import_module(p)
+    except Exception as e:
+        missing.append(f'{p} ({type(e).__name__})')
+print('|'.join(missing))
+"@
+$missingDeps = (& $Python -c $depCheck 2>$null | Select-Object -First 1)
+if ($missingDeps) {
+    Write-Warning ("打包解释器缺少以下依赖，产物将缺少对应功能：`n  " + ($missingDeps -replace '\|', "`n  "))
+    Write-Warning "提示：zfec 无 Python 3.14 官方 wheel，需先 pip install --find-links wheels zfec（见 wheels/README.md）"
+} else {
+    Write-Host "    依赖完整（14/14）"
+}
+
 # 2. PyInstaller 打包后端（单目录：exe + _internal/）
 Write-Host "==> PyInstaller 打包后端（$Python）..."
 & $Python -m PyInstaller --noconfirm --clean --distpath $Dist --workpath $WorkDir (Join-Path $Root "JZToolsHub.spec")
@@ -62,9 +103,20 @@ Copy-Item -Recurse -Force (Join-Path $Dist "JZToolsHub\*") $AppDir
 # 3.2 前端与插件源码（可修改）、配置模板、文档
 Copy-Item -Recurse -Force (Join-Path $Root "static")  $AppDir
 Copy-Item -Recurse -Force (Join-Path $Root "plugins") $AppDir
+# wheels/tools 随包分发：体积很小（约百 KB），便于后续在部署目录里重装/重建 zfec
+# （目标是冻结 exe 运行时不依赖它们，但 README §2.3 与 wheels/README.md 的说明要可用）
+foreach ($extra in @("wheels", "tools")) {
+    $p = Join-Path $Root $extra
+    if (Test-Path $p) { Copy-Item -Recurse -Force $p $AppDir }
+}
 Copy-Item -Recurse -Force (Join-Path $Root "docs")    $AppDir
 Copy-Item -Force (Join-Path $Root "README.md") $AppDir
 Copy-Item -Force (Join-Path $Root "HANDOFF.md") $AppDir
+# 顶层契约文档（README/HANDOFF 会引用它们，此前漏拷导致部署包内引用悬空）
+foreach ($doc in @("插件设计规范.md", "移动端APP.md")) {
+    $p = Join-Path $Root $doc
+    if (Test-Path $p) { Copy-Item -Force $p $AppDir }
+}
 
 # config 仅复制 tools.json 模板（admin.json / .admin_key 属密钥，首启自动生成）
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "config") | Out-Null
@@ -97,7 +149,7 @@ Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留"
 # 3.3 运行期目录
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "logs") | Out-Null
 
-# 3.4 一键安装 / 卸载脚本 + 版本号（含 commit / built_at 便于核对包内代码来源）
+# 3.4 一键安装 / 卸载脚本 + 版本号（含 commit / built_at / python，便于核对包内代码与运行时来源）
 Write-Host "==> 写入一键安装/卸载脚本与 version.json（版本 $Version）..."
 foreach ($f in @("install.ps1", "一键安装.bat", "一键卸载.bat")) {
     $srcF = Join-Path $Root $f
@@ -111,6 +163,7 @@ $verObj = @{
     schema   = 1
     commit   = $gitCommit
     built_at = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+    python   = $PyVer          # 打包解释器版本（基线 $PyBaseline，不符时已在开头告警）
 }
 # 注意：必须 UTF-8 无 BOM（Python json.load 遇 BOM 会报错）
 [System.IO.File]::WriteAllText(
@@ -118,7 +171,7 @@ $verObj = @{
     ($verObj | ConvertTo-Json),
     (New-Object System.Text.UTF8Encoding($false))
 )
-Write-Host "    版本 $Version（commit $gitCommit）"
+Write-Host "    版本 $Version（commit $gitCommit，Python $PyVer）"
 
 # 4. 一键启动脚本
 Write-Host "==> 生成 start.bat..."

@@ -1,1 +1,5 @@
+# zfec 是版本锁定型 C 扩展，PyPI 上没有 Python 3.14 的 wheel（最新只到 cp313），
+# 直接 pip install 会回退到源码编译（需 MSVC）。安装时请加 --find-links 指向仓库 wheels/：
+#   pip install --find-links wheels -r plugins/qr-video-decode/backend/requirements.txt
+# 详见 wheels/README.md
 zfec>=1.5
