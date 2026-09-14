@@ -152,7 +152,7 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 > | 组件 | 分发物 | 安装方式 | 影响面 |
 > | --- | --- | --- | --- |
 > | LibreOffice 核心 | `JZToolsHub-离线组件-LibreOffice核心-<版本>.zip`（≈163 MB） | 解压后双击 `安装LibreOffice核心组件.bat`（**免管理员**） | **对目标机隐身**：纯解压、不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"，目标机 Office/WPS 与默认应用均不受影响 |
-> | Chrome | `JZToolsHub-离线组件-Chrome-<版本>.zip`（≈160 MB） | 双击 `安装Chrome.bat`（**需管理员**，全机静默安装） | 目标机已有 Chrome/Edge 时可不装 |
+> | Chrome | `JZToolsHub-离线组件-Chrome-<版本>.zip`（≈160 MB） | 右键"以管理员身份运行" `安装Chrome浏览器.bat`（**需管理员**，全机静默安装） | 目标机已有 Chrome/Edge 时可不装 |
 >
 > 主包（`deploy\JZToolsHub-v<版本>.zip`，≈122 MB）**默认不含任何离线组件**；LibreOffice 组件
 > 内含**裁剪核心包**（只保留 `.doc→.docx` / `.xls→.xlsx` 需要的那套，357.5 MB → 164.5 MB），
@@ -251,7 +251,7 @@ deploy\JZToolsHub\
 | 全新安装或升级 | 解压主包 zip → 双击 `一键安装.bat` |
 | 启动 | 双击 `start.bat`（或 `JZToolsHub.exe`） |
 | 安装 LibreOffice 核心组件（免管理员，对目标机隐身） | 解压组件包 → 双击 `安装LibreOffice核心组件.bat`；移除用 `卸载LibreOffice核心组件.bat` |
-| 安装 Chrome（仅目标机无现代浏览器时需要） | 解压 Chrome 组件包 → 右键"以管理员身份运行" `安装Chrome.bat` |
+| 安装 Chrome（仅目标机无现代浏览器时需要） | 解压 Chrome 组件包 → **右键"以管理员身份运行"** `安装Chrome浏览器.bat`（全机安装需提权） |
 | 卸载 | 双击 `一键卸载.bat` 并输入 Y（删程序 + 用户数据）；保留数据用 `install.ps1 -Uninstall -KeepData` |
 
 一键安装流程：停止旧进程 → 检测既有安装（注册表 Uninstall 键 > 默认目录 `%LOCALAPPDATA%\JZToolsHub` > 含 `config/data_root.json` 的源目录 = 就地更新）→ 复制程序文件 → 同步配置模板到数据根目录 → **若包内含 `runtime/`（胖包）则就地处理离线组件，否则打印组件安装指引** → 写 `version.json` / 注册表 / 快捷方式。

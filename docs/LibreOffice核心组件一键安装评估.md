@@ -115,8 +115,8 @@ Windows 的「默认应用」与文件类型图标由 `HKCR\<扩展名>` / `User
 
 | 产物 | 体积 |
 | --- | --- |
-| `JZToolsHub-离线组件-LibreOffice核心-26.8.0.zip` | **162.8 MB**（一键安装包） |
-| 主程序包（组件已移出，实测） | **121.9 MB** / 解压 260.5 MB / 2888 文件 |
+| `JZToolsHub-离线组件-LibreOffice核心-26.8.0.zip` | **162.8 MB**（一键安装包，顶层目录 `LibreOffice核心组件\`） |
+| 主程序包 `JZToolsHub-v1.9.0.zip`（组件已移出，实测） | **122.0 MB** / 解压 **260.5 MB / 2889 文件**，**无 `runtime\` 目录** |
 | 主程序包（组件随包，v1.8 对照） | 437.5 MB / 解压 584.6 MB / 2891 文件 |
 
 ---
@@ -202,7 +202,7 @@ Windows 的「默认应用」与文件类型图标由 `HKCR\<扩展名>` / `User
 
 | 分发物 | 体积 | 目标机操作 |
 | --- | --- | --- |
-| `JZToolsHub-v<版本>.zip`（主包） | **≈122 MB** | 双击「一键安装.bat」 |
+| `JZToolsHub-v<版本>.zip`（主包） | **122 MB**（v1.9.0 实测） | 双击「一键安装.bat」 |
 | `JZToolsHub-离线组件-LibreOffice核心-<版本>.zip` | **≈163 MB** | 解压后双击「安装LibreOffice核心组件.bat」（**免管理员**） |
 | `JZToolsHub-离线组件-Chrome-<版本>.zip`（可选） | ≈160 MB | 解压后**以管理员身份**运行「安装Chrome浏览器.bat」 |
 

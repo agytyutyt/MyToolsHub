@@ -130,7 +130,7 @@ python app.py
 | 组件 | 产物 | 体积 | 安装方式与影响面 |
 | --- | --- | --- | --- |
 | LibreOffice 核心 | `deploy/JZToolsHub-离线组件-LibreOffice核心-<版本>.zip` | 约 163 MB | 解压后双击 `安装LibreOffice核心组件.bat`（**免管理员**）；**对目标机隐身**：不写注册表 / 不建快捷方式 / 不改文件关联 / 不进"程序和功能"；`卸载LibreOffice核心组件.bat` 可单独移除 |
-| Chrome | `deploy/JZToolsHub-离线组件-Chrome-<版本>.zip` | 约 160 MB | 双击 `安装Chrome.bat`（**需管理员**，全机静默安装）；目标机已有 Chrome/Edge 时不必装 |
+| Chrome | `deploy/JZToolsHub-离线组件-Chrome-<版本>.zip` | 约 160 MB | **右键"以管理员身份运行"** `安装Chrome浏览器.bat`（全机静默安装，需提权）；目标机已有 Chrome/Edge 时不必装 |
 
 **为什么移出主包**：v1.8 主包 437.5 MB 里 324.1 MB 是离线组件（Chrome MSI + LibreOffice 核心包），
 而组件只服务于**部分**目标机（有 Office/WPS 且不需要高保真预览的机器根本用不上）。移出后主包降到
