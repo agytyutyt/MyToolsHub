@@ -316,32 +316,53 @@ def parse_ppr(ppr_el, theme: dict) -> Optional[ParaProps]:
         p.line_spacing = parse_line_spacing(dict(spacing.attrib))
     ind = ppr_el.find("ind")
     if ind is not None:
+        # ⚠️ left/leftChars（同 right/rightChars）是二选一的两种写法：
+        #    解析到哪种就显式清掉另一种，私有键置 None 也会被 merge_para
+        #    无条件覆盖 —— 保证「样式 ← 段落直接格式」整组覆盖，否则样式的
+        #    字符缩进会压过段落直接写的 twips 缩进（已实测该错配）。
+        #    w:start/w:end 是 Strict 别名，仅在 left/right 缺席时兜底。
         left = _num(ind, "left")
+        if left is None:
+            left = _num(ind, "start")
         if left is not None:
             p.indent_left_px = twip_to_px(left)
+            setattr(p, "_left_chars_em", None)
         right = _num(ind, "right")
+        if right is None:
+            right = _num(ind, "end")
         if right is not None:
             p.indent_right_px = twip_to_px(right)
+            setattr(p, "_right_chars_em", None)
         fl = _num(ind, "firstLine")
         if fl is not None:
             p.first_line_px = twip_to_px(fl)
+            p.first_line_em = None
+            setattr(p, "_fl_form", "px")  # 形态标记：合并时整组覆盖（同 left 的处理）
         hg = _num(ind, "hanging")
         if hg is not None:
             p.hanging_px = twip_to_px(hg)
+            p.hanging_em = None
+            setattr(p, "_hg_form", "px")
         # ★ Chars 字符单位优先于 twips（中文首行缩进 2 字符）
         flc = _num(ind, "firstLineChars")
         if flc is not None:
             p.first_line_em = chars100_to_em(flc)
             p.first_line_px = None
+            setattr(p, "_fl_form", "em")
         hgc = _num(ind, "hangingChars")
         if hgc is not None:
             p.hanging_em = chars100_to_em(hgc)
             p.hanging_px = None
+            setattr(p, "_hg_form", "em")
         lc = _num(ind, "leftChars")
+        if lc is None:
+            lc = _num(ind, "startChars")
         if lc is not None:
             setattr(p, "_left_chars_em", lc / 100)
             p.indent_left_px = None
         rc = _num(ind, "rightChars")
+        if rc is None:
+            rc = _num(ind, "endChars")
         if rc is not None:
             setattr(p, "_right_chars_em", rc / 100)
             p.indent_right_px = None

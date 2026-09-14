@@ -173,16 +173,42 @@ def para_props_to_css(p: ParaProps, default_tab_px: float = 48.0) -> List[str]:
             if p.align == "distribute":
                 d.append("text-justify:inter-character")
     # ⚠️ 缩进用 margin（不用 padding —— 会和边框/底纹冲突）
-    if p.indent_left_px is not None:
+    # ★ 字符单位（leftChars/rightChars）用 em：随字号缩放，与 Word 一致；
+    #   与 px 二选一（styles.parse_ppr 保证同组已互相清空）
+    left_em = getattr(p, "_left_chars_em", None)
+    if left_em is not None:
+        d.append(f"margin-left:{_num(left_em)}em")
+    elif p.indent_left_px is not None:
         d.append(f"margin-left:{_num(p.indent_left_px)}px")
-    if p.indent_right_px is not None:
+    right_em = getattr(p, "_right_chars_em", None)
+    if right_em is not None:
+        d.append(f"margin-right:{_num(right_em)}em")
+    elif p.indent_right_px is not None:
         d.append(f"margin-right:{_num(p.indent_right_px)}px")
-    # ★ 首行缩进优先用 em（Chars 单位），字号变化时跟着变
-    if p.first_line_em is not None:
+    # ★ 首行/悬挂缩进：px 与 em（Chars）二选一。带形态标记时按标记取
+    #   （styles.parse_ppr 写入、merge_para 透传），避免样式的字符缩进压过
+    #   段落直接写的 twips 缩进；无标记走历史优先级（em 优先）
+    fl_form = getattr(p, "_fl_form", None)
+    if fl_form == "px":
+        if p.first_line_px is not None:
+            d.append(f"text-indent:{_num(p.first_line_px)}px")
+    elif fl_form == "em":
+        if p.first_line_em is not None:
+            d.append(f"text-indent:{_num(p.first_line_em)}em")
+    elif p.first_line_em is not None:
         d.append(f"text-indent:{_num(p.first_line_em)}em")
     elif p.first_line_px is not None:
         d.append(f"text-indent:{_num(p.first_line_px)}px")
-    if p.hanging_em is not None:
+    hg_form = getattr(p, "_hg_form", None)
+    if hg_form == "px":
+        if p.hanging_px is not None:
+            d.append(f"text-indent:-{_num(p.hanging_px)}px")
+            d.append(f"padding-left:{_num(p.hanging_px)}px")
+    elif hg_form == "em":
+        if p.hanging_em is not None:
+            d.append(f"text-indent:-{_num(p.hanging_em)}em")
+            d.append(f"padding-left:{_num(p.hanging_em)}em")
+    elif p.hanging_em is not None:
         d.append(f"text-indent:-{_num(p.hanging_em)}em")
         d.append(f"padding-left:{_num(p.hanging_em)}em")
     elif p.hanging_px is not None:

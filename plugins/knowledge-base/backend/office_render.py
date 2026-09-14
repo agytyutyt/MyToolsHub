@@ -202,6 +202,19 @@ def _raise_from_xhr(e):
     raise OfficeRenderError(msg) from e
 
 
+def _meta_warnings(result):
+    """从引擎结果提取 warnings 列表。
+
+    引擎的 model.meta 是 **dict**（不是对象），此前用 getattr(meta, "warnings")
+    永远拿到 None，导致 /preview 的 warnings 字段恒为空——引擎真正的不支持特性
+    提示只在 HTML 内嵌提示条里可见。这里兼容 dict / 对象两种形态。
+    """
+    meta = getattr(result.model, "meta", None)
+    if isinstance(meta, dict):
+        return list(meta.get("warnings") or [])
+    return list(getattr(meta, "warnings", None) or [])
+
+
 def render_word(data):
     """Word（docx/docm/doc 字节）→ {"kind","html","warnings"}。
 
@@ -226,8 +239,7 @@ def render_word(data):
             result = _dhr.convert(bytes(data), opts)
     except Exception as e:
         _raise_from_xhr(e)
-    meta = getattr(result.model, "meta", None)
-    warnings = list(getattr(meta, "warnings", None) or [])
+    warnings = _meta_warnings(result)
     return {"kind": "word", "html": result.html, "warnings": warnings[:5],
             "truncated": False}
 
@@ -251,7 +263,6 @@ def render_sheet(data):
             result = _xhr.convert(bytes(data), opts)
     except Exception as e:
         _raise_from_xhr(e)
-    meta = getattr(result.model, "meta", None)
-    warnings = list(getattr(meta, "warnings", None) or [])
+    warnings = _meta_warnings(result)
     return {"kind": "sheet", "html": result.html, "warnings": warnings[:5],
             "truncated": bool(result.truncated)}

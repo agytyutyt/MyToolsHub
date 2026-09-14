@@ -758,7 +758,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 卡片点击显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 指向的文件是否存在于 `frontend/` |
 | 登录后接口全部 401 | 会话超时（默认空闲 30 分钟 / 登录满 12 小时）；重新登录 |
 | 轨迹速写提示「过滤器插件不可用」 | 确认 `file-filter` 的 `enabled: true` 并重启服务，再看 `/api/trajectory-sketch/status` 的 `filter_plugin.reason` |
-| 知识库 Word/Excel 预览样式不对 | 先看 `GET /api/knowledge-base/status` 的 `office_render`：引擎不可用时会**静默回退**到降级渲染。常见原因：`vendor/` 缺失，或 vendor 的 `xhr/__init__.py` 少了一行 `from typing import Optional`（Python ≤3.13 上会导致引擎导入即 `NameError`，详见 `vendor/README.md`）。改了引擎或升级 vendor 后需删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` 缓存 |
+| 知识库 Word/Excel 预览样式不对 | 先看 `GET /api/knowledge-base/status` 的 `office_render`：引擎不可用时会**静默回退**到降级渲染。常见原因：`vendor/` 缺失，或 vendor 的 `xhr/__init__.py` 少了一行 `from typing import Optional`（Python ≤3.13 上会导致引擎导入即 `NameError`，详见 `vendor/README.md`）。改了引擎或升级 vendor 后**递增 `routes.py` 的 `PREVIEW_CACHE_VERSION`** 即可自动重渲染旧缓存（无需手工清缓存、无需重启）；排查时也可手工删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` |
 | 装依赖时 zfec 编译失败（`error: [WinError 2]` / 找不到编译器） | `zfec` 没有 Python 3.14 的官方 wheel，不加 `--find-links wheels` 会退化成源码编译。用 `pip install --find-links wheels ...`，或参考 `wheels/README.md` 重建 wheel |
 | 地图标点空白 | 在插件页「⚙️ 配置」中填写有效的高德 Web 服务 Key |
 | 端口被占用 | 设 `JZTOOLS_PORT` 换端口，或先停旧进程 |

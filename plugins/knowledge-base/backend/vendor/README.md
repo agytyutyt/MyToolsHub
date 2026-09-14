@@ -10,7 +10,7 @@
 - **来源**：`D:\TestWorkSpace\xlsx-html-preview\python\`（xhr/dhr 0.1.0，MIT License，
   pyproject 声明核心链路零第三方依赖；`.xls` 兜底通道用 xlrd，`.doc` 归一化用外部
   LibreOffice——两者都是可选依赖）
-- **拷贝日期**：2026-09-13；除下述两处补丁外未改动引擎源码（升级时整目录替换后需重打这两个补丁）：
+- **拷贝日期**：2026-09-13；除下述四处补丁外未改动引擎源码（升级时整目录替换后需重打这四处补丁）：
 
   1. `xhr/__init__.py` 顶部补 `from typing import Optional`
      —— **上游缺该导入**：第 84 行 `def convert(data: bytes, options: Optional[ConvertOptions] = None)`
@@ -29,6 +29,28 @@
      （实测「集成测试表格」出现 179 个蓝格子）。补丁：缺格一律按无样式渲染
      （与 Excel 行为一致）。上游 `TestWorkSpace/xlsx-html-preview` 同样存在此 bug，
      已按同位置定位，待同步。
+
+  3. `dhr/numbering.py` `assign_list_markers`：**numId=0 误报**。OOXML 里
+     `<w:numId w:val="0"/>` 是「取消编号」的合法值（Word/WPS 用它清除段落从样式
+     继承的编号），并非「未定义编号」。原实现查不到 numId=0 的定义就告警
+     「编号 numId=0.0 未在 numbering.xml 中定义，该列表降级为普通段落」，用户可见
+     的文档顶部提示条被这条假警告污染（用户实测反馈）。补丁：numId=0 静默按普通
+     段落处理；真未定义的 numId 仍告警，且消息中的 numId 以整数格式输出
+     （原为 float 的 "3.0"）。上游同缺陷待同步。
+
+  4. `dhr/styles.py` `parse_ppr` + `dhr/renderer/css.py` `para_props_to_css`：
+     **字符缩进丢失/错误覆盖**（用户实测反馈「部分段落开头缩进不显示」）：
+     a) `w:ind` 的 `leftChars`/`rightChars`/`startChars`/`endChars`（中文文档常用
+        「缩进 N 字符」写法）解析后**无任何消费方**，margin 整个丢失——补丁在
+        `para_props_to_css` 以 `margin-left/right:{n}em` 输出（em 随字号缩放）；
+     b) `w:start`/`w:end`（Strict 别名）原本被忽略——补丁在 `left`/`right` 缺席时兜底；
+     c) 首行/悬挂缩进的 px 与 em（Chars）两形态在「样式 ← 段落直接格式」合并时
+        各自独立继承，样式的字符缩进会压过段落直接写的 twips 缩进（反之亦然）——
+        实测「样式 leftChars=200 + 段落 left=420」输出 2em 而非 28px。补丁：
+        `parse_ppr` 记录形态标记 `_fl_form`/`_hg_form`/`_left_chars_em`（私有键由
+        `merge_para` 无条件透传），渲染时按「最近来源整组覆盖」取用。
+     回归自测：`backend/test_dhr_indent_numid.py`（14 项断言，含覆盖矩阵）。
+     上游同缺陷待同步。
 - **接入方式**：`../office_render.py` 在 import 前把本目录插入 `sys.path`
   （dhr 依赖顶层 `xhr` 包，两包必须同为顶层可导入）
 - 上游文档：设计文档/API 参考/known-issues 见上游 `docs/`；格式层踩坑见上游

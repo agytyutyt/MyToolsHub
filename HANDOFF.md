@@ -177,6 +177,7 @@ python app.py
 | 2026-09-14 | **主包瘦身 + 离线组件包 + LibreOffice 核心一键安装** | 主包**默认不再携带** Chrome / LibreOffice（`build-deploy.ps1` 用 `-WithOfflineRuntime` 才随包），体积 437.5 MB → 约 122 MB；新增 `tools/build-offline-component.ps1` 把组件打成可独立分发的「离线组件包」；LibreOffice 核心组件做成**一键安装 / 对目标机隐身 / 零副作用**（`tools/offline-runtime/install-libreoffice-core.ps1` + `安装LibreOffice核心组件.bat` + `卸载LibreOffice核心组件.bat`）：纯解压到 `<程序目录>\runtime\libreoffice\`，**不执行 msiexec、不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"**，目标机 Office/WPS 与默认应用不受影响、无任何 LibreOffice 图标，装完**无需重启**即生效（应用每次渲染都重新探测 soffice）。`install.ps1` 的离线组件判定改为看**源包**（`runtime\manifest.json`）以防旧胖装残留误触发，瘦包时只打印组件安装指引。实测：安装 rc=0 / 12.7s / 557.9MB / 2824 文件 + 内置冒烟通过；应用 `.doc→.docx` 8169B、`.xls→.xlsx` 5933B（回环校验通过）；卸载 rc=0。评估见 `docs/LibreOffice核心组件一键安装评估.md` |
 | 2026-09-14 | **LibreOffice 裁剪核心包 + v1.8 发版** | 应用只需 `.doc→.docx` / `.xls→.xlsx` 两条 soffice 转换，故不再随包分发完整版 MSI：新增 `tools/build-libreoffice-core.py`（`msiexec /a` 解包 → 裁剪 → **构建期全新 profile 冒烟测试** → zip + 溯源元数据），1522.6MB / 19418 文件 → **557.9MB / 2824 文件**、zip 164.5MB；`build-deploy.ps1` 默认用核心包替代 MSI 并改写包内 `manifest.json`（`-KeepFullLibreOffice` 可保留完整版，且校验核心包与源 MSI 的 sha256）；`setup-offline-runtime.ps1` 优先解压核心包（三级回退）→ 安装从 95~130s 降到约 24s；`fetch-offline-bundle.py` 加 `--core`。产出 `JZToolsHub-v1.8.zip`（**437.5MB**，较 v1.7 少约 181MB）。**关键坑：`presets\` 不能删（全新 profile 下 rc=77），且测裁剪安全性必须每次用全新 profile；`msiexec /a` 忽略 `ADDLOCAL`** |
 | 2026-09-14 | **离线部署包打通 + v1.7 发版** | `runtime/` 随包分发 Chrome 企业版 MSI（159.6MB）与 LibreOffice 26.8.0 MSI（357.5MB）；新增 `tools/fetch-offline-bundle.py`（断点续传 + sha256 冻结校验，清单入 `tools/offline-components.json`）与 `tools/offline-runtime/setup-offline-runtime.ps1`（Chrome 静默安装 / **LibreOffice `msiexec /a` 免管理员解包**）；`office_render` 新增便携 soffice 三级探测（**零配置**）；`install.ps1` 安装末尾自动处理离线组件且**失败不阻断**，并修掉覆盖 `version.json` 溯源字段的缺陷；打包脚本新增**离线组件完整性自检**与 `-SkipOfflineRuntime` / `-ZipOnly`；产出 `JZToolsHub-v1.7.zip`（618.4MB）。文档见 `docs/离线部署包说明.md`。实测：`.xls→.xlsx` 归一化、应用自动探测、`render_sheet` 真实渲染全绿 |
+| 2026-09-14 | **知识库 dhr 缩进/编号修复（用户实测反馈）** | ①「编号 numId=0.0 未在 numbering.xml 中定义」假警告：`<w:numId w:val="0"/>` 是 OOXML 的**取消编号**合法值，引擎误判为未定义编号——`vendor/dhr/numbering.py` 修 numId=0 静默处理（真未定义仍告警且消息整数化）；② 部分段落开头缩进不显示：`leftChars`/`rightChars`/`startChars`/`endChars` 解析后无消费方、`w:start`/`w:end` 别名被忽略、首行/悬挂缩进的 px/em 两形态在样式合并时各自独立继承（样式的字符缩进压过段落直接写的 twips）——`vendor/dhr/styles.py` + `renderer/css.py` 修「最近来源整组覆盖」。适配层：`_meta_warnings` 修 meta 为 dict 时 warnings 恒空的缺陷；`routes.py` 新增 `PREVIEW_CACHE_VERSION`（=2）使旧缓存自动重渲染。已入库 4 份 docx 修复前后 HTML 字节一致；新增自测 `backend/test_dhr_indent_numid.py`（14 项）+ `test_routes_preview.py` 回归全过；浏览器实测计算样式正确。补丁清单见 `backend/vendor/README.md` 第 3/4 条 |
 | 2026-09-14 | 知识库阅读体验收尾 | `.reader-frame` 改 `width: fit-content` 贴合预览内容宽度；Word 超版心固定宽表格在卡片内横向滚动；长 token 断词修复横向滚动条（style.css v24） |
 | 2026-09-13 | 知识库 Office 预览引擎替换 | 引入 `backend/vendor/{xhr,dhr}` 双引擎（纯标准库，零新增 pip 依赖），**舍弃** LibreOffice 转 PDF 与 openpyxl 手绘 HTML 两套旧方案；新增适配层 `office_render.py`；`/preview` 改为按需同步渲染 + 磁盘缓存 `<id>.preview.json`，失败 404 前端回退 mammoth/SheetJS |
 | 2026-09-11 | 知识库旧版格式自动转换 | `doc_convert.py`（olefile + python-docx / xlrd + openpyxl，纯 Python，不依赖 Office COM）；上传白名单加 `.doc`，元数据记 `original_ext`，页面三处提示 |
@@ -244,7 +245,7 @@ python app.py
 | A5 | **后端路由统一 `/api/<id>/` 前缀 + 函数名带插件前缀** | 避免多插件路由与 endpoint 冲突 | 新增插件务必重启并确认日志出现「已注册后端插件：\<id\>」 |
 | A6 | **长耗时一律异步任务**（提交即返回 + 轮询） | 不占用 HTTP worker | 有界线程池 + TTL 30 分钟 + 归属校验；前端轮询上限要与后端超时对齐 |
 | A7 | **插件间禁止 import，只走程序化 HTTP 接口** | 解耦，避免卸载连锁崩溃 | 能力复用需提供 `/apply` 类接口并自己处理会话传递 |
-| A8 | **知识库预览改为按需渲染 + 磁盘缓存** | 引擎亚秒级（首渲染 19~70ms），无需后台状态机 | 文件不可变所以缓存无失效逻辑；**改引擎/升级 vendor 后必须删旧 `<id>.preview.json`** |
+| A8 | **知识库预览改为按需渲染 + 磁盘缓存** | 引擎亚秒级（首渲染 19~70ms），无需后台状态机 | 文件不可变；缓存内记 `PREVIEW_CACHE_VERSION`——**改引擎/升级 vendor 后递增该常量**（`routes.py`），旧缓存自动重渲染，无需手工删 `<id>.preview.json` |
 | A9 | **轨迹分析引擎做成零依赖可插拔包** | 算法独立演进、可独立自测，不动路由与前端 | 新增算法版本只需在 `engine/algorithms/` 下加目录并注册 |
 | A10 | **移动端完全离线**（仅 CAMERA 权限，禁止 INTERNET） | 业务数据通过二维码光学传输，不落公网 | 任何联网能力都不应被加入 |
 | A11 | **错误文案作为逐字契约** | 桌面端按文案做 e2e 断言 | 改文案 = 改《移动端APP.md》+ 桌面端 + APP 三处 |
@@ -543,7 +544,8 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
 > 目标机按需安装）。默认瘦包这条线是 2026-09-14 第六轮定的，`-WithOfflineRuntime` 才回退到胖包。
 
 改信息传输协议时**四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 + 《移动端APP.md》（改完记得重启服务）。
-改 vendor 引擎时**必须同步 `vendor/README.md` 的补丁清单**（升级 vendor 整目录替换后要重打两个补丁）。
+改 vendor 引擎时**必须同步 `vendor/README.md` 的补丁清单**（升级 vendor 整目录替换后要重打四个补丁），
+并递增 `routes.py` 的 `PREVIEW_CACHE_VERSION` 让旧预览缓存自动重渲染。
 
 ### 10.2 快速命令
 

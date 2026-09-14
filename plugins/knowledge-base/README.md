@@ -86,14 +86,16 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 
 ## 运维与注意事项（阶段 8 实测沉淀）
 
-- **预览缓存与失效**：`<id>.preview.json` 按「文件 id 不可变」设计为永久缓存，服务端不主动
-  失效。**升级 `backend/vendor/` 引擎、修改渲染逻辑或排查渲染问题后，必须删除受影响文件的
-  缓存**（`data/files/<id>.preview.json`，或整批 `*.preview.json`），重新打开阅读页即按新
-  产物重渲染——无需重启服务。删除文档时缓存自动清理。
-- **vendor 引擎升级流程**：① 整目录替换 `backend/vendor/{xhr,dhr}`；② **重打补丁**——
-  `xhr/renderer/table.py` `_build_cell_attrs` 的「缺格无样式」修复（原因与写法见
-  `vendor/README.md`，上游 TestWorkSpace 同 bug 待同步）；③ 重跑 `backend/test_routes_preview.py`
-  回归；④ `python backend/_build_phase8.py` 重建目检页人工核对样式。
+- **预览缓存与失效**：`<id>.preview.json` 按「文件 id 不可变」设计为长期缓存，服务端不主动
+  失效，但缓存内记有**格式版本号**（`routes.py` 的 `PREVIEW_CACHE_VERSION`）：**引擎渲染行为
+  变化（vendor 打补丁/升级）时必须递增该常量**，旧缓存会在下次打开阅读页时自动重渲染，
+  无需手工清缓存、无需重启服务。排查渲染问题时也可手工删除受影响文件的缓存
+  （`data/files/<id>.preview.json`，或整批 `*.preview.json`）。删除文档时缓存自动清理。
+- **vendor 引擎升级流程**：① 整目录替换 `backend/vendor/{xhr,dhr}`；② **重打补丁**——按
+  `vendor/README.md` 的补丁清单逐条恢复（现有 4 条：xhr 缺格样式、xhr `Optional` 导入、
+  dhr numId=0 语义、dhr 字符缩进/形态覆盖）；③ 递增 `routes.py` 的 `PREVIEW_CACHE_VERSION`；
+  ④ 重跑 `backend/test_routes_preview.py` 与 `backend/test_dhr_indent_numid.py` 回归；
+  ⑤ `python backend/_build_phase8.py` 重建目检页人工核对样式。
 - **前端注入约定**：reader.js 对引擎 HTML 的处理是「摘取全部 `<style>` 块 → 正文过
   DOMPurify → CSS 原样挂回」。原因：DOMPurify 会整块丢弃 `<style>` 元素（engine 的 class
   型 CSS 全在里面），而 CSS 是引擎生成的静态内容（字体白名单/无 URL），不经消毒是安全的。

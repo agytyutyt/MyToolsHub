@@ -327,10 +327,16 @@ def assign_list_markers(
         ilvl = getattr(para.props, "_num_ilvl", None)
         if num_id is None:
             continue
+        # numId=0 是 OOXML 的「取消编号」值（区别于「未定义编号」）：
+        # Word/WPS 用它清除段落从样式继承的编号，属正常文档结构，
+        # 静默按普通段落渲染，不告警
+        if int(num_id) == 0:
+            continue
         nd = by_id.get(int(num_id))
         if nd is None:
             if warnings is not None:
-                warnings.append(f"编号 numId={num_id} 未在 numbering.xml 中定义，该列表降级为普通段落")
+                shown = int(num_id) if float(num_id).is_integer() else num_id
+                warnings.append(f"编号 numId={shown} 未在 numbering.xml 中定义，该列表降级为普通段落")
             continue
         lvl_idx = max(0, min(int(ilvl or 0), 8))
         seq = counters.setdefault(num_id, [None] * 9)

@@ -249,6 +249,10 @@ def _migrate_files():
 # xhr/dhr 引擎亚秒级完成渲染（50 页 Word 实测约 0.25s），首次请求 /preview 时
 # 同步渲染并落盘缓存 <id>.preview.json，后续请求直接读缓存，无需任何状态轮询。
 
+# 预览缓存格式版本：**引擎渲染行为发生变化时递增**（vendor 补丁/升级），
+# 读取时版本不符即视为无缓存重新渲染 —— 否则升级引擎后旧缓存会让修复"不生效"。
+PREVIEW_CACHE_VERSION = 2
+
 
 def _preview_cache_path(fid):
     """预览缓存落盘路径（id 白名单校验同 SEC-1）。"""
@@ -791,11 +795,12 @@ def register(app) -> None:
             try:
                 with open(cache, "r", encoding="utf-8") as f:
                     payload = json.load(f)
-                if isinstance(payload, dict) and payload.get("html"):
+                if (isinstance(payload, dict) and payload.get("html")
+                        and payload.get("version") == PREVIEW_CACHE_VERSION):
                     payload["cached"] = True
                     return jsonify(payload)
             except Exception:
-                pass  # 缓存损坏 → 走重新渲染（下次覆盖）
+                pass  # 缓存损坏/版本过期 → 走重新渲染（下次覆盖）
         if _office_render is None:
             return jsonify({"ok": False, "error": "服务器渲染引擎未加载"}), 404
         try:
@@ -806,7 +811,7 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "预览生成失败（内部错误）"}), 404
         payload = {
             "ok": True,
-            "version": 1,
+            "version": PREVIEW_CACHE_VERSION,
             "kind": result["kind"],
             "html": result["html"],
             "warnings": result.get("warnings") or [],
