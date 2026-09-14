@@ -1,0 +1,10 @@
+{
+  "ui": {
+    "api_source": "web"
+  },
+  "llm": {
+    "base_url": "",
+    "api_key": "",
+    "model": ""
+  }
+}

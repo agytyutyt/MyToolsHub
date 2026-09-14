@@ -49,6 +49,8 @@ _LEGACY_MAP = [
     (os.path.join("plugins", "notice-board", "backend", "data"), os.path.join("plugins", "notice-board", "data"), True),
     (os.path.join("plugins", "case-report", "backend", "data"), os.path.join("plugins", "case-report", "data"), True),
     (os.path.join("plugins", "case-report", "backend", "config.json"), os.path.join("plugins", "case-report", "config.json"), False),
+    # prompt.json 已不再作为「随版本下发的模板」（改由 llm_client 内置默认值提供），
+    # 但用户在旧程序目录里手写过的 prompt.json 属用户数据，仍要迁移到数据根目录。
     (os.path.join("plugins", "case-report", "backend", "prompt.json"), os.path.join("plugins", "case-report", "prompt.json"), False),
     (os.path.join("plugins", "character-graph", "backend", "config.json"), os.path.join("plugins", "character-graph", "config.json"), False),
     (os.path.join("plugins", "character-graph", "backend", "prompt.json"), os.path.join("plugins", "character-graph", "prompt.json"), False),
@@ -68,21 +70,28 @@ _DATA_SUBDIRS = ("config", "logs", "plugins")
 #                 保留用户已做的启停 / 排序 / 自定义（不覆盖用户改动）。
 #   ensure-keys ：仅把模板中「用户配置缺失的键」补全（深合并），
 #                 保留用户已有值（如 LLM api_key / base_url / model）。
+#
+# ★ 命名纪律：配置模板一律命名 config.template.json，与运行时 config.json 分离。
+#   原因：打包脚本 build-deploy.ps1 会删除插件树内所有 config.json（清掉本机含
+#   API Key 的运行时配置），模板若沿用 config.json 命名会被一并删除，导致同步链路
+#   静默失效（实测：部署形态下 6 条登记项一度只剩 tools.json 有效）。
+#   —— 新增带模板配置的插件时，本清单与 install.ps1 的 Sync-ConfigTemplates 两处
+#   必须同时登记且保持一致。
 _TEMPLATE_SYNC = [
     # (程序目录相对路径, 数据根目录相对路径, 模式)
-    (("plugins", "case-report", "backend", "prompt.json"),
-     ("plugins", "case-report", "prompt.json"), "overwrite"),
-    (("plugins", "character-graph", "backend", "prompt.json"),
-     ("plugins", "character-graph", "prompt.json"), "overwrite"),
     (("config", "tools.json"), ("config", "tools.json"), "merge-tools"),
-    (("plugins", "case-report", "backend", "config.json"),
+    (("plugins", "case-report", "backend", "config.template.json"),
      ("plugins", "case-report", "config.json"), "ensure-keys"),
-    (("plugins", "character-graph", "backend", "config.json"),
+    (("plugins", "character-graph", "backend", "config.template.json"),
      ("plugins", "character-graph", "config.json"), "ensure-keys"),
     # 轨迹速写：配置含保留字段名单 / 列映射 / 分析阈值 / 报告文案，
     # 均为管理员可在插件页自定义的值 → ensure-keys（只补模板新增字段，不覆盖用户设置）。
-    (("plugins", "trajectory-sketch", "backend", "config.json"),
+    (("plugins", "trajectory-sketch", "backend", "config.template.json"),
      ("plugins", "trajectory-sketch", "config.json"), "ensure-keys"),
+    # 过滤器：管理员配置（保留字段名单 / 后处理规则 / LLM），
+    # 此前完全不在同步清单中，新增配置键永远不下发 → 本次补入。
+    (("plugins", "file-filter", "backend", "config.template.json"),
+     ("plugins", "file-filter", "config.json"), "ensure-keys"),
 ]
 
 # 应用版本状态文件：数据根目录 config/.app_state.json（记录上次启动的应用版本，

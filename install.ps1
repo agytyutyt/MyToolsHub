@@ -120,26 +120,12 @@ function ConvertTo-Utf8NoBom {
 function Sync-ConfigTemplates {
     param([string]$SourceDir, [string]$DataDir, [string]$Version)
 
-    # 1) overwrite：prompt.json 直接覆盖（旧文件备份 .bak-old）
-    $promptPairs = @(
-        @("plugins\case-report\backend\prompt.json",    "plugins\case-report\prompt.json"),
-        @("plugins\character-graph\backend\prompt.json", "plugins\character-graph\prompt.json")
-    )
-    foreach ($pp in $promptPairs) {
-        $src = Join-Path $SourceDir $pp[0]
-        $dst = Join-Path $DataDir    $pp[1]
-        if (-not (Test-Path $src)) { continue }
-        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-        if (Test-Path $dst) {
-            $bak = "$dst.bak-old"
-            if (-not (Test-Path $bak)) { Copy-Item $dst $bak -Force }
-            Copy-Item $src $dst -Force
-            Write-Host "  [同步] 已更新 $($pp[1])（旧版备份 .bak-old）"
-        } else {
-            Copy-Item $src $dst -Force
-            Write-Host "  [同步] 已初始化 $($pp[1])"
-        }
-    }
+    # 1) overwrite：已取消。
+    #    历史上此处同步 plugins\<id>\backend\prompt.json → 数据根 plugins\<id>\prompt.json，
+    #    但提示词模板已删除、改为插件内 llm_client 的内置默认值（代码即唯一来源），
+    #    再引入文件模板会造成「双来源」。用户若需在目标机调提示词，直接手写
+    #    <数据根>\plugins\<id>\prompt.json 即可——插件的 load_prompt() 存在即优先读取，
+    #    且从此不再被版本升级覆盖。
 
     # 2) merge-tools：tools.json 合并（保留用户启停/排序/自定义）
     $srcTools = Join-Path $SourceDir "config\tools.json"
@@ -178,10 +164,15 @@ function Sync-ConfigTemplates {
     }
 
     # 3) ensure-keys：插件 config.json 仅补缺失键（保留用户 LLM 配置与自定义阈值）
+    # ★ 模板一律命名 config.template.json：打包与安装过程中插件树内的 config.json
+    #   会被当作「本机运行时配置」清理，模板若同名会被连带删除（历史缺陷，见
+    #   docs/P0问题修复方案.md FIX-1）。新增带模板的插件时，本清单须与
+    #   jztools_data._TEMPLATE_SYNC 同时登记且保持一致。
     $cfgPairs = @(
-        @("plugins\case-report\backend\config.json",    "plugins\case-report\config.json"),
-        @("plugins\character-graph\backend\config.json", "plugins\character-graph\config.json"),
-        @("plugins\trajectory-sketch\backend\config.json", "plugins\trajectory-sketch\config.json")
+        @("plugins\case-report\backend\config.template.json",      "plugins\case-report\config.json"),
+        @("plugins\character-graph\backend\config.template.json",  "plugins\character-graph\config.json"),
+        @("plugins\trajectory-sketch\backend\config.template.json","plugins\trajectory-sketch\config.json"),
+        @("plugins\file-filter\backend\config.template.json",      "plugins\file-filter\config.json")
     )
     foreach ($cp in $cfgPairs) {
         $src = Join-Path $SourceDir $cp[0]
@@ -192,11 +183,9 @@ function Sync-ConfigTemplates {
             try {
                 $t = Get-Content $src -Raw -Encoding UTF8 | ConvertFrom-Json
                 $u = Get-Content $dst -Raw -Encoding UTF8 | ConvertFrom-Json
-                # 用 Newtonsoft 不存在，手动深层补键：简单地把模板键补充到用户配置（不覆盖已有）
-                $merged = @{}
-                foreach ($p in $t.PSObject.Properties) { $merged[$p.Name] = $p.Value }
-                foreach ($p in $u.PSObject.Properties) { $merged[$p.Name] = $p.Value }
-                $json = $merged | ConvertTo-Json -Depth 20
+                # 递归补键（与 jztools_data._ensure_deep_keys 语义一致：只补缺失、不覆盖已有）
+                Merge-DeepKeys -User $u -Template $t
+                $json = $u | ConvertTo-Json -Depth 20
                 ConvertTo-Utf8NoBom -Path $dst -Json $json
                 Write-Host "  [同步] 已补全 $($cp[1])（保留用户 LLM 配置）"
             } catch {
@@ -205,6 +194,23 @@ function Sync-ConfigTemplates {
         } else {
             Copy-Item $src $dst -Force
             Write-Host "  [同步] 已初始化 $($cp[1])"
+        }
+    }
+}
+
+# 递归补键：把模板中「用户配置缺失的键」补进用户配置，已有值一律不覆盖。
+# 与 Python 侧 jztools_data._ensure_deep_keys() 语义必须保持一致（此前只并顶层键，
+# 模板在嵌套层新增键时一键安装路径补不上，与 app 启动同步路径行为分叉）。
+function Merge-DeepKeys {
+    param($User, $Template)
+    foreach ($p in $Template.PSObject.Properties) {
+        if ($User.PSObject.Properties.Name -contains $p.Name) {
+            if ($p.Value -is [PSCustomObject] -and $User.($p.Name) -is [PSCustomObject]) {
+                Merge-DeepKeys -User $User.($p.Name) -Template $p.Value
+            }
+            # 用户已有标量/数组值：保留
+        } else {
+            $User | Add-Member -NotePropertyName $p.Name -NotePropertyValue $p.Value -Force
         }
     }
 }
