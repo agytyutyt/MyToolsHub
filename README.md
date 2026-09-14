@@ -1,922 +1,564 @@
 # JZToolsHub 工具箱
 
-基于 **Flask + 配置驱动插件机制** 的在线工具集合网站。界面采用 **Google Material Design** 风格，首页以大方块（卡片）展示各工具模块，工具以 iframe 方式嵌入外壳页运行。
+基于 **Flask + 配置驱动插件机制** 的在线工具集合网站。界面采用 Material Design 风格，首页以卡片展示各工具，工具页以 iframe 方式嵌入外壳页运行。
 
-> 核心设计理念：**一切皆插件** —— 主框架（首页 + 外壳页 + 配置聚合 API）与工具业务完全解耦，新增、下线、排序工具均不需要改动框架代码。
+> 核心设计理念：**一切皆插件** —— 主框架只提供运行底座（首页、外壳页、配置聚合 API、访问日志），业务功能全部收敛在 `plugins/` 下的自包含插件目录里。新增、下线、改名、排序、授权工具，都不需要改动框架代码。
+
+| 项目 | 说明 |
+| --- | --- |
+| 后端 | Python 3（源码运行 ≥3.8 可跑主框架，**完整功能建议 ≥3.10**）· Flask |
+| 前端 | 原生 HTML / CSS / JS，无构建步骤 |
+| 插件机制 | 目录扫描 + 配置驱动 + iframe 隔离 + 后端动态加载 |
+| 交付形态 | 源码直跑，或 PyInstaller 打包为 Windows 可执行程序（含一键安装/卸载） |
+| 移动端 | 配套 Android 离线接收端 `android-app/InfoParse/`（Kotlin） |
 
 ---
 
 ## 目录
 
-1. [快速开始](#快速开始)
-2. [技术栈与运行环境](#技术栈与运行环境)
-3. [目录结构](#目录结构)
-4. [核心机制：一切皆插件](#核心机制一切皆插件)
-5. [代码阅读地图](#代码阅读地图按此顺序读最快上手)
-6. [交互流程说明](#交互流程说明)
-7. [HTTP API](#http-api)
-8. [访问日志](#访问日志)
-9. [并发与性能优化](#并发与性能优化)
-10. [健壮性与安全](#健壮性与安全)
-11. [开发者指南：开发插件](#开发者指南开发插件)
-    - [7.1 纯前端插件](#71-纯前端插件)
-    - [7.2 带 Python 后端的插件](#72-带-python-后端的插件)
-    - [7.3 插件清单字段说明](#73-插件清单字段说明)
-    - [7.4 注册插件到首页](#74-注册插件到首页)
-    - [7.5 常见约定与注意事项](#75-常见约定与注意事项)
-    - [7.6 插件数据归属规范](#76-插件数据归属规范)
-12. [内置插件一览](#内置插件一览)
-13. [轨迹数据与二维码闭环](#轨迹数据与二维码闭环)
-14. [信息传输与移动端 APP（Android）](#信息传输与移动端-appandroid)
-15. [打包部署（可上线程序）](#打包部署可上线程序)
-16. [项目更新与数据迁移](#项目更新与数据迁移)
-17. [故障排查](#故障排查)
-18. [后期接入真实后端](#后期接入真实后端)
+1. [项目简介](#1-项目简介)
+2. [环境搭建](#2-环境搭建)
+3. [运行与构建](#3-运行与构建)
+4. [目录结构](#4-目录结构)
+5. [核心模块解析](#5-核心模块解析)
+6. [使用示例](#6-使用示例)
+7. [HTTP API](#7-http-api)
+8. [内置插件一览](#8-内置插件一览)
+9. [典型业务链路](#9-典型业务链路)
+10. [配置模板同步与数据迁移](#10-配置模板同步与数据迁移)
+11. [访问日志](#11-访问日志)
+12. [故障排查](#12-故障排查)
+13. [开发者约定速查](#13-开发者约定速查)
 
 ---
 
-## 快速开始
+## 1. 项目简介
+
+### 1.1 它解决什么问题
+
+一个单位内部往往零散需要一批小工具（文档协作、公告、知识库、表格过滤、战果台账、轨迹分析、离线传输……）。逐个开发独立网站成本高、账号体系割裂、运维分散。JZToolsHub 提供**统一的外壳**：
+
+- 统一登录与组织架构（单位 → 部门 → 人员 → 角色 → 工具权限点）；
+- 统一首页与工具入口（卡片式、可拖拽排序、可按人授权）；
+- 统一数据目录（用户数据与程序目录分离，升级不丢数据）；
+- 统一访问日志（谁、何时、用了哪个功能、做了什么操作）；
+- 插件只管自己的页面、接口和私有数据，互不干扰。
+
+### 1.2 四类使用者
+
+| 角色 | 关注点 | 入口 |
+| --- | --- | --- |
+| 普通用户 | 用工具 | 首页卡片 |
+| 站点管理员 | 建组织、发账号、授权、上下线工具 | `/admin` 管理后台 |
+| 插件开发者 | 新增/维护插件 | `plugins/<id>/` + `config/tools.json` |
+| 部署运维 | 打包、安装、升级、卸载、换数据目录 | `build-deploy.ps1` / `一键安装.bat` / `一键卸载.bat` |
+
+### 1.3 五条设计原则
+
+1. **框架零改动**：加功能 = 放插件目录 + 改配置，禁止为此改 `app.py` 或 `static/`。
+2. **目录即插件**：一个插件 = 一个自包含目录，可整体复制、整体删除、跨项目迁移。
+3. **配置即启停**：名称、描述、分类、排序、启停、授权全部由 `config/tools.json` 决定。
+4. **隔离即安全**：前端 iframe 物理隔离，后端 `/api/<id>/` 前缀隔离，数据独立目录隔离。
+5. **数据可迁移**：用户数据存于数据根目录，与程序目录分离，整体换程序文件夹不丢数据。
+
+---
+
+## 2. 环境搭建
+
+### 2.1 Python 版本
+
+| 场景 | 建议版本 | 说明 |
+| --- | --- | --- |
+| 源码开发（主框架 + 多数插件） | ≥3.8 | 历史目标版本，主框架与多数插件兼容 |
+| 源码开发（**完整功能**） | **≥3.10** | 知识库 Office 预览引擎（vendor xhr/dhr）声明 requires-python ≥3.10 |
+| 打包发布 | 3.14（当前实际使用） | 见 `HANDOFF.md` 打包章节；需兼容 Win7 时必须改用 Python 3.8 打包 |
+
+> 结论：**开发/部署请统一用 ≥3.10 的解释器**。低于 3.10 时知识库 Word/Excel 预览会回退到前端降级渲染（不报错，但样式还原度下降）。
+
+### 2.2 安装步骤
 
 ```bash
-# 1. 安装主框架依赖（Flask + cryptography，管理后台加密存储所需）
-pip install Flask>=3.0 cryptography>=41.0
+# ① 主框架依赖（Flask + cryptography，管理后台加密存储必需）
+pip install "Flask>=3.0,<3.1" "cryptography>=41.0"
 
-# 2. 按需安装各插件后端依赖（无需全部安装，缺依赖的插件会优雅降级并在页面提示）
-#    核心必备：admin（Flask/cryptography，已含；openpyxl 用于单位/部门/人员批量导入导出的 xlsx 支持，
-#    缺失时批量导入导出自动降级为仅 CSV）
+# ② 核心插件依赖（管理后台；openpyxl 用于单位/部门/人员批量导入导出的 xlsx，
+#    缺失时自动降级为仅 CSV）
 pip install -r plugins/admin/backend/requirements.txt
-#    其他插件可选用插件自带 requirements 安装，例如：
-#    pip install -r plugins/character-graph/backend/requirements.txt
-#    pip install -r plugins/shared-docs/backend/requirements.txt
 
-# 3. 启动
+# ③ 按需安装其他插件依赖（缺依赖的插件会优雅降级并在页面提示，不会拖垮主进程）
+pip install -r plugins/knowledge-base/backend/requirements.txt
+pip install -r plugins/shared-docs/backend/requirements.txt
+pip install -r plugins/character-graph/backend/requirements.txt
+pip install -r plugins/case-report/backend/requirements.txt
+pip install -r plugins/file-filter/backend/requirements.txt
+pip install -r plugins/trajectory-sketch/backend/requirements.txt
+pip install -r plugins/trajectory-convert/backend/requirements.txt
+pip install -r plugins/qr-video-decode/backend/requirements.txt
+pip install -r plugins/info-transfer/backend/requirements.txt
+```
+
+Windows 下若本机默认是 Python 3.8：
+
+```bash
+C:\Users\<你>\AppData\Local\Programs\Python\Python38\python.exe -m pip install Flask cryptography
+```
+
+> 仓库根目录**没有**统一的 `requirements.txt`——依赖按插件粒度声明，避免"为了用一个工具装齐全部依赖"。部署机只需装启用的插件的依赖。
+
+### 2.3 外部可选依赖
+
+| 依赖 | 类型 | 缺失影响 |
+| --- | --- | --- |
+| LibreOffice | 外部程序（非 pip） | 仅影响知识库 `.xls` 高保真归一化与 `.doc` 归一化两条窄路径；缺失时 `.xls` 自动走 xlrd 兜底，其余功能不受影响 |
+| 高德地图 Key | 前端配置 | 仅影响「地图标点」插件 |
+| 大模型 API（OpenAI 兼容） | 前端配置 | 影响战果录入、人物关系星图、过滤器/轨迹速写的"大模型模式" |
+
+---
+
+## 3. 运行与构建
+
+### 3.1 源码运行
+
+```bash
 python app.py
 ```
 
-浏览器访问 <http://localhost:5000> 即可看到首页。
+浏览器访问 <http://localhost:5000>。
 
-> **默认管理员账号：** `admin` / `admin123`，首次启动自动生成（保存于数据根目录 `config/admin.json`）。
-> 登录后可访问管理后台 `/admin`，进行部门、人员、权限管理。
-> 登录状态在首页顶栏右侧显示；顶部用户菜单内可直接「修改密码」（原密码 + 新密码 ≥6 位）。
-> **强制登录（R2）**：未登录访问任意页面一律重定向到 `/login?next=…`，登录后原路返回；
-> 未登录调用任意 `/api/*` 一律返回 401 JSON（白名单仅保留 `/login`、`/api/login`、
-> `/api/logout`、`/api/session`、`/favicon.ico` 与无业务数据的静态资源）。
-> **会话超时（R1）**：连续 `session.idle_minutes` 分钟（默认 30）无任何请求，或登录满
-> `session.absolute_hours` 小时（默认 12）自动登出；可在数据根目录 `config/admin.json` 顶层
-> `session` 节调整（首启自动生成，缺省即上述默认值）。页面每 60 秒心跳探测一次登录状态，过期自动跳登录。
-> **敏感数据加密：** 账号密码、身份证号、大模型 API Key 等以 Fernet 对称加密密文
-> 存入数据根目录 `config/admin.json`（加密密钥保存在同目录 `config/.admin_key`，两者均已 gitignore）；
-> 该文件不存在时首次启动自动生成，请勿提交仓库。
-> **用户数据目录：** 管理配置、日志与插件运行数据默认保存在 `<用户主目录>\.jztoolshub\`，
-> 不随程序文件夹一起被替换（见「项目更新与数据迁移」）；管理员可在后台「系统设置」中修改数据目录。
+- 默认管理员：`admin` / `admin123`（首次启动自动生成于数据根目录 `config/admin.json`，**登录后请尽快改密**）。
+- 管理后台：`/admin`；数据目录设置：`/admin/settings`（仅超级管理员）。
+- 环境变量：`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 `5000`，解析失败回落 5000）。
 
-> 本仓库开发目标环境为 **Python 3.8**（Flask 锁定 `>=3.0,<3.1`，兼容 3.8）。若使用本机安装的 3.8，启动命令为：
-> ```bash
-> C:\Users\yfjz\AppData\Local\Programs\Python\Python38\python.exe app.py
-> ```
+> 源码模式使用 Flask 内置服务器（`debug=True`，自动重载），仅供开发。生产请用打包产物（内置 waitress 8 线程）。
 
----
+### 3.2 打包构建
 
-## 技术栈与运行环境
+```powershell
+# 递增版本号并打包（版本号写入 version.json，是目标机配置模板同步的触发依据）
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
 
-| 项目 | 说明 |
-| --- | --- |
-| 后端 | Python 3.8 · Flask 3.0 |
-| 前端 | 原生 HTML / CSS / JS（Material Design 风格） |
-| 插件机制 | 目录扫描 + 配置文件驱动，前端 iframe 隔离，后端按需动态加载 |
-| 依赖 | 主框架：Flask / cryptography；各插件后端依赖以 `plugins/<id>/backend/requirements.txt` 声明（见下表「内置插件一览」） |
-
-```bash
-# 依赖安装（Python 3.8）：先装主框架，再按需装插件依赖
-C:\Users\yfjz\AppData\Local\Programs\Python\Python38\Scripts\pip.exe install Flask cryptography
-C:\Users\yfjz\AppData\Local\Programs\Python\Python38\Scripts\pip.exe install -r plugins\admin\backend\requirements.txt
+# 可选参数
+#   -Python "C:\...\Python38\python.exe"   指定打包解释器（产物需兼容 Win7 时用 3.8）
+#   -DeployName "JZToolsHub-py38"          输出目录名（多版本部署目录共存）
 ```
 
+产物：`deploy\JZToolsHub\`（可直接运行的部署目录）+ `deploy\JZToolsHub-v<版本>.zip`（分发包）。
+
+```
+deploy\JZToolsHub\
+├─ JZToolsHub.exe      # 后端可执行程序（双击或 start.bat 启动，无控制台，托盘常驻）
+├─ _internal\          # Python 运行时 + Flask + 全部第三方依赖
+├─ static\             # 首页前端源码（可修改，重启生效）
+├─ plugins\            # 插件：frontend/ 可改；backend/ 随包源码
+├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录）
+├─ docs\  README.md  HANDOFF.md
+├─ start.bat           # 一键启动
+├─ 一键安装.bat         # 安装 / 更新（自动判断）
+├─ 一键卸载.bat         # 卸载（含用户数据，需确认）
+├─ install.ps1         # 安装 / 更新 / 卸载核心逻辑
+└─ version.json        # 版本号（模板同步触发依据）
+```
+
+打包脚本依次完成：PyInstaller 按 `JZToolsHub.spec` 打包后端 → 组装部署目录（复制 `static/`、`plugins/`、`docs/`、`config/tools.json`）→ 清理插件运行时数据（`data/`、`.task_cache/`、`__pycache__/`、`out/`、`*.pyc`、`config.json`）→ 复制安装/卸载脚本并写 `version.json` → 生成 `start.bat` → 压缩为 zip。
+
+> **改了安装/卸载逻辑，必须改仓库根目录的源文件再重新打包**：部署包里的是副本，下次打包会被覆盖。
+
+### 3.3 目标机安装 / 更新 / 卸载
+
+| 动作 | 操作 |
+| --- | --- |
+| 全新安装或升级 | 解压 zip → 双击 `一键安装.bat` |
+| 启动 | 双击 `start.bat`（或 `JZToolsHub.exe`） |
+| 卸载 | 双击 `一键卸载.bat` 并输入 Y（删程序 + 用户数据）；保留数据用 `install.ps1 -Uninstall -KeepData` |
+
+一键安装流程：停止旧进程 → 检测既有安装（注册表 Uninstall 键 > 默认目录 `%LOCALAPPDATA%\JZToolsHub` > 含 `config/data_root.json` 的源目录 = 就地更新）→ 复制程序文件 → 同步配置模板到数据根目录 → 写 `version.json` / 注册表 / 快捷方式。
+
+> **发版务必递增 `-Version`**：版本号不变时模板同步不触发，新版提示词等配置不会生效。
+
 ---
 
-## 目录结构
+## 4. 目录结构
+
+### 4.1 仓库目录
 
 ```
 JZToolsHub/
-├── app.py                    # Flask 入口 + 配置聚合 API + 插件静态/后端加载
+├── app.py                     # ★ 框架入口：数据根初始化、日志、插件加载、核心路由、压缩/缓存中间件
+├── jztools_data.py            # ★ 数据根目录管理：双指针解析、旧数据迁移、配置模板同步
 ├── config/
-│   └── tools.json            # ★ 后台配置：站点信息 + 分类 + 工具注册清单（含名称/说明/排序）+ 日志开关
-├── plugins/                  # ★ 插件目录（一切皆插件：前端 + 后端自包含）
-│   ├── base64/               #   示例插件：Base64 编解码（纯前端）
-│   │   ├── manifest.json     #   插件清单（图标/主题色/入口/能力标签）
-│   │   └── frontend/         #   前端资源（iframe 静态服务）
-│   │       └── index.html
-│   ├── json-formatter/       #   示例插件：JSON 格式化（纯前端）
-│   ├── color-picker/         #   示例插件：取色器（纯前端）
-│   ├── md5-generator/        #   示例插件：MD5 生成器（纯前端）
-│   ├── map-marker/           #   插件：地图标点（高德地图 + 二维码识别回放）
-│   ├── character-graph/      #   插件：人物关系立体星图（前后端一体）
-│   │   ├── manifest.json
-│   │   ├── frontend/         #   前端入口 + Three.js 资源
-│   │   └── backend/          #   Python 后端（routes.py 等）
-│   ├── trajectory-convert/   #   插件：轨迹转换（Excel → 二维码视频流 / 静态二维码）
-│   ├── qr-video-decode/      #   插件：QR 视频流解码（jsQR 逐帧扫码 + zfec 纠错重组）
-│   ├── info-transfer/        #   插件：信息传输（文字/文档 → 二维码封装与还原，见「信息传输与移动端 APP」）
-│   ├── shared-docs/          #   插件：共享文档（多人共同编辑 Word / Excel，实时同步 + 在线协作）
-│   ├── case-report/          #   插件：战果录入（收网报告 → 五要素键值对 JSON 本地台账）
-│   ├── notice-board/         #   插件：公告板（按单位/部门/用户可见范围发布，home_card() 动态卡片）
-│   ├── knowledge-base/       # 插件：知识库（PDF/OFD/Word/Excel/MD 在线只读阅读 + Word/Excel 由 xhr/dhr 双引擎按需渲染原样式预览（连续单页）+ 原件下载，管理员上传 + 多级分类，前端纯 JS 渲染）
-│   ├── file-filter/          # 插件：过滤器（表格脱敏过滤 + 合规检查：硬过滤/大模型语义匹配过滤/文本与正则后处理）
-│   ├── trajectory-sketch/    # 插件：轨迹速写（Excel 轨迹表 → 调用过滤器做字段过滤 → 轨迹分析 → 速写报告）
-│   └── admin/                # 核心插件：管理后台（登录鉴权 + 部门/人员/权限管理 + 工具访问控制）
-│       ├── manifest.json
-│       ├── frontend/         #   后台页面 / 登录页 / 样式与脚本（/plugin/admin/... 提供）
-│       └── backend/          #   routes.py：鉴权、后台接口、加密存储、工具访问拦截、requirements.txt
-├── android-app/InfoParse/    # 移动端 APP：信息传输的 Android 离线接收端（Kotlin，扫码还原，见「信息传输与移动端 APP」）
-├── static/
-│   ├── index.html            # 首页（大方块展示）
-│   ├── tool.html             # 工具外壳页（加载插件 iframe）
-│   ├── css/style.css         # Material 风格主题
-│   ├── icons/                # 内置 SVG 图标（Twemoji，emoji 无法渲染时的回退，见 _EMOJI_ICON_FILES）
-│   └── js/
-│       ├── main.js           # 首页渲染逻辑（读取 /api/tools）
-│       ├── tool.js           # 外壳页加载插件逻辑
-│       └── jz-icon.js        # JZIcon emoji 兼容层（旧浏览器 emoji 显示异常时回退 SVG）
-├── jztools_data.py           # ★ 数据根目录管理：解析/迁移用户数据目录（见「项目更新与数据迁移」）
-├── 插件设计规范.md            # ★ 插件开发铁律（B-1~B-8、SEC-1~6 等，开发插件前必读）
-├── build-deploy.ps1          # 一键打包脚本（PyInstaller + 组装部署目录 + zip，见「打包部署」）
-├── JZToolsHub.spec           # PyInstaller 打包配置（显式收集插件后端动态导入的第三方库）
-├── install.ps1               # 一键安装 / 更新 / 卸载核心逻辑（源文件，打包时自动复制进部署包）
-├── 一键安装.bat / 一键卸载.bat # 安装 / 卸载双击入口（调用 install.ps1）
-└── docs/                     # 历史设计文档（登录改造与数据隔离 / 容器化与插件热插拔）
-
-数据根目录（默认 <用户主目录>\.jztoolshub\，管理员可在后台「系统设置」中修改）：
-├── config/                   # tools.json（首启从程序目录模板复制）、admin.json、.admin_key
-├── logs/                     # 访问日志（按天滚动，自动生成）
-└── plugins/<id>/             # 各插件运行数据（data/、config.json、prompt.json、.task_cache/）
+│   ├── tools.json             # ★ 工具注册清单模板（站点信息 + 分类 + 工具条目）
+│   └── data_root.json         # 数据根目录备份指针（开发机产物，见 §12 注意事项）
+├── plugins/                   # ★ 插件目录（一切皆插件）
+│   ├── admin/                 #   核心插件：登录鉴权 / 组织人员 / 权限 / 批量导入导出
+│   ├── notice-board/          #   公告板（home_card() 动态卡片）
+│   ├── knowledge-base/        #   知识库（Office 预览引擎 vendor 在 backend/vendor/）
+│   ├── file-filter/           #   过滤器（提供 /apply 供其他插件复用）
+│   ├── trajectory-sketch/     #   轨迹速写（分析引擎 backend/engine/ 零依赖可插拔）
+│   ├── shared-docs/           #   共享文档（多人协作编辑）
+│   ├── case-report/           #   战果录入（大模型要素抽取 + 台账）
+│   ├── character-graph/       #   人物关系立体星图
+│   ├── trajectory-convert/    #   轨迹转换（Excel → 二维码视频流）
+│   ├── qr-video-decode/       #   QR 视频流解码
+│   ├── info-transfer/         #   信息传输（封装/解析二维码）
+│   ├── map-marker/            #   地图标点（纯前端）
+│   └── base64/ json-formatter/ color-picker/ md5-generator/   # 基础示例插件（纯前端）
+├── static/                    # 框架前端（首页 / 外壳页 / 主题 / SVG 图标回退）
+│   ├── index.html  tool.html
+│   ├── css/style.css
+│   ├── icons/                 # Twemoji SVG（无彩色 emoji 字体环境的回退）
+│   └── js/  main.js  tool.js  jz-icon.js
+├── android-app/InfoParse/     # 移动端 APP（Kotlin，信息传输的 Android 离线接收端）
+├── docs/                      # 设计文档（按功能/插件归档）
+├── 插件设计规范.md             # ★ 插件开发铁律（开发插件前必读）
+├── 移动端APP.md                # ★ 信息传输协议权威规范
+├── JZToolsHub.spec            # PyInstaller 打包配置（显式收集插件后端动态导入的库）
+├── build-deploy.ps1           # 一键打包脚本
+├── install.ps1                # 一键安装 / 更新 / 卸载核心逻辑（源文件）
+├── 一键安装.bat  一键卸载.bat   # 双击入口
+└── README.md  HANDOFF.md
 ```
+
+### 4.2 数据根目录（运行时生成，默认 `<用户主目录>\.jztoolshub\`）
+
+```
+<数据根>/
+├── config/
+│   ├── tools.json             # 工具注册清单（首启从程序目录模板复制，之后改这里）
+│   ├── admin.json             # 单位/部门/人员/角色（敏感字段 Fernet 加密）
+│   ├── .admin_key             # 加密密钥（必须与 admin.json 同目录迁移）
+│   └── .app_state.json        # 记录 last_app 版本号，控制模板同步幂等
+├── logs/access.log            # 访问日志（按天滚动，保留 30 天）
+└── plugins/<id>/              # 各插件运行数据
+    ├── data/                  #   业务记录（共享文档 / 公告 / 战果台账 / 知识库 files）
+    ├── config.json            #   插件运行配置（含密钥的已 gitignore）
+    ├── prompt.json            #   大模型提示词（若插件使用）
+    └── .task_cache/           #   异步任务临时产物（TTL 30 分钟）
+```
+
+程序目录与数据目录的对应关系由 `jztools_data.py` 维护，**插件一律通过 `jztools_data.get_data_root_dir()/get_data_root_file()` 定位自己的数据，禁止拼接绝对路径**。
 
 ---
 
-## 核心机制：一切皆插件
+## 5. 核心模块解析
 
-JZToolsHub 的核心是可插拔工具架构，一切工作围绕 **`plugins/` 下的自包含插件目录**展开：
+### 5.1 app.py —— 框架入口
 
-- **插件即目录**：一个插件 = `plugins/<插件id>/` 目录，内部包含 `manifest.json`（图标/入口/能力标签等元信息）、`frontend/`（前端资源）、以及可选的 `backend/`（Python 后端）。
-- **配置即启停，也即展示**：`config/tools.json` 决定哪些插件展示、展示顺序与所属分类，同时是工具**名称 / 描述**的权威来源；`enabled: false` 即可后台下线，无需删代码；`hidden: true` 的插件（如 `admin`）只注册后端、不展示为首页卡片；`grant_all: true` 的插件（如 `notice-board`）对全体登录用户默认开放，无需逐人授权。
-- **前端隔离**：工具页面通过 iframe 嵌入外壳页（`static/tool.html`），插件之间、插件与框架之间互不污染。
-- **后端自发现**：只要插件目录下存在 `backend/__init__.py` 与含 `register(app)` 的 `routes.py`，框架启动时自动导入注册，无需在配置中声明。
-- **核心插件始终加载**：`admin`（管理后台）为基础设施插件，`register_plugin_backends()` 对其无条件加载（不随 `enabled` 启停），保证登录鉴权、后台接口与工具访问控制一直可用。
+| 职责 | 关键实现 |
+| --- | --- |
+| 路径常量 | `BASE_DIR`（frozen 时为 exe 目录）、`DATA_ROOT`、`CONFIG_PATH`、`LOG_DIR`、`PLUGINS_DIR` |
+| 数据根初始化 | `init_data_root()`：迁移旧数据 → 解析数据根 → `sync_templates()` 模板同步 |
+| 访问日志 | `setup_access_logging()`：内存队列（容量 2000）+ 后台 `QueueListener` 异步落盘 |
+| 插件加载 | `register_plugin_backends()`：先无条件加载 `admin`，再按 `tools.json` 的 `enabled` 逐个加载 |
+| 核心路由 | `/`、`/tool/<id>`、`/plugin/<id>/<path>`、`/api/tools*`（reorder / visibility） |
+| 中间件 | `_compress_response`（gzip，>256B 且可压缩类型）、`_static_cache`（静态 1 天 / HTML no-cache）、`_log_response`（写访问日志） |
+| 工具聚合 | `get_aggregated_tools()`：manifest + tools.json + `home_card()` 钩子三级合并 |
+| 权限过滤 | `_filter_visible_tools()`：非超管只看到权限点内的工具 |
+| 容错 | `WindowsSafeTimedRotatingFileHandler`：Windows 文件占用导致 rename 失败时退化为「复制 + 截断」，跨天零丢日志 |
 
-> **每个请求的拦截管线**（admin 插件注册的 `before_request`，按序执行，改后端前需理解）：
-> 1. **会话守卫**：空闲超 30 分钟（可配）或登录满 12 小时（可配）强制登出，活跃请求滑动续期；
-> 2. **强制登录**：白名单（`/login`、`/api/login`、`/api/logout`、`/api/session`、`/favicon.ico` 及无业务数据静态资源）之外一律要求登录——页面 302 到 `/login`，`/api/*` 返回 401 JSON；
-> 3. **首页写操作保护**：`/api/tools/reorder`、`POST /api/tools/visibility` 需登录；
-> 4. **工具访问控制**：非超级管理员只能访问权限点（`permissions` = tools.json 插件 ID）内的工具，越权访问 `/tool/<id>`、`/plugin/<id>/...` 返回 403 页面，`/api/<插件id>/...` 返回 403 JSON。
->
-> 各插件后端通过 `from jztools_admin.routes import get_session_user` 获取当前登录用户（未登录返回 `None`），这是插件做数据可见性过滤的标准入口。
+### 5.2 jztools_data.py —— 数据根目录
 
-可视化关系：
+| 函数 | 作用 |
+| --- | --- |
+| `get_data_root()` | 双指针解析：主指针 `~/.jztoolshub.json` > 备份指针 `<程序目录>/config/data_root.json` > 默认 `~/.jztoolshub` |
+| `get_data_root_dir(*parts)` / `get_data_root_file(*parts)` | 插件定位自有数据的唯一入口（自动建目录） |
+| `migrate_legacy_app_data()` | 启动时把旧版留在程序目录的用户数据搬进数据根目录（幂等） |
+| `migrate_data_root(old, new)` / `set_data_root()` | 管理员换数据目录时整体迁移 config/logs/plugins |
+| `sync_templates()` | 版本升级时按 `_TEMPLATE_SYNC` 清单把程序目录模板同步进数据根目录（三种模式：`overwrite` / `merge-tools` / `ensure-keys`） |
+| `data_usage_summary()` | 数据占用统计（后台设置页展示） |
+
+### 5.3 config/tools.json + manifest.json —— 两级配置
 
 ```
-config/tools.json ──注册 + 展示名/描述──▶ plugins/<id>/manifest.json（图标/入口/能力）
-        │                                    │
-        │  enabled + name/description      frontend/（iframe 加载）
-        ▼                                    ▼
-   首页卡片 ◀── /api/tools ────────────── 外壳页 /tool/<id>
-        │                                    │
-        └─── 名称解析（日志）◀────────── backend/（启动时自动注册 Flask 路由）
+展示优先级：插件 home_card() 钩子（请求时实时求值）> config/tools.json（权威）> manifest.json（回退兜底）
+                                                     ↑ name/description          ↑ icon/accent/entry/features
 ```
 
-> **首页卡片内容两级读取（名称 / 描述 / 图标 / 主题色 / 能力标签）**：
-> 1. **插件主动声明（方式一）**：插件后端若提供可选钩子 `home_card()`，主应用在启动时登记该钩子，首页请求时于请求上下文内实时调用（可按当前登录用户权限返回动态内容），返回值作为卡片展示字段的**最高优先级来源**（见 7.2 / 7.4）；
-> 2. **tools.json 兜底（方式二）**：插件未提供钩子时，`name` / `description` 以 `config/tools.json` 为权威取值，插件目录 `manifest.json` 中若也写了这两个字段，仅作为**缺省回退**（便于把插件目录整体复制到其他项目、尚未在配置中补充名称时依然可用）；`icon` / `accent` / `features` 默认取 `manifest.json`。
+`tools.json` 工具条目字段：
+
+| 字段 | 缺省 | 说明 |
+| --- | --- | --- |
+| `id` | 必填 | 与目录名、`manifest.id` 三者一致 |
+| `name` / `description` | 回退 manifest | 权威展示文案，改完刷新即生效 |
+| `category` | 未分类 | 引用 `categories[].id` |
+| `enabled` | `true` | `false` = 卡片隐藏**且后端不加载** |
+| `hidden` | `false` | `true` = 只注册后端、不出卡片（`admin` 用） |
+| `grant_all` | `false` | `true` = 对全体登录用户开放，无需逐人授权 |
+| `order` | `0` | 同分类内升序 |
+
+`manifest.json` 字段：`id`（必填）、`icon`、`accent`、`entry`、`features`、`version`、`author`、`form`（`source`/`package`）、`name`/`description`（仅回退用）。
+
+### 5.4 admin 插件 —— 安全层与组织管理
+
+`admin` 是核心基础设施插件，`register_plugin_backends()` 对其**无条件加载**，不随 `enabled` 启停。
+
+它在 `register()` 里注册 4 个 `before_request`（按序执行）：
+
+1. `make_session_guard` —— 空闲 30 分钟 / 绝对 12 小时超时登出，活跃请求滑动续期；
+2. `_enforce_login` —— 白名单外一律要求登录（页面 302 → `/login`，`/api/*` 返回 401）；
+   白名单 = `/login`、`/api/login`、`/api/logout`、`/api/session`、`/favicon.ico` + 前缀 `/static/`、`/plugin/admin/css/`、`/plugin/admin/js/`；
+3. `_protect_admin_ops` —— 首页布局写操作（`reorder` / `visibility`）需登录；
+4. `_enforce_tool_access` —— 非超管按权限点拦截 `/tool/<id>`、`/plugin/<id>/...`、`/api/<插件id>/...`。
+
+它还负责：会话密钥持久化、Fernet 加解密（密码 / 身份证 / API Key）、组织架构 CRUD、角色与权限点、数据目录设置，以及单位/部门/人员的批量导入导出（`backend/batch_io.py`，依赖注入挂载，不反向 import `routes.py`）。
+
+### 5.5 插件后端加载机制
+
+```python
+# app.py::_load_backend_module
+module_name = "jztools_" + re.sub(r"\W", "_", plugin_id)     # 如 jztools_knowledge_base
+spec = importlib.util.spec_from_file_location(module_name, backend/__init__.py,
+                                              submodule_search_locations=[backend_dir])
+...exec_module... → importlib.import_module(f"{module_name}.routes") → routes.register(app)
+```
+
+- 插件以独立模块名加载，符号互不可见；
+- `routes.py` 必须导出 `register(app)`；
+- 若 `routes.py` 里存在 `home_card`，框架登记为首页卡片钩子，每次首页请求时实时调用。
+
+> **路由函数必须带插件前缀**（如 `kb_status`、`ts_upload`）：Flask 以 `view_func.__name__` 作为 endpoint，两个插件各写一个 `def status()` 会在启动阶段直接抛 `AssertionError` 导致插件整体加载失败。
+
+### 5.6 首页卡片三级合并
+
+```
+① home_card()（插件后端可选钩子，请求时求值，可按登录用户返回动态内容）
+      ↓ 未声明
+② config/tools.json 的 name / description
+      ↓ 缺省
+③ manifest.json 的 name / description
+（icon / accent / entry / features 始终以 manifest 为基础，可被 ① 覆盖）
+```
+
+参考实现：`plugins/notice-board/backend/routes.py` 的 `home_card()`（按当前用户可见范围取最新公告）。
 
 ---
 
-## 代码阅读地图（按此顺序读最快上手）
+## 6. 使用示例
 
-| 顺序 | 文件 | 读什么 | 行数级 |
-| --- | --- | --- | --- |
-| 1 | `app.py` | 全部（约 830 行）：路径常量 → 数据根初始化 → 日志中间件 → 插件加载 → 核心路由 | 短 |
-| 2 | `jztools_data.py` | 数据根目录解析（双指针）/ 旧数据迁移 / 模板同步 | 短 |
-| 3 | `config/tools.json` | 站点信息 / 分类 / 工具注册（一切展示的来源） | JSON |
-| 4 | `plugins/admin/backend/routes.py` | 鉴权与会话守卫（约 1260 行，是框架的「安全层」）；先看 `register()` 开头的 before_request 注册段 | 长 |
-| 5 | 任一简单插件（如 `plugins/notice-board/`） | 一个完整插件的最小闭环：manifest.json + frontend + backend/routes.py | 中 |
-| 6 | `static/js/main.js` | 首页如何消费 `/api/tools` 渲染卡片、拖拽排序如何回写 | 中 |
+### 6.1 首次启动与登录
 
-**启动时序**（`python app.py` 后发生的事，按顺序）：
-
-```
-init_data_root()                    # ① 迁移旧数据 + 解析数据根目录 + sync_templates() 模板同步
-  → setup_access_logging(app)       # ② 异步访问日志（队列 + 后台线程落盘）
-  → register_plugin_backends(app)   # ③ 先无条件加载 admin，再按 tools.json 的 enabled 逐个加载插件后端
-  → Flask 内置服务器（源码 debug）或 waitress 8 线程（打包运行）开始监听 0.0.0.0:5000
+```bash
+python app.py          # 打开 http://localhost:5000
+# 用 admin / admin123 登录 → 右上角菜单「修改密码」→ 进入 /admin
+# 管理后台：建单位 → 建部门 → 建人员（勾选该人员可用的工具权限点）
 ```
 
-> 插件后端 `register(app)` 内部也可做启动迁移（如 admin 的角色/加密迁移，均幂等）；前端资源加载后无需后端参与即可运行（纯前端插件）。
+不带代码的快速自测：
 
----
-
-## 交互流程说明
-
-1. 用户访问首页 `/`：`static/js/main.js` 请求 `/api/tools`，按分类渲染工具卡片（**每行固定最多 4 个**）；同时在页面**右侧生成分类快速定位标签**（每个分类一个标点，悬浮显示分类名，单击平滑滚动定位，随滚动自动高亮当前分类）。
-2. 点击卡片进入外壳页 `/tool/<id>`：`static/js/tool.js` 请求 `/api/tools/<id>` 获取工具元信息，并将 iframe 指向 `/plugin/<id>/<entry>`。
-3. `/plugin/<id>/<path>` 路由将 `plugins/<id>/frontend/` 下的文件作为静态资源返回。
-4. 若插件含后端，后端路由已在启动时注册到同一 Flask 应用（如 `/api/character-graph/...`）。
-5. **右下角「更多」悬浮球（⋮）**：悬浮展开菜单，含三个工具——
-   - **编辑位置**：进入「编辑位置」模式。**插件卡片**采用 Android 桌面式拖拽：按住图标拖起后图标放大悬停跟随光标，拖动到目标槽位时该位置实时生成该图标的**半透明虚影**，沿途卡片顺序让位，松手落位即自动调用 `POST /api/tools/reorder` 保存（Esc 取消）。**分类区块**可直接拖动标题调整上下顺序。编辑模式下点击卡片不会跳转，再次点「完成编辑」退出。
-   - **隐藏工具**：浮窗内以开关切换**分类 / 插件**的显示与隐藏，实时调用 `POST /api/tools/visibility` 写回 `config/tools.json`，隐藏的分类与插件即刻从首页消失。
-   - 各插件的大模型 API 配置请在对应插件页面内完成（如「人物关系立体星图」「战果录入」）。
-
----
-
-## HTTP API
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /` | 首页 |
-| `GET /tool/<id>` | 工具外壳页 |
-| `GET /plugin/<id>/<path>` | 插件前端静态资源（映射到 `plugins/<id>/frontend/`），目录穿越已拦截 |
-| `GET /api/tools` | 聚合后的工具列表（站点信息 + 分类 + 工具清单） |
-| `GET /api/tools/<id>` | 单个工具信息，不存在返回 404 |
-| `POST /api/tools/reorder` | 保存首页布局：请求体 `{categories: [分类id按显示顺序], tools: {分类id: [工具id…]}}`，按分类顺序重排 `categories`、按位置重写各工具的 `category` 与 `order` 并写回数据根目录 `config/tools.json` |
-| `GET /api/tools/visibility` | 返回全部分类与工具及启用状态（`enabled`），供「隐藏工具」浮窗使用（含已隐藏项） |
-| `POST /api/tools/visibility` | 切换启用：`{type: 'tool'\|'category', id, enabled}`，写回数据根目录 `config/tools.json`（分类/工具各支持 `enabled` 字段） |
-
-**登录 / 管理后台接口**（由 `admin` 插件提供，数据根目录 `config/admin.json` 存储单位 / 部门 / 人员 / 角色，层级：**单位(units) → 部门(departments) → 用户(users)**）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /login` | 登录页 |
-| `POST /api/login` | 登录 `{username, password}`，成功写入 session（含 `login_at` / `last_active` 时间戳） |
-| `POST /api/logout` | 退出登录，清空 session |
-| `GET /api/session` | 当前登录状态：`{user: {username, name, role, unit, unit_id, department, department_id, modules, super_admin, permissions}\|null}`（匿名返回 `user: null`，用于前端心跳探测） |
-| `POST /api/account/password` | 自助修改密码 `{old_password, new_password}`：新密码 ≥6 位且不得与旧密码相同；成功后当前会话保持有效 |
-| `GET /admin` | 管理后台首页（需登录） |
-| `GET /admin/<module>` | 管理模块页（需登录）：`unit` / `department` / `user`；`permission` 暂时屏蔽（权限管理已并入「人员管理」，直接访问返回 404）；`settings` 为数据目录设置页（仅超管，另见下行） |
-| `GET /admin/settings` | 系统设置页（数据目录查看 / 修改，仅超级管理员） |
-| `GET /api/admin/summary` | 后台总览：各模块名称 / 记录数 / 当前账号是否可访问（需登录）；不含「权限管理」卡片，含「系统设置」卡片（仅超管标记可用） |
-| `GET /api/admin/org-tree` | 组织架构树（只读，单位→部门→用户，仅标识与姓名），供公告板等业务插件选择可见范围，仅需登录 |
-| `GET /api/admin/data-settings` | 当前数据根目录 / 默认目录 / 各子目录占用（仅超管） |
-| `POST /api/admin/data-settings` | 修改数据根目录 `{data_root, migrate?}`：整体迁移 config/logs/plugins 后更新双指针（仅超管） |
-| `GET\|POST /api/admin/units`、`PUT\|DELETE /api/admin/units/<id>` | 单位管理 CRUD（需 `unit` 权限）；删除前需清空其下部门 |
-| `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门管理 CRUD（需 `department` 权限）；创建/编辑需指定 `unit_id`；删除前需清空其下人员 |
-| `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员管理 CRUD（需 `user` 权限）；支持字段：`username`、`name`、`password`、`unit_id`、`department_id`、`role`、`idcard`（身份证号）、`permissions`（权限点 = tools.json 插件 ID 数组）、`llm`（`{base_url, api_key, model}`）；密码/身份证/API Key 以 Fernet 加密存储；密码为空时保持不变，删除当前登录账号会被拒绝。返回的用户条目含 `super_admin` 标记（前端据此区分角色）。权限点不在 Web 界面展示，仅后端读取并据此拦截工具访问 |
-| `GET\|POST /api/admin/permissions`、`PUT\|DELETE /api/admin/permissions/<id>` | 权限（角色）管理 CRUD（需 `user` 权限，**已并入「人员管理」模块**），可勾选模块为 `unit` / `department` / `user` / `permission`；`modules` 可为空（纯工具角色，如办案员） |
-| `GET /api/admin/batch/<module>/template?format=xlsx\|csv` | **批量导入模板下载**（`<module>` = `unit` / `department` / `user`，需对应模块权限）；xlsx 模板附「填写说明」工作表（列含义 / 必填 / 留空与清空语义） |
-| `GET /api/admin/batch/<module>/export?format=xlsx\|csv` | **批量导出**（列结构与导入模板完全一致，可直接改后回导）；密码列恒为空，大模型 API Key 默认留空，需明文时加 `?sensitive=1`（谨慎） |
-| `POST /api/admin/batch/<module>/import` | **批量导入**（multipart，需对应模块权限）：`file`（.xlsx/.csv）、`mode=upsert\|insert\|update`（默认 upsert）、`dry_run=1\|0`（默认 1，仅预览校验不落盘）、`auto_create_parent=1\|0`（上级单位/部门不存在时自动创建）、`on_error=abort\|skip`（默认 abort，有错误行则整批回滚）。返回逐行结果（`create`/`update`/`skip`/`error` 与说明）及汇总 `summary`，另回传 `sheet`（识别到的工作表）、`header_row`（表头行号）、`notes`（结构层提示：跳过的行/补全的合并单元格等）、`ignored_columns`（未识别列） |
-
-> **权限点与工具访问控制**：账号的 `permissions` 字段为 `config/tools.json` 中插件 ID 的列表。
-> 已登录的非超级管理员账号只能访问权限点内的工具：
-> `GET /tool/<id>`、`GET /plugin/<id>/...` 返回 403，`/api/tools` 列表自动过滤，`/api/tools/<id>` 返回 404；
-> 拥有全部管理模块（单位/部门/人员/权限）的角色视为超级管理员，默认可访问全部工具。
-> 未登录（匿名）访问任何页面/接口一律被拦截（302 到 `/login` / 401 JSON），不再放行。
-> 权限点可在 Web 界面维护（人员管理 →「权限」浮窗），也可通过后端 API（`POST/PUT /api/admin/users`）
-> 或直接编辑 `config/admin.json` 配置，非法 ID 会被拒绝。
-> 此外 `config/tools.json` 中声明 `grant_all: true` 的工具对全体登录用户默认开放（无需逐人授权）。
-
-> 以上接口均由 `plugins/admin/backend/routes.py`（admin 插件）提供，贯彻「一切皆插件」理念。
-> 未登录访问后台接口返回 401，页面重定向到 `/login`；无模块权限返回 403 / 重定向回 `/admin`。
-> 首页「编辑位置」「隐藏工具」等写操作同样需要登录（由 admin 插件的 `before_request` 保护）。
-> 权限数据模型：**角色（permissions）→ 可访问的管理模块列表**；人员归属单位下的部门并绑定一个角色。
-> 内置角色：**管理员**（`role-admin`，拥有全部 4 个模块，即超级管理员）与 **办案员**
-> （`role-case-handler`，无管理模块，仅可被分配工具权限点，不含「管理后台」）。
-> 内置管理员角色（`role-admin`）默认拥有全部 4 个模块，升版时自动补齐新模块，保证超级管理员始终可访问全部工具。
-> **按人分配工具权限**：人员管理列表「操作」列的「权限」按钮以浮窗展示系统中全部功能模块
-> （来源于 `/api/tools/visibility`）。管理员角色显示全部模块（含管理后台，只读）；办案员等其他角色
-> 不展示「管理后台」，可勾选该人员可访问的工具后保存（写回该用户的 `permissions` 字段）。
-> 新建办案员账号默认授予全部工具（不含管理后台），管理员可在「权限」浮窗中再调整。
-
-> **批量导入导出（单位 / 部门 / 人员）**：三个管理页头部均提供「下载模板 / 导出 / 批量导入」。
-> 流程为**两步式**：先「预览校验」（`dry_run=1`，逐行给出 新增/更新/跳过/错误 与原因，不落盘），
-> 确认后再执行写入 —— 预览与执行走同一套推演代码，保证「预览所见 = 执行所得」。
-> 关键语义：
-> - **唯一键**：单位 = 单位名称；部门 = 所属单位 + 部门名称；人员 = 登录名。命中唯一键则视为更新。
-> - **留空 = 不修改**（更新场景）；需要清空某字段时填半角 `-`（角色、身份证、大模型三项、权限点均适用）。
-> - **权限点**可填工具 ID 或工具名称，多个用顿号/分号分隔（CSV 中若用逗号需给整个单元格加双引号）；
->   新增人员留空时默认授予全部工具（不含管理后台），与 `POST /api/admin/users` 行为一致。
-> - 勾选「上级单位/部门不存在时自动创建」后，导入部门/人员可顺带建出缺失的上级组织。
-> - 超级管理员账号（如 `admin`）**不允许**通过批量导入改动角色与权限点，防止误降权导致无法登录后台；
->   其余字段（姓名/密码/身份证/大模型/归属）仍可同步。
-> - 支持 `.xlsx` 与 `.csv`（UTF-8-SIG / GBK 自适应，导出 CSV 带 BOM 便于 Excel 直接打开）；
->   单文件上限 10 MB、单次上限 3000 行；表头允许少量别名与多余列（多余列忽略并在结果中回传）。
-> - **单元格格式与文件结构都已做兜底**（详见 `docs/管理后台批量导入导出-设计文档.md` §10）：
->   表头上方可有标题行/说明行（自动向下探 8 行定位表头，界面会显示"表头在第 N 行"）；
->   数据放哪张工作表都行；纵向**合并单元格**会自动补全（"所属单位"合并 3 行不用逐行填）；
->   CSV 的**分号/制表符/竖线**分隔都能识别；百分比/货币/日期等**显示格式不影响取值**（取底层数值）；
->   登录名、身份证等标识字段做全角转半角 + 去空白；表头里的 BOM/零宽字符自动清除。
->   两类会造成**数据失真**的格式会被明确拦下（阻断该行并说明怎么改）：
->   ① 18 位身份证按「数字」存储（Excel 只保留 15 位有效数字，末尾已被改写）；
->   ② 公式单元格从未保存过计算结果（`data_only` 读出来是空）。
->   已知限制：表头须为单行；`00123` 这类前导零若被 Excel 存成数字则无法还原（建议该列设为文本）。
-> - 导入同样受权限模块约束：`unit` / `department` / `user` 各自的批量接口只对有相应模块权限的账号开放。
-
-**character-graph 插件后端接口**（演示含后端插件的 API 模式）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/character-graph/status` | 依赖可用性检查（python-docx / pypdf / requests） |
-| `GET /api/character-graph/config` | 读取大模型配置（base_url / api_key / model / api_source，api_key 掩码回传） |
-| `POST /api/character-graph/config` | 保存大模型配置 |
-| `GET /api/character-graph/prompt` | 读取抽取 Prompt 模板 |
-| `POST /api/character-graph/analyze` | 提交文档分析任务（multipart），**立即返回 `task_id`**，后台异步执行 |
-| `GET /api/character-graph/result/<task_id>` | 轮询分析任务状态与结果 |
-
-> 各插件后端路由统一挂在 `/api/<插件id>/` 前缀下，动态注册，互不冲突。
-
-**trajectory-convert 插件后端接口**（Excel 轨迹表 → 二维码视频流 / 静态二维码）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/trajectory-convert/config` | 读取抽样/解析配置 |
-| `GET /api/trajectory-convert/status` | 依赖可用性检查（openpyxl / xlrd / qrcode / zfec / cv2 / numpy） |
-| `POST /api/trajectory-convert/convert` | 上传 Excel（`.xlsx`/`.xls`）与参数（时间间隔 / 二维码版本 / 模式），**异步执行返回 `task_id`** |
-| `GET /api/trajectory-convert/status/<task_id>` | 轮询转换进度与结果 |
-| `GET /api/trajectory-convert/download/<task_id>/<filename>` | 下载产物：二维码视频 `.mp4` / 单张静态图 `.png` / 多张静态图 ZIP |
-| `GET /api/trajectory-convert/image/<task_id>/<index>` | 预览某一张静态二维码图片（`index` 从 1 开始） |
-| `POST /api/trajectory-convert/download-selected` | 把勾选的多张静态二维码打包为 ZIP（`{task_id, indices}`） |
-
-**qr-video-decode 插件后端接口**（二维码视频流解码）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/qr-video-decode/status` | 依赖可用性检查（zfec / jsQR） |
-| `POST /api/qr-video-decode/reassemble` | 提交前端逐帧识别出的分块数据，**异步 zfec 前向纠错重组，返回 `task_id`** |
-| `GET /api/qr-video-decode/reassemble/<task_id>` | 轮询重组进度与恢复结果 |
-
-**info-transfer 插件后端接口**（信息传输——文字/文档封装为二维码或二维码视频并解析还原，协议见下文「信息传输与移动端 APP」）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/info-transfer/status` | 依赖可用性检查（qrcode / zfec / cv2 / numpy / openpyxl） |
-| `GET /api/info-transfer/ping` | 探活 |
-| `POST /api/info-transfer/encode` | 封装任务：multipart `file`（或 `text`）+ `mode`(static/video) + `qr_version`(1-40)，**立即返回 `task_id`**；文档类文件按协议 v2 `fmt=file` base64 原始字节完整封装 |
-| `GET /api/info-transfer/task/<task_id>` | 封装任务轮询 |
-| `GET /api/info-transfer/download/<task_id>` | 下载产物（静态 PNG / 多张 ZIP / 视频 MP4） |
-| `GET /api/info-transfer/image/<task_id>/<index>` | 静态二维码单张预览 |
-| `GET /api/info-transfer/frame/<task_id>/<index>` | 相机传输模式单帧码图（网页 JS 轮播用，每码重复 5 帧） |
-| `POST /api/info-transfer/decode` | 解析：multipart `file` + `type`(image/zip/video)；图片同步返回、视频异步执行 |
-| `GET /api/info-transfer/decode/<task_id>` | 视频解析任务轮询 |
-| `POST /api/info-transfer/export` | 解析数据 → 导出文件：`file` 格式直接还原原始文件（文件名与字节一致） |
-
-**shared-docs 插件后端接口**（共享文档协作编辑，**数据按「单位 / 部门 / 私人」三级隔离**）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/shared-docs/status` | 依赖可用性检查（python-docx / openpyxl / xlrd） |
-| `GET /api/shared-docs/status` | 依赖可用性检查（python-docx / openpyxl / xlrd） |
-| `GET /api/shared-docs/documents` | 文档列表 —— 仅返回当前用户可见的文档（超管可见全部；单位级同单位可见、部门级同部门可见、私人仅本人可见）；条目含 `created_by` / `created_by_name` / `scope{level,owner,owner_name,unit_id,department_id}` |
-| `POST /api/shared-docs/documents` | 新建文档 `{name, type, level?}`，type 为 `word` / `excel`；`level` 为 `unit` / `department` / `private`（默认 `private`）。创建人、单位/部门 ID 一律取自 session，不接受前端传入 |
-| `GET /api/shared-docs/documents/<id>` | 文档详情（含内容、修订历史、在线用户）；对「存在但无权访问」的文档返回 **404** |
-| `POST /api/shared-docs/documents/<id>/content` | 保存内容 `{base_version, content}`（**可见即可编辑**）；**乐观锁**：版本不匹配返回 409 并携带服务端最新文档 |
-| `POST /api/shared-docs/documents/<id>/presence` | 在线心跳 `{client_id}`（身份只认 session，忽略前端自报昵称），返回当前在线用户真实姓名 |
-| `POST /api/shared-docs/documents/<id>/rename` | 重命名 `{name}` —— 仅创建者或超管（其余 **403**） |
-| `POST /api/shared-docs/documents/<id>/scope` | 调整挂靠层级 `{level}` —— 仅创建者或超管（其余 403）；只改 level，保留原 owner/unit/dept |
-| `DELETE /api/shared-docs/documents/<id>` | 删除文档 —— 仅创建者或超管（其余 403） |
-| `GET /api/shared-docs/documents/<id>/export` | 导出真实 Office 文件（Word→`.docx`、Excel→`.xlsx`） |
-| `POST /api/shared-docs/documents/<id>/import` | 上传 `.docx` / `.xlsx` / `.xls` 导入覆盖当前文档（可见即可编辑） |
-
-> 文档数据以 JSON 文件保存在数据根目录 `plugins/shared-docs/data/`（已 gitignore，
-> 默认 `<用户主目录>\.jztoolshub\plugins\shared-docs\data\`），
-> 内容格式：Word 为块级结构（`blocks`：段落 / 标题 / 列表 + 富文本 runs），
-> Excel 为二维数组（`rows`）加可选列宽（`colWidths`，像素，0=自动）。
-> **历史文档迁移**：启动时自动给没有 `scope` 的存量文档补「私人 + 创建者 admin」，
-> 默认仅超管可见；需要老文档共享时由管理员在前端改成「单位」层级即可（幂等，重复启动不重复迁移）。
-
-**case-report 插件后端接口**（战果录入——收网情况报告大模型要素抽取 + 本地台账）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/case-report/config` | 读取大模型配置（base_url / api_key / model）及是否已配置 |
-| `POST /api/case-report/config` | 保存大模型配置 |
-| `POST /api/case-report/config/test` | 大模型连通性测试：用当前（或本次表单）配置发一条最小请求验证地址/Key/模型可用 |
-| `GET /api/case-report/status` | 依赖可用性检查（requests / openpyxl） |
-| `GET /api/case-report/org-units` | 主办大队可选值（插件目录 `org_units.json` 固化：一大队/二大队/三大队） |
-| `POST /api/case-report/parse` | 提交解析任务 `{text, base_url?, api_key?, model?}`，**立即返回 `task_id`**，后台异步执行（**仅大模型解析**，未配置/失败时任务置 `error`，前端提示） |
-| `GET /api/case-report/result/<task_id>` | 轮询解析结果：`fields`（要素键值对）、`items`（缴获物品逐项明细）、`method`（`llm`）、`llm_error` |
-| `GET /api/case-report/categories` | 既有类别集合：`learned`（用户已学习的「物品名→类别」）+ `known`（可选类别列表） |
-| `POST /api/case-report/categories` | 学习一条类别 `{name, category}`，持久化后后续解析优先采用 |
-| `DELETE /api/case-report/categories/<name>` | 删除某物品名的学习类别，恢复默认判定 |
-| `GET /api/case-report/aggregate` | 跨记录「战果汇总」：类似物品归为统一类别、数量叠加（重量→克、货币→元自动归并）；「涉及 N 起」按规整后案件名去重（同一案件多条记录只计 1 起）。支持 `?case=<案件名>` 仅统计该案件（涉及 N 起 = 1）；支持 `?scope=mine\|dept\|all`（默认 mine）按范围过滤 |
-| `GET /api/case-report/cases` | 既有案件列表（按规整后案件名去重、**拼音排序**，含各案件记录条数与 `normalized` 规整名），供筛选侧边栏 / 入库合并 / 改案件名选择；**跟随 `?scope=` 过滤**（切到「本部门」时下拉为部门内所有人案件） |
-| `GET /api/case-report/months` | 当前可见范围内的入库月份列表（倒序），供按月统计下拉使用；跟随 `?scope=` 过滤 |
-| `GET /api/case-report/records` | 本地台账列表（按入库时间倒序），支持 `?case=<案件名>` 仅返回该案件的记录；支持 `?scope=mine\|dept\|all`（默认 mine）：mine=本人、dept=本人+同部门（部门+单位双重比对）、all=全站（仅超管，普通账号传 `scope=all` 返回 403） |
-| `POST /api/case-report/records` | 保存一条战果 `{fields, source_text, items?, merge_mode?, merge_case?}`；`items` 为用户编辑后的单列明细（可省略，未传时为空列表），保存时同步学习 `物品名→类别`。案件名保存前自动规整（去引号/空白）。**服务端自动打归属标签**（`created_by` / `created_by_name` / `unit_id` / `department_id`，取自 session）；`merge_mode=auto`（默认）时**只在自己可管理的记录里**检测同名案件（不落盘、返回 `duplicate:true + matches`）；`merge_mode=merge` 时并入既有案件（`merge_case` 指定归入的目标案件名）；`merge_mode=new` 时跳过同案提示直接新增 |
-| `GET /api/case-report/records/<rid>` | 单条记录详情 —— 本人或同部门可读，其余 **404** |
-| `PUT /api/case-report/records/<rid>` | 编辑台账记录 `{fields?, source_text?, items?}`（缺省字段保持不变）—— 仅录入人本人或超管（其余 **403**）；保存时同步学习「物品名→类别」 |
-| `PUT /api/case-report/records/<rid>/case` | 修改记录的案件名 `{case_name}`（可新建案件名，或改为既有案件名即并入该案）—— 仅录入人本人或超管（其余 **403**） |
-| `DELETE /api/case-report/records/<rid>` | 删除记录 —— 仅录入人本人或超管（其余 403） |
-| `GET /api/case-report/export` | 按筛选条件（与 `/records` 一致：scope/case/month/from/to/dept/user）导出台账为 Excel（`.xlsx`） |
-| `GET /api/case-report/records/<rid>/download` | 下载单条记录的键值对 JSON 文件（`case-<rid>.json`）—— 本人或同部门可读，其余 404 |
-
-> 解析策略：**仅大模型解析**。未配置 API Key 或调用失败时任务返回 `error`，前端提示用户配置；
-> 已取消本地规则与正则解析（所有要素与缴获明细均由大模型结构化输出，缴获明细为
-> `items: [{category, name, quantity, unit}]`）。
-> 台账以键值对 JSON 一记录一文件保存在数据根目录 `plugins/case-report/data/`
-> （默认 `<用户主目录>\.jztoolshub\plugins\case-report\data\`，已 gitignore）。
-> **主办大队**：只能为 一大队/二大队/三大队（插件目录 `org_units.json` 固化），解析/保存时自动归一到该三值，无法识别置空。
-> **涉案价值**：由大模型解析，原文有则填、无则为空；台账中为空时不显示。
-> **案件名实体对齐**：同一案件可能因写法差异出现不同名称（如 `"2.11"开设赌场案` 与
-> `2.11开设赌场案`）。保存/比较前会规整案件名（去掉引号、书名号、空白）；
-> 入库时自动检测同名案件并提示「并入 / 作为新案件保存」；
-> 台账里可随时修改某条记录的案件名（新建案件或并入既有案件），
-> 「战果汇总」的「涉及 N 起」按案件去重统计。
-> **案件筛选侧边栏**：战果汇总与台账左侧提供「案件」侧边栏（**拼音排序**汇总所有案件），
-> 选中后右侧战果汇总与下方台账联动只展示该案件数据；保存 / 删除 / 改名后侧边栏自动重建
-> 并保持选中（选中案件消失时自动回落「全部案件」）。
-
-**时间规则**：仅写「月/日」（如 8月20日）时自动补当前年份；出现「昨天 / 前天 / 今天」等
-以当前年月日为基准回推；大模型产出的时间统一归一化为「YYYY年M月D日」。
-
-**缴获物品规则**：除在 `fields.缴获物品` 保留原文摘要外，逐项由大模型输出
-`items: [{category, name, quantity, unit}]` 单列存储——如「冰毒500克、涉案手机6部」拆为
-毒品/手机两项；类似物品（如 电脑 / 笔记本电脑 / 台式电脑 / 平板）映射为同一「电脑」类别，
-可在 `GET /api/case-report/aggregate` 中跨记录按数量叠加（重量→克、货币→元，批次「一批/若干」不参与数字累加）。
-
-**类别学习（持久化）**：解析结果先在界面展示为可编辑明细（类别 / 名称 / 数量 / 单位）。
-修改类别后系统自动把「物品名→类别」写入本地类别库
-（数据根目录 `plugins/case-report/data/item_categories.json`，已 gitignore）。
-再次解析时的类别判定优先级：**用户已学习类别 > 大模型判定**；保存记录时也会把最终明细中的类别一并学习。
-
-**notice-board 插件后端接口**（公告板——按可见范围发布 / 修改 / 删除与查看公告）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/notice-board/status` | 依赖自检 |
-| `GET /api/notice-board/config` | 当前用户是否可发布/修改公告（`can_publish`） |
-| `GET /api/notice-board/announcements` | 公告列表 —— 仅返回当前用户可见的公告（单位=同单位 / 部门=同部门且同单位 / 用户=本人；超管可见全部）；条目含 `created_by` / `created_by_name` / `created_at` / `updated_at` / `targets` / `manageable`（可删除）/ `editable`（可修改） |
-| `GET /api/notice-board/latest` | 最新一条可见公告（首页卡片曾用；现卡片内容由插件 `home_card()` 声明） |
-| `POST /api/notice-board/announcements` | 发布公告 `{title, content, targets}` —— 仅管理员角色/超管；归属四字段取自 session；`targets` 为 `[{type: unit\|department\|user, id, uid?}]`（部门需带 `uid`=所属单位） |
-| `PUT /api/notice-board/announcements/<aid>` | 修改公告 `{title, content, targets}` —— 仅管理员角色/超管（须可读该公告）；保留创建归属与 `created_at`，更新 `updated_at`；不可读一律 404 |
-| `DELETE /api/notice-board/announcements/<aid>` | 删除公告 —— 仅创建者或超管；不可读一律 404 |
-
-> 公告以 JSON 一公告一文件保存在数据根目录 `plugins/notice-board/data/`
-> （默认 `<用户主目录>\.jztoolshub\plugins\notice-board\data\`，已 gitignore）。
-> **首页卡片动态声明**：首页插件卡片内容支持两级读取 —— 插件后端提供可选钩子 `home_card()`
-> 时（启动登记、请求时实时求值，可按当前登录用户权限返回动态内容）以声明为准；未提供钩子时
-> 回退读取 `config/tools.json`（name/description）+ `manifest.json`（icon/accent/features）。
-> 公告板 `home_card()` 按当前用户可见范围取最新公告，以「时间 + 标题」首行、换行展示公告内容。
-
-**knowledge-base 插件后端接口**（知识库——管理员上传归档、全员在线只读阅读）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/knowledge-base/status` | 依赖自检（核心功能纯标准库恒 ok；`convert_legacy` 表示旧版格式转换能力：openpyxl/xlrd/python-docx/olefile 齐备；`office_render` 报告 vendor 双引擎可用性与可选 LibreOffice（`office_preview`）） |
-| `GET /api/knowledge-base/config` | 当前用户是否可管理（`can_manage`：管理员角色/超管） |
-| `GET /api/knowledge-base/categories` | 分类树（全部登录用户；按 order + created_at 排序） |
-| `POST /api/knowledge-base/categories` | 新建分类 `{name, parent_id?}` —— 仅管理员；同层重名 409、父分类 404 |
-| `PUT /api/knowledge-base/categories/<cid>` | 改名 / 移动（parent_id 防环：不得指向自身或子孙）/ 排序 —— 仅管理员 |
-| `DELETE /api/knowledge-base/categories/<cid>` | 删除分类 —— 仅管理员；有子分类或文件 409 |
-| `GET /api/knowledge-base/files?category=&q=` | 文件列表（category 递归含子孙分类；q 模糊匹配文件名；按创建时间倒序，含上传人姓名/大小/时间） |
-| `POST /api/knowledge-base/files` | 上传文档（multipart：`file` + `name` + `category_id`）—— 仅管理员；白名单 `pdf/ofd/docx/xlsx/xls/doc/csv/md/markdown/txt`、≤20MB（413）；**旧版 `.doc`/`.xls` 服务端自动转换为 `.docx`/`.xlsx` 后落盘**（依赖缺失/文件损坏 422 明确提示），响应含 `converted_from`，元数据记 `original_ext`；服务端生成 ID 重命名落盘；**原件与渲染件双份保存**（旧版 .doc/.xls 自动转为 .docx/.xlsx） |
-| `PUT /api/knowledge-base/files/<fid>` | 改名 / 移动分类 `{name?, category_id?}` —— 仅管理员 |
-| `DELETE /api/knowledge-base/files/<fid>` | 删除文档（元数据 + 落盘文件）—— 仅管理员 |
-| `GET /api/knowledge-base/files/<fid>/raw` | **内联**读取渲染件（`Content-Disposition: inline`，无 attachment；`conditional=True` 支持 Range/304 供 pdf.js 断点续读）；ID 白名单正则防目录穿越，不可读一律 404 |
-| `GET /api/knowledge-base/files/<fid>/preview` | Office（Word/Excel）预览 JSON `{kind, html, warnings, truncated}`——docx/doc/xlsx/xls 由 vendor 双引擎（dhr/xhr）**按需同步渲染**并缓存 `<id>.preview.json`；失败/引擎缺失/非 Office 类一律 404（前端自动回退 mammoth/SheetJS）——样式还原、连续单页不分页 |
-| `GET /api/knowledge-base/files/<fid>/download` | **附件下载原件**（`download_name` 用 `original_name`，中文名由 Flask 处理 RFC 5987）—— 全体登录用户；Word/Excel 下载的是原始文档 **不是 PDF 版** |
-
-
-> 分类与文件元数据以单库 JSON 保存在数据根目录 `plugins/knowledge-base/data/`
-> （categories.json / files.json，原子写 + 全局锁），上传的文件落盘 `data/files/<id>.<ext>`；
-> 上传后落盘：原件 `<id>.<original_ext>`（下载专用）+ 渲染件 `<id>.docx/.xlsx`
-> （旧版格式转换产物）+ 预览缓存 `<id>.preview.json`（Word/Excel 类，xhr/dhr 双引擎
-> 按需渲染，首阅生成）。
-> 记录含 `created_by / created_by_name / unit_id / department_id` 归属四字段（取自会话）；
-> 预览为按需渲染 + 磁盘缓存，无后台状态字段（旧版 pdf_status/html_status 已废弃）。
-> 阅读为全站公共资源：列表不做单位/部门过滤（`grant_all`），管理操作仅管理员角色/超管。
-> 前端渲染全在浏览器端（pdf.js / easyofd / mammoth / SheetJS / marked，输出过 DOMPurify），
-> 库文件 vendor 于 `frontend/vendor/`（离线内网可用，见其 VENDOR.md）；
-> 无编辑接口；阅读与**下载原件**对全员开放（下载为需求级变更，见优化方案设计文档 §9）。
-> Word/Excel 已生成 PDF 时用 pdf.js 按原样式渲染，否则回退降级渲染（未装 LibreOffice 时体验同前）。
-> 设计文档：`docs/知识库插件-设计文档.md`、`docs/插件库优化方案-设计文档.md`。
-
-**file-filter 插件后端接口**（过滤器——表格脱敏过滤与合规检查）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/file-filter/status` | 依赖自检（openpyxl / xlrd / requests）+ 大模型是否已配置 |
-| `GET /api/file-filter/config` | 读取管理配置（保留字段名单 / 后处理规则 / LLM 配置，api_key 掩码回传，含 `can_manage`） |
-| `POST /api/file-filter/config` | 保存管理配置（keep_columns / post_rules / llm）—— 仅管理员角色/超管 |
-| `POST /api/file-filter/config/test` | 大模型连通性测试 —— 仅管理员 |
-| `POST /api/file-filter/filter` | 上传表格（multipart：`file` + `mode`(hard/llm) + `columns`?），白名单 xlsx/xls/csv、≤20MB；**异步**返回 `task_id`（硬过滤毫秒级也统一走任务轮询） |
-| `GET /api/file-filter/result/<task_id>` | 轮询过滤任务：`status / kept（字段↔匹配名单）/ removed / replace_count / rows / download`；任务归属校验（创建者或超管，其余 404） |
-| `GET /api/file-filter/download/<task_id>` | 下载过滤后文件（csv→csv、xlsx→xlsx、xls→转 xlsx 输出）；task_id 白名单正则防穿越 |
-| `POST /api/file-filter/apply` | **程序化调用接口（供其他插件）**：JSON `{rows, mode, columns?, post_rules?}`（rows 首行为表头）→ `{rows, kept, removed, replace_count}`；同步执行、不落盘；`columns`/`post_rules` 缺省用管理员配置 |
-
-> 过滤流程：硬过滤按名单规整后精确匹配保留列（去 BOM/空白、全角转半角、忽略大小写）；
-> 大模型过滤把全部表头交由大模型与名单做语义关联判断（如「开始时间」↔「时间」），匹配保留、其余删除；
-> 两种模式后统一执行管理员配置的后处理规则（文本/正则替换，作用于表头与单元格，如「开始时间」应用规则「开始」→「时间」）。
-> 任务产物落数据根目录 `plugins/file-filter/.task_cache/`（TTL 30 分钟自动清理）；
-> 管理配置存 `plugins/file-filter/config.json`（含 API Key，已 gitignore）。
-> 其他插件复用过滤能力请走 `POST /api/file-filter/apply`（B-7 禁止 import 其他插件后端模块）。
-> 设计文档：`docs/过滤器插件-设计文档.md`。
-
-**trajectory-sketch 插件后端接口**（轨迹速写——Excel 轨迹表 → 字段过滤 → 轨迹分析 → 速写报告）：
-
-| 接口 | 说明 |
-| --- | --- |
-| `GET /api/trajectory-sketch/status` | 依赖自检（openpyxl / xlrd / requests）+ **过滤器插件可用性** + 算法版本 + 配置提醒 |
-| `GET /api/trajectory-sketch/config` | 读取配置（保留字段名单 / 列映射 / 分析阈值 / 报告文案；含保留字段**别名展开明细**与 `can_manage`） |
-| `POST /api/trajectory-sketch/config` | 保存配置 —— 仅管理员角色/超管 |
-| `POST /api/trajectory-sketch/upload` | multipart `file`（xlsx/xls/csv ≤20MB）→ 暂存原始件 + 调用过滤器插件做**硬过滤预演** + 字段自检；**同步**返回 `{staged_id, filter{kept,removed,rows}, schema{matched,missing_required,can_analyze}, preview, llm_configured}` |
-| `POST /api/trajectory-sketch/analyze` | JSON `{staged_id, mode}`（mode=`hard`/`llm`）→ **异步**返回 `task_id`；前置校验：自检通过、保留名单未变更、llm 模式需过滤器插件已配置大模型 |
-| `GET /api/trajectory-sketch/result/<task_id>` | 轮询 `{status(pending/running/done/error), step, quality, stays, trips, report, clusters, schema, filter, warnings, download}`；任务归属校验（创建者/超管，其余 404） |
-| `GET /api/trajectory-sketch/download/<task_id>` | 下载速写报告 `.xlsx`（5 sheet：速写报告 / 速写摘要 / 停留点 / 出行段 / 数据质量）；task_id 白名单正则防穿越 |
-
-> **流程**：① 上传即做**字段自检**（用过滤器插件对真实表头做硬过滤预演，回显"必需列命中了哪个表头"、
-> 保留/删除字段、过滤后数据预览）；② 用户确认后可切换「大模型辅助判断」开关（默认硬过滤）；
-> ③ 后台线程池执行「调过滤器插件 `/apply` → 轨迹分析引擎 → 写报告工作簿」；④ 轮询取结果并下载。
-> **过滤字段由本插件自己的配置决定**（`filter.keep_columns`，可写规范列名或中文别名，调用前自动
-> 展开为该规范列的**全部别名**再做精确匹配），与过滤器插件的名单解耦。
-> **轨迹分析引擎为可插拔独立包**（`backend/engine/`）：纯 Python 标准库、零 Flask/框架依赖，
-> 输入「过滤后的二维表 + 参数」、输出纯 JSON 结果；算法版本经注册表挂载（当前 `v2`），
-> 后续算法更新只需在 `engine/algorithms/` 下新增版本目录并注册，**不动路由与前端**。
-> 算法参考 `D:\SQLRewrite` 的 v2（基站工参适配：地点簇 → 自适应停留点 → 出行段），
-> 在同一份样本上与其输出**逐项一致**（停留点 3 / 出行段 4，净位移·直线度·回访·判定全部吻合）。
-> 数据落数据根目录 `plugins/trajectory-sketch/`（`config.json` + `.task_cache/`，TTL 30 分钟）；
-> **非超管需同时拥有「轨迹速写」与「过滤器」两个工具权限**（过滤动作经由过滤器插件完成）。
-> 设计文档：`docs/轨迹速写插件-设计文档.md`。
-
-`GET /api/tools` 返回结构示例：
-
-```json
-{
-  "site": { "title": "JZ 工具箱", "subtitle": "...", "footer": "..." },
-  "categories": [{ "id": "dev", "name": "开发者工具" }],
-  "tools": [
-    {
-      "id": "base64",
-      "name": "Base64 编解码",          // ← 来自 config/tools.json（配置为权威来源）
-      "description": "...",             // ← 来自 config/tools.json
-      "icon": "🔐",                     // ← 来自 manifest.json
-      "accent": "#4285F4",              // ← 来自 manifest.json
-      "entry": "index.html",            // ← 来自 manifest.json
-      "features": ["编码", "解码", "UTF-8"],   // ← 来自 manifest.json
-      "category": "开发者工具",
-      "category_id": "dev",
-      "order": 2
-    }
-  ]
-}
+```python
+import sys; sys.path.insert(0, r"D:\JZToolsHub")
+import app as m
+m.init_data_root(); m.setup_access_logging(m.app); m.register_plugin_backends(m.app)
+c = m.app.test_client()
+print(c.post("/api/login", json={"username": "admin", "password": "admin123"}).status_code)
+print(c.get("/api/tools").get_json()["tools"][0]["name"])
 ```
 
----
-
-## 访问日志
-
-系统自动记录所有 HTTP 请求，重点记录**登录用户名、客户端 IP、访问的功能与具体操作**，用于使用统计与安全审计。
-
-- **日志位置**：数据根目录 `logs/access.log`（首次请求时自动创建 `logs/` 目录；默认
-  `<用户主目录>\.jztoolshub\logs\access.log`）。
-- **滚动策略**：按天滚动（`TimedRotatingFileHandler`），保留最近 30 天，过期自动清理。
-- **启用开关**：数据根目录 `config/tools.json` → `site.logging`，默认 `true`；设为 `false` 即停止写日志。
-
-### 日志格式（TAB 分隔，每行一条）
+### 6.2 新增一个纯前端插件
 
 ```
-时间戳		级别		ip=客户端IP	user=登录用户名	method=方法	func=功能标签	op=具体操作	path=路径	status=状态码	cost_ms=耗时	ua=浏览器标识
-```
-
-示例（真实输出）：
-
-```
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=admin	method=POST	func=后端接口: /api/admin/units	op=新增单位	path=/api/admin/units	status=200	cost_ms=8	ua=Mozilla/5.0 ...
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=admin	method=GET	func=API: 工具列表	op=获取工具列表	path=/api/tools	status=200	cost_ms=5	...
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=admin	method=POST	func=后端接口: /api/notice-board/announcements	op=发布公告	path=/api/notice-board/announcements	status=200	...
-2026-08-15 14:04:22,882	INFO	ip=127.0.0.1	user=-	method=GET	func=插件(人物关系立体星图)/frontend/index.html	op=打开插件功能页	path=/plugin/character-graph/index.html	status=200	...
-```
-
-### 字段说明
-
-| 字段 | 说明 |
-| --- | --- |
-| `ip` | 客户端真实 IP；兼容反向代理，优先取 `X-Forwarded-For` 首段 |
-| `user` | 当前登录用户名；未登录为 `-`（登录接口本身记登录者，登录前的匿名请求记 `-`） |
-| `method` | HTTP 方法（GET / POST / …） |
-| `func` | 功能标签，自动解析：`首页` / `API: 工具列表` / `API: 工具详情(工具名)` / `工具壳页(工具名)` / `插件(工具名)/frontend/...` / `后端接口: /api/...` / `静态资源: ...` |
-| `op` | 具体操作标签：优先取插件/路由在请求处理中显式标记（如 `新增单位` / `修改密码` / `发布公告` / `删除共享文档` / `保存战果记录`），未标记时回退为核心路由映射或 `接口调用: 方法 路径` / `打开插件功能页` / `打开工具` 等兜底描述 |
-| `path` | 原始请求路径 |
-| `status` | HTTP 状态码 |
-| `cost_ms` | 请求处理耗时（毫秒） |
-| `ua` | 客户端 User-Agent（截断 120 字符） |
-
-### 插件如何标记具体操作
-
-插件后端可在路由处理器内调用 `set_operation("操作描述")`（从 `jztools_admin.routes` 导入，导入失败时兜底为空操作），访问日志即记录该描述；不标记时框架自动回退到路径/方法兜底，插件**禁止**自行落盘访问日志（规范 B-8，框架统一异步记录）。
-
----
-
-## 并发与性能优化
-
-针对并发评估发现的瓶颈，已完成四项优化（本分支合入 main 的内容）：
-
-### 1. LLM 调用异步化（最大瓶颈）
-
-人物关系星图的长耗时大模型调用**不再占用 HTTP worker 线程**：
-
-- `POST /api/character-graph/analyze` 毫秒级返回 `task_id`，文档解析 + 大模型调用放入后台线程池（`ANALYZE_WORKERS = 2`，见 `plugins/character-graph/backend/routes.py`）。
-- 新增 `GET /api/character-graph/result/<task_id>` 轮询状态（`pending / running / done / error`），任务结果保留 30 分钟自动清理防内存泄漏。
-- API Key 前置校验，避免无效提交白白排入队列。
-
-### 2. gzip 压缩
-
-- HTML / JS / CSS / JSON 等文本响应在客户端声明 `Accept-Encoding: gzip` 时压缩（`app.py` 的 `_compress_response` 中间件），响应附带压缩前大小阈值过滤（<256B 不压缩）。
-- 流式响应（`send_file` 大文件，`direct_passthrough` 模式）跳过压缩，避免序列化错误。
-
-### 3. 静态资源缓存
-
-- `.js/.css/.json/.png/...` → `Cache-Control: public, max-age=86400`（1 天）。
-- `.html` → `no-cache`，配合 ETag 做协商缓存（`_static_cache` 中间件，覆盖 Flask debug 默认的 no-cache）。
-
-### 4. 异步日志
-
-- 日志经内存队列（容量 2000）由后台线程批量落盘（`QueueHandler` + `QueueListener`），HTTP 线程零写盘阻塞；队列满时丢弃最旧日志，防止日志拖垮站点。
-
-### 实测性能参考
-
-| 场景 | 并发 | 总请求 | 成功率 | 平均响应 |
-| --- | --- | --- | --- | --- |
-| 常规读接口 | 200 | 14000 | 100% | 28-49ms |
-| gzip 开启 | 200 | 14000 | 100% | 40-67ms |
-| 压力边界 | 300 | 16800 | 88%（连接排队/拒绝，非应用异常） | — |
-
-> 300 并发以上的上限源于 Flask 开发服务器单进程线程模型。生产部署建议使用 **Gunicorn 多进程 + Nginx 反向代理**（静态资源分发、gzip、负载均衡），可彻底消除该瓶颈。
-
----
-
-## 健壮性与安全
-
-### 安全防护
-
-- **目录穿越拦截**：插件 ID 仅允许 `[A-Za-z0-9_-]`，`send_from_directory` 安全控制路径，`..`、`%2f`、`%5c` 等 6 种穿越变体均已验证拦截。
-- **敏感信息不入库**：`.gitignore` 排除插件运行配置（`plugins/character-graph/backend/config.json`，含大模型 API Key）与运行时文件（`logs/`、`.server.*`、`__pycache__`）。
-- **HTML 转义**：map-marker 等插件对使用者输入进行 XSS 转义。
-
-### 健壮性测试覆盖
-
-已通过 28 项健壮性测试：目录穿越、非法 ID、错误方法（405）、非法 JSON 宽容处理、超长 URL、编码注入、空/坏/超大文件（10MB）、畸形 task_id、20 并发 analyze 无崩溃等，全部通过。
-
-### 已知修复：Windows 跨天日志轮转
-
-- **症状**：服务长期运行跨过午夜后，`TimedRotatingFileHandler` 的 `os.rename` 因文件被占用抛 `WinError 32`（PermissionError），随后日志静默丢失。
-- **修复**：`WindowsSafeTimedRotatingFileHandler`（`app.py`）在改名失败时退回「复制 + 截断」（copytruncate）策略，归档完整、写入不断，跨天零日志丢失。
-
----
-
-## 开发者指南：开发插件
-
-### 7.1 纯前端插件
-
-**最短步骤**：只需两个文件 + 一行配置。
-
-```
-plugins/my-tool/
+plugins/hello/
 ├── manifest.json
 └── frontend/
-    └── index.html        # 随便写什么前端页面
+    └── index.html
 ```
 
-示例 `plugins/my-tool/manifest.json`：
+`manifest.json`
 
 ```json
 {
-  "id": "my-tool",
-  "icon": "🧰",
+  "id": "hello",
+  "version": "1.0.0",
+  "icon": "👋",
   "accent": "#4285F4",
   "entry": "index.html",
-  "features": ["标签1", "标签2"]
+  "features": ["示例"],
+  "form": "source"
 }
 ```
 
-> **工具的「名称 / 说明」不写在这里**，而是写在下文 7.4 的 `config/tools.json` 中 —— 它们是配置驱动的展示项（也可以不回退，直接由后台配置统一管理）。
+在**数据根目录**的 `config/tools.json` 的 `tools` 数组追加：
 
-`frontend/index.html` 就是一个普通网页，可在其中引用**相对路径**的脚本、样式与图片（因为 iframe 的 src 是 `/plugin/my-tool/xxx`，同目录资源会被正确解析）：
-
-```html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>我的工具</title>
-  <script src="./app.js"></script>
-  <link rel="stylesheet" href="./style.css">
-</head>
-<body>
-  <h1>你好，世界</h1>
-</body>
-</html>
+```json
+{ "id": "hello", "name": "你好工具", "description": "第一个示例插件",
+  "category": "dev", "enabled": true, "order": 99 }
 ```
 
-### 7.2 带 Python 后端的插件
+刷新浏览器首页即可看到卡片，**无需重启**（纯前端插件）。
 
-若插件需要文件处理、调用第三方服务等后端能力，在插件目录下新增 `backend/`：
+### 6.3 新增一个带后端的插件
 
 ```
 plugins/my-tool/
 ├── manifest.json
-├── frontend/
-│   └── index.html
+├── frontend/index.html
 └── backend/
-    ├── __init__.py      # 可以为空，标识该目录是 Python 包
-    ├── routes.py        # 必须导出 register(app)
-    └── helper.py        # 该插件私有模块
+    ├── __init__.py          # 空文件，标识 Python 包
+    ├── routes.py            # 必须导出 register(app)
+    └── requirements.txt
 ```
 
-`backend/routes.py` 约定（参考 `plugins/character-graph/backend/routes.py`）：
+`backend/routes.py`
 
 ```python
 from flask import jsonify, request
+import jztools_data
 
-API_PREFIX = "/api/my-tool"
-
-def register(app):
-    """框架启动时自动调用，app 为当前 Flask 实例。"""
-    @app.get(f"{API_PREFIX}/ping")
-    def ping():
-        return jsonify({"ok": True})
-
-    @app.post(f"{API_PREFIX}/echo")
-    def echo():
-        data = request.get_json(silent=True) or {}
-        return jsonify({"you_said": data.get("msg", "")})
-```
-
-注意事项：
-
-- 后端路由应统一挂在自己的前缀（如 `/api/my-tool/...`），避免与其他插件冲突。
-- 同一插件目录内的私有模块使用**相对导入**：`from . import helper`，不要依赖全局包名。
-- 框架以插件 ID 派生独立模块名加载 `backend/routes.py`，不会与其它插件或者与主应用符号互相污染。
-- 插件后端仅在前端页面被调用时才生效；工具禁用时后端也不会被注册（随 `enabled` 配置整体启停）。
-
-### 7.3 插件清单字段说明
-
-`manifest.json` 描述插件**自身**的图标、入口与能力标签（属于「插件自描述」）：
-
-| 字段 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `id` | ✅ | - | 工具唯一标识，**必须与目录名一致**，仅允许 `A-Z a-z 0-9 _ -` |
-| `name` | - | 同 `id` | **可选回退**：`config/tools.json` 未注册名称时使用 |
-| `description` | - | 空 | **可选回退**：`config/tools.json` 未注册说明时使用 |
-| `icon` | - | `🧩` | 卡片图标（Emoji） |
-| `accent` | - | `#4285F4` | 卡片主题色（Hex） |
-| `entry` | - | `index.html` | 前端入口页面，位于 `frontend/` 下 |
-| `features` | - | `[]` | 卡片上的能力标签（字符串数组） |
-
-> 展示用**名称 / 描述**建议统一写在 `config/tools.json`（7.4），manifest 中的这两个字段仅作为插件目录迁移到其他项目时的兜底；若插件后端提供了 `home_card(app)` 主动声明（见 7.4），则以其声明为准（两种方式并存时声明优先）。
-
-### 7.4 注册插件到首页
-
-插件卡片展示内容有两种读取方式（可叠加）：
-
-- **方式一：插件主动声明（请求时动态求值）** —— 插件后端在 `plugins/<id>/backend/routes.py` 中提供可选钩子
-  `home_card()`，主应用启动时登记该钩子，首页 `/api/tools` 请求时于请求上下文内实时调用（可按当前登录用户
-  权限返回动态卡片内容），结果作为首页卡片展示字段的**最高优先级来源**（可覆盖 `config/tools.json` 与
-  `manifest.json` 中的同名项）。声明字段：`name` / `description` / `icon` / `accent` / `features`
-  （缺省字段自动回退到方式二）。示例（`plugins/notice-board/backend/routes.py` 参考实现）：
-
-  ```python
-  def home_card(app=None):
-      """首页卡片内容声明：每次请求时被主程序调用，可依据当前用户返回动态内容。"""
-      card = {"name": "公告板", "icon": "\U0001f4e2", "accent": "#E8710A",
-              "features": ["最新公告", "可见范围发布"]}
-      user = get_session_user()  # 在请求上下文内，可获取当前登录用户
-      if not user:
-          card["description"] = "暂无最新公告。"
-          return card
-      # 动态检索当前用户可见的最新公告，以「时间 + 公告标题」换行展示公告内容
-      latest = fetch_latest_readable(user)
-      card["description"] = (f"{latest['time']} {latest['title']}\n{latest['content']}"
-                             if latest else "暂无最新公告。")
-      return card
-  ```
-
-  > 参考实现：`plugins/notice-board/backend/routes.py`。钩子异常不会阻断插件加载，未提供钩子自动回退方式二。
-
-- **方式二：读取 tools.json（未声明时）** —— 插件未提供 `home_card(app)` 时，按 7.4 下方配置读取。
-
-编辑 `config/tools.json`，在 `tools` 数组中增加一条引用；如需新分类，再在 `categories` 中声明：
-
-```json
-{
-  "site": { "...": "..." },
-  "categories": [
-    { "id": "dev", "name": "开发者工具" },
-    { "id": "mycat", "name": "我的分类" }
-  ],
-  "tools": [
-    {
-      "id": "my-tool",
-      "name": "我的工具",
-      "description": "一句话描述这个工具能做什么",
-      "category": "mycat",
-      "enabled": true,
-      "order": 6
-    }
-  ]
-}
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `id` | ✅ | 插件 ID，与 `manifest.json` 及目录名一致 |
-| `name` | - | **展示名称**（插件 `home_card()` 声明优先；其次配置为权威来源；再回退 manifest，最后回退 `id`） |
-| `description` | - | **卡片说明文字**（插件 `home_card()` 声明优先；其次配置为权威来源；再回退 manifest） |
-| `category` | ✅ | 所属分类 ID（对应 `categories` 中的 `id`） |
-| `enabled` | - | 是否启用，`false` 时首页隐藏且后端不加载 |
-| `hidden` | - | `true` 时不出首页卡片但正常注册后端（核心插件 `admin` 即用此字段；与 `enabled: false` 的区别：后端仍在运行） |
-| `grant_all` | - | `true` 时对**全体登录用户**默认开放（无需逐人授权权限点），适合公告板这类全站基础设施插件；权限校验在 admin 插件的 `get_session_user()` 中并入 |
-| `order` | - | 展示顺序（同分类内按此排序） |
-
-> `categories` 数组每条也支持 `enabled` 字段（`false` 整组下线）。`site` 节支持 `title` / `subtitle` / `footer`（首页文案）与 `logging`（访问日志开关）。
-> **数据根目录注意**：程序运行读取的是**数据根目录**的 `config/tools.json`（首启从程序目录模板复制）；程序目录下的只是模板，升级时按版本合并（见「配置模板自动同步」）。改首页配置请改数据根目录副本（或经后台「编辑位置 / 隐藏工具」操作）。
-
-保存后刷新首页即生效，**无需重启服务、无需改框架代码**。只改 `name` / `description` 即可调整前台展示文案，不动插件目录。
-
-> 注意：若插件已通过 `home_card(app)` 主动声明了 `name` / `description` 等字段（方式一），
-> 该插件卡片将**以声明为准**，此时修改 `tools.json` 中对应字段不会生效；需移除插件中的
-> `home_card()` 钩子后，`tools.json` 才会重新接管（方式二）。
-
-### 7.5 常见约定与注意事项
-
-1. **ID 规范**：`manifest.json` 的 `id`、目录名、`config/tools.json` 中的 `id` 三者必须一致。
-2. **展示名集中管理**：工具在前台展示的**名称 / 说明**统一写在 `config/tools.json`（配置为准）；manifest 中的同名段仅作回退，不建议两处维护不同文案。若插件需要通过代码主动声明卡片内容（动态生成或自描述），请在 `routes.py` 提供 `home_card(app)` 钩子（方式一），此时以声明为准。
-3. **资源隔离**：所有插件文件必须放在 `plugins/<id>/` 下，前端放 `frontend/`，后端放 `backend/`。主框架 `static/` 目录属于框架自身，不要混入插件资源。
-4. **目录穿越防护**：插件 ID 只允许 `[A-Za-z0-9_-]`，`/plugin/<id>/<path>` 由 `send_from_directory` 安全控制，不要用 `..`、`/` 等字符作 ID 或路径。
-5. **相对路径引用**：前端内部引用其他资源一律用相对路径（`./app.js`、`css/style.css`），不要硬编码 `/static/...` 之外的绝对路径。
-6. **改了 JS/CSS 必须递增版本号**：框架对 `/static/` 与 `/plugin/` 下的 `.js/.css/.png` 等静态资源下发 **1 天强缓存**（`Cache-Control: max-age=86400`），而 `.html` 为 `no-cache`。因此每次修改某插件的 JS/CSS 后，必须同步把入口页 `index.html` 里的引用改成 `app.js?v=N+1`（N 递增），否则用户会持续看到旧文件。这是本项目最常踩的坑。
-7. **后端前缀唯一**：多个插件可能同时注册，后端路由建议统一使用 `/api/<插件id>/` 前缀。
-8. **敏感配置**：插件内的高德 Key、大模型 Key 等前端依赖配置建议由插件页面自行管理（如保存到 localStorage），不要写死在仓库文件中。
-9. **自包含交付**：一个插件目录可以从项目复制到另一个 JZToolsHub 项目，配合一段 `tools.json` 配置（含 `name` / `description`）即可完整迁移。
-10. **长耗时操作必须异步化**：预计超过 3 秒的处理（大模型调用、视频转码等）必须采用「提交即返回 `task_id` + 轮询取结果」模式，用有界线程池（参考各插件 `ThreadPoolExecutor(max_workers=2)`）执行，任务结果设 TTL（30 分钟）自动清理。详见《插件设计规范》8.5。
-11. **数据目录混用要过滤**：插件 `data/` 目录内若同时存在业务记录与其他 JSON（如类别库），扫描时必须按结构特征过滤出目标文件，否则会把辅助文件误当记录读入。
-
-### 7.6 插件数据归属规范
-
-凡是插件持久化"用户产生的数据"，必须遵守以下两条铁规矩：
-
-> **规范一（归属标签）**：落盘 JSON 必须含 `created_by` / `created_by_name` / `unit_id` / `department_id` 四个字段（创建时从 `get_session_user()` 取，**不从请求体取**）。
-
-> **规范二（读取必过滤）**：任何返回这些数据的接口，第一步取用户上下文（`get_session_user()`，None 即 401），第二步按以下可见性规则过滤后才允许序列化返回；单条读写按「读=可见性规则、写=本人或超管」控制。
-
-**可见性规则**（记当前用户为 U，一条数据为 X）：
-
-| 数据 | 可见条件（满足其一） |
-| --- | --- |
-| 共享文档 · 单位级 | U 是超管，或 `X.unit_id == u(U)` |
-| 共享文档 · 部门级 | U 是超管，或 `X.department_id == d(U)` |
-| 共享文档 · 私人 | U 是超管，或 `X.created_by == n(U)` |
-| 战果记录（本人视图） | U 是超管，或 `X.created_by == n(U)` |
-| 战果记录（本部门视图） | 本人视图全部 + `X.department_id == d(U)` 且 `X.unit_id == u(U)` |
-| 公告板 | U 是超管，或命中公告 `targets` 中任一目标（单位=同单位 / 部门=同部门且同单位 / 用户=本人） |
-
-**写操作约束**：重命名 / 删除 / 改归属等管理操作仅创建者或超级管理员；协作编辑内容（共享文档内容保存）"可见即可编辑"。
-**公告板例外**：发布与**修改**为管理员角色或超管（修改须可读该公告），删除仍限创建者或超管。
-
-**标准取用样板**：
-
-```python
-from flask import jsonify
-
-try:
+try:                                  # 取当前登录用户（admin 提供，导入失败兜底 None）
     from jztools_admin.routes import get_session_user
 except Exception:
     get_session_user = None
 
+try:                                  # 访问日志操作标签（B-8）
+    from jztools_admin.routes import set_operation
+except Exception:
+    def set_operation(op): pass
 
-def current_user_or_none():
-    if get_session_user is None:
-        return None
-    return get_session_user()
+API_PREFIX = "/api/my-tool"
+DATA_DIR = jztools_data.get_data_root_dir("plugins", "my-tool", "data")
+
+
+def register(app):
+    @app.get(f"{API_PREFIX}/status")
+    def mt_status():                  # ★ 函数名带插件前缀，避免 endpoint 冲突
+        deps = {}
+        try:
+            import openpyxl; deps["openpyxl"] = True
+        except Exception:
+            deps["openpyxl"] = False
+        return jsonify({"ok": all(deps.values()), "dependencies": deps})
+
+    @app.post(f"{API_PREFIX}/echo")
+    def mt_echo():
+        set_operation("回显文本")
+        user = get_session_user() if get_session_user else None
+        data = request.get_json(silent=True) or {}
+        return jsonify({"you_said": str(data.get("msg", ""))[:500],
+                        "by": (user or {}).get("username")})
 ```
 
+登记 `tools.json` 后**重启服务**，访问 `/api/my-tool/status` 验证。
+
+### 6.4 长耗时操作：异步任务模式
+
+预计超过 3 秒的处理（大模型调用、视频转码、大文件解析）必须走「提交即返回 + 轮询」：
+
+```text
+POST /api/<id>/<action>            → 立即返回 {"task_id": "..."}（毫秒级）
+GET  /api/<id>/result/<task_id>    → {"status": "pending|running|done|error", ...}
+```
+
+实现要点：有界线程池（`ThreadPoolExecutor(max_workers=2)`）、任务表加锁、结果 TTL 30 分钟清理、任务归属校验（创建者或超管，其余 404）。
+
+### 6.5 插件之间复用能力
+
+**禁止** import 其他插件的后端模块（规范 B-7）。正确做法是提供并调用程序化 HTTP 接口：
+
+```bash
+# 轨迹速写调用「过滤器」的字段过滤能力
+curl -X POST http://localhost:5000/api/file-filter/apply \
+     -H "Content-Type: application/json" \
+     -d '{"rows": [["姓名","时间","地点"], ["张三","2026-01-01 10:00","A"]], "mode": "hard"}'
+# → {"rows": [...], "kept": ["时间","地点"], "removed": ["姓名"], "replace_count": 0}
+```
+
+### 6.6 运维动作速查
+
+| 动作 | 操作 | 是否重启 |
+| --- | --- | --- |
+| 改名称 / 描述 / 排序 | 编辑数据根目录 `config/tools.json` | 否 |
+| 临时下线 / 恢复 | 该条目 `enabled: false` / `true` | 否 |
+| 按人授权 | 管理后台「人员管理 → 权限」勾选插件 ID | 否（重新登录或刷新会话） |
+| 新增 / 升级插件 | 覆盖目录 → 前端递增 `?v=` → 有后端改动则重启 | 视改动而定 |
+| 卸载插件 | 先删 `tools.json` 条目 → 备份数据 → 再删目录 → 重启 | 是 |
+| 换数据目录 | 后台「系统设置」→ 输入新路径 →「更改并迁移」 | 否（自动迁移） |
+
 ---
 
-## 内置插件一览
+## 7. HTTP API
 
-| 插件 | 分类 | 前端 | 后端 | 后端依赖 | 说明 |
+### 7.1 框架核心接口
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /` | 首页 |
+| `GET /tool/<id>` | 工具外壳页（iframe 宿主） |
+| `GET /plugin/<id>/<path>` | 插件前端静态资源（映射到 `plugins/<id>/frontend/`，目录穿越已拦截） |
+| `GET /api/tools` | 聚合工具列表（站点信息 + 分类 + 工具清单，按权限过滤） |
+| `GET /api/tools/<id>` | 单个工具信息，不存在返回 404 |
+| `POST /api/tools/reorder` | 保存首页布局 `{categories: [分类id…], tools: {分类id: [工具id…]}}` |
+| `GET /api/tools/visibility` | 全部分类与工具及其启用状态（含已隐藏项） |
+| `POST /api/tools/visibility` | 切换启用 `{type: 'tool'\|'category', id, enabled}` |
+
+### 7.2 登录 / 管理后台（admin 插件）
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /login`、`POST /api/login`、`POST /api/logout`、`GET /api/session` | 登录闭环（`logout` 是 **POST**） |
+| `POST /api/account/password` | 自助改密 `{old_password, new_password}`（新密码 ≥6 位） |
+| `GET /admin`、`GET /admin/<module>` | 后台页面（`unit` / `department` / `user` / `settings`） |
+| `GET /api/admin/summary` | 后台总览（各模块记录数 + 当前账号可访问性） |
+| `GET /api/admin/org-tree` | 组织架构树（只读，供业务插件选可见范围） |
+| `GET\|POST /api/admin/data-settings` | 查看 / 修改数据根目录（仅超管） |
+| `GET\|POST /api/admin/units`、`PUT\|DELETE /api/admin/units/<id>` | 单位 CRUD（需 `unit` 权限） |
+| `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门 CRUD（需 `department` 权限） |
+| `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员 CRUD（需 `user` 权限）；密码/身份证/API Key 加密存储 |
+| `GET\|POST /api/admin/permissions`、`PUT\|DELETE /api/admin/permissions/<id>` | 角色 CRUD（已并入人员管理） |
+| `GET /api/admin/batch/<module>/template?format=xlsx\|csv` | 批量导入模板下载（`<module>` = `unit`/`department`/`user`） |
+| `GET /api/admin/batch/<module>/export?format=xlsx\|csv` | 批量导出（`?sensitive=1` 才导出 API Key 明文） |
+| `POST /api/admin/batch/<module>/import` | 批量导入（multipart：`file`、`mode`、`dry_run`、`auto_create_parent`、`on_error`） |
+
+> **权限模型**：账号的 `permissions` = `tools.json` 中的插件 ID 列表。非超管只能访问权限点内的工具（页面 403、API 403、`/api/tools` 自动过滤）。拥有全部管理模块的角色视为超级管理员。`grant_all: true` 的工具对全体登录用户开放。
+> **批量导入**为两步式：先 `dry_run=1` 预览（逐行给出 新增/更新/跳过/错误），确认后再写入；预览与执行共用同一套推演代码，保证「预览所见 = 执行所得」。
+
+### 7.3 各业务插件接口（摘要）
+
+完整逐条清单见 `plugins/<id>/README.md` 与 `docs/` 下对应设计文档。各插件接口统一挂在 `/api/<插件id>/` 前缀下：
+
+| 插件 | 关键接口 |
+| --- | --- |
+| knowledge-base | `/status` `/config` `/categories`(CRUD) `/files`(CRUD) `/files/<id>/raw` `/files/<id>/preview` `/files/<id>/download` |
+| file-filter | `/status` `/config` `/config/test` `/filter` `/result/<task>` `/download/<task>` `/apply`（程序化接口） |
+| trajectory-sketch | `/status` `/config` `/upload` `/analyze` `/result/<task>` `/download/<task>` |
+| shared-docs | `/status` `/documents`(CRUD) `/documents/<id>/content` `/presence` `/rename` `/scope` `/export` `/import` |
+| case-report | `/config` `/config/test` `/status` `/parse` `/result/<task>` `/records`(CRUD) `/aggregate` `/cases` `/months` `/categories` `/export` |
+| character-graph | `/status` `/config` `/prompt` `/analyze` `/result/<task>` |
+| notice-board | `/status` `/config` `/announcements`(CRUD) `/latest` |
+| trajectory-convert | `/config` `/status` `/convert` `/status/<task>` `/download/<task>` `/image/<task>/<i>` `/download-selected` |
+| qr-video-decode | `/status` `/reassemble` `/reassemble/<task>` |
+| info-transfer | `/status` `/formats` `/encode` `/task/<task>` `/encode/<task>/cancel` `/download/<task>` `/image/<task>/<i>` `/frame/<task>/<i>` `/decode` `/decode/<task>` `/export` `/ping` |
+
+---
+
+## 8. 内置插件一览
+
+当前 16 个插件：5 个纯前端、11 个前后端一体（其中 `admin` 为核心插件）。
+
+| 插件 | 分类 | 形态 | 后端依赖 | 默认 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| json-formatter | dev | ✅ | - | - | JSON 格式化 / 压缩 |
-| base64 | dev | ✅ | - | - | Base64 编解码（UTF-8 中文） |
-| color-picker | design | ✅ | - | - | 取色器 |
-| md5-generator | dev | ✅ | - | - | MD5 摘要生成 |
-| map-marker | maps | ✅ | - | - | 高德地图经纬度标点（需自备高德 Key），支持二维码识别还原轨迹、批量导入、按时间移动轨迹回放 |
-| character-graph | ai | ✅ | ✅ | python-docx / pypdf / requests | 上传文档 → 大模型提取人物关系 → 3D 星图展示（线程池 2 + task 轮询） |
-| trajectory-convert | dev | ✅ | ✅ | openpyxl / xlrd / qrcode / opencv / numpy / zfec | Excel 轨迹表 → 时间间隔抽样 → JSON 封装 → 生成二维码视频流，或静态二维码图片（单张/多张） |
-| qr-video-decode | dev | ✅ | ✅ | zfec | 解码二维码视频流，前端 jsQR 逐帧识别 + 后端 zfec 前向纠错重组，恢复原始数据 |
-| info-transfer | office | ✅ | ✅ | qrcode / zfec / opencv-python / numpy / openpyxl | 信息传输：文字 / txt / markdown / 任意文档封装为二维码（静态多张 / QR-transfer 视频流，相机传输模式每码重复 5 帧）；解析先识别信封格式再还原，v2 起 `fmt=file` 原始文件完整传输；配套 Android 离线接收端（见「信息传输与移动端 APP」） |
-| shared-docs | office | ✅ | ✅ | python-docx / openpyxl / xlrd | 多人共同编辑 Word / Excel 文档：实时同步、在线用户、乐观锁版本冲突提示、`.docx` / `.xlsx` 导入导出、单位/部门/私人三级可见 |
-| case-report | office | ✅ | ✅ | requests / openpyxl | 输入收网报告 → 大模型抽取要素 → 键值对 JSON 本地台账（仅大模型解析，主办大队限定一大队/二大队/三大队），跨记录汇总 / 案件筛选 / Excel 导出 |
-| notice-board | office | ✅ | ✅ | - （纯标准库） | 单位/部门/用户可见范围公告：管理员发布与修改、创建者/超管删除，按可见性过滤展示；`grant_all` 全员可见；首页卡片经 `home_card()` 动态声明最新可读公告 |
-| knowledge-base | office | ✅ | ✅ | openpyxl / xlrd / python-docx / olefile（仅旧版格式自动转换，缺失时优雅降级）；**PDF 预览需目标机安装 LibreOffice**（外部程序，非 pip 包，缺失时阅读回退降级渲染） | 知识库：管理员上传 PDF/OFD/Word/Excel/Markdown/文本（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面提示**）并多级分类管理；**Word/Excel 服务端异步转 PDF，阅读按原文档样式展示（pdf.js），原件 + PDF 双份保存**；全员在线只读阅读、复制与**下载原始文档**（纯 JS 前端渲染，无浏览器控件依赖，库文件 vendor 内嵌离线可用）；`grant_all` 全员可见 |
-| file-filter | office | ✅ | ✅ | openpyxl / xlrd / requests | 过滤器：表格文件（xlsx/xls/csv ≤20MB）脱敏过滤与合规检查——硬过滤（按名单精确匹配保留列）/ 大模型过滤（表头语义关联匹配）/ 文本与正则后处理；左右两栏布局（左上传右下载）；`/apply` 接口供其他插件程序化调用 |
-| trajectory-sketch | office | ✅ | ✅ | openpyxl / xlrd / requests | 轨迹速写：上传原始轨迹表（Excel）→ 调用「过滤器」插件做字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析（地点簇 / 自适应停留点 / 出行段）→ 速写报告（页内预览 + 5 sheet Excel）；分析引擎为零依赖可插拔包（纯标准库），非超管需同时拥有「过滤器」权限 |
-| admin（核心） | - | ✅ | ✅ | cryptography / Flask / openpyxl | 登录鉴权 + 会话超时 + 单位/部门/人员/角色管理 + 工具访问拦截 + 数据目录设置 + **单位/部门/人员批量导入导出**（xlsx/csv，两步式预览 + 执行）；`hidden: true`，始终加载 |
+| admin | — | 核心（hidden） | cryptography / Flask / openpyxl | 始终加载 | 登录鉴权、会话超时、单位/部门/人员/角色、工具访问拦截、数据目录设置、批量导入导出 |
+| notice-board | office | 前后端 | 无第三方 | 启用（grant_all） | 按单位/部门/人员可见范围发布公告；`home_card()` 动态卡片 |
+| knowledge-base | office | 前后端 | openpyxl / xlrd / python-docx / olefile（旧版格式转换，缺失优雅降级）；LibreOffice 可选 | 启用（grant_all） | 上传 PDF/OFD/Word/Excel/MD（≤20MB）并多级分类；Word/Excel 由 xhr/dhr 引擎按需渲染预览；原件下载 |
+| file-filter | office | 前后端 | openpyxl / xlrd / requests | 启用 | 表格脱敏过滤：硬过滤 / 大模型语义匹配 / 文本与正则后处理；`/apply` 供其他插件复用 |
+| trajectory-sketch | office | 前后端 | openpyxl / xlrd / requests | 启用 | 轨迹表 → 字段过滤 → 轨迹分析 → 速写报告；分析引擎为零依赖可插拔包 |
+| shared-docs | office | 前后端 | python-docx / openpyxl / xlrd | 启用 | 多人协作编辑 Word/Excel，乐观锁、在线用户、导入导出 |
+| case-report | office | 前后端 | requests / openpyxl | 启用 | 收网报告 → 大模型五要素抽取 → 键值对台账、跨记录汇总、Excel 导出 |
+| character-graph | office | 前后端 | python-docx / pypdf / requests | 启用 | 文档 → 大模型抽取人物关系 → 3D 星图 |
+| info-transfer | office | 前后端 | qrcode / zfec / opencv / numpy / openpyxl（+ 可选 python-docx / xlrd / olefile） | 启用 | 文字/文档封装为二维码（静态多张 / 视频流），解析还原；协议 v2 `fmt=file` 原文件完整传输 |
+| trajectory-convert | dev | 前后端 | openpyxl / xlrd / qrcode / opencv / numpy / zfec | 启用 | Excel 轨迹 → 二维码视频流 / 静态二维码 |
+| qr-video-decode | dev | 前后端 | zfec | 启用 | 二维码视频流逐帧识别 + zfec 纠错重组 |
+| md5-generator | dev | 纯前端 | — | 启用 | MD5 摘要生成 |
+| map-marker | maps | 纯前端 | — | **停用** | 高德地图标点、二维码识别回放、移动轨迹 |
+| base64 | dev | 纯前端 | — | **停用** | Base64 编解码 |
+| json-formatter | dev | 纯前端 | — | **停用** | JSON 格式化 / 压缩 |
+| color-picker | design | 纯前端 | — | **停用** | 取色器 |
 
-> 各后端插件的完整接口清单见上文「HTTP API」各小节；每个插件的依赖声明在各自 `plugins/<id>/backend/requirements.txt`。
+> `ai` / `design` / `maps` 三个分类在当前默认配置下没有启用中的工具（其成员均为停用状态），首页会显示空分类；可在「隐藏工具」中把空分类一并下线。
 
 ---
 
-## 轨迹数据与二维码闭环
+## 9. 典型业务链路
 
-「轨迹转换」「QR 视频流解码」「地图标点」三个插件组成一条完整的**轨迹数据 ↔ 二维码**闭环，数据格式统一为键值对 JSON（`key` 为时间，`value` 为经纬度 `[经度, 纬度]`）。
+### 9.1 轨迹数据 ↔ 二维码闭环
 
 ```
 Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / 静态二维码
@@ -926,358 +568,110 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
                         └──▶ [map-marker] 扫码识别 → 地图标点 + 移动轨迹回放
 ```
 
-### trajectory-convert（轨迹转换）
+数据格式统一为键值对 JSON：`key` = 时间，`value` = `[经度, 纬度]`。
 
-- 上传 `.xlsx` / `.xls` 轨迹表，按后端配置的字段名自动解析（时间 / 经度 / 纬度），按时间间隔抽样。
-- **视频模式（默认）**：将 JSON 切块 + zfec 前向纠错，编码为 QR-transfer 二维码视频流（H.264，浏览器可直接预览），供 qr-video-decode 解码。
-- **静态模式**：输出可直接扫码的静态二维码图片。
-  - 数据能装下时输出**单张 PNG**，内容为完整可读 JSON；
-  - 装不下时**自动按点位拆分多张 PNG** 并打包为 ZIP，每张都是独立可读的 JSON 子集（`{时间: [经度, 纬度]}`），**可直接扫码导入「地图标点」**查看对应片段；页面支持逐张放大预览、勾选部分下载。
-- 后端任务异步执行，前端轮询进度；二维码版本 1-40 可调（版本越大单码容量越大）。
+### 9.2 信息传输与移动端 APP
 
-### qr-video-decode（QR 视频流解码）
+「信息传输」把文字/文档封装为二维码进行**离线传输**，`android-app/InfoParse/` 是配套的 Android 接收端，扫码还原。全程无网络通信。
 
-- 前端 Web Worker 中用 jsQR **逐帧识别**二维码视频帧，收集分块与帧头（序号 / 总帧数 / 纠错参数）。
-- 后端按帧头信息执行 zfec 前向纠错**重组**原始数据，支持进度轮询与结果下载预览。
-- 可与 trajectory-convert 视频模式对接，恢复原始轨迹 JSON；也支持地图标点生成的二维码轨迹回放数据。
-
-### map-marker（地图标点）
-
-- 高德地图输入经纬度标点（需自备高德 Key），支持批量导入、点地图添加。
-- **二维码识别**：上传二维码图片，jsQR 识别并解析轨迹 JSON（兼容 `[{"时间": "经度,纬度"}]`、`{时间: [经度,纬度]}` 等形态），确认后按时间在地图上**标点并生成移动轨迹**。
-- **轨迹回放**：生成轨迹折线与时间标点，进度条可非线性步进，时间压缩让长跨度的轨迹在约 20 秒内播完，支持播放/暂停/进度跳转，播放时同步高亮当前点。
-
----
-
-## 信息传输与移动端 APP（Android）
-
-「信息传输」插件（`plugins/info-transfer/`）把文字、txt、markdown 与任意文档文件封装为二维码进行**离线传输**；`android-app/InfoParse/`（InfoParse APP）是配套的 **Android 离线接收端**，扫码还原内容。整条链路无网络通信——数据靠二维码光学传输，手机与电脑之间无需任何连接。
-
-```
-文字 / 文档 ──▶ [info-transfer 封装] ──▶ 静态二维码（单张 PNG / 多张 ZIP，
-                （二维码版本 1-40）        首页带格式与文件名、续页带页码）
-                                        或 QR-transfer 视频流 MP4（zfec 前向纠错，
-                                          相机传输模式每码连续重复 5 帧）
-                                                        │
-                                                  手机摄像头扫码
-                                                        │
-        原始文本 / 原始文件 ◀── [InfoParse APP 解析还原] ◀┘
-```
-
-### 信封协议（简表）
-
-完整规范见 **《移动端APP.md》** 第 3 章（仓库根目录，★协议契约文档，改协议必须同步修订它）；
-封装端实现以 `plugins/info-transfer/backend/routes.py` 为最终裁定依据。
-
-信封 JSON：`{"jzt": 1, "fmt": ..., "name": ..., "data": ...}`；静态多页拆分加
-`"pg": {"i": 1, "n": 3}`（首页带 `fmt`/`name`，续页省略）。
+信封：`{"jzt":1,"fmt":<fmt>,"name":<名>,"data":<载荷>}`，静态多页加 `"pg":{"i":1,"n":3}`。
 
 | fmt | data | name | 状态 |
 | --- | --- | --- | --- |
-| `text` / `markdown` | 原文 string | 无扩展名基名 | v1 起在用 |
-| `word` / `excel` | 逐段文本 / 二维数组 | 无扩展名基名 | **兼容保留**（封装端不再生成，旧二维码仍可解析） |
-| `file` | 文件字节 base64 | **完整文件名（含扩展名）** | **v2 新增**：原始文件完整传输，样式 / 宏 / 图片与原文件完全一致，导出 / 分享即原文件 |
+| `text` / `markdown` | 原文 | 无扩展名基名 | 在用 |
+| `word` / `excel` | 逐段文本 / 二维数组 | 无扩展名基名 | 兼容保留（旧码可解析） |
+| `file` | 文件字节 base64 | **完整文件名（含扩展名）** | v2 起：原文件完整传输 |
 
-扫码内容判别顺序不可变：`{` 开头 → JSON 信封（有 `pg` → 多页收集器；无 → 信封校验）；
-否则按 base64 帧头 → QR-transfer 视频流收集器。错误文案（《移动端APP.md》3.5）是**逐字契约**，
-桌面端与 APP 端都必须逐字使用。
+判别顺序不可变：`{` 开头 → JSON 信封（有 `pg` → 多页收集器）；否则按 base64 帧头 → 视频流收集器。
+**协议权威定义在根目录《移动端APP.md》**，错误文案是逐字契约；改协议必须四端一文档齐改（桌面后端 + Web 前端 + APP + 《移动端APP.md》）。APP 的构建环境、真机限制与回归清单一并维护在 `HANDOFF.md` 第 9 节。
 
-### InfoParse APP 功能覆盖
+---
 
-| 编号 | 能力 | 状态 |
+## 10. 配置模板同步与数据迁移
+
+### 10.1 为什么需要模板同步
+
+程序目录里的 `config/tools.json`、插件 `prompt.json` / `config.json` 是**随版本迭代的模板**；程序运行时读的是**数据根目录里的运行配置**。早期版本升级只替换程序文件，数据根目录的 prompt 等未更新，导致"新版提示词不生效"。
+
+### 10.2 触发与规则
+
+触发条件：程序目录 `version.json` 的 `app` ≠ 数据根目录 `config/.app_state.json` 的 `last_app`（一致则跳过，幂等）。
+
+| 模板（程序目录 → 数据根目录） | 模式 | 含义 |
 | --- | --- | --- |
-| FR-01 | 相机实时扫码解析（CameraX + ML Kit bundled） | ✅ |
-| FR-01a | 启动即持续识别，自动分流单张信封 / 多页拆分码 / QR-transfer 视频流（同文本去重） | ✅ |
-| FR-02 | 相册导入 PNG/JPG（多选，逐张喂同一收集器） | ✅ |
-| FR-03 | 多页拆分码收集与重组（乱序 / 覆盖 / 进度提示） | ✅ |
-| FR-04 | 结果展示：格式徽标、来源名、文本/表格预览（4000 字符 / 100 行截断）；`file` 格式不预览内容，显示文件名与字节数 | ✅ |
-| FR-05 | 导出到系统「下载」：`.txt` / `.md` / `.csv`(BOM)；旧 word 码重建 `.docx`；`file` 还原原文件 | ✅ |
-| FR-06 | 分享内容 / 文件 | ✅ |
-| FR-07 | 复制全部（excel 为 TSV；`file` 提示改用导出） | ✅ |
-| FR-08 | 多页收集本地暂存（`filesDir/pending_collect.json`，重启可续，「继续收集 / 放弃」框） | ✅ |
-| FR-09 | 二维码视频 MP4 流解析（15fps 步进 + 系统位重组） | ✅ |
-| FR-10 | 解析历史（主页历史卡片，一条结果一个 JSON 文件，长按删除 / 菜单清空） | ✅（v1.1 实现） |
-| FR-11 | 相机视频流采集（扫到 QR-transfer 帧自动进入帧收集，配合桌面端相机传输模式循环播放） | ✅ |
+| `plugins/case-report/backend/prompt.json` | overwrite | 覆盖，旧文件备份 `.bak-old` |
+| `plugins/character-graph/backend/prompt.json` | overwrite | 同上 |
+| `config/tools.json` | merge-tools | 新分类/新工具追加，保留用户启停与排序 |
+| `plugins/*/backend/config.json` | ensure-keys | 只补模板新增键，保留用户 LLM 配置等 |
 
-### 页面架构（三个 Activity，无 Fragment）
+双保险：`install.ps1` 的 `Sync-ConfigTemplates` 在安装时也做等价合并；即使手动替换程序文件夹，app 启动时也会自动同步。
 
-```
-HomeActivity（启动页/LAUNCHER）      ScanActivity（识别页，沉浸式）        ResultActivity（结果页，沉浸式）
-├─ 历史卡片列表(RecyclerView)   FAB→ ├─ 全屏相机预览+亮度渐变顶罩        ├─ 信息卡(格式徽标+统计+说明)
-├─ 空状态引导                        ├─ 底部堆叠:扫码提示胶囊+状态文字     ├─ 内容卡(文本4000字符/excel100行截断)
-├─ 长按删单条/菜单清空历史            ├─ 导入图片(多选)/导入视频按钮       ├─ 底部导航栏:导出/复制/分享文件
-└─ 点卡片→ResultActivity(历史)       └─ insets 避让手势条                └─ 重新扫描(仅非历史入口显示)
-```
+> **新增带模板配置的插件时，必须在两处同时登记**并保持一致：① `jztools_data.py` 的 `_TEMPLATE_SYNC`；② `install.ps1` 的 `Sync-ConfigTemplates`。
+> 用户数据（`admin.json`、`.admin_key`、插件 `data/`、日志）**绝不参与**模板同步。
 
-页面间传信封用内存单例 `ResultStore.current`（避免 Intent 序列化大文本）；识别成功自动写历史
-`filesDir/history/<uuid>.json`（一条结果一个文件）。
+### 10.3 升级 / 换目录
 
-### 技术栈与离线承诺
+1. **旧版（数据在程序目录）升级**：新版首启自动把程序目录的 `admin.json` / `.admin_key` / `logs/` / 各插件 `backend/data|config.json|prompt.json|.task_cache` 迁入数据根目录（幂等，目标已存在不覆盖）。
+2. **整体替换程序文件夹**：数据根目录不动，用户数据不丢。
+3. **管理员换目录**：后台 → 系统设置 → 输入新绝对路径 →「更改并迁移」（按 config/logs/plugins 三个子目录整体搬移，已存在不覆盖，并更新双指针）。
 
-| 项目 | 说明 |
-| --- | --- |
-| 语言 / SDK | Kotlin · minSdk 29 / targetSdk 34 · JVM 17 · Gradle 8.7 |
-| 核心依赖 | CameraX 1.3.4 · ML Kit barcode-scanning 17.3.0（**bundled 离线模型**，不依赖 GMS，国产手机可用）· Material3 1.12.0 · Gson 2.11.0 |
-| 权限 | **仅 CAMERA 一个运行时权限，禁止声明 INTERNET**（《移动端APP.md》1.4 硬约束，勿加） |
-| 单元测试 | 协议层与工具层全覆盖（信封校验 / 多页状态机 / 帧重组 / zfec 测试向量 / CSV）；UI 无自动化测试 |
-
-### 构建运行
-
-- **Android Studio**（Koala+）→ Open `android-app/InfoParse/` → 连接 Android 10+ 真机 → Run。
-- **命令行**：仓库未提交 gradle wrapper 二进制（只有 `gradle/wrapper/gradle-wrapper.properties`），
-  Android Studio 打开一次可自动生成 wrapper，或用本机 Gradle 8.7 直接构建：
-
-  ```bash
-  gradle -p android-app/InfoParse :app:assembleDebug :app:testDebugUnitTest
-  ```
-
-  开发机上的离线构建环境（依赖缓存目录、JDK 版本等）见 **HANDOFF.md 第 8 节**。
-- 产物：`app/build/outputs/apk/debug/app-debug.apk`（约 37MB，含 ML Kit bundled 模型）。
-
-### 测试
-
-1. 运行 `android-app/InfoParse/gen_test_materials.py`（或 `make_video_materials.py`）生成二维码
-   PNG/MP4 素材（`qr_test_materials/`）；
-2. 电脑屏幕显示二维码（调高亮度、关深色模式），手机 10~30cm 扫描；
-3. 用例对照《移动端APP.md》7.2 表 TC-01 ~ TC-15 执行；APP 端回归验证清单见 **HANDOFF.md 第 8 节**。
-
-### 已知边界
-
-- 二期视频缺帧时仅提示重扫：`ZfecCompat`（zfec 兼容 RS 纠错）已实现并通过测试向量，
-  但未接入 `QrFrame.Collector` 的缺帧补齐路径；
-- excel 旧码导出为 `.csv`(BOM)（移动端简化项）；`file` 格式导出原始文件；
-- 大文件注意：`fmt=file` base64 体积 +33%，静态码每张约 20KB、拆分上限 200 页、20MB 上传上限，
-  超出时引导用户改用二维码视频流。
-
-> APP 端的构建环境细节、真机调试限制、踩坑记录与回归清单统一维护在 **HANDOFF.md 第 8 节**；
-> 协议、判别流程与错误文案的权威定义在 **《移动端APP.md》**。
+> 迁移是「移动」而非「复制」。`.admin_key` 与 `admin.json` 必须一起迁，否则无法解密。
 
 ---
 
-## 打包部署（可上线程序）
+## 11. 访问日志
 
-后端以 **PyInstaller 单目录可执行程序** 打包（免安装 Python / 依赖），前端保留源码便于快速修改。
-
-**产物结构**（`deploy\JZToolsHub\`，另附 `JZToolsHub-v1.3.5.zip`）：
-
-```
-deploy\JZToolsHub\
-├─ JZToolsHub.exe      # 后端可执行程序（双击或 start.bat 启动）
-├─ _internal\          # 编译后的 Python 运行时 + Flask + 全部第三方依赖
-├─ static\             # 首页前端源码（可修改，重启生效）
-├─ plugins\            # 插件：frontend/ 前端源码可改；backend/ 后端源码
-├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录后改数据根目录副本）
-├─ docs\  README.md  HANDOFF.md
-├─ start.bat           # 一键启动脚本
-├─ 一键安装.bat         # ★ 一键安装 / 更新（双击运行，自动判断安装或升级）
-├─ 一键卸载.bat         # ★ 一键卸载（含用户数据，双击后确认删除）
-├─ install.ps1         # 安装 / 更新 / 卸载核心逻辑（PowerShell）
-└─ version.json        # 版本号（{app, schema}，用于升级检测与模板同步）
-```
-
-**用户数据（不在程序目录）**：
+- 位置：数据根目录 `logs/access.log`，按天滚动，保留 30 天；开关：数据根目录 `config/tools.json` → `site.logging`。
+- 格式（TAB 分隔，每行一条）：
 
 ```
-<用户主目录>\.jztoolshub\        # 数据根目录（管理员可在「后台 → 系统设置」中修改）
-├─ config\                      # tools.json（工具注册/站点配置，首启从模板复制）
-│   ├─ admin.json               #   管理后台数据（单位/部门/人员/角色，Fernet 加密）
-│   └─ .admin_key               #   加密密钥（与密文同目录迁移）
-├─ logs\                        # 访问日志（按天滚动）
-└─ plugins\                     # 各插件运行数据（data/、config.json、prompt.json、.task_cache/）
+时间戳  级别  ip=客户端IP  user=登录用户名  method=方法  func=功能标签  op=具体操作  path=路径  status=状态码  cost_ms=耗时  ua=浏览器标识
 ```
 
-**使用**：
-1. **全新安装 / 升级**：解压后双击 `一键安装.bat`（自动判断：未安装→完整安装；已安装→停止旧服务、更新程序文件、同步配置模板到用户数据根目录）；
-2. 浏览器访问 `http://<服务器IP>:5000`，默认管理员 `admin` / `admin123`（首启自动生成，请尽快登录后台改密）；
-3. 修改前端：编辑 `static\` 或 `plugins\<id>\frontend\` 下的文件后重启服务即生效；
-4. 端口 / 监听地址可用环境变量覆盖：`JZTOOLS_PORT`、`JZTOOLS_HOST`（默认 `0.0.0.0:5000`）；
-5. **卸载**：双击 `一键卸载.bat` 并输入 Y（将停止服务、删除项目文件与用户数据根目录）。
-
-> `app.py` 已内置 PyInstaller「打包运行」分支（`frozen` 模式自动适配 `BASE_DIR`/静态资源路径，
-> 并以 **waitress** 多线程生产级 WSGI 服务器运行，禁用 debug/reloader）。
-> PyInstaller 经 `JZToolsHub.spec` 显式收集插件后端动态导入的第三方库：
-> `docx / openpyxl / xlrd / qrcode / zfec / cv2 / numpy / pypdf / requests / cryptography / waitress / pystray / PIL`。
-
-> **用户数据默认不在程序目录**（见下节「项目更新与数据迁移」）：管理配置
-> （`admin.json`/`.admin_key`）、访问日志、各插件运行数据均保存在**数据根目录**
-> （默认 `<用户主目录>\.jztoolshub\`），升级程序时只需替换 exe + `_internal\`（或整个文件夹），
-> 用户数据不会丢失。
-
-### 版本迭代发布流程（生成安装 / 更新 / 卸载程序）
-
-安装、更新、卸载脚本的**源文件在仓库根目录**（`install.ps1`、`一键安装.bat`、`一键卸载.bat`）。
-`build-deploy.ps1` 打包时自动把它们与 `version.json` 一并复制进部署包——后续开发者只需维护
-根目录源文件，无需手动同步部署目录。
-
-```powershell
-# 递增版本号并打包（版本号写入 version.json，是目标机配置模板同步的触发依据）
-powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.3.6"
-
-# 可选参数：
-#   -Python "C:\...\Python38\python.exe"   指定打包解释器（默认 PATH 上的 python；
-#                                          产物需兼容 Win7 时必须用 Python 3.8 打包）
-#   -DeployName "JZToolsHub-py38"          指定输出目录名（多版本部署目录共存）
-```
-
-打包脚本依次完成：
-
-1. PyInstaller 按 `JZToolsHub.spec` 打包后端（`JZToolsHub.exe` + `_internal\`）；
-2. 组装 `deploy\JZToolsHub\`：复制 `static/`、`plugins/`、`docs/`、`config\tools.json` 模板，
-   并清理插件运行时数据（`data/`、`config.json`、`__pycache__`、`.task_cache/`）；
-3. **复制根目录 `install.ps1`、`一键安装.bat`、`一键卸载.bat`，写入 `version.json`**；
-4. 生成 `start.bat` 一键启动脚本；
-5. 压缩产出 `deploy\JZToolsHub-v<版本>.zip`（即「一键安装程序」，直接分发）。
-
-> **修改了安装 / 卸载逻辑后必须改根目录源文件并重新打包**：部署包内的脚本是根目录的副本，
-> 直接改部署包里的脚本不会回写仓库，下次打包会被覆盖。
-
-**目标机更新操作（版本迭代后）**：
-
-1. 把新版 `JZToolsHub-v<版本>.zip` 发到目标机，解压到任意目录；
-2. 双击 `一键安装.bat`：自动停止旧服务 → 定位既有安装目录 → 更新程序文件 →
-   同步配置模板（大模型 prompt、tools.json 等）到用户数据根目录 → 重建快捷方式与注册表；
-3. 双击 `start.bat` 启动（首次安装会自动生成数据根目录与默认管理员）；
-4. **发版务必递增 `-Version`**：版本号不变时，`sync_templates()` 判定「未升级」而跳过模板同步，
-   新版 prompt 等配置不会生效。
+- `ip` 兼容反向代理（优先 `X-Forwarded-For` 首段）；`user` 未登录为 `-`；`func` 自动解析（首页 / 工具壳页 / 插件页 / 后端接口 / 静态资源）；`op` 优先取插件显式标记。
+- **禁止记录请求体**（含密码与正文）。插件**禁止**自行落盘访问日志（规范 B-8）；如需具体操作描述，在处理器内调用 `set_operation("发布公告")`。
 
 ---
 
-## 项目更新与数据迁移
-
-**核心原则：用户数据保存在数据根目录（默认 `<用户主目录>\.jztoolshub\`），与程序文件夹分离。**
-
-数据根目录由 `jztools_data.py` 统一管理，可通过指针文件（`<用户主目录>\.jztoolshub.json` 主指针
-+ 程序目录 `config\data_root.json` 备份指针）解析，管理员可在 **管理后台 → 系统设置** 中查看当前目录、
-修改数据目录，修改时自动把旧目录数据整体迁移到新目录。
-
-### 数据根目录内容
-
-| 数据 | 路径（相对数据根目录） | 说明 |
-| --- | --- | --- |
-| 工具注册 / 站点配置 | `config/tools.json` | 首启从程序目录 `config\tools.json` 模板复制，之后改数据根目录副本 |
-| 管理后台数据 | `config/admin.json` | 单位/部门/人员/角色，敏感字段 Fernet 加密 |
-| 加密密钥 | `config/.admin_key` | 与密文同目录迁移，两者必须一起移动 |
-| 访问日志 | `logs/` | 按天滚动，保留 30 天 |
-| 各插件运行数据 | `plugins/<插件id>/` | 共享文档 `data/`、公告板 `data/`、战果录入 `data/`+`config.json`+`prompt.json`、星图 `config.json`+`prompt.json`、轨迹转换 `config.json`+`.task_cache/` 等 |
-
-### 升级步骤（替换整个文件夹时数据不丢失）
-
-1. **停止旧服务**（托盘图标右键「退出服务」）。
-2. **备份**（可选但建议）：确认数据根目录存在且包含所需数据（`<用户主目录>\.jztoolshub\` 或管理员自设目录）。
-3. **替换程序文件夹**：用新版 `deploy\JZToolsHub\` 覆盖旧的程序文件夹（或删除旧文件夹后放入新版）。
-4. **启动新版**：双击 `start.bat`。启动时 `init_data_root()` 自动完成——
-   - 若程序目录中残留旧版用户数据（`config/admin.json`、`logs/`、各插件 `backend/data/` 等），
-     自动迁移到数据根目录（幂等，目标已存在则不覆盖）；
-   - 若数据根目录缺失 `tools.json`，从程序目录模板复制；
-   - **配置模板同步**：对比 `version.json` 与数据根目录 `config/.app_state.json` 记录的上次
-     应用版本，版本变化时把程序目录中的**配置模板**（`prompt.json`、`tools.json`、插件
-     `config.json`）同步进数据根目录（见下文「配置模板自动同步」），保证新版的大模型提示词、
-     新工具等**随版本迭代的配置在升级后立即生效**（这就是旧版本「替换文件后 prompt 未更新」的根治）。
-5. **验证**：登录后台，确认账号、文档、公告、战果等数据完整；打开「系统设置」确认数据目录正确。
-
-### 一键安装 / 更新 / 卸载（推荐）
-
-每次发版用 `build-deploy.ps1` 生成的部署包自带三个入口（见「打包部署」），推荐日常更新直接使用：
-
-- **`一键安装.bat`**（安装 + 更新）：运行 `install.ps1`，自动——
-  1. 停止正在运行的 JZToolsHub 服务；
-  2. 检测是否已安装（注册表 Uninstall 键 / 默认安装目录 `%LOCALAPPDATA%\JZToolsHub`，可用
-     `-InstallDir` 指定其他目录）：已安装→更新到安装目录；未安装→全新安装到默认目录；
-  3. 复制程序文件（排除 `deploy/dist/build/.zcode/__pycache__`）；
-  4. **同步配置模板到用户数据根目录**（与上文启动时自动同步相同的清单与规则，双保险）；
-  5. 写回 `version.json`、注册表卸载信息、开始菜单与桌面快捷方式。
-- **`一键卸载.bat`**：运行 `install.ps1 -Uninstall`，停服务后删除项目文件、**用户数据根目录**、
-  数据目录指针（`<用户主目录>\.jztoolshub.json`）、快捷方式与注册表卸载项；
-  若只想删程序保留数据，可在 PowerShell 中执行 `install.ps1 -Uninstall -KeepData`。
-- 直接在解压目录双击 `start.bat`（或 `JZToolsHub.exe`）也能启动。
-
-**后续开发者如何维护这套脚本**：
-
-- **扩展配置模板同步清单**：新增带 `prompt.json` / `config.json` 模板的插件后，需在
-  **两处同步登记**——① `jztools_data.py` 的 `_TEMPLATE_SYNC`（启动时同步，权威实现）；
-  ② `install.ps1` 的 `Sync-ConfigTemplates`（安装时同步，双保险）。两处的清单须保持一致。
-  优先级：随版本迭代的模板（如 prompt）用 `overwrite`；用户可自定义的（如 LLM 配置）用
-  `ensure-keys`；用户可能在后台改过的（如 tools.json）用 `merge-tools`。
-- **编码约定**：`install.ps1` 必须 **UTF-8 with BOM**（PowerShell 5.1 无 BOM 时按 ANSI 解析，
-  中文注释/输出会乱码）；`一键安装.bat` / `一键卸载.bat` 必须 **GBK/ANSI** 编码（cmd 按系统
-  代码页解析，UTF-8 会导致中文乱码甚至执行错误）；脚本写出的 JSON 一律 **UTF-8 无 BOM**
-  （Python `json.load` 遇 BOM 会报错）。
-- **脚本行为自测**：改动后可先在测试机验证——双击 `一键安装.bat`（全新安装路径）→ 再跑一次
-  （更新路径）→ `一键卸载.bat` 输 Y（卸载路径），确认注册表、快捷方式、数据根目录的建立与清理
-  均符合预期。
-
-### 配置模板自动同步
-
-**背景**：程序目录 `plugins\<id>\backend\prompt.json`、`config\tools.json` 等是「随版本迭代的
-模板」，而程序实际读取的是数据根目录里的运行配置（如 `plugins\<id>\prompt.json`）。早期版本
-升级只替换程序文件，数据根目录里的 prompt 等未更新，导致新版配置（如大模型提示词）不生效。
-
-**机制**（`jztools_data.sync_templates()`，一键安装脚本中也做了等价实现）：
-
-- 同步条件：数据根目录 `config/.app_state.json` 中的 `last_app` 与程序目录 `version.json` 的
-  `app` 不一致时执行一次，执行后更新 `last_app`；版本一致则跳过（幂等，不打扰用户）。
-- 同步清单与规则：
-
-  | 模板（程序目录 → 数据根目录） | 规则 |
-  | --- | --- |
-  | `plugins/case-report/backend/prompt.json` → `plugins/case-report/prompt.json` | **覆盖**，旧文件备份为 `.bak-old` |
-  | `plugins/character-graph/backend/prompt.json` → `plugins/character-graph/prompt.json` | **覆盖**，旧文件备份为 `.bak-old` |
-  | `config/tools.json` → `config/tools.json` | **合并**：新分类/新工具追加，保留用户启停、排序、自定义字段 |
-  | `plugins/case-report/backend/config.json` → `plugins/case-report/config.json` | **补键**：仅补模板新增字段，保留用户 LLM 配置（api_key 等） |
-  | `plugins/character-graph/backend/config.json` → `plugins/character-graph/config.json` | **补键**：同上 |
-  | `plugins/trajectory-sketch/backend/config.json` → `plugins/trajectory-sketch/config.json` | **补键**：同上（保留管理员自定义的保留字段名单 / 列映射 / 阈值 / 报告文案） |
-
-> 用户数据（`admin.json`、`.admin_key`、插件 `data/`、日志）绝不参与模板同步，更新不会丢失。
-> **新增插件需同步模板时**，在 `jztools_data.py` 的 `_TEMPLATE_SYNC` 与 `install.ps1` 的
-> `Sync-ConfigTemplates` 两处同时登记（清单与规则须一致），详见上文「一键安装 / 更新 / 卸载」
-> 的维护说明。
-
-> **旧版（数据在程序目录内）升级**：新版首次启动会把程序目录里的 `admin.json`/`.admin_key`/`logs/`
-> 与各插件 `backend/data/`、`config.json`、`prompt.json`、`.task_cache` 自动搬进数据根目录，
-> 之后即可放心整体替换程序文件夹。首次迁移前请勿删除旧程序目录。
-
-### 管理员修改数据目录
-
-1. 登录后台 → 右上角「⚙️ 设置」→ 系统设置页。
-2. 查看「当前目录 / 默认目录 / 占用空间」。
-3. 输入新的绝对路径 → 点「更改并迁移」：系统把 `config/`、`logs/`、`plugins/` 三个子目录
-   整体迁移到新目录（目标已存在的同名文件/目录不会覆盖），并更新主/备份指针。
-4. 迁移完成后新目录即生效，旧目录中的文件已搬走。
-
-> 修改数据目录会同时移动加密密钥（`.admin_key`）与密文（`admin.json`），保证账号数据可正常解密。
-> 迁移是「移动」而非「复制」，完成后旧目录不再保留原数据（子目录整体搬走）。
-
----
-
-## 故障排查
+## 12. 故障排查
 
 | 现象 | 排查建议 |
 | --- | --- |
-| 首页看不到某个工具 | 检查 `config/tools.json` 中 `enabled` 是否为 `true`、`id` 是否一致；确认数据根目录的 `config/tools.json`（非程序目录模板）已注册该工具 |
-| 改了插件 JS/CSS 后页面没变化 | 静态资源有 1 天强缓存；把入口 `index.html` 里的引用递增版本号（`app.js?v=N+1`），或强制刷新（Ctrl+F5）验证 |
-| 后端接口 404 | 确认插件目录下有 `backend/__init__.py` 与 `backend/routes.py`，且 `register(app)` 已导出；含后端的插件改代码或新装后需**重启服务**（前端无需重启） |
-| 工具卡片点击后显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 对应文件是否存在于 `frontend/` |
-| `/api/tools` 返回但页面空白 | 刷新浏览器缓存；确认 `static/js/main.js` 正常加载 |
-| 登录后接口全部 401 | 会话可能已超时（默认空闲 30 分钟 / 登录满 12 小时，见 `config/admin.json` 的 `session` 节）；重新登录即可 |
-| 轨迹转换报缺依赖 | 确认已安装 `openpyxl / xlrd / qrcode / zfec / numpy / opencv-python`；`GET /api/trajectory-convert/status` 可查看各依赖可用性 |
-| 静态二维码扫描报"缺少时间/经纬度" | 若为多张静态二维码中的一张，其内容是该段的 JSON 子集，可导入地图标点查看对应片段；完整轨迹请用「二维码视频流」模式 |
-| 地图标点空白/地图不显示 | 在「⚙️ 配置」中填写有效的高德 Web 服务 Key 并保存 |
-| 共享文档导入/导出不可用 | 确认已安装 `python-docx / openpyxl`（Word/Excel）与 `xlrd`（.xls）；页面顶部依赖提示会列出缺失项 |
-| 轨迹速写提示「过滤器插件不可用」 | 该插件的字段过滤依赖「过滤器」插件：在首页确认其 `enabled: true`，并在服务器重启后访问 `/api/trajectory-sketch/status` 查看 `filter_plugin.reason` |
-| 轨迹速写自检报「缺少必需字段」 | 在插件页「⚙️ 管理配置」中把缺失字段加入保留字段名单，并在「列映射」里为该表表头补别名（如中文表头「开始时间」→ `BEGINTIME`）后重新上传 |
-| 轨迹速写「大模型辅助」开关灰掉 | 大模型配置由过滤器插件持有：先在其插件页面填写 API 地址 / Key / 模型并测试连通 |
-| 轨迹速写报告里只有「位置变动」没有「有效出行」 | 属正常结论：该数据为基站工参级定位（噪声约百米~公里级），1 公里量级位移不足以判定为确定出行；可在配置中调整有效出行倍数 / 停留半径后重跑 |
-| 端口被占用 | 设置环境变量 `JZTOOLS_PORT` 换端口启动，或先停止旧进程再启动 |
-| 升级后数据不见了 | 确认数据根目录（`<用户主目录>\.jztoolshub\` 或管理员自设目录）未被误删；旧程序目录里的 `admin.json`、插件 `backend/data/` 等会在新版首次启动时自动迁移到数据根目录，升级前请勿删除旧目录 |
-| 登录提示密码错误（升级后） | 升级会连同加密密钥（`.admin_key`）一起迁移；若仅复制了 `admin.json` 而未迁移 `.admin_key`，解密会失败。请在旧程序目录或旧数据根目录中找到 `.admin_key` 一并迁入数据根目录 `config/` 下 |
-| 升级后大模型解析效果没变 | 版本号未递增：`sync_templates()` 以 `version.json` 与数据根目录 `config/.app_state.json` 的版本比对触发模板同步；重新打包时务必传更大的 `-Version` |
-| 首页/后台图标显示异常 | 前端 emoji 图标依赖系统 emoji 字体；框架已内置 SVG 回退（`static/icons/` + `jz-icon.js`）；若浏览器过旧仍异常，请升级浏览器或系统字体 |
+| 首页看不到某个工具 | 检查**数据根目录** `config/tools.json` 的 `enabled` 与 `id` 是否一致；分类是否被 `enabled:false` 整组下线 |
+| 改了插件 JS/CSS 页面没变化 | 静态资源 1 天强缓存；把入口页引用递增为 `app.js?v=N+1` |
+| 后端接口 404 | 确认 `backend/__init__.py` 与 `backend/routes.py`（含 `register(app)`）存在；含后端的插件改动后需重启 |
+| 启动时报 `View function mapping is overwriting an existing endpoint` | 两个插件的路由函数同名；给路由函数加插件前缀（如 `mt_status`），或显式传 `endpoint=` |
+| 卡片点击显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 指向的文件是否存在于 `frontend/` |
+| 登录后接口全部 401 | 会话超时（默认空闲 30 分钟 / 登录满 12 小时）；重新登录 |
+| 轨迹速写提示「过滤器插件不可用」 | 确认 `file-filter` 的 `enabled: true` 并重启服务，再看 `/api/trajectory-sketch/status` 的 `filter_plugin.reason` |
+| 知识库 Word/Excel 预览样式不对 | 确认 Python ≥3.10（引擎要求）；改了引擎或升级 vendor 后需删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` 缓存 |
+| 地图标点空白 | 在插件页「⚙️ 配置」中填写有效的高德 Web 服务 Key |
+| 端口被占用 | 设 `JZTOOLS_PORT` 换端口，或先停旧进程 |
+| 升级后数据不见了 | 确认数据根目录未被误删；旧程序目录里的数据会在新版首启自动迁移，升级前勿删旧目录 |
+| 升级后提示密码错误 | 只复制了 `admin.json` 而未迁移 `.admin_key`；两者必须同目录 |
+| 升级后大模型解析效果没变 | 版本号未递增，模板同步未触发 |
+| 图标显示为方块 | 前端 emoji 依赖系统 emoji 字体；框架内置 SVG 回退（`static/icons/` + `jz-icon.js`），新增插件图标请在该文件登记 |
+
+> **仓库中的 `config/data_root.json` 是开发机产物**（含开发机绝对路径）。克隆到新机器后如发现数据根目录指向他人路径，删除该文件即可回落到默认 `~/.jztoolshub`。
 
 ---
 
-## 后期接入真实后端
+## 13. 开发者约定速查
 
-现阶段 `config/tools.json` 为本地 Mock。接入真实后台时，将 `app.py` 中 `load_registry()` 替换为数据库或远程配置接口即可 —— 前端渲染、插件加载机制、外壳页与 API 结构均无需任何改动。这保证了"配置驱动"的机制可以平滑过渡到真实的运营后台。
+1. **ID 三处一致**：目录名 = `manifest.id` = `tools.json` 的 `id`，仅允许 `[A-Za-z0-9_-]`。
+2. **改了 JS/CSS 必须递增 `?v=N`**：`/plugin/` 下静态资源 1 天强缓存，这是本项目最常踩的坑。
+3. **后端路由统一挂 `/api/<id>/`**，路由函数带插件前缀，避免 endpoint 冲突。
+4. **长耗时必须异步化**（>3 秒）：提交即返回 `task_id` + 轮询；有界线程池 + TTL 30 分钟 + 归属校验。
+5. **数据只写数据根目录**：用 `jztools_data.get_data_root_dir/file()`，禁止拼绝对路径或写别的插件目录。
+6. **归属四字段取自会话**：`created_by` / `created_by_name` / `unit_id` / `department_id`，**禁止**从请求体接收；列表接口必须按可见性过滤（越权读 404、越权写 403）。
+7. **禁止 import 其他插件后端模块**（B-7）；需要复用能力就提供程序化 HTTP 接口（参考 `file-filter` 的 `/apply`）。
+8. **禁止插件自行落盘访问日志**（B-8）；用 `set_operation("描述")` 标记具体操作。
+9. **敏感配置外置**：API Key 写 `backend/config.json`（gitignore）或由用户在页面录入，禁止硬编码入库。
+10. **前端资源用相对路径**；`data/` 与含密钥的 `config.json` 必须 gitignore。
+11. **自包含验收**：把插件目录 + 一段 `tools.json` 注册片段复制到全新部署即可完整工作。
+12. **卸载顺序**：先删 `tools.json` 条目 → 备份数据 → 再删目录（顺序反了会留下悬空引用）。
+
+> 完整条款（B-1~B-21、SEC-1~SEC-11、F-1~F-7、S-1~S-8、M-1~M-3、V-1~V-7）见 **《插件设计规范.md》**。
 
 ---
 

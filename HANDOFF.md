@@ -1,972 +1,413 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
-> 写给一个没有上下文的会话：请先完整读完本文，再动手。
-> 最后更新：2026-09-14（**知识库：阅读页背景卡片改为贴合预览内容宽度**——
-> 用户反馈预览界面背景卡片通栏太宽、两侧大片空白。`.reader-frame` 由固定通栏
-> 改 `width: fit-content` 收缩居中：宽度由预览件实际宽度决定（Word dhr 版心
-> max-width / Excel xhr 表格显式 px 宽 / PDF 画布 / `.paper` 860px 版心），
-> 上限仍为视口宽，老内核回退 `width:auto` 同旧行为。配套：≥600px 视口 520px
-> 最小宽兜底（窄表/加载态）；`.kb-office-word{overflow-x:auto}` 让 Word 超版心
-> 固定宽表格在卡片内横向滚动；`.reader-notice` 限宽 640px 不撑宽卡片。
-> 同日续修（8.7.1）：用户实测「会话开发文档」出现横向滚动条——根因是该 docx
-> 参数表「说明」列的无空格长 token（chat.completion/chat.completion.chunk）把
-> auto 表格列 min-content 撑到 345px、整表超版心 47px。根修 `.kb-office-word`
-> 加 `overflow-wrap:anywhere`（断词且参与 min-content 计算）→ 表格收缩回版心
-> 滚动条根除；`.paper` 同步加防溢出；guard 滚动仅对真正超宽固定表生效。
-> 纯前端 CSS，style.css v24（reader.js/app.js 未动）。浏览器实测全过
-> （详见 `docs/插件库优化方案-设计文档.md` 阶段 8.7/8.7.1）。改动未提交，等用户拍板）。
-> （2026-09-13 **知识库：Office 预览引擎整体替换为 xhr/dhr 双引擎**——
-> 用户指定采用 `D:\TestWorkSpace\xlsx-html-preview` 项目的转换引擎，Word（doc/docx）
-> 与 Excel（xls/xlsx）预览**舍弃原方案**（阶段 2 的 LibreOffice 转 PDF +
-> 阶段 7 的 xlsx_render openpyxl 手绘 HTML）。落地：`backend/vendor/{xhr,dhr}`
-> 零改动拷贝（纯标准库 53 个 .py，dhr 依赖顶层 xhr → sys.path 注入接入）+
-> 适配层 `backend/office_render.py`（XHR_SOFFICE 配置注入/渲染锁/错误码映射）；
-> routes.py 删除 pdf_status/html_status 全套异步状态机与 /pdf、/pdf-retry、
-> /preview-retry 端点，`GET /files/<id>/preview` 改**按需同步渲染 + 磁盘缓存**
-> `<id>.preview.json`（引擎亚秒级：50 页 Word 约 0.25s、实测首渲染 19~70ms），
-> 失败 404 前端自动回退 mammoth/SheetJS；删除清理改为「原件+渲染件+预览缓存+
-> 历史 PDF 残留」。前端 reader.js `renderOffice`（页签接线/TSV 复制）——
-> **实测坑：DOMPurify 整块丢弃 `<style>` 元素**，xhr 的 class 型 CSS 全灭，
-> 解法：摘取 style 块 → 正文过 DOMPurify → CSS 原样挂回（引擎生成静态内容无注入面）；
-> 资源版本 v22/v6/v16。验证：四格式模块渲染（.xls/.doc 经 soffice 归一化/兜底通道）+
-> test_client 全链路 + 浏览器目检全过。改动未提交，等用户拍板。
-> 详见 `docs/插件库优化方案-设计文档.md` 阶段 8）。
-> （2026-09-13 **知识库：Excel 预览弃 PDF 改 Python 手绘 HTML 表格**——
-> 用户反馈 xlsx 转 PDF 预览按打印分页、宽表被切碎不利阅读。新模块
-> `plugins/knowledge-base/backend/xlsx_render.py`（openpyxl 手绘 `<table>`，零新增 pip 依赖；
-> 参考 GitHub Apkawa/xlsx2html 思路重写，修正其主题色丢弃/列宽换算偏窄/字号 11pt 当 11px/
-> 数字格式依赖 babel 四处失真）：还原合并单元格/列宽/行高/隐藏行列/边框/填充（theme+tint）/
-> 字体/对齐/数字与日期显示格式，单 sheet 3000 行/120 列/12 万格/4MB 封顶截断提示，>15MB 直接
-> failed 回退 SheetJS。`routes.py`：Excel 走 `html_status` 异步渲染管线（独立线程池，
-> 与 Word 的 LibreOffice 长任务分池），新端点 `GET /files/<id>/preview`、
-> `POST /files/<id>/preview-retry`，删除扩为四件套，历史 Excel 记录 `pdf_status` 复位 none；
-> Word 类 PDF 预览不变。前端 reader.js 新增表格预览渲染器（页签 + DOMPurify + TSV 复制，
-> 失败自动回退 SheetJS），app.js 角标/轮询双轨适配，资源版本 v21/v5/v15。
-> 验证：格式化矩阵 40+ 用例 + test_client 全链路 + 浏览器目检样式还原全过；
-> 自测脚本 `backend/test_xlsx_render.py`、`backend/test_routes_preview.py` 留存。
-> 改动未提交，等用户拍板。详见 `docs/插件库优化方案-设计文档.md` 阶段 7）。
-> （2026-09-11 **知识库优化方案：全部阶段（0~5）完成，含真实 LibreOffice 端到端验证**——
-> 在前轮（阶段 1~3）基础上本轮新增：
-> ⑥ 引擎安装：`msiexec /a` 非管理员解包 LibreOffice 25.8.7 到 `D:\LibreOffice`（1.5GB），
-> 注册表无 LibreOffice；通过 `<数据根>/plugins/knowledge-base/config.json` 的 `pdf.soffice_path` 显式指定；
-> ⑦ `pdf_convert.py` **改用固定 profile**（`<数据根>/.lo-profile`，实测 37~40s → 15~18s，
-> profile 损坏自动重置重试一次）；`soffice --version` 解包版会挂起，超时压到 10s 兜底；
-> ⑧ 前端轮询上限 20×3s → 60×3s（与 180s 转换超时对齐，避免角标卡「生成中」）；
-> ⑨ **修真实缺陷**：routes.py `pdf_convert` import 缺裸 `import pdf_convert` 兜底，
-> 脚本方式加载（如补偿测试）的实例会永远判定「引擎不存在」置 failed；
-> ⑩ 真机验证：含中文/表格/图片/页眉页脚的 docx → PDF 105KB / 2 页 / 45s 首转 18s 热；
-> 3 sheet xlsx（含 `SUM(E3:E7)=120200` 公式）→ PDF 230KB / 3 页 / 18s；浏览器目视 PDF
-> 在 pdf.js 中渲染，中文无方块、表格边框/红字/列表/页眉/图片/数字格式全保留；
-> 重启补偿 ok；全链路测试 **16/16 通过**（`%TEMP%\kb_phase4_smoke.py`）。
-> 改动未提交，等用户拍板）。
-> （2026-09-11 **插件库优化方案设计定稿**——
-> `docs/插件库优化方案-设计文档.md`：Word/Excel 上传转 PDF 预览（LibreOffice headless 主选 +
-> 探测降级链）、原件+降级件+PDF 三件套存储、全类型下载（Word/Excel 下载给原件）、
-> 异步转换管线；实施按该文档 §12 TODO 断点续作）
-> （2026-09-11 **知识库插件：旧版 .doc/.xls 上传自动转换**——新模块
-> `plugins/knowledge-base/backend/doc_convert.py`（纯 Python：olefile 解析 Word 二进制 FIB/CLX +
-> python-docx 重建 / xlrd+openpyxl 重建表格，不依赖 WPS/Office COM——服务账户与无 Office 机器可用）；
-> 上传白名单加 `.doc`，转换后落盘（库内只留 docx/xlsx），元数据记 `original_ext`，
-> 页面三处提示：上传 Snackbar / 卡片"已转换"角标 / 阅读页可关闭说明条；依赖缺失优雅降级
-> （`/status` 返回 `convert_legacy`，上传 422 明确提示）；端到端测试 + 真机浏览器走查通过，
-> 本轮改动未提交，详见 `docs/知识库插件-设计文档.md` §11 阶段 6）
-> （2026-09-11 **打包上线 v1.6**——`deploy/JZToolsHub/` 已重生、生成 `deploy/JZToolsHub-v1.6.zip`
-> （约 102 MB）；二进制用 Python 3.14 + PyInstaller 6.22.2 + numpy 2.5 + opencv 5.0 等打包，
-> 隔离 venv 在 `C:\Users\yfjz\.workbuddy\binaries\python\envs\build-314`；用「源码 + waitress」
-> 启动 `app.py` 验证了登录 / 模板下载 / CSV 导出 / 导入预览（dry_run）/ 真实写盘 API 全链路
-> 通过。所有临时数据根（`C:\Users\yfjz\AppData\Local\Temp\test_v16*`）、pointer 文件
-> （`~/.jztoolshub.json`）已还原到生产路径，用户零感知改动）
-> （2026-09-11 管理后台新增**单位/部门/人员 批量导入导出**——新模块
-> `plugins/admin/backend/batch_io.py`（同包子模块，依赖注入挂载，不反向 import routes.py），
-> 三页头部各加「下载模板 / 导出 / 批量导入」；导入为**两步式**（`dry_run=1` 预览逐行结果 → 确认写入，
-> 预览与执行共用同一推演代码，保证「预览所见=执行所得」）；支持 xlsx/csv、三种导入模式、
-> 上级组织自动创建、留空=不修改 / `-`=清空的字段语义、超级管理员防降权护栏；
-> **并对单元格格式做了系统加固**：合并单元格自动补全、表头不在首行/多工作表/多分隔符自动识别、
-> 数字型长数字丢精度与「公式无缓存值」阻断并给出修法、全角与不可见字符归一化（详见 §4.5）；
-> 设计文档 `docs/管理后台批量导入导出-设计文档.md`；后端 67 项 + 格式 64 项冒烟、
-> 73 次模糊请求 0 个 5xx、浏览器实测通过）
-> （2026-09-11 新增「轨迹速写」插件 `plugins/trajectory-sketch/`——Excel 轨迹表 →
-> 调用「过滤器」插件完成字段过滤（默认硬过滤，可切大模型辅助）→ 轨迹分析 → 速写报告；
-> 内置**零依赖可插拔分析引擎** `backend/engine/`（纯标准库，参考并逐项对拍 `D:\SQLRewrite` 的 v2：
-> 停留点 3 / 出行段 4，净位移·直线度·回访·判定完全一致）；设计文档
-> `docs/轨迹速写插件-设计文档.md`，插件 README 在插件目录内，本轮改动未提交）
-> （2026-09-10 新增「过滤器」插件 `plugins/file-filter/`——表格脱敏过滤与合规检查：
-> 硬过滤 / 大模型语义匹配过滤 / 文本与正则后处理；`POST /api/file-filter/apply` 程序化接口供其他插件；
-> 设计文档 `docs/过滤器插件-设计文档.md`，本轮改动未提交）（2026-09-09 v1.5 上线打包：战果录入优化——入库时间不再展示/时间筛选改按战果时间 fields.时间/主办人默认空/大模型配置防浏览器自动填充/新增手动录入卡片/返回落点修正/单位换算修复（吨/千克/毫克/大写 T-KG-G）；
-> v1.4 上线打包：双模式精简/原件传输+zlib 压缩+多文件封装+停止按钮+APP 1.4 签名包；§5.1 升级演练要点）（并入移动端 APP（android-app/InfoParse）交接内容与 info-transfer 插件登记；
-> android-app 子目录原 README/HANDOFF 已删除，移动端内容统一收敛到本文件第 8 节；
-> 另：G2 连续曲率圆角引擎在「G2改造」分支（a8c9834，jz-radius v1.2+基准页+设计文档），未并入 main，打包不含）
+> 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
+> 最后更新：2026-09-14（文档全面重写：同步 git 实际状态、合并移动端章节、重排踩坑清单）。
+> 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
+> `20260914评估报告.md`（插件规范符合性与项目问题清单）。
 
 ---
 
-## 1. 这个项目是什么
+## 目录
+
+1. [项目定位与架构速记](#1-项目定位与架构速记)
+2. [当前开发状态](#2-当前开发状态)
+3. [已完成事项](#3-已完成事项)
+4. [待办清单](#4-待办清单)
+5. [关键架构决策](#5-关键架构决策)
+6. [已知问题](#6-已知问题)
+7. [踩坑清单（按主题分类）](#7-踩坑清单按主题分类)
+8. [插件后端速查表](#8-插件后端速查表)
+9. [移动端 APP（android-app/InfoParse）](#9-移动端-appandroid-appinfoparse)
+10. [文档同步约定与快速命令](#10-文档同步约定与快速命令)
+
+---
+
+## 1. 项目定位与架构速记
 
 `D:\JZToolsHub` 是一个 **Flask + 配置驱动的插件化工具箱**（"一切皆插件"）：
 
-- 主应用 `app.py` 启动时扫描 `plugins/<插件id>/`，注册插件后端路由到同一 Flask 应用。
-- 插件前端放在 `plugins/<id>/frontend/`，通过 `/plugin/<id>/<path>` 静态访问。
-- 工具清单由 `config/tools.json` 声明（name/description/category/order/enabled/hidden/grant_all）。
-- 管理后台（`admin`）是**核心基础设施插件**：登录鉴权、会话超时、单位/部门/人员/权限管理、
-   工具访问控制、Fernet 加密存储，始终加载、不随 enabled 启停。
-- `README.md` 有完整架构说明与 HTTP API 表，改完功能记得同步它；`插件设计规范.md` 是插件开发铁律。
-- **移动端 APP**（`android-app/InfoParse/`，Kotlin，info-transfer 插件的 Android 离线接收端）：
-  功能/协议/构建运行见 README「信息传输与移动端 APP（Android）」章节，**交接细节见本文件第 8 节**；
-  协议权威定义在仓库根目录《移动端APP.md》。
+- 主应用 `app.py` 启动时扫描 `plugins/<插件id>/`，把插件后端路由注册进同一个 Flask 应用；
+- 插件前端在 `plugins/<id>/frontend/`，经 `/plugin/<id>/<path>` 静态访问，以 iframe 嵌入外壳页 `/tool/<id>`；
+- 工具清单由 `config/tools.json` 声明（name / description / category / order / enabled / hidden / grant_all）；
+- 管理后台（`admin`）是**核心基础设施插件**：登录鉴权、会话超时、组织架构、权限、Fernet 加密、批量导入导出，始终加载、不随 `enabled` 启停；
+- 移动端 `android-app/InfoParse/`（Kotlin）是 `info-transfer` 插件的 Android 离线接收端，协议权威定义在仓库根目录《移动端APP.md》。
 
-### 1.1 架构速记（改代码前先看这里）
+### 1.1 启动时序
 
-**启动时序**（app.py `__main__`）：
-`init_data_root()`（迁移旧数据 → 解析数据根目录 → `sync_templates()` 模板同步）→
-`setup_access_logging()`（异步日志队列）→ `register_plugin_backends()`（先无条件加载 admin，再按
-tools.json 的 `enabled` 逐个加载其余插件后端）→ 启动 HTTP 服务。
+```
+python app.py
+  → init_data_root()              迁移旧数据 → 解析数据根目录 → sync_templates() 模板同步
+  → setup_access_logging(app)     异步访问日志（队列 2000 + 后台线程落盘）
+  → register_plugin_backends(app) 先无条件加载 admin，再按 tools.json 的 enabled 逐个加载
+  → 监听 0.0.0.0:5000             源码=Flask debug 服务器；打包=waitress 8 线程
+```
 
-**请求拦截管线**（admin 插件 `register()` 注册的 4 个 before_request，按序执行）：
+### 1.2 请求拦截管线（admin 注册的 4 个 before_request，按序）
+
 1. `make_session_guard`：空闲 30 分钟 / 绝对 12 小时超时登出，活跃滑动续期；
-2. `_enforce_login`：白名单（/login、/api/login、/api/logout、/api/session、/favicon.ico、
-   /static/、/plugin/admin/css|js）之外一律要求登录（页面 302，API 401）；
+2. `_enforce_login`：白名单之外一律要求登录（页面 302 → `/login`，`/api/*` 401）；
+   白名单 = `/login`、`/api/login`、`/api/logout`、`/api/session`、`/favicon.ico` + 前缀 `/static/`、`/plugin/admin/css/`、`/plugin/admin/js/`；
 3. `_protect_admin_ops`：首页布局写操作需登录；
 4. `_enforce_tool_access`：非超管按权限点拦 `/tool/<id>`、`/plugin/<id>/...`、`/api/<插件id>/...`。
 
-**关键单例/全局**：
-- `app.py`：`DATA_ROOT/CONFIG_PATH/LOG_DIR`（init_data_root 后指向数据根目录）、
-  `_plugin_home_card_hooks`（home_card 钩子表）、`_tool_meta_cache`（日志解析用 2s TTL 缓存）。
-- `jztools_data.py`：`get_data_root()` 双指针解析（主指针 `~/.jztoolshub.json` 优先，
-  备份指针 `<程序目录>/config/data_root.json`）；`_TEMPLATE_SYNC` 模板同步清单；
-  `_LEGACY_MAP` 旧版数据迁移映射。
-- admin：`ADMIN_CONFIG_PATH`（数据根目录 config/admin.json）、`_fernet`（懒加载）、
-  `_registered_tool_ids()` / `_grant_all_tool_ids()`（权限点全集 / grant_all 全集）。
+### 1.3 关键单例与全局
 
-**tools.json 特殊字段**：`hidden: true`（不出卡片但注册后端，admin 用）、
-`grant_all: true`（全体登录用户默认可用，notice-board 用）、`enabled: false`（下线且后端不加载）。
-
-**环境变量**：`JZTOOLS_HOST`（默认 0.0.0.0）、`JZTOOLS_PORT`（默认 5000，解析失败回落 5000）。
-
-## 2. 当前 git 状态
-
-- 分支：`main`，最新提交 `7269cb8`（v1.4 功能全集：info-transfer 双模式精简/原件传输、
-  zlib 压缩信封、多文件封装、封装停止、格式白名单；InfoParse APP 深色模式、
-  XlsxWriter/Zlib 还原、卡片打开、版本 1.4）。
-- 工作区剩余未提交：`install.ps1` 桌面快捷方式判空修复、`HANDOFF.md` 本节更新、
-  `app/build.gradle.kts`（APP 版本 1.4 + release 签名）、`release.keystore`（APP 签名密钥）。
-  2026-09-11 追加未提交：管理后台批量导入导出（`plugins/admin/backend/batch_io.py` 新增、
-  `routes.py` / `requirements.txt` / `manifest.json` / `frontend/js/admin-common.js` /
-  `admin-{unit,dept,user}.js` / `admin-{unit,department,user,}.html` / `css/admin.css` ，
-  详见 §4.5）、`docs/管理后台批量导入导出-设计文档.md`、`README.md`、本文件。
-  2026-09-11 追加未提交：`plugins/trajectory-sketch/`（新插件整目录）、
-  `docs/轨迹速写插件-设计文档.md`、`config/tools.json` 与数据根目录副本（登记新工具）、
-  `jztools_data.py` 与 `install.ps1`（新增插件配置模板同步登记）、`README.md`、本文件。
-  2026-09-11 追加未提交：知识库插件旧版 `.doc`/`.xls` 上传自动转换（详见 `docs/知识库插件-设计文档.md` §11 阶段 6）：
-  新增 `plugins/knowledge-base/backend/doc_convert.py`（olefile+python-docx / xlrd+openpyxl 纯 Python，
-  不依赖 WPS/Office COM——服务账户与无 Office 机器可用），改 `routes.py`（白名单加 `doc`、
-  上传时转换后落盘、`original_ext` 元数据、`/status` 自检 `convert_legacy`）、
-  改 `frontend/app.js` + `frontend/index.html` + `frontend/style.css`（上传 Snackbar + 卡片角标 + 阅读页可关闭说明条三处提示）、
-  `backend/requirements.txt`（声明四个新依赖：openpyxl / xlrd / python-docx / olefile）、
-  `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md` / 本文件。
-  2026-09-11 追加未提交（**知识库优化方案实施**，《插件库优化方案-设计文档》阶段 1~3）：
-  新增 `plugins/knowledge-base/backend/pdf_convert.py`；改 `routes.py`（三件套存储、下载端点、
-  `/pdf` 与 `/pdf-retry` 端点、`/status` 的 `pdf_engine`、异步转换管线、启动补偿、删除三件套）、
-  改 `backend/requirements.txt`（说明 PDF 预览依赖外部 LibreOffice，非 pip 包）、
-  改 `frontend/reader.js` + `frontend/app.js` + `frontend/index.html` + `frontend/style.css`
-  （pdf.js 预览短路、下载按钮、状态角标、轮询、提示条；资源版本 v20/v4/v14）、
-  `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md` /
-  `docs/插件库优化方案-设计文档.md` / 本文件。
-  2026-09-11 追加未提交（仅设计文档）：`docs/插件库优化方案-设计文档.md`（知识库 Word/Excel 转 PDF
-  预览 + 全类型下载的实施方案，含分阶段 TODO；**代码部分已在上一行条目中实施**）。
-  2026-09-13 追加未提交（**Excel 表格 HTML 预览**，《插件库优化方案-设计文档》阶段 7）：
-  新增 `plugins/knowledge-base/backend/xlsx_render.py` + 自测脚本 `test_xlsx_render.py` /
-  `test_routes_preview.py`；改 `routes.py`（PDF_SOURCE_EXTS 收窄为 Word、XLSX_SOURCE_EXTS 新增、
-  html_status 管线、/preview 与 /preview-retry 端点、删除四件套、迁移复位 Excel 的 pdf_status、
-  /status 报 xlsx_render）、`frontend/reader.js`（renderSheetHtml + 分派改造）、
-  `frontend/app.js`（previewStatus/Pending/Ready 辅助 + 角标/轮询/提示条/上传提示）、
-  `frontend/style.css`（.kb-xlsx-table 网格线/兜底字体）、`frontend/index.html`（v21/v5/v15）、
-  `backend/requirements.txt`（openpyxl 注释补表格预览用途）、`.gitignore`（backend/out/ 测试产物）、
-  `README.md` / `plugins/knowledge-base/README.md` / `docs/知识库插件-设计文档.md`（阶段 8）/
-  `docs/插件库优化方案-设计文档.md`（阶段 7）/ 本文件。
-  2026-09-13 追加未提交（**Office 预览引擎替换为 xhr/dhr 双引擎**，《插件库优化方案
-  -设计文档》阶段 8）：新增 `plugins/knowledge-base/backend/vendor/{xhr,dhr}/`（引擎
-  原样拷贝 + README）、`backend/office_render.py`（适配层）、`backend/_build_phase8.py`
-  （目检页生成器）；**删除** `backend/pdf_convert.py`、`backend/xlsx_render.py`、
-  `backend/test_xlsx_render.py`；改 `routes.py`（删状态机与 /pdf、/pdf-retry、
-  /preview-retry，/preview 改按需渲染+缓存，`_migrate_files` 精简，删除清理改四件）、
-  `backend/requirements.txt`（LibreOffice 注释改窄路径可选）、`frontend/reader.js`
-  （renderOffice + style 摘取挂回 + 页签接线）、`frontend/app.js`（删轮询/角标/提示
-  pending 分支）、`frontend/style.css`（删手绘样式，增 .kb-office）、
-  `frontend/index.html`（v22/v6/v16）、`README.md` / `plugins/knowledge-base/README.md` /
-  `docs/知识库插件-设计文档.md`（阶段 9）/ `docs/插件库优化方案-设计文档.md`（阶段 8）/ 本文件。
-- 打包产物（不入库，gitignore）：`deploy/JZToolsHub-v1.4.zip`、`deploy/InfoParse-v1.4.apk`。
-
-## 3. 内置插件一览
-
-| 插件 | 目录 | 类型 | 依赖 | 说明 |
-| --- | --- | --- | --- | --- |
-| 管理后台 | `plugins/admin/` | 前后端一体（核心） | cryptography / Flask / openpyxl | 登录鉴权、单位/部门/人员/角色权限、工具访问拦截、Fernet 加密、会话超时、单位/部门/人员批量导入导出（见 §4.5） |
-| 公告板 | `plugins/notice-board/` | 前后端一体 | 无第三方 | 管理员发布/修改/删除公告，树状可见范围，首页卡片动态声明（`home_card()` 钩子） |
-| 知识库 | `plugins/knowledge-base/` | 前后端一体 | 后端标准库；前端渲染库 vendor 在 frontend/vendor/；**Office 预览引擎** vendor 在 backend/vendor/（xhr/dhr，纯标准库）；**旧版格式转换**：openpyxl/xlrd/python-docx/olefile（缺库优雅降级）；LibreOffice（外部程序）仅 .xls 高保真/.doc 归一化两条窄路径可选 | 管理员上传 PDF/OFD/Word/Excel/MD（≤20MB，**旧版 `.doc`/`.xls` 自动转 `.docx`/`.xlsx` 并在页面三处提示**）+ 多级分类树；**Word/Excel 预览由 xhr/dhr 双引擎按需渲染 + 磁盘缓存（`GET /preview`，连续单页不分页，失败回退 mammoth/SheetJS，无后台状态机）；上传后落盘原件 + 渲染件 + 预览缓存，全员可下载原始文档**；`grant_all`；设计文档 `docs/知识库插件-设计文档.md`（基线）+ `docs/插件库优化方案-设计文档.md`（阶段 8 = 引擎替换） |
-| 过滤器 | `plugins/file-filter/` | 前后端一体 | openpyxl/xlrd/requests | 表格脱敏过滤与合规检查：硬过滤（名单精确匹配保留列）/ 大模型过滤（表头语义关联，OpenAI 兼容接口）/ 文本与正则后处理；异步任务（ThreadPoolExecutor 2 + TTL 30min + 归属校验）；`POST /apply` 程序化接口供其他插件（JSON rows in/out，不落盘）；设计文档 `docs/过滤器插件-设计文档.md` |
-| 轨迹速写 | `plugins/trajectory-sketch/` | 前后端一体 | openpyxl/xlrd/requests | Excel 轨迹表 → 调「过滤器」`/apply` 做字段过滤（默认硬过滤，开关切大模型辅助）→ 轨迹分析（地点簇/自适应停留点/出行段）→ 速写报告（页内 + 5 sheet Excel）；**分析引擎 `backend/engine/` 为零依赖可插拔包**（纯标准库、零 Flask 依赖、算法版本走 registry），对拍 `D:\SQLRewrite` v2 逐项一致；两段式流程（上传即字段自检 → 确认后异步分析）；`/upload` 同步、`/analyze` 异步（线程池 2 + TTL 30min + 归属校验）；**非超管需同时拥有「过滤器」权限**；设计文档 `docs/轨迹速写插件-设计文档.md` |
-| 共享文档 | `plugins/shared-docs/` | 前后端一体 | python-docx/openpyxl/xlrd | 多人协作编辑 Word/Excel，乐观锁版本冲突，在线用户，导入/导出 Office |
-| 战果录入 | `plugins/case-report/` | 前后端一体 | requests | 收网报告→大模型五要素键值对台账（仅大模型解析），缴获物品明细结构化输出、跨记录汇总、主办大队限定一大队/二大队/三大队 |
-| 人物关系立体星图 | `plugins/character-graph/` | 前后端一体 | python-docx/pypdf/requests | 上传文档→LLM 提取人物关系→3D 星点图（后台线程池 + task_id 轮询） |
-| 轨迹转换 | `plugins/trajectory-convert/` | 前后端一体 | openpyxl/xlrd/qrcode/opencv/numpy/zfec | Excel 轨迹→二维码视频流 / 静态二维码 ZIP |
-| QR 视频流解码 | `plugins/qr-video-decode/` | 前后端一体 | zfec | jsQR 逐帧扫码 + zfec 纠错重组 |
-| 信息传输 | `plugins/info-transfer/` | 前后端一体 | qrcode/zfec/opencv/numpy/openpyxl | 文字/文档封装为二维码（静态多张 / QR-transfer 视频流，相机传输模式每码重复 5 帧）+ 解析还原；协议 v2 `fmt=file` 原始文件完整传输；配套 Android 接收端（见第 8 节），协议规范《移动端APP.md》 |
-| 地图标点 | `plugins/map-marker/` | 纯前端 | — | 高德地图标点、二维码识别回放、移动轨迹 |
-| Base64 / JSON 格式化 / 取色器 / MD5 | `plugins/{base64,json-formatter,color-picker,md5-generator}/` | 纯前端 | — | 示例/基础工具（tools.json 中 `enabled` 控制显隐） |
-
-## 4. 最近一次功能：数据目录可配置化（`1c4ddb3`）
-
-**目标**：系统数据（管理配置 / 日志 / 各插件运行数据）默认保存到计算机用户目录，管理员可改，
-更换数据目录后自动迁移旧数据 —— 整体替换程序文件夹升级时用户数据不丢失。
-
-### 数据根目录（`jztools_data.py`）
-
-- 默认 `<用户主目录>\.jztoolshub\`，指针双写：主指针 `~\.jztoolshub.json`（用户目录，替换程序文件夹后仍可找到）+
-  备份指针 `<程序目录>/config/data_root.json`。
-- 布局：`config/`（tools.json / admin.json / .admin_key）、`logs/`、`plugins/<id>/`（data / config.json / prompt.json / .task_cache）。
-- 关键函数：`get_data_root()` / `get_data_root_dir()` / `get_data_root_file()` / `migrate_legacy_app_data()`（启动迁移旧版程序目录数据）/
-  `migrate_data_root()`（换目录迁移）/ `set_data_root()` / `data_usage_summary()`。
-- **启动顺序（app.py `__main__`）**：`init_data_root()`（先 `migrate_legacy_app_data()` 再重算 CONFIG_PATH/LOG_DIR）→
-  `setup_access_logging()` → `register_plugin_backends()`。
-
-### 改动面
-
-- **app.py**：`init_data_root()` 迁移旧数据 + 重算 `CONFIG_PATH/LOG_DIR/LOG_FILE`。
-- **admin 插件**：`CONFIG_PATH/ADMIN_CONFIG_PATH/ADMIN_KEY_PATH` 改走 `jztools_data`；新增 `GET/POST /api/admin/data-settings`（仅超管）、
-  `/admin/settings` 设置页（`admin-settings.html` + `admin-settings.js`），后台首页加「⚙️ 设置」入口。
-- **全部插件后端**（shared-docs / notice-board / case-report / character-graph / trajectory-convert）：
-  `data/`、`config.json`、`prompt.json`、`.task_cache` 统一改用 `jztools_data` 定位。
-- **配置模板**：程序目录 `config/tools.json` 保留为模板，首启复制到数据根目录；此后读写都改数据根目录副本。
-
-### 升级 / 换目录方法（也见 README「项目更新与数据迁移」）
-
-1. 旧版（数据在程序目录）升级：新版首启自动把程序目录 `admin.json`/`.admin_key`/`logs/`/各插件 `backend/data`、`config.json`、`prompt.json`、`.task_cache` 迁入数据根目录（幂等，目标已存在不覆盖）。
-2. 之后整体替换程序文件夹，用户数据仍在数据根目录，不丢失。
-3. 管理员换目录：后台 → 系统设置 → 输入新绝对路径 →「更改并迁移」（`migrate_data_root` 按 config/logs/plugins 三个子目录整体搬移，已存在不覆盖，并更新双指针）。
-
-> **注意**：迁移是「移动」而非「复制」；`.admin_key` 与 `admin.json` 密文必须同目录一起迁，否则解密失败。
-> 前端 emoji 图标在旧浏览器（Chrome 72/78）可能显示异常，已把首页 `.tool-icon` 显式指定 emoji 字体栈缓解。
-
-## 4.5 管理后台：单位 / 部门 / 人员 批量导入导出（2026-09-11，未提交）
-
-**需求**：组织架构三层（单位 → 部门 → 人员）过去只能逐条手工录入，批量初始化 / 系统迁移
-需要可用的导入导出通道。
-
-**改动文件**
-
-| 文件 | 说明 |
+| 位置 | 内容 |
 | --- | --- |
-| `plugins/admin/backend/batch_io.py`（新增） | 批量导入导出全部后端逻辑：模块列规格 / 解析 / 校验推演 / 导出 / 模板 |
-| `plugins/admin/backend/routes.py` | 新增 `_load_batch_io()` 与 `_register_batch_io(app)`，在 `register()` 末尾以**依赖注入**方式挂载 |
-| `plugins/admin/backend/requirements.txt` | 增加 `openpyxl>=3.1`（缺库时自动降级为仅 CSV） |
-| `plugins/admin/frontend/js/admin-common.js` | 新增通用 `batchImport()`（两步式浮窗）与 `download()`（Blob 下载，处理 401 与中文文件名） |
-| `plugins/admin/frontend/js/admin-{unit,dept,user}.js` | 三页接入「下载模板 / 导出 / 批量导入」 |
-| `plugins/admin/frontend/admin-{unit,department,user}.html`、`admin.html` | 头部按钮组 + 静态资源版本号（`admin-common.js?v=4`、`admin.css?v=4`） |
-| `plugins/admin/frontend/css/admin.css` | `.batch-*` / `.admin-head-actions` 样式（**刻意不用 emoji**，见 §4 的 emoji 字体坑） |
-| `plugins/admin/manifest.json` | 版本 1.1.0 → 1.2.0，features 增加「批量导入导出」 |
-| `docs/管理后台批量导入导出-设计文档.md`（新增） | 字段规格 / 接口契约 / 语义与护栏 |
+| `app.py` | `DATA_ROOT` / `CONFIG_PATH` / `LOG_DIR` / `LOG_FILE`（`init_data_root()` 后指向数据根目录）、`_plugin_home_card_hooks`（首页卡片钩子表）、`_tool_meta_cache`（日志用，2s TTL） |
+| `jztools_data.py` | `get_data_root()` 双指针解析、`_TEMPLATE_SYNC` 模板同步清单、`_LEGACY_MAP` 旧数据迁移映射 |
+| `plugins/admin/backend/routes.py` | `ADMIN_CONFIG_PATH`（数据根 `config/admin.json`）、`_fernet`（懒加载）、`_registered_tool_ids()` / `_grant_all_tool_ids()` |
 
-**接口**（完整表见 README「登录 / 管理后台接口」）
+### 1.4 环境变量
 
-- `GET  /api/admin/batch/<module>/template?format=xlsx|csv`
-- `GET  /api/admin/batch/<module>/export?format=xlsx|csv`（默认不导出 API Key 明文，`?sensitive=1` 才导出）
-- `POST /api/admin/batch/<module>/import`（multipart：`file` / `mode=upsert|insert|update` /
-  `dry_run=1|0` / `auto_create_parent=1|0` / `on_error=abort|skip`）
+`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 5000，解析失败回落 5000）。
 
-`<module>` = `unit` / `department` / `user`，分别要求对应管理模块权限。
-路由挂在 `/api/admin/` 下，`_enforce_tool_access` 见到首段 `admin` 会直接放行，
-所以**必须在视图内自行做模块权限校验**（`batch_io._check_access`）。
+---
 
-**关键设计（改这段代码前必读）**
+## 2. 当前开发状态
 
-1. **预览 = 执行**：`_run_import()` 在 `copy.deepcopy(cfg)` 上推演；`dry_run=1` 只回传逐行计划，
-   `dry_run=0` 才 `save_admin_config(work)`。两条路径共用同一份代码，且前端「确认导入」复用预览时
-   的选项（`state.opts`），因此预览显示什么、执行就是什么。
-2. **不做反向 import**：`batch_io` 不 import `routes`（否则循环依赖），由 `routes` 注入
-   `load_admin_config / save_admin_config / load_registry / find_unit / find_dept / find_user /
-   iter_users / encrypt_field / decrypt_field / role_super_admin / registered_tool_ids /
-   get_session_user / set_operation`。
-3. **字段语义**：留空 = 不修改；填 `-`（及 无/空/清空/none/clear）= 清空。唯一键 = 单位名称 /
-   所属单位+部门名称 / 登录名。权限点接受工具 ID 或工具名称，多值可用顿号/分号/空格分隔
-   （CSV 中用逗号需给整个单元格加双引号）。
-4. **幂等**：内容未变时一律回「跳过」（单位/部门比描述；人员比姓名/角色/权限点/身份证/大模型，
-   加密字段先 `decrypt_field` 再比对），不写盘也不误报「更新」。
-5. **护栏**：超级管理员账号不允许通过批量导入改角色 / 权限点（其余字段可同步），
-   防止整批导入把 admin 降权后无人能进后台。
-6. **错误行策略**：默认 `on_error=abort` —— 有错误行则后端 `blocked=true` 整批不落盘，
-   前端同时禁用「确认导入」并给出醒目提示；可切 `skip` 跳过错误行继续导入。
+### 2.1 git 实际状态（2026-09-14 核实）
 
-**单元格格式健壮性（2026-09-11 第二轮实测后加固）**
+| 项 | 值 |
+| --- | --- |
+| 当前分支 | `main` |
+| HEAD | `ca69141`（2026-09-14）知识库阅读页背景卡片贴合预览内容宽度 + 长 token 撑破版心的横向滚动条修复 |
+| 工作区 | **干净**（无未提交改动，无未跟踪文件） |
+| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`，`origin/main` 与本地一致 |
+| 其他分支 | `G2改造`、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造`（均为历史功能分支，未合并） |
 
-用户交上来的表格格式五花八门，解析层（`batch_io.py` 的「数据读取」段）已按结构层 + 值层兜底，
-逐条都有回归用例（`jz_format_smoke.py`，64 项）：
+> 早前版本文档记录的"大量未提交改动"与"最新提交 7269cb8"已过时：相关改动已随后续提交入库。
+> `G2改造` 分支的连续曲率圆角引擎（jz-radius v1.2 + 基准页 + 设计文档）**未并入 main**，打包不含。
 
-| 情形 | 加固前的问题 | 现在的行为 |
+### 2.2 产物状态（需人工确认后决定是否重打）
+
+- 最近一次明确记录的打包是 **v1.6**（2026-09-11，`deploy/JZToolsHub-v1.6.zip` 约 102MB）。
+- 但 `ca69141` / `98dabe7` / `77e0f22`（2026-09-13 ~ 09-14）的知识库 Office 预览引擎改造**在此之后**。
+- **结论：若要发布含最新知识库预览的版本，必须重新打包并递增 `-Version`**（否则目标机模板同步不触发）。
+
+### 2.3 无硬性阻塞，但以下事项未充分验证
+
+1. 访问日志字段仅经 Flask test client 验证，未在真实浏览器/多用户高并发环境走查；`get_session_user()` 每请求读 `config/admin.json`（静态资源已跳过），高并发如吃紧要加缓存。
+2. 战果录入为**仅大模型解析**，缴获物品明细依赖大模型结构化输出；换低性能模型需复测。
+3. 公告板 / 共享文档 / 战果录入等前端功能多靠 `node --check` + test client 回归，浏览器走查较少。
+4. 一键安装/卸载脚本已在开发机通过语法检查与 exe 冒烟，**尚未在目标机做完整「全新安装 → 更新 → 卸载」三段式实测**。
+5. `info-transfer` 的 `fmt=file` 端到端（桌面封装 → APP 扫码 → 导出 → 与原文件逐字节比对）尚未真机验证，是移动端首要待办。
+6. 打包用 Python 3.14 时产物**不支持 Win7**；需兼容 Win7 必须用 Python 3.8 打包。
+
+---
+
+## 3. 已完成事项
+
+| 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
-| 表头上方有标题/说明行 | 把标题行当表头，误建"单位名称"这类垃圾记录 | 向下探 8 行，按「必填列齐全 > 精确匹配列数 > 匹配列数」择优；`header_row` 回传并显示在预览里 |
-| 数据不在第一张工作表 | 读空表报"未解析到数据行" | 每个工作表/每种 CSV 分隔符都作为候选，取表头匹配度最高者；`sheet` 回传 |
-| 纵向合并单元格 | openpyxl 只在左上角给值，下方行集体"缺值" | 按合并区域补全（`_fill_merged`）。**只读模式拿不到 `merged_cells`，故改用普通模式加载** |
-| 重复表头行 / 空行 / 多余列 | 形成垃圾记录 | 重复表头行忽略并提示；空行跳过；多余列记入 `ignored_columns` |
-| CSV 分号/制表符/竖线分隔 | 整行挤成一列 → 缺列报错 | 四种分隔符各解析一份择优；`.tsv` 优先制表符 |
-| **≥16 位长数字按「数字」存储**（身份证） | 静默存入被 Excel 改写过的号码 | **阻断该行**并给出改写后的值 + 改文本格式的操作指引 |
-| **公式无缓存计算结果** | `data_only` 读出空 → 必填列莫名"不能为空" | 第二遍 `data_only=False` 比对定位；必填列阻断，非必填列提示后按空处理 |
-| 全角/空白/不可见字符 | 登录名、身份证变成无法匹配的脏数据 | 标识字段全角转半角 + 去空白；表头清 BOM/零宽字符；控制字符（CSV 常见）清除，保留 `\n\t` |
-| 百分比/日期/布尔/科学计数 | 取值口径不明 | 一律取**底层值**（格式只是显示）；日期转可读文本、布尔转「是/否」 |
-| 超行数/超体积/损坏文件 | 大文件吃内存、坏文件可能 500 | 读取阶段按行数上限截断；体积前置校验；模糊测试 73 次请求 **0 个 5xx** |
+| 2026-09-14 | 知识库阅读体验收尾 | `.reader-frame` 改 `width: fit-content` 贴合预览内容宽度；Word 超版心固定宽表格在卡片内横向滚动；长 token 断词修复横向滚动条（style.css v24） |
+| 2026-09-13 | 知识库 Office 预览引擎替换 | 引入 `backend/vendor/{xhr,dhr}` 双引擎（纯标准库，零新增 pip 依赖），**舍弃** LibreOffice 转 PDF 与 openpyxl 手绘 HTML 两套旧方案；新增适配层 `office_render.py`；`/preview` 改为按需同步渲染 + 磁盘缓存 `<id>.preview.json`，失败 404 前端回退 mammoth/SheetJS |
+| 2026-09-11 | 知识库旧版格式自动转换 | `doc_convert.py`（olefile + python-docx / xlrd + openpyxl，纯 Python，不依赖 Office COM）；上传白名单加 `.doc`，元数据记 `original_ext`，页面三处提示 |
+| 2026-09-11 | 管理后台批量导入导出 | `admin/backend/batch_io.py`（依赖注入挂载）；单位/部门/人员三页「下载模板 / 导出 / 批量导入」；两步式 dry_run 预览；单元格格式系统加固（合并单元格、表头定位、多工作表、多分隔符、长数字精度、公式无缓存值、全角与不可见字符） |
+| 2026-09-11 | 轨迹速写插件 | `plugins/trajectory-sketch/` 新增；调「过滤器」`/apply` 做字段过滤 → 轨迹分析 → 速写报告；`backend/engine/` 零依赖可插拔分析引擎（与 `D:\SQLRewrite` v2 逐项对拍一致） |
+| 2026-09-11 | v1.6 打包 | `deploy/JZToolsHub-v1.6.zip`（约 102MB）；源码 + waitress 全链路验收通过 |
+| 2026-09-10 | 过滤器插件 | `plugins/file-filter/` 新增：硬过滤 / 大模型语义过滤 / 文本与正则后处理；`/apply` 程序化接口 |
+| 2026-09-09 | v1.5 战果录入优化 | 入库时间不展示、时间筛选改按战果时间、主办人默认空、防浏览器自动填充、手动录入卡片、返回落点修正、单位换算修复 |
+| 2026-09-08 | v1.4 信息传输重构 + APP 1.4 | 双模式（精简/原件）、zlib 压缩信封、多文件封装、停止按钮、协议 v2 `fmt=file`；APP 深色模式、XlsxWriter/Zlib 还原 |
+| 更早 | 基础设施 | 数据根目录可配置化 + 双指针 + 旧数据迁移；一键安装/更新/卸载；配置模板同步（版本门控）；登录改造与强制鉴权；首页拖拽排序与隐藏工具 |
 
-已知限制（不改，已写进文档）：表头须为单行；`00123` 被 Excel 存成数字后前导零无法还原；
-`.xls` 不支持（提示另存）；导入值一律按文本入库。
+---
 
-**验证方式（可复用，脚本在 `%TEMP%`，如长期使用建议移入项目）**
+## 4. 待办清单
 
-- 后端冒烟：`jz_batch_smoke.py` —— 把 `jztools_data.get_data_root` 打桩到临时目录 + Flask
-  `test_client`，67 项断言覆盖模板/导出/三种导入模式/外键缺失/自动建上级/角色与权限点解析/
-  身份证与大模型字段/幂等回导/越权 403/异常输入。**这个打桩手法可用于任何插件后端的隔离测试**
-  （先 patch `get_data_root` 再 import app，避免污染 `~/.jztoolshub`）。
-- 格式健壮性：`jz_format_smoke.py` —— 64 项，覆盖上表全部条目 + 公式检测与值归一化单元测试。
-- 模糊测试：`jz_fuzz.py` —— 真实 Excel 样例（含 `D:\SQLRewrite\demoData_real.xlsx`）× 3 模块、
-  25 份随机字节、截断 zip、超宽（500 列）/超行（4001 行）/超大（18MB）文件、控制字符等；
-  判定标准是「任何输入都只能是 4xx，不能 5xx」，结果 73 次请求 0 个 5xx。
-- 界面实测：`jz_ui_server.py` 启动隔离数据根目录实例（端口 5099），`agent-browser` 走
-  登录 → 选文件 → 预览 → 确认 → 列表刷新全流程。
-  **坑**：agent-browser 默认视口约 1080×480，模态框高于视口时真实鼠标点击会落到遮罩上把浮窗关掉
-  （合成 `el.click()` 不受影响）——实测前先 `agent-browser set viewport 1440 1000`。
-- 本轮实测拦截并修复的真实缺陷：① 列规格字段直接下标访问 `c["required"]` 触发 KeyError（改 `c.get`）；
-  ② 超级管理员账号回导时被误判「不支持批量修改角色/权限点」（改成只在值真的不同时才拦）；
-  ③ 默认「整批回滚」下错误行仍可点确认导入（会显示「导入完成」但实际未写入）；
-  另修 2 处误导性提示（身份证 / 大模型 / 描述未变却报「已更新」）。
+### P0（建议下次发版前处理）
 
-## 5. 最新功能：一键安装/更新/卸载 + 配置模板同步（本会话）
+| # | 事项 | 说明 |
+| --- | --- | --- |
+| 1 | 重新打包并发版 | 2026-09-13 之后的知识库引擎改造尚未进入任何 zip；发版需递增 `-Version` |
+| 2 | 补齐 `prompt.json` 模板或清理同步清单 | `_TEMPLATE_SYNC` 与 `install.ps1` 仍登记两个 `prompt.json`，但仓库中文件已不存在，每次版本升级都会打印「缺少模板」告警；要么补回模板，要么从清单移除（详见评估报告 §5.2） |
+| 3 | 修复 `trajectory-sketch` 模板被打包脚本删除 | `build-deploy.ps1` 会删除插件树内所有 `config.json`，包括作为同步模板的 `trajectory-sketch/backend/config.json`（详见评估报告 §5.3） |
+| 4 | `config/data_root.json` 移出版本库 | 该文件被跟踪且含开发机绝对路径，克隆到新机器会指向错误数据目录；应加入 `.gitignore` |
+| 5 | 验证 `fmt=file` 端到端 | 桌面封装 → APP 扫码 → 导出 → 逐字节哈希比对 |
 
-**背景**：新版 zip 替换旧文件后，部分配置未能及时更新（如大模型的 prompt）。排查发现：
-新版本配置（`plugins/*/backend/prompt.json`、`config/tools.json`）存放在项目主目录，
-但程序运行时实际读取的配置位于用户数据根目录（`~/.jztoolshub/plugins/<id>/prompt.json`）。
-需在系统升级时把新版本模板同步到用户数据根目录。
+### P1（功能与质量）
 
-### 新增/改动文件
-
-| 文件 | 说明 |
+| # | 事项 |
 | --- | --- |
-| `install.ps1`（根目录，源文件） | 一键安装 / 更新 / 卸载核心 PowerShell 脚本，含 `Sync-ConfigTemplates` 配置模板同步函数 |
-| `一键安装.bat` | 双击入口 → 调用 `install.ps1`（无参数 = 安装/更新） |
-| `一键卸载.bat` | 双击入口 → 调用 `install.ps1 -Uninstall`（删除程序+用户数据，需确认） |
-| `jztools_data.py`（改动） | 新增 `sync_templates()` 版本门控同步函数，`_TEMPLATE_SYNC` 清单定义模板映射与策略 |
-| `app.py`（改动） | `init_data_root()` 末尾调用 `jztools_data.sync_templates()` |
-| `build-deploy.ps1`（改动） | 新增 `-Version` 参数，打包时自动复制 `install.ps1`/`一键安装.bat`/`一键卸载.bat`/`version.json` 到部署目录，可选生成 zip |
-| `README.md`（改动） | 更新「打包部署」「项目更新与数据迁移」章节，新增「配置模板自动同步」说明 |
+| 6 | `file-filter/backend/routes.py` 的 `def status()` 改为带前缀（如 `ff_status`），消除 endpoint 冲突隐患（当前唯一不带前缀的路由函数） |
+| 7 | 统一前端资源版本号起点与步长（现 case-report 用序号 v34、character-graph 用日期戳、admin 各页同一份 CSS 引用了 v1/v2/v5 三个版本） |
+| 8 | 清理随包分发的开发期文件：`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}`、`trajectory-sketch/frontend/icons/_generate.py`、`map-marker/frontend/*.py` |
+| 9 | 为 `file-filter`（🧹）补 SVG 回退图标，或统一 SVG 回退为按 codepoint 自动推导（不再维护硬编码映射表） |
+| 10 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
+| 11 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
 
-### 关键机制
+### P2（体验与规范）
 
-**配置模板同步**（`jztools_data.sync_templates()`）：
-
-- 触发条件：`version.json` 中的 `app` 与数据根目录 `config/.app_state.json` 记录的
-  `last_app` 不一致时执行（一次），一致时跳过（幂等）。
-- 清单（`_TEMPLATE_SYNC`）：
-
-  | 模板路径 | 策略 | 说明 |
-  | --- | --- | --- |
-  | `plugins/case-report/prompt.json` | overwrite | 备份 `.bak-old` 后覆盖 |
-  | `plugins/character-graph/prompt.json` | overwrite | 同上 |
-  | `config/tools.json` | merge-tools | 合并：保留用户启停/排序，追加新分类/新工具 |
-  | `plugins/case-report/config.json` | ensure-keys | 保留用户 LLM，仅补模板新字段 |
-  | `plugins/character-graph/config.json` | ensure-keys | 同上 |
-
-- **双保险**：`install.ps1` 的 `Sync-ConfigTemplates` 函数在更新时也做等价合并；
-  即使手动替换文件夹，app 启动时也会自动同步。
-
-**一键安装/更新流程**（`install.ps1`）：
-
-1. 停止旧 JZToolsHub 进程。
-2. 检测已安装（注册表 Uninstall 键 > 默认目录 `%LOCALAPPDATA%\JZToolsHub` > 含 `config/data_root.json` 的源目录 → 就地更新）。
-3. 复制程序文件（排除运行时产物）；源=目标时跳过复制。
-4. 调用 `Sync-ConfigTemplates` 同步模板。
-5. 写 `version.json`、注册表卸载信息、开始菜单/桌面快捷方式。
-
-**卸载流程**（`install.ps1 -Uninstall`）：
-
-1. 停止进程。清理快捷方式。删除程序目录。删除数据根目录（默认；`-KeepData` 保留）。
-2. 删除数据目录指针（`~/.jztoolshub.json`）。清理注册表。
-
-**版本号**：`version.json` 由 `build-deploy.ps1 -Version` 参数指定（默认读取上一版 patch+1）。
-
-### 版本迭代发布 / 目标机更新流程（后续接手必读）
-
-```
-开发者（仓库）                                目标机
-─────────────────────────────              ─────────────────────────────
-改代码 / 改根目录 install.ps1、
-一键安装.bat、一键卸载.bat（如需）
-        │
-build-deploy.ps1 -Version "x.y.z"          解压 JZToolsHub-v<x.y.z>.zip
-  ├─ PyInstaller 打包 exe                          │
-  ├─ 组装 deploy\JZToolsHub\                双击「一键安装.bat」
-  ├─ 复制根目录安装/卸载脚本                   ├─ 停旧服务 → 定位安装目录 → 复制程序
-  └─ 产出 JZToolsHub-v<x.y.z>.zip            ├─ Sync-ConfigTemplates 同步模板
-        │                                    └─ 注册表 + 快捷方式 + version.json
-分发 zip ──────────────────────────▶         双击「start.bat」启动（或托盘退出旧服后自动）
-                                             卸载：双击「一键卸载.bat」（Y 确认，全删；
-                                                   -KeepData 仅删程序留数据）
-```
-
-- **必须递增版本号**：`sync_templates()` 与 `install.ps1` 均以 `version.json` 的 `app` 与
-  数据根目录 `config/.app_state.json` 的 `last_app` 比对作为同步触发条件，版本不变则跳过。
-- **脚本源文件在仓库根目录**：部署包里的是副本，直接改包内脚本不会回写仓库，下次打包被覆盖。
-- **新增插件带模板配置时**：在 `jztools_data.py` 的 `_TEMPLATE_SYNC` 与 `install.ps1` 的
-  `Sync-ConfigTemplates` 两处同时登记（清单须一致），详见 README「配置模板自动同步」。
-
-### 与旧版兼容
-
-- 已有 `deploy/JZToolsHub/` 已有 `install.ps1`（旧版，无模板同步）和 `uninstall.bat`。
-  新版 `build-deploy.ps1` 生成的部署目录自动覆盖为新版脚本（`一键安装.bat`、`一键卸载.bat`）。
-- 旧版 `install.ps1` 注册的 UninstallString 指向 `install.ps1 -Uninstall`，更新后新版
-  `install.ps1` 会替换旧版，卸载入口不变。
-- `uninstall.bat` 仍保留在旧部署目录中（新包不再带它），不影响功能，可用 `一键卸载.bat` 替代。
-
-### 5.3 v1.6 上线打包要点（2026-09-11）
-
-- 产物：`deploy/JZToolsHub-v1.6.zip`（约 **102 MB**，**2143 条目**），`version.json = "1.6"`，由隔离 venv `C:\Users\yfjz\.workbuddy\binaries\python\envs\build-314` + `pyinstaller --clean -y JZToolsHub.spec` 然后 Python 装配脚本（见 `4.5 节第一段`）整合而成。
-- 内容：管理后台的**批量导入导出**与**单元格格式健壮性加固**（详见 §4.5）。核心交付：
-  - 新模块 `plugins/admin/backend/batch_io.py`（约 700 行，依赖注入挂载，不反向 import routes.py）
-  - `routes.py` 注册 `/api/admin/batch/<unit|department|user>/{template,export,import}` 三接口
-  - 前端 `admin-common.js` 通用 `batchImport()` 浮窗 + 三页接线 + `admin.css` 新增样式
-  - 文档：`docs/管理后台批量导入导出-设计文档.md`（含 §10 格式健壮性、§11 测试脚本）、`plugins/admin/README.md`、README 接口表 + 插件表
-- 打包环境：Python 3.14.7 + PyInstaller 6.22.2 + numpy 2.5 + opencv 5.0（与 v1.5 同代 ABI）；隔离 venv 装齐 spec 列出的 13 个第三方包（waitress / cryptography / requests / docx / openpyxl / xlrd / olefile / qrcode / zfec / cv2 / numpy / pypdf / pystray / Pillow），全部与 3.14 ABI 兼容。
-- 验收：
-  1. zip 含关键文件：exe / start.bat / version.json / batch_io.py (54.7KB) / admin-common.js (21.7KB) / python314.dll ✓
-  2. 解包后用「源码 + waitress」启动 `app.py`（临时数据根 `C:\Users\yfjz\AppData\Local\Temp\test_v16_src`，生产 pointer 已复原）
-     - `/api/login` 返回 200 + Set-Cookie ✓
-     - `/api/admin/batch/unit/export?format=csv` 返回 200，Content-Disposition 中文文件名 UTF-8 编码正确，文件 BOM + UTF-8 内容正确 ✓
-     - `/api/admin/batch/unit/import`（dry_run）→ preview 命中 1 行 `create`，回传 `sheet / header_row / notes / summary` ✓
-     - `/api/admin/batch/unit/import`（真实写）→ `applied=true`，单位列表新增「请测试大队」✓
-  3. `.jztoolshub.json` pointer 已从临时路径恢复为 `C:\\Users\\yfjz\\.jztoolshub`（生产路径）
-- 升级路径：与 §5.1 / §5.2 完全一致（数据根目录不动；首次安装由 install.ps1 自动迁移旧版数据；插件运行时数据清空后由程序按需重建）。**注意：批量导入是新增能力，不破坏现有 admin.json / .admin_key / 用户数据，升级安全**。
-- 未做：未跑真实 frozen exe (`deploy/JZToolsHub/JZToolsHub.exe`) 的 headless 启动（pystray 无桌面会失败，但 main 流程 try/except 已吞——服务端验证已通过源码 + waitress 等价路径覆盖）。
-
-### 5.3.1 知识库 Office 预览引擎（阶段 8）打包要点（2026-09-13）
-
-- **pip 依赖零新增**：xhr/dhr 双引擎纯 Python 标准库（zipfile/xml.etree/re/colorsys/
-  decimal…），xlrd 是**已有**依赖（doc_convert 用，spec PACKAGES 已列），仅被引擎的
-  `.xls` 兜底通道共用；LibreOffice 仍是**外部可选程序**（仅 .xls 高保真 / .doc 归一化
-  两条窄路径，目标机不装不影响其它功能）。**`JZToolsHub.spec` 的 PACKAGES 不要为
-  xhr/dhr 加条目**——spec 注释说"插件动态导入的第三方库必须显式 collect_all"，
-  那是针对 pip 包的；纯标准库引擎源码随插件目录分发，PyInstaller 不感知、也不需要。
-- **vendor 随包分发**：`build-deploy.ps1` 整树拷贝 `plugins/` →
-  `backend/vendor/{xhr,dhr}`（53 个 .py）自动进部署包；引擎在运行时由
-  `office_render.py` 以 `__file__` 推导 vendor 路径注入 sys.path 加载——插件后端
-  本就是 exe 同层源码（importlib 动态加载），frozen 环境不受影响。
-- **打包清理逻辑的三个影响**（`build-deploy.ps1` 会从拷贝后的插件树删除
-  `data` / `.task_cache` / `__pycache__` / `out` 目录与 `*.pyc` / `config.json` 文件）：
-  1. `backend/out/`（渲染引擎测试产物，已 gitignore）不会入包——清理清单已含 `out`；
-  2. 仓库侧 `backend/config.json`（若有）不入包——它是开发机的 soffice 路径配置，
-     属机器本地文件；**目标机的配置在数据根** `<数据根>/plugins/knowledge-base/config.json`
-     （`office.soffice_path`），一键安装/升级不动数据根，配置与 LibreOffice 安装路径
-     均持久，升级后无需重配；
-  3. vendor 内的 `__pycache__` 自动清理，无需手工处理。
-- **Python 版本**：引擎 requires-python ≥3.10（pyproject）；打包 venv build-314
-  （3.14.7）满足，与 v1.6 同代 ABI。
-- **打包后验收（新增两条）**：
-  1. zip 含 `plugins/knowledge-base/backend/vendor/xhr/__init__.py` 与
-     `vendor/dhr/__init__.py`（vendor 完整随包），且**不含** `backend/out/`；
-  2. 源码 + waitress 冒烟：`GET /api/knowledge-base/status` 返回
-     `office_preview: true`；上传一份 xlsx / docx 后 `GET /files/<id>/preview`
-     返回 `kind=sheet/word` 的 HTML（尤其在无 LibreOffice 的机器上再抽查
-     `.xls`/`.doc` 走降级链路：预览 404 → 前端回退 SheetJS/mammoth，不报 500）。
-
-### 5.2 v1.5 上线打包要点（2026-09-09）
-
-- 产物：`deploy/JZToolsHub-v1.5.zip`（约 103MB，2102 条目），version.json=1.5；由 `build-deploy.ps1 -Version "1.5"` 生成。
-- 内容：main 分支 8dbbd43 战果录入优化（入库时间不再展示 / 时间筛选改按战果时间 fields.时间 / 主办人默认空 / 大模型配置 autocomplete 防填充 / 手动录入卡片 / 返回落点修正 / 单位换算修复）。
-- 单位换算修复要点：aggregate_items 重量分支漏乘系数（吨=克 根因）；补毫克/mg 与大写 T/KG/G（单位 lower 归一）；前端克→吨/千克显示换算。
-- 验收：关键文件在包（case-report 前后端、app.js v32）；数据/密钥/__pycache__ 清理干净；install.ps1 与仓库 MD5 一致。
-- 未含：G2 圆角引擎（G2改造 分支，未合并 main）。APP 无变更（沿用 v1.4_lite 签名包）。
-- 后端依赖无新增（无 pip 需求）；升级路径同 5.1（数据根不触碰）。
-
-## 5.1 v1.4 上线打包与升级演练要点（2026-09-08 实测）
-
-**打包产物**（`deploy/`，`build-deploy.ps1 -Version "1.4"` 生成）：
-
-| 产物 | 说明 |
+| # | 事项 |
 | --- | --- |
-| `JZToolsHub-v1.4.zip` | 服务端安装包（exe + `_internal/` + 前端/插件/config + 安装卸载脚本 + version.json） |
-| `deploy\JZToolsHub\` | 同内容解包目录，可直接运行 |
-| `InfoParse-v1.4.apk` | 移动端 APP 正式签名包（单独构建，不进服务端 zip） |
+| 12 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
+| 13 | 在目标机做一次「全新安装 → 更新 → 卸载」三段式实测 |
+| 14 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 合计约 1.2GB（含 3 个历史版本目录与 11 个旧 zip） |
+| 15 | 生产部署评估：当前上限约 300 并发（Flask/waitress 单进程线程模型），高负载建议 Gunicorn 多进程 + Nginx 反代 |
+| 16 | 移动端：恢复或彻底移除「重置」功能；`CameraScanner.averageLuminance` 亮度采样保留但无人调用 |
 
-**APP 打包要点**（`android-app/InfoParse/`，Gradle 直接构建）：
+---
 
-- 环境：`JAVA_HOME=C:\Users\yfjz\.jdks\jbr-21.0.11`、`GRADLE_USER_HOME=D:\GradleHome`、
-  Gradle 8.7 位于 `D:\GradleHome\wrapper\dists\gradle-8.7-bin\...\gradle-8.7\bin\gradle.bat`
-  （仓库无 gradlew，直接调本机 Gradle）；SDK `D:\Android\Sdk`（build-tools 34/36）。
-- 版本：`app/build.gradle.kts` 的 `versionCode`/`versionName` 手工维护（v1.4 = code 2）。
-- **正式签名**：`android-app/InfoParse/release.keystore`（alias `infoparse`，
-  密码 `infoparse2024`，有效期 30 年，随仓库管理）。升级包必须用同一 keystore，
-  否则用户无法覆盖安装；丢失只能换包名或卸载重装（丢历史数据）。
-- 命令：`gradle :app:testDebugUnitTest :app:assembleRelease` →
-  `app/build/outputs/apk/release/app-release.apk`，复制到 `deploy/InfoParse-v<版本>.apk`。
-- release 构建有 `lintVitalRelease` 卡点：**资源若只在 values-night 声明、
-  base values 没有同名项，release 直接失败**（MissingDefaultResource，debug 不报）。
-  新增夜间资源必须两份都有，或确保成对声明。
-- 验签：`apksigner verify --print-certs`（需 JAVA_HOME）；
-  版本核对：`aapt dump badging xxx.apk | findstr versionName`。
+## 5. 关键架构决策
 
-**升级演练实测（v1.3.5 → v1.4，模拟机 + 本机真升各一遍）**：
-
-- **用户数据 100% 保留**：admin.json（账号）、case-report data（台账）、
-  logs、.task_cache 均在数据根目录，升级只替换程序目录、不触碰数据根。
-- **配置模板三项同步**（`Sync-ConfigTemplates`，与 `jztools_data.sync_templates` 双保险）：
-  - prompt.json（case-report / character-graph）：overwrite，旧值备份 `.bak-old`；
-  - tools.json：merge——用户 `site.*` / 工具启停 order 保留，新分类新工具
-    （如 info-transfer）追加；
-  - 插件 config.json：仅补缺失键（LLM key 等用户配置不动）。
-- **新插件/新依赖落地**：info-transfer 整目录覆盖进安装目录（含新前端/后端）；
-  新增 Python 依赖（python-docx / xlrd）已打进 `_internal/`，目标机无需 pip。
-- **info-transfer 无插件级 config.json**（格式清单是内置常量），升级零配置迁移。
-- **实测发现并修复的坑**：install.ps1 桌面快捷方式在「桌面路径为空」的环境
-  （重定向 profile / 服务账户）会因 Join-Path 空参数崩溃 → 已修为判空跳过
-  （卸载分支同步修复）。**教训：改了 install.ps1 必须重新打 zip**——
-  zip 内嵌的是打包时点的脚本副本，v1.4.zip 已用修复版重打（三处 MD5 一致）。
-- **升级路径判定**：注册表 Uninstall 项（优先）> 默认目录 > 源目录含
-  `config/data_root.json`（就地更新）。数据根目录解析：`~/.jztoolshub.json`
-  主指针 > 安装目录 `config/data_root.json` 备份指针 > 默认 `~/.jztoolshub`。
-- **遗留确认项**：`一键安装.bat`/`一键卸载.bat` 未演练（bat 仅转发 install.ps1）；
-  zip 覆盖安装时旧版独有文件不会删除（v1.3.5→v1.4 无差异，未来若删文件需注意）。
-
-
-## 6. 当前状态 / 卡点
-
-- **无硬性阻塞**。`main` 已推送；但**工作区有大量未提交变更**（info-transfer 插件、android-app、
-  移动端APP.md 等，详见第 2 节），`.zcode/` 是会话工作目录，不要提交。
-- 以下为未充分验证/待办项（别当成已解决）：
-  1. 访问日志字段仅经 Flask test client 验证（`user=admin`、`op=新增单位/发布公告/删除共享文档`
-     等标签正确），未在真实浏览器/多用户环境走查；`get_session_user()` 每请求读 `config/admin.json`，
-     静态资源已跳过（app.py 的 `get_current_user` 对 `/static/` 返回 None），但高并发 API 场景若吃紧需加缓存。
-  2. 战果录入为仅大模型解析（LLM-only），缴获物品明细由大模型结构化输出 `缴获物品明细` 数组，
-     真实网络环境下该格式输出已多轮调优 prompt（`906585c`），换低性能模型时仍需复测。
-  3. 公告板/共享文档/战果录入等前端新功能多靠 `node --check` + test client 回归，浏览器走查较少。
-  4. **一键安装/卸载脚本已在开发机通过语法检查、Python 侧 sync_templates 隔离测试与 exe 冒烟测试，
-     但尚未在目标机做完整「全新安装 → 更新 → 卸载」三段式实测**；首次正式发版建议在测试机走一遍。
-  5. **打包用 Python 3.14（PATH 默认）时产物不支持 Win7**；需兼容 Win7 的部署必须用
-     Python 3.8 打包（`-Python "C:\Users\yfjz\AppData\Local\Programs\Python\Python38\python.exe"`，
-     3.8 环境需先补装 `pystray` + `pillow`）。
-  6. 各插件前端 `?v=` 版本号起点/步长不统一（case-report v28、character-graph 用日期戳、
-     trajectory-convert 无版本号因只有内联脚本的单文件）；给无版本号的插件加外部 JS/CSS 时
-     必须从一开始就带 `?v=1` 并遵守递增纪律。
-  7. **info-transfer `fmt=file` 端到端尚未真机验证**（桌面封装 → APP 扫码 → 导出，与原文件逐字节
-     哈希比对），是移动端当前首要待办（详见第 8.6 节）。
-  8. **android-app/ 尚未纳入版本管理**，本轮移动端全部改动从未提交（详见第 2 节）。
-
-## 7. 踩过的坑 —— 绝对不要踩
-
-1. **绝不要清理 `plugins/*/backend/data/` 目录**。曾两次在测试脚本里误删用户真实台账记录
-   （git 不含插件 data）。测试清理只删自己刚建的文件，或改用独立临时目录；动手前先 `git status`/列目录。
-2. **`config/admin.json` 含明文密码哈希、Fernet 加密字段与真实 LLM API Key 密文**，`.gitignore` 已排除。
-   任何 `git add` 前确认不会带上它；密钥 `config/.admin_key` 与密文分离存储，两者均勿提交。
-   各插件的 `backend/config.json`（如战果录入/星图含明文 API Key）同样 gitignore。
-3. **前端资源改了必须递增版本号**（`index.html` 里 `style.css?v=N`、`app.js?v=N`），
-   否则 `/plugin/` 静态资源缓存一整天的策略让用户看不到改动。改完检查资源名带不带新版本号。
-4. **访问日志禁止记请求体**（含密码/正文），只记 path/status/字段；插件**禁止**自行落盘访问日志
-   （规范 B-8），要更具体的操作描述用 `set_operation()`。
-5. **同目录扫描 `.json` 要过滤非记录文件**（如战果录入的 `item_categories.json` 与记录同目录，
-   用 `_is_record()` 过滤，否则把类别库当"记录"导致 undefined/删除 404）。
-6. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8 正常值；断言写在 Python 代码里
-   （`assert ... , dict`），别靠肉眼读控制台。
-7. **LLM 路径解析在 HTTP 轮询下要数秒**（连接/超时兜底），前端轮询上限 90s；测试轮询别只等 5 秒就断言。
-8. **bash/read 工具偶发不稳定**（返回空/ChildProcess.kill），write/edit 更可靠；抽风就重试或改小读取块，
-   同一批并发工具调用不要依赖彼此结果。
-9. **安装/卸载脚本编码**：`install.ps1` 必须 UTF-8 with BOM（PS 5.1 无 BOM 按 ANSI 解析，中文乱码）；
-   `一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI 且**不要**加 `chcp 65001`（cmd 按系统代码页逐行解析，
-   UTF-8 中文会乱码）；脚本写出的 JSON 一律 UTF-8 无 BOM（`json.load` 遇 BOM 报错）。
-   **此外两个 .bat 必须 CRLF 换行**：曾因编辑器把 bat 存成 LF（Unix 换行）导致 cmd 把相邻行拼接解析，
-   双击报 `'RC"=="0" ('`、`'安装' 不是内部或外部命令` 等碎片错误（2026-09-04 已修复根目录与
-   deploy 副本）。用 Git 时建议在 `.gitattributes` 对 `*.bat` 强制 `eol=crlf`，或改完 bat 后
-   用 PowerShell 检查字节里有无裸 `\n`。
-   **install.ps1 的 `$InstallDir` 不能在 param 里设默认值 `%LOCALAPPDATA%\...` 后留空串跑**：
-   曾因 param 默认 `""` 而注册表无记录时 `Join-Path $InstallDir $ExeName` 报
-   「无法将参数绑定到参数 Path，因为该参数为空字符串」（2026-09-04 已修复：脚本头部对空值
-   兜底 `Join-Path $env:LOCALAPPDATA $AppName`）。改 install.ps1 后必须在无注册表记录的
-   机器/账户上跑一遍全新安装路径验证。
-   **一键安装脚本只能在「含 JZToolsHub.exe 的解压目录」里跑**：在源码仓库根目录跑时，仓库里
-   开发运行产生的 `config\data_root.json` 备份指针会让脚本误判「既有安装目录→就地更新」，
-   最后因缺 exe 报「安装目录缺少 JZToolsHub.exe」（2026-09-04 已加源目录守卫：安装入口先
-   检查 `$Source` 下有无 exe，没有则明确提示解压 zip 后再执行并 exit 1）。另外仓库根目录
-   没有 `version.json`，此时安装横幅会显示版本 0.0.0——这本身就是「不在安装包内」的信号。
-10. **测试 sync_templates / install.ps1 时务必隔离数据根目录**：本机 `~/.jztoolshub` 是真实用户数据，
-    直接跑会改写 `config/.app_state.json`（曾发生，已恢复）。Python 侧测试用临时目录 +
-    monkeypatch `get_base_dir/get_data_root`；不要在未隔离状态下对真实数据根目录做版本变更测试。
-11. **PowerShell 里跑含引号/花括号的 `python -c "..."` 内联脚本极易翻车**（引号被 PS 重新解释）；
-    复杂断言先写到临时 .py 文件再执行（README/HANDOFF 文档自身的校验脚本也建议这么干）。
-12. **Flask 视图函数名全局唯一 —— 插件路由函数必须带插件前缀**（2026-09-11 实测）。
-    插件的 `register(app)` 直接往同一个 app 上挂路由，Flask 以 `view_func.__name__` 作为 endpoint，
-    因此两个插件各写一个 `def status():` 就会在启动时抛
-    `AssertionError: View function mapping is overwriting an existing endpoint function: status`
-    （轨迹速写的 `def status()` 与 file-filter 的同名函数撞车，插件整体加载失败）。
-    **约定：插件内路由函数一律加插件前缀**（如 `ts_status` / `ts_upload` / `ts_analyze`），
-    或显式传 `endpoint="<插件id>_<动作>"`。新增插件后务必重启服务并确认
-    `app.logger` 出现「已注册后端插件：<id>」。
-13. **Werkzeug ≥ 2.3 的 test_client 会忽略手写的 Cookie 头**（2026-09-11 实测）。
-    插件之间走"进程内派发"复用彼此接口时（如轨迹速写调 file-filter 的 `/apply`），
-    若用 `test_client().post(path, headers={"Cookie": cookie})` 或
-    `environ_overrides={"HTTP_COOKIE": cookie}` 传递会话，**两种写法都会被忽略**
-    （客户端用自带 cookie jar 重写 HTTP_COOKIE），内部请求变成匿名 → 对方返回 401。
-    唯一可靠做法是逐条塞进 jar：`client.set_cookie(name, value, domain="localhost")`
-    （见 `plugins/trajectory-sketch/backend/filter_bridge.py` 的 `_client_with_session`）。
-14. **跨项目复用算法必须对齐"计量口径"，否则对拍差一个采样点**（2026-09-11 实测）。
-    把 `D:\SQLRewrite` 的 v2 算法移植到插件（pandas/numpy → 纯标准库）时踩了三处隐式口径差：
-    ① 球面距离地球半径取 **6378137**（不是平均半径 6371008.8）且结果 **`round()` 取整**，
-    否则停留窗口的 `<= D_thr` 判定会在边界翻转；
-    ② **地点簇必须建在"清洗后未去重的行"上**（质心按上报次数加权、转移边按真实切换次数统计），
-    用去重后的点建簇会让质心偏移、停留点边界差 1 个点；
-    ③ 数据质量报告的"采样间隔中位"**含 0 间隔**，而 T_thr 推导用的是**有效间隔（Δt>0）**中位数，
-    两者本就不同、不可混用。对齐后与上游 `output/v2/` 逐项一致（99 点 / 34 簇 / 噪声 610m /
-    D_thr 800m / T_thr 19.7min / 停留 3 / 出行 4，净位移·累计位移·直线度·回访·判定全等）。
-    **另注**：上游 `output/v2/` 是用 git 提交版样本生成的，仓库里的 `demoData_real.xlsx` 已被换过
-    （号码从 15728345997 变为 15700000007），对拍时用 `git show <commit>:demoData_real.xlsx` 取旧版才可比。
-15. **openpyxl 读取行为有 4 个必须知道的坑**（2026-09-11 实测，批量导入解析层因此重写过）：
-    ① **只读模式（`read_only=True`）读不到合并单元格**——`ReadOnlyWorksheet` 没有 `merged_cells`
-    属性，而合并区域只有左上角单元格有值，其余全是 `None`（"所属单位"纵向合并 3 行 → 下面 2 行
-    集体缺值）。要处理合并就必须用**普通模式**加载（本项目导入文件已限 10MB，代价可接受）；
-    ② **`data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`**（openpyxl 只读缓存值，
-    脚本生成的文件没有缓存），要判断"是不是公式"必须再用 `data_only=False` 加载一遍比对；
-    ③ **Excel 数字只保留 15 位有效数字**，18 位身份证按数字存 → 末尾被静默改写
-    （`110101199001011234` → 读回来 `1.101011990010112e+17` → 末 4 位变 0），
-    且 Excel 里显示的还是原值——**必须靠"原始单元格是 float 且 ≥1e15"来识别，不能靠显示值**；
-    ④ **openpyxl 拒绝写入 XML 非法控制字符**（`\x00`、`\x07` 等抛 `IllegalCharacterError`），
-    所以造测试夹具时不能塞控制字符；但 **CSV 可以携带它们**，取值时要清理，否则污染入库数据。
-16. **不要把"会造成数据失真"的格式问题只做成提示**（2026-09-11 二审修正）：数字型身份证丢精度
-    最初只给行内提示、该行仍按"新增"照写，等于把错的身份证号存进系统。改为**阻断该行**
-    （`item["errors"]`，在推演之前拦下，保证工作副本不被污染），配合默认整批回滚 → 文件不改好就导不进去。
-    判据：**这个值写进去以后还有没有意义**——没意义的一律阻断（身份证丢精度、必填列是未算公式），
-    只是"不如预期"的给提示（非必填列是公式、格式被转换）。
-17. **Word 二进制 `.doc` 流解析有 5 个易错点**（2026-09-11 实测，`plugins/knowledge-base/backend/doc_convert.py`）：
-    ① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指到 `0Table`/`1Table` 流里的 CLX 分片；
-    ② PlcPcd 用可变长度 CPs（1/2 字节前缀表示下条 CP 字节数），不能按定长解析；
-    ③ **控制字符里 `\x07\x07` 是行结束标志**（空缓冲的连续两个 `\x07`）——单 `\x07` 是单元格结束，
-    `\r` 是段落结束；状态机要把这三种符号的边界都识别清楚才能正确切分表格；
-    ④ **闭包捕获 `buf = []` 会读到旧列表**：状态机里 `buf_text()` 捕获了 `buf` 这个列表对象，
-    函数里一旦 `buf = []`（重绑定），外层 `buf_text()` 仍读到旧列表 → 幻影内容。
-    解决：原地 `del buf[:]`；
-    ⑤ **`close_row()` 不得给空缓冲区补单元格**，否则 Word 行结束符自身被当成一列 → 出现「凭空多出的空列」。
-18. **知识库「三处提示」要记忆关闭状态**（2026-09-11 实测）。阅读页横幅关闭按钮必须用**会话级**
-    缓存（`sessionStorage`），不能用 `localStorage`——因为一个文件被多个用户先后打开，
-    张三关了不影响李四打开再看到一次提示。同一会话内重开同文件时不再弹即可。
-19. **元数据字段迁移的幂等判定必须用「键是否存在」，不能用取值**（2026-09-11 实测，
-    `plugins/knowledge-base/backend/routes.py::_migrate_files`）。`pdf_size` 在未生成 PDF 时恒为
-    `None`，写成 `if rec.get("pdf_size") is None: 补齐; changed = True` 会让**每次启动都判定需迁移**
-    并重写 files.json（实测二次迁移返回 True 才发现）。正确写法：`if "pdf_size" not in rec:`。
-    同类字段（`pdf_error=""`、`original_size=0`）一律照此办理。
-20. **Windows 上给外部转换程序做测试夹具：用 `.bat` 转调 Python**（2026-09-11 实测）。
-    `subprocess.run` 不能直接执行 `.py`，但可以执行 `.bat`（CreateProcess 支持 .bat/.cmd）。
-    做法：临时目录写 `soffice.bat`（`@echo off` + `"<venv python>" "%~dp0fake_soffice.py" %*`），
-    脚本解析 `--outdir` 与源文件参数，向 outdir 写一份**最小但结构合法**的 PDF（含正确 xref 偏移，
-    pdf.js 能直接打开），再把 `pdf_convert.detect_soffice` 打桩指向这个 bat —— 无需在机器上
-    真装 LibreOffice 就能全链路验证异步转换管线。
-21. **插件前端在 iframe 里跑，浏览器自动化要直接开插件页**（2026-09-11 实测）。
-    `/tool/<id>` 是外壳页，插件内容在 `<iframe src="/plugin/<id>/index.html">` 内：
-    agent-browser 的 `click <css选择器>` 默认打在**父文档**上，会报 "Element not found"；
-    而 `eval document.querySelector(...)` 也只作用于父文档。绕法：登录后直接
-    `open http://127.0.0.1:5099/plugin/knowledge-base/index.html`（同源，登录 Cookie 照常有效）。
-22. **agent-browser 的每次 CLI 调用都是新会话，登录态不跨调用保持**（2026-09-11 复测）。
-    必须把「登录 + 后续操作」放进**同一次 `agent-browser batch "..."`**里（batch 内多条命令共用
-    一个 daemon 会话）；另外 batch 参数按空格切分，JS 里的**空格和 `|` 会被 cmd 当管道拆掉**
-    —— `eval` 的脚本要么写成无空格表达式，要么改用 `get text` / `get count` / `get attr` 这类命令。
-23. **Flask `send_file` 的 `download_name` 已自动处理 RFC 5987**（中文名老浏览器可用），
-    前端不要自己拼 `Content-Disposition`；前端下载走 `fetch → blob → createObjectURL → <a download>`
-    时，文件名从响应头解析（`filename*=UTF-8''` 优先，回退 `filename=`），不要硬编码。
-24. **`pdf_convert` import 兜底必须两步式**（2026-09-11 真坑）。`try: from . import pdf_convert except Exception: _pdf_convert=None`
-    这种写法**缺少裸 `import pdf_convert` 的 fallback**——脚本方式加载（importlib 加载、补偿测试、重启后的实例）
-    的 routes 模块永远把引擎当作「不存在」置 failed，前端上传后状态卡 pending → 240s 后 failed。
-    与 `doc_convert` 一致：
-    ```python
-    try:
-        from . import pdf_convert as _pdf_convert
-    except ImportError:
-        try:
-            import pdf_convert as _pdf_convert
-        except ImportError:
-            _pdf_convert = None
-    ```
-    规则：插件 backend 内**任何**共享模块的 import 都走两步式（包优先 + 裸脚本兜底）。
-25. **`/files?category=root` 只返回已归类文件**（2026-09-11 实测）。上传未指定分类时 `category_id=None`，
-    `category=root`（root 及其子孙）的过滤集**不包含 None**，结果接口返回 0 条——轮询时永远 timeout。
-    隔离测试 / 兜底轮询时用 `category=all`（不过滤）。**用户**看不到未分类文件是设计如此
-    （上传 UI 应强制选分类；待办）。
-26. **`/api/logout` 是 POST 不是 GET**（2026-09-11 实测）。admin 插件 `routes.py:704` 是
-    `@app.post("/api/logout")`，GET 会 405；测试脚本登出用 POST。
-27. **profile 从「每次新建临时」改为「固定复用」**（2026-09-11 实测提速）。解包版 LibreOffice 冷启动
-    每次新建临时 profile 需 37~40s，**复用固定 profile 只 15~18s**。profile 放在数据根下
-    `<data_root>/.lo-profile/`，转换失败时重置 profile 再试一次（避免「一次损坏、永久失败」）。
-28. **管理安装解包的 LibreOffice `soffice --version` 会挂起**（2026-09-11 实测）。`msiexec /a` 解包
-    的 soffice.exe 在 URE 未注册场景，启动后不退出（实测 60s+）。`pdf_convert._version_of` 超时
-    压到 10s 并把异常吞掉返 None（版本仅展示用，不影响可用性）。设置 `URE_BOOTSTRAP` /
-    `SAL_DISABLE_USERMIGRATION` 等环境变量**不改善**耗时（实测 17.5s vs 17.8s 基线），不要加。
-29. **DOMPurify 会整块丢弃 `<style>` 元素**（2026-09-13 实测，知识库 Office 预览）。xhr/dhr
-    引擎是 class 型 CSS（`<style>` 去重声明），`sanitize(html, {USE_PROFILES:{html:true}})`
-    之后 Excel 全裸、Word 表格无边框。解法：reader.js 先正则摘取全部 `<style>` 块 → 仅正文
-    过 DOMPurify → CSS 用 `createElement("style")` 原样挂回。CSS 是引擎生成的静态内容
-    （字体名白名单、无 URL），无注入面，这样处理是安全的。**改 reader.js 注入逻辑时别把
-    这段摘取逻辑当冗余删掉。**
-30. **dhr 的表格内部还有第二个 `<style>`**（嵌在 `<table>` 里，单元格 padding 覆盖用）。
-    `<style>` 出现在 `<table>` 内会被 HTML 解析器 foster-parent，innerHTML 注入行为不定——
-    所以上述摘取必须用全局正则（`/<style[^>]*>([\s\S]*?)<\/style>/gi`），别只摘第一个。
-31. **xhr 渲染器对 XML 缺失格取 `style_table[0]` 不是「默认样式」**（2026-09-13 实测，
-    「集成测试表格」预览出现 179 个蓝格子的根因）。`StyleTable.intern` 按首次出现顺序分配
-    id，`[0]` 是首个被解析单元格的样式（该文件恰是 A1 蓝底大标题）——凡「工作簿首个带样式
-    单元格非默认 + used_range 内有缺格」的文件都会把空白区染色。已在 vendor 副本打补丁
-    （缺格一律按无样式渲染，见 `backend/vendor/README.md`）；**上游 TestWorkSpace 同 bug
-    待同步**。教训：dedup 表的 `[0]` 语义是「最先出现」，永远不要当「默认值」用。
-32. **改了引擎 / 升级 vendor 后必须删旧预览缓存**。`<id>.preview.json` 按文件 id 永久缓存
-    （文件不可变所以设计无失效逻辑），用户看到的可能是修复前的旧产物——删掉受影响文件的
-    缓存（或整个 `data/files/*.preview.json`）才生效，无需重启服务。
-33. **vendor 引擎接入方式**：dhr 顶层 `from xhr.core import ...`，两包必须同为顶层可导入——
-    `office_render.py` 用 `sys.path` 注入 `backend/vendor/`（上游 demo 同款）。soffice 路径经
-    插件 `config.json`（`office.soffice_path` 新键，兼容旧 `pdf.soffice_path`）写入环境变量
-    `XHR_SOFFICE`——引擎每次调用都读该变量，**改配置免重启**。
-34. **xhr 的 `model.meta` 是 MetaInfo 对象不是 dict**（取 `meta.warnings` 属性，不能 `.get()`）；
-    模块 docstring 含 Windows 路径（`D:\TestWorkSpace\x…`）会触发 `\x` unicode 转义错误——
-    docstring 要用 raw 字符串前缀。
-35. **Bash 工具 heredoc 会吃反斜杠**（2026-09-13 两次实测：补丁里 `"\t"`/`"\n"` 落盘成真实
-    制表符/换行，JS 语法错误；与 MEMORY 记的「PATH 损坏」同属 Bash 工具坑）。含转义序列的
-    补丁一律用 **Write 工具写脚本文件再 `python 执行`**，不要 heredoc 内嵌。
-36. **LibreOffice `.doc→docx` 归一化回环对微型表格会退化**（2026-09-13 实测：合成 1 行表格
-    经 doc 往返变成制表符段落，内容保留、结构丢失）。真实链路 `.doc` 上传走 doc_convert
-    转换件（docx），不经过该通道；仅历史转换失败记录会踩到，属上游引擎边界。
-
-## 7.5 插件后端速查表（改哪个插件先看这里）
-
-所有后端插件共用同一套模式：`register(app)` 注册路由；会话取
-`from jztools_admin.routes import get_session_user`；日志标记 `set_operation("…")`；
-数据统一存数据根目录 `plugins/<id>/`（经 `jztools_data.get_data_root_dir/get_data_root_file`）。
-
-| 插件 | 前缀 | 长任务机制 | 数据落盘（数据根目录下） |
+| # | 决策 | 理由 | 代价 / 注意 |
 | --- | --- | --- | --- |
-| admin | /api/admin、/api/admin/batch、/login 等 | openpyxl（批量导入导出的 xlsx，缺库降级 CSV） | config/admin.json + .admin_key |
-| notice-board | /api/notice-board | 无 | plugins/notice-board/data/*.json（一公告一文件，RLock 串行化） |
-| knowledge-base | /api/knowledge-base | 无后台任务线程池（阶段 8 起预览为**按需同步渲染**：`office_render._RENDER_LOCK` 串行，引擎亚秒级；`GET /files/<id>/preview` 首阅渲染 + 原子缓存 `<id>.preview.json`，失败 404 前端回退） | plugins/knowledge-base/data/{categories.json,files.json}（单库 JSON，原子写 tmp+os.replace + RLock）+ data/files/：`<id>.<original_ext>` **原件**（下载端点专用）/ `<id>.docx·.xlsx` 渲染件（doc·xls 经 doc_convert 转换）/ `<id>.preview.json` Office 预览缓存（vendor xhr/dhr 双引擎，`office_render.render_word/render_sheet`，CSS class 型输出，Excel 页签前端接线）/ 历史 `<id>.pdf` 残留（不再消费，删除时清理）；服务端 ID 重命名；元数据 `original_ext`（恒有值=上传格式）；预览引擎 soffice 路径经 config.json（`office.soffice_path`，兼容旧键 `pdf.soffice_path`）注入 `XHR_SOFFICE` 环境变量 |
-| shared-docs | /api/shared-docs | 无（全局 RLock） | plugins/shared-docs/data/*.json（一文档一文件，历史上限 100） |
-| case-report | /api/case-report | ThreadPoolExecutor(2)，TASK_TTL 30min | data/*.json（一记录一文件）+ item_categories.json + config.json + prompt.json |
-| character-graph | /api/character-graph | ThreadPoolExecutor(2)，TASK_TTL 30min | config.json（LLM）+ prompt.json |
-| trajectory-convert | /api/trajectory-convert | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | .task_cache/（mp4/png/zip）+ backend/config.json（列名） |
-| qr-video-decode | /api/qr-video-decode | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘（data_b64 存任务表） |
-| file-filter | /api/file-filter | ThreadPoolExecutor(2)，TASK_TTL 30min，产物与任务表双清理 | .task_cache/（input/output 临时文件）+ config.json（保留字段名单 / 后处理规则 / LLM）；`POST /apply` 为程序化接口（其他插件复用过滤能力，B-7 合规方式） |
-| trajectory-sketch | /api/trajectory-sketch | ThreadPoolExecutor(2)，TASK_TTL 30min，上传暂存与产物双清理 | .task_cache/（`<staged_id>_upload.<ext>` 原始上传件 + `<task_id>_report.xlsx` 报告）+ config.json（保留字段名单 / 列映射 / 分析阈值 / 报告文案，无密钥）；引擎在 `backend/engine/`（纯标准库，`selftest.py` 可独立跑） |
-| info-transfer | /api/info-transfer | ThreadPoolExecutor(2)，TASK_TTL 30min，任务产物与 .task_cache 双清理 | .task_cache/（mp4/png/zip/帧 PNG）+ backend/requirements.txt（qrcode/zfec/opencv/numpy/openpyxl）；无 config.json/prompt.json |
+| A1 | **一切皆插件，连鉴权都是插件** | 框架一经打包不再修改；新功能零代码接入 | `admin` 必须始终加载，否则全站鉴权失效；`register_plugin_backends()` 对它无条件加载 |
+| A2 | **数据与程序目录分离**（数据根目录 + 双指针） | 整体替换程序文件夹升级不丢用户数据 | 插件必须经 `jztools_data` 定位数据，禁止拼绝对路径；`.admin_key` 与 `admin.json` 必须同目录迁移 |
+| A3 | **配置模板同步按版本门控** | 根治"换文件后 prompt 不更新" | 发版必须递增 `-Version`；新增模板要两处登记（`_TEMPLATE_SYNC` + `install.ps1`） |
+| A4 | **前端 iframe 隔离** | 插件之间、插件与框架互不污染 | 插件前端必须用相对路径；插件不能操作 parent 文档 |
+| A5 | **后端路由统一 `/api/<id>/` 前缀 + 函数名带插件前缀** | 避免多插件路由与 endpoint 冲突 | 新增插件务必重启并确认日志出现「已注册后端插件：\<id\>」 |
+| A6 | **长耗时一律异步任务**（提交即返回 + 轮询） | 不占用 HTTP worker | 有界线程池 + TTL 30 分钟 + 归属校验；前端轮询上限要与后端超时对齐 |
+| A7 | **插件间禁止 import，只走程序化 HTTP 接口** | 解耦，避免卸载连锁崩溃 | 能力复用需提供 `/apply` 类接口并自己处理会话传递 |
+| A8 | **知识库预览改为按需渲染 + 磁盘缓存** | 引擎亚秒级（首渲染 19~70ms），无需后台状态机 | 文件不可变所以缓存无失效逻辑；**改引擎/升级 vendor 后必须删旧 `<id>.preview.json`** |
+| A9 | **轨迹分析引擎做成零依赖可插拔包** | 算法独立演进、可独立自测，不动路由与前端 | 新增算法版本只需在 `engine/algorithms/` 下加目录并注册 |
+| A10 | **移动端完全离线**（仅 CAMERA 权限，禁止 INTERNET） | 业务数据通过二维码光学传输，不落公网 | 任何联网能力都不应被加入 |
+| A11 | **错误文案作为逐字契约** | 桌面端按文案做 e2e 断言 | 改文案 = 改《移动端APP.md》+ 桌面端 + APP 三处 |
 
-**异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` →
-后台线程池执行 → `GET /api/<id>/result/<task_id>` 轮询 `{status: pending|running|done|error}`。
-任务表加锁、结果 TTL 30 分钟清理；任务归属校验（创建者/超管可见）。
+---
 
-## 8. 移动端 APP（android-app/InfoParse，Android 离线接收端）
+## 6. 已知问题
 
-> 本节由 `android-app/InfoParse/HANDOFF.md` 与其 `README.md` 合并而来（2026-09-07，两份原文件已删除）；
-> 功能/协议/构建运行的「说明书」版本在根 README「信息传输与移动端 APP（Android）」章节。
-> 配套文档：**《移动端APP.md》**（仓库根目录，协议与实现规格，★代码注释反复引用它，改协议必须同步它）、
-> `plugins/info-transfer/README.md`（封装端协议与接口）。
+### 6.1 功能/数据类
 
-### 8.1 这个项目是什么
+| 级别 | 问题 |
+| --- | --- |
+| 中 | `_TEMPLATE_SYNC` 与 `install.ps1` 登记的 `case-report`/`character-graph` 的 `prompt.json` 模板在仓库中不存在，同步时会被跳过并告警；两插件实际使用 `llm_client` 内置默认提示词，无法通过模板同步更新 |
+| 中 | `build-deploy.ps1` 删除插件树内所有 `config.json`，会连带删除作为同步模板的 `trajectory-sketch/backend/config.json`，导致目标机该模板永不生效 |
+| 中 | `config/data_root.json`（含开发机绝对路径）已纳入版本库，新机器克隆后数据根目录可能指向错误路径 |
+| 低 | `app.py::_EMOJI_ICON_FILES` 提供的 `icon_file` 字段前端无人消费，属冗余维护点；`file-filter` 的 🧹 无任何 SVG 回退 |
+| 低 | `ai` / `design` / `maps` 分类在当前默认配置下无启用工具，首页显示空分类 |
+| 低 | `knowledge-base/backend/` 与 `trajectory-sketch/frontend/icons/`、`map-marker/frontend/` 混入了开发/测试脚本，随包分发 |
+| 低 | README 宣称 Python 3.8 为目标环境，但知识库引擎要求 ≥3.10，**完整功能的最低版本实为 3.10** |
+| 低 | `plugins/info-transfer/backend/requirements.txt` 仍列 python-docx / xlrd / olefile（代码中确为可选依赖，用于"精简传输"模式），与部分文档"已移除该依赖"的表述不一致 |
 
-`android-app/InfoParse` 是 JZToolsHub「信息传输」插件的 **Android 离线接收端**：
-把桌面端生成的二维码（静态多张 / QR-transfer 视频流）扫进来，还原出原始内容。
+### 6.2 兼容性 / 部署类
 
-- **技术栈**：Kotlin + CameraX 1.3.4 + ML Kit Barcode 17.3.0（bundled 离线模型，不依赖 GMS）+ Material3 1.12.0 + Gson。minSdk 29 / targetSdk 34。
-- **完全离线**：唯一运行时权限 CAMERA，**禁止声明 INTERNET**（《移动端APP.md》1.4 约束，勿加）。
-- 与桌面端共用一套信封协议（见《移动端APP.md》第 3 章，协议 v2 已支持 `fmt=file` 完整文件传输）。
-- 单元测试只覆盖协议层与工具层（`app/src/test/`），UI 无自动化测试。
+| 级别 | 问题 |
+| --- | --- |
+| 中 | 打包用 Python 3.14 时产物不支持 Win7；需 Win7 兼容必须 3.8 打包，但 3.8 会导致知识库预览引擎不可用（要求 ≥3.10）——二者不可兼得，需按目标机选择 |
+| 低 | 300 并发以上成功率下降（连接排队/拒绝，非应用异常），源于单进程线程模型 |
+| 低 | 工作区构建产物约 1.2GB（`deploy/` 含 3 个历史版本目录与 11 个旧 zip、`dist/` 220MB、`build/` 42MB），均已被 gitignore 但占用磁盘与备份 |
+| 低 | zip 覆盖安装时旧版独有文件不会被删除（若未来删文件需注意残留） |
 
-**页面架构**（三个 Activity，无 Fragment）：主页 HomeActivity（历史卡片 + FAB）→ 识别页
-ScanActivity（沉浸式，相机/图片/视频导入与分流）→ 结果页 ResultActivity（展示 + 导出/复制/分享）。
-图示见 README「页面架构」小节。
+### 6.3 流程类
 
-- 页面间传信封用内存单例 `ResultStore.current`（避免 Intent 序列化大文本）。
-- 识别成功自动写历史：`HistoryStore.save()` → `filesDir/history/<uuid>.json`（一条结果一个文件）。
-- 多页收集暂存：`filesDir/pending_collect.json`（FR-08，「继续收集/放弃」框）。
+| 级别 | 问题 |
+| --- | --- |
+| 中 | 本次评估前的 HANDOFF 记录"大量未提交改动"已与 git 实际状态不符；文档滞后于仓库是本项目反复出现的风险 |
+| 低 | 各插件前端 `?v=` 版本号起点/步长不统一；`admin` 各页面对同一份 CSS 引用了不同版本号 |
 
-**关键源码索引**：
+---
 
-| 文件 | 职责 | 备注 |
-| --- | --- | --- |
-| `HomeActivity.kt` | 主页：历史卡片 + FAB + 清空/删除确认 | onResume 必刷新列表 |
-| `ScanActivity.kt` | 识别页：相机扫码分流（单张/多页/视频流帧）、图片/视频导入、暂存恢复 | 逻辑最重，改动前读《移动端APP.md》3.2 判别顺序 |
-| `ResultActivity.kt` | 结果渲染 + 导出/复制/分享 + 沉浸式 | file 格式不预览内容 |
-| `history/HistoryStore.kt` | 历史持久化（Gson，一条一 JSON） | excel 回读必须走 `EnvelopeParser.jsonToRows` |
-| `protocol/Envelope.kt` | 信封模型 + 解析器 + `Fmt` 常量 + `ScanResult` | 协议核心契约 |
-| `protocol/PageCollector.kt` | 多页收集状态机（serialize/restore 暂存） | 数字按字符串保留（防 1→1.0） |
-| `protocol/QrFrame.kt` + `ZfecCompat.kt` | 视频流帧解析 + zfec 前向纠错重组 | 二期协议，勿动 |
-| `scan/CameraScanner.kt` | CameraX+ML Kit 封装；同文本去重；亮度采样（暂无调用方，见 8.6） | |
-| `scan/ImageDecoder.kt` | 图片解码（防 OOM 缩放 maxDim 2048） | |
-| `export/Exporter.kt` | 导出 mime/文件名/MediaStore Downloads/分享 intent | |
-| `util/DocxWriter.kt` | 逐段文本 → 最小 .docx（兼容旧 word 码导出） | v1.4 引入 |
-| `ui/FmtUi.kt`、`ui/HistoryAdapter.kt` | 格式徽标着色/统计文案、历史卡片适配器 | 主页与结果页共用 FmtUi |
+## 7. 踩坑清单（按主题分类）
 
-### 8.2 构建与真机环境（★先读，环境很特殊）
+### 7.1 数据安全（最高优先级）
 
-**构建命令（可复制，离线）**——项目**没有可用的 gradle wrapper**（只有
-`gradle/wrapper/gradle-wrapper.properties`，缺 gradlew 脚本与 wrapper jar），本机也没有独立安装
-gradle。用 GradleHome 里已下载的发行版直接构建：
+1. **绝不要清理 `plugins/*/backend/data/` 或数据根目录下的 `plugins/<id>/data/`**。历史上两次在测试脚本里误删用户真实台账（git 不含插件 data）。测试清理只删自己刚建的文件，或改用独立临时目录；动手前先列目录。
+2. **`config/admin.json` 含密码哈希、Fernet 加密字段与真实 LLM API Key 密文**；`config/.admin_key` 是密钥。两者均已 gitignore，任何 `git add` 前确认不会带上。各插件的 `backend/config.json`（如战果录入/星图/过滤器含明文 API Key）同理。
+3. **测试任何插件后端都要隔离数据根目录**：先 `import jztools_data; jztools_data.get_data_root = lambda: <临时目录>`，**再** `import app`；用 `app.test_client()` 打接口，**不要调用 `init_data_root()`**（会触发旧数据迁移）。需要真实 HTTP 时用 `app.run(port=5099)` 避开用户的 5000。
+4. **浏览器走查不要污染真实数据**：把数据根整目录 `copytree` 到临时目录（约 10MB），在副本里注入预置记录再起隔离服务。
+
+### 7.2 插件后端
+
+5. **Flask 视图函数名全局唯一 —— 路由函数必须带插件前缀**。两个插件各写一个 `def status()` 会在启动时抛 `AssertionError: View function mapping is overwriting an existing endpoint function`，导致插件整体加载失败（轨迹速写与过滤器曾因此撞车）。新增插件后务必重启并确认日志出现「已注册后端插件：\<id\>」。
+6. **插件 backend 内跨模块 import 必须两步式兜底**：
+   ```python
+   try:
+       from . import X as _X
+   except ImportError:
+       try:
+           import X as _X
+       except ImportError:
+           _X = None
+   ```
+   只写 `except Exception` 或缺裸 import 兜底，会让脚本方式加载的实例永远判定"模块不存在"。
+7. **Werkzeug ≥2.3 的 test_client 会忽略手写 Cookie 头**。插件间"进程内派发"复用彼此接口时，`headers={"Cookie": ...}` 与 `environ_overrides={"HTTP_COOKIE": ...}` 都会被忽略导致 401；唯一可靠做法是 `client.set_cookie(name, value, domain="localhost")` 逐条塞进 jar（见 `trajectory-sketch/backend/filter_bridge.py::_client_with_session`）。
+8. **元数据迁移的幂等判定用「键是否存在」而非取值**：`if rec.get("pdf_size") is None` 会让每次启动都判定需迁移；正确写法 `if "pdf_size" not in rec:`。
+9. **同目录扫描 `.json` 要过滤非记录文件**（如战果录入的 `item_categories.json`），否则把辅助库当"记录"读入导致 undefined。
+10. **`/api/logout` 是 POST 不是 GET**。
+11. **`/files?category=root` 只返回已归类文件**（未分类的 `category_id=None` 不在过滤集内）；隔离测试/兜底轮询用 `category=all`。
+
+### 7.3 前端
+
+12. **改了 JS/CSS 必须递增 `?v=N`**：`/plugin/` 下静态资源 1 天强缓存，`.html` 才是 no-cache。这是最常踩的坑。
+13. **DOMPurify 会整块丢弃 `<style>` 元素**。知识库 xhr/dhr 引擎是 class 型 CSS，`sanitize()` 之后 Excel 全裸、Word 表格无边框。解法：先正则摘取全部 `<style>`（**全局正则**，dhr 的表格内还有第二个 style 块）→ 正文过 DOMPurify → CSS 原样挂回。**改 `reader.js` 时别把这段摘取逻辑当冗余删掉。**
+14. **下载文件名从响应头解析**：Flask `send_file` 的 `download_name` 已处理 RFC 5987（中文名老浏览器可用），前端不要自己拼 `Content-Disposition`；前端走 fetch→blob 时从 `filename*=UTF-8''` 解析，回退 `filename=`。
+15. **旧浏览器 emoji 渲染不稳定**（Chrome 72/78）：新样式优先用纯文本或自绘 SVG，不要依赖 emoji 字体。SVG 回退登记表在 `static/js/jz-icon.js`。
+16. **知识库「已转换」提示用 `sessionStorage` 记忆关闭状态**，不能用 `localStorage`（一个文件被多人先后打开，互不影响）。
+
+### 7.4 打包 / 安装脚本
+
+17. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
+18. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
+19. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**：在仓库根目录跑时，`config/data_root.json` 备份指针会让脚本误判为"既有安装 → 就地更新"，最后报"安装目录缺少 JZToolsHub.exe"。
+20. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
+21. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
+
+### 7.5 第三方库行为
+
+22. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
+23. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
+24. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
+25. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
+26. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
+27. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
+
+### 7.6 工具链
+
+28. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
+29. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
+30. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
+31. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
+32. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
+
+---
+
+## 8. 插件后端速查表
+
+所有后端插件共用同一套模式：`register(app)` 注册路由；会话取 `from jztools_admin.routes import get_session_user`；日志标记 `set_operation("…")`；数据统一存数据根目录 `plugins/<id>/`。
+
+| 插件 | 路由前缀 | 长任务机制 | 数据落盘（数据根目录下） |
+| --- | --- | --- | --- |
+| admin | `/api/admin`、`/api/admin/batch`、`/login` | openpyxl（批量导入导出的 xlsx，缺库降级 CSV） | `config/admin.json` + `.admin_key` |
+| notice-board | `/api/notice-board` | 无 | `plugins/notice-board/data/*.json`（一公告一文件，RLock 串行化） |
+| knowledge-base | `/api/knowledge-base` | 无后台状态机；预览为**按需同步渲染**（`office_render._RENDER_LOCK` 串行 + `<id>.preview.json` 磁盘缓存，失败 404 前端回退） | `data/{categories.json,files.json}` + `data/files/<id>.<original_ext>` 原件 + `<id>.docx/.xlsx` 渲染件 + `<id>.preview.json` 预览缓存 |
+| shared-docs | `/api/shared-docs` | 无（全局 RLock） | `plugins/shared-docs/data/*.json`（一文档一文件，历史上限 100） |
+| case-report | `/api/case-report` | ThreadPoolExecutor(2)，TTL 30min | `data/*.json`（一记录一文件）+ `item_categories.json` + `config.json` |
+| character-graph | `/api/character-graph` | ThreadPoolExecutor(2)，TTL 30min | `config.json`（LLM） |
+| trajectory-convert | `/api/trajectory-convert` | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | `.task_cache/`（mp4/png/zip）+ `config.json`（列名） |
+| qr-video-decode | `/api/qr-video-decode` | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘 |
+| file-filter | `/api/file-filter` | ThreadPoolExecutor(2)，TTL 30min，产物与任务表双清理 | `.task_cache/` + `config.json`；`POST /apply` 为程序化接口 |
+| trajectory-sketch | `/api/trajectory-sketch` | ThreadPoolExecutor(2)，TTL 30min，上传暂存与产物双清理 | `.task_cache/`（`_upload.<ext>` + `_report.xlsx`）+ `config.json`；引擎在 `backend/engine/`（`selftest.py` 可独立跑） |
+| info-transfer | `/api/info-transfer` | ThreadPoolExecutor(2)，TTL 30min，支持取消 | `.task_cache/`（mp4/png/zip/帧 PNG） |
+
+**异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` → 后台线程池执行 → `GET /api/<id>/result/<task_id>` 轮询 `{status: pending|running|done|error}`。任务表加锁、结果 TTL 30 分钟、任务归属校验（创建者或超管可见）。
+
+---
+
+## 9. 移动端 APP（android-app/InfoParse）
+
+> 功能/协议/构建运行的"说明书"版本在 README「信息传输与移动端 APP（Android）」章节；**协议权威定义在仓库根目录《移动端APP.md》**（改协议必须同步它）。
+> 注：本目录**已纳入版本管理**（63 个文件），早前文档"未纳入版本管理"的表述已过时。
+
+### 9.1 定位与技术栈
+
+- JZToolsHub「信息传输」插件的 **Android 离线接收端**：扫桌面端生成的二维码（静态多张 / QR-transfer 视频流）还原内容，全程无网络。
+- Kotlin + CameraX 1.3.4 + ML Kit Barcode 17.3.0（bundled 离线模型，不依赖 GMS）+ Material3 1.12.0 + Gson；minSdk 29 / targetSdk 34。
+- **完全离线**：唯一运行时权限 CAMERA，**禁止声明 INTERNET**。
+- 三个 Activity（无 Fragment）：`HomeActivity`（历史卡片 + FAB）→ `ScanActivity`（识别页）→ `ResultActivity`（结果页）。
+
+### 9.2 关键源码索引
+
+| 文件 | 职责 |
+| --- | --- |
+| `HomeActivity.kt` | 主页：历史卡片 + FAB + 清空/删除确认（onResume 必刷新列表） |
+| `ScanActivity.kt` | 识别页：相机扫码分流、图片/视频导入、暂存恢复（逻辑最重） |
+| `ResultActivity.kt` | 结果渲染 + 导出/复制/分享（`file` 格式不预览内容） |
+| `history/HistoryStore.kt` | 历史持久化（Gson，一条一 JSON，存 `filesDir/history/`） |
+| `protocol/Envelope.kt` | 信封模型 + 解析器 + `Fmt` 常量（协议核心契约） |
+| `protocol/PageCollector.kt` | 多页收集状态机（serialize/restore 暂存） |
+| `protocol/QrFrame.kt` + `ZfecCompat.kt` | 视频流帧解析 + zfec 前向纠错重组 |
+| `scan/CameraScanner.kt` | CameraX + ML Kit 封装；同文本去重；亮度采样（暂无调用方） |
+| `export/Exporter.kt` | 导出 mime/文件名/MediaStore Downloads/分享 intent |
+| `util/DocxWriter.kt` | 逐段文本 → 最小 .docx（兼容旧 word 码导出） |
+
+### 9.3 构建命令（离线，可复制）
+
+项目**没有可用的 gradle wrapper**（只有 `gradle/wrapper/gradle-wrapper.properties`），用本机 Gradle 发行版直接构建：
 
 ```bash
-export JAVA_HOME="C:/Users/yfjz/.jdks/jbr-21.0.11"   # JBR 21；不要用 Android Studio 自带 JBR 25，gradle 8.7 不支持
-export GRADLE_USER_HOME="D:/GradleHome"              # 依赖缓存都在这，不设会重新联网下载
+export JAVA_HOME="C:/Users/yfjz/.jdks/jbr-21.0.11"    # JBR 21；不要用 JBR 25，gradle 8.7 不支持
+export GRADLE_USER_HOME="D:/GradleHome"
 "D:/GradleHome/wrapper/dists/gradle-8.7-bin/bhs2wmbdwecv87pi65oeuq5iu/gradle-8.7/bin/gradle" \
   -p "D:/JZToolsHub/android-app/InfoParse" :app:assembleDebug :app:testDebugUnitTest --console=plain --offline
 ```
 
-- 产物：`app/build/outputs/apk/debug/app-debug.apk`（约 37MB，含 ML Kit bundled 模型）。
-- SDK 路径：`D:/Android/Sdk`（`local.properties` 已指向）。build.gradle.kts 里 compileSdk 34。
-- 想恢复 wrapper：`gradle wrapper --gradle-version 8.7`（同上环境变量）。
+- SDK：`D:/Android/Sdk`（`local.properties` 已指向）；产物 `app/build/outputs/apk/debug/app-debug.apk`（约 37MB）。
+- 正式签名：`android-app/InfoParse/release.keystore`（alias `infoparse`，密码 `infoparse2024`）。**升级包必须用同一 keystore**，否则用户无法覆盖安装。
+- release 构建有 `lintVitalRelease` 卡点：**资源只在 `values-night` 声明、base values 没有同名项时 release 直接失败**（debug 不报）。
+- adb：`D:/Android/Sdk/platform-tools/adb.exe`（不在 PATH）；崩溃排查第一步 `adb logcat -b crash -d`。
 
-**adb 与真机（无线）**：
+### 9.4 这台测试机的限制（别浪费时间尝试）
 
-```bash
-ADB="D:/Android/Sdk/platform-tools/adb.exe"   # 不在 PATH
-"$ADB" devices                                 # 无线 adb：adb-8471627e-..._adb-tls-connect._tcp，会莫名掉线，掉线重连即可
-"$ADB" install -r app/build/outputs/apk/debug/app-debug.apk
-"$ADB" logcat -b crash -d | grep -A 30 jztools   # ★崩溃排查第一步：只看 crash 缓冲
-"$ADB" logcat -b crash -c                       # 清空崩溃缓冲（安装新包前先清，便于区分新旧崩溃）
+- `adb shell input keyevent/tap` 全部被拒（ROM 的「USB 调试（安全设置）」未开），**无法远程替用户点 UI**；
+- `ScanActivity`/`ResultActivity` 未导出，`am start` 直拉会 Permission Denial，只有 `HomeActivity` 可直拉；
+- 设备锁屏时 `uiautomator dump` 抓到的是 SystemUI；Git Bash 需 `export MSYS_NO_PATHCONV=1` 才能用 `/sdcard`。
+
+因此 UI 层改动只能「编译 → 安装 → 请机主人工点验」；日志验证上限是"主页能启动 + crash 缓冲为空"。
+
+### 9.5 移动端踩坑与铁律
+
+1. **【最严重】insets 监听器里禁止引用 lateinit 成员**。`setupImmersive()` 曾因在视图绑定前执行且立即解引用 `btnReset`，导致识别页启动必崩（`UninitializedPropertyAccessException`）。三个 Activity 的 `setupImmersive()` 现在都只用局部 `findViewById`，改 UI 时别破坏；引用顺序必须是「setContentView → findViewById → 才能用」。
+2. **Material 属性名不要想当然**：`?attr/materialButtonTonalStyle` 在 1.12.0 不存在（用 `@style/Widget.Material3.Button.TonalButton`）；BottomNavigationView 是 `itemIconTint` 而非 `itemIconTintList`。查真名：`unzip material-1.12.0.aar` 后 grep `res/values/values.xml`。
+3. **Kotlin 表达式体函数里不能写 `return`**（带 return 一律写块体 `{}`）。
+4. **单元测试里的 JSON 字符串别嵌裸引号**（`${'"'}` 生成的不是合法 JSON，会走到错误分支）。
+5. **"word 还原不了原文件"是链路设计而非 APP 缺陷**：v1 封装端只提取文本且去掉扩展名，APP 端不可能还原；真正的修复是 v2 的 `fmt=file` 完整传输。排查"还原不对"先看封装端塞了什么数据。
+6. **协议 v2 的数据量代价**：`fmt=file` base64 体积 +33%，静态码每张约 20KB、上限 200 页、20MB 上传上限；大文件引导用户用二维码视频流。
+7. **历史回读必须复用协议解析**（`EnvelopeParser.jsonToRows`），自己随手 `asString` 会改变数字语义（1 → "1.0"）。
+8. **桌面端改 `routes.py` 必须重启 JZToolsHub 服务**才生效。
+9. **长会话中凭记忆 Edit 出过重复 import / 重复函数**：对同一文件多次编辑后、编译报符号冲突时先 Read 全文核对。
+10. **进程被杀后从最近任务恢复 `ResultActivity` 会直接 finish**（`ResultStore.current == null`）——已知轻微问题，从历史卡片重新点开即可。
+
+### 9.6 回归验证清单
+
+- [ ] `assembleDebug` + `testDebugUnitTest` 全绿
+- [ ] 主页：空状态 / 历史卡片（徽标配色）/ 长按删除 / 菜单清空（有确认）/ FAB 进识别页
+- [ ] 识别页：权限被拒仍可「导入图片」；同码可重扫；多页码收齐出结果；「继续收集/放弃」可用
+- [ ] 导入图片多选、导入视频（.mp4）
+- [ ] 结果页：五种 fmt 徽标与统计；文本 4000 字符 / excel 100 行截断；file 不显示内容
+- [ ] 导出 / 复制（excel 得 TSV）/ 分享（file 显示原文件名）/ 长按出名称气泡
+- [ ] 沉浸式：三页状态栏延伸、底部不压手势条（手势 + 三键两种导航）
+- [ ] **file 端到端：桌面封装 → APP 还原 → 与原文件哈希一致**（当前首要待办）
+
+---
+
+## 10. 文档同步约定与快速命令
+
+### 10.1 改完功能必须同步的文档
+
+```
+README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故障排查）
+  → plugins/<id>/README.md（插件自身说明）
+  → docs/<功能>-设计文档.md（如有）
+  → HANDOFF.md（状态头「最后更新」、§2 git 状态、§3 已完成、§4 待办、§6 已知问题）
+  → .workbuddy/memory/YYYY-MM-DD.md（当日工作日志）
 ```
 
-**这台测试机（安卓 16/国产 ROM）的限制，别浪费时间尝试**：
+改信息传输协议时**四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 + 《移动端APP.md》（改完记得重启服务）。
 
-- `adb shell input keyevent/tap` 全部被拒（`SecurityException: INJECT_EVENTS`）——ROM 的
-  「USB 调试（安全设置）」未开，**无法远程替用户点 UI**；开该开关可解，需要机主操作。
-- `ScanActivity`/`ResultActivity` 未导出，`am start` 直拉会 `Permission Denial`；只有 `HomeActivity` 可直拉。
-- 设备锁屏时 `uiautomator dump` 抓到的是 SystemUI（看到 scrim/shade 节点就是没解锁）。
-- Git Bash 会把 `/sdcard` 转义成本地路径，需 `export MSYS_NO_PATHCONV=1`。
+### 10.2 快速命令
 
-因此：**UI 层功能改动只能编译→安装→请机主人工点验**；日志验证上限是「主页能否启动 + crash 缓冲是否为空」。
+```bash
+# 启动（源码）
+python app.py
 
-### 8.3 协议要点（改协议层前必读）
+# 打包（必须递增版本号）
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
 
-信封：`{"jzt":1,"fmt":<fmt>,"name":<名>,"data":<载荷>}`，静态多页加 `"pg":{"i":1,"n":3}`。
-完整规范在《移动端APP.md》第 3 章（3.5 错误文案表是**逐字契约**，APP 端错误文案不得擅改）。
+# 目标机：解压 zip → 双击 一键安装.bat → start.bat 启动；卸载双击 一键卸载.bat
+```
 
-| fmt | data | name | 状态 |
-| --- | --- | --- | --- |
-| `text` / `markdown` | 原文 string | 无扩展名基名 | v1 起在用 |
-| `word` / `excel` | 逐段文本 / 二维数组 | 无扩展名基名 | **兼容保留**（封装端不再生成，旧码仍可解析） |
-| `file` | 文件字节 base64 | **完整文件名（含扩展名）** | **v2 新增**：原始文件完整传输，导出/分享即原文件 |
+```python
+# 不进浏览器的快速自测
+import sys; sys.path.insert(0, r"D:\JZToolsHub")
+import app as m
+m.init_data_root(); m.setup_access_logging(m.app); m.register_plugin_backends(m.app)
+c = m.app.test_client()
+c.post("/api/login", json={"username": "admin", "password": "admin123"})
+```
 
-判别顺序不可变：`{` 开头 → JSON（有 pg → 多页收集器；无 → 信封校验）；否则按 base64 帧头 → 视频流收集器。
+### 10.3 关键文档索引
 
-### 8.4 版本变更历史（2026-09-05 ~ 09-07 本轮迭代）
-
-| 版本 | 内容 |
+| 文档 | 内容 |
 | --- | --- |
-| v1.0（前人） | 协议实现 + 扫码页（原 MainActivity）+ 结果页；FR-01~09、暂存 |
-| v1.1 | 新增 HomeActivity 历史卡片主页 + 相机 FAB；MainActivity→ScanActivity；导入按钮重排（小字提示 + 导入图片多选/导入视频）；新增「重置」；结果页 Material3 化 |
-| v1.1+ | 识别页底部堆叠防遮挡、三个页面沉浸式系统栏 + 手势条 insets 避让、主题色公安藏蓝 #1C2F5E |
-| v1.2 | 结果页卡片化（信息卡+内容卡）；导出/复制/分享图标化；**移除「重置」**（见 8.5.1 闪退事故） |
-| v1.3 | 结果页底部 BottomNavigationView 动作栏（长按 tooltip）；去除「分享内容」 |
-| v1.4 | word 旧码导出由 .txt 改为 DocxWriter 重建 .docx；文件名防重复后缀 |
-| v1.5 + 协议 v2 | **文档完整传输**：封装端（`plugins/info-transfer/backend/routes.py`）新增 `fmt=file`（base64 直传原始文件，.doc/.wps/.pdf 同步放开），删除 python-docx/xlrd 依赖；APP 端全链路支持 file（还原原文件/不预览/字节数/复制禁用提示）；历史卡片与徽标配色适配 |
+| `README.md` | 架构、环境搭建、运行构建、目录结构、核心模块、使用示例、HTTP API、插件一览、故障排查 |
+| `HANDOFF.md`（本文件） | 开发状态、已完成/待办、架构决策、已知问题、踩坑清单、移动端 |
+| `插件设计规范.md` | 插件开发铁律（B-1~B-21、SEC-1~SEC-11、F-1~F-7、S-1~S-8、M-1~M-3、V-1~V-7） |
+| `移动端APP.md` | 信息传输协议权威规范（含错误文案逐字契约、判别顺序） |
+| `20260914评估报告.md` | 插件规范符合性分析、开发/更新/移除便利性评估、规范优化建议、项目问题清单 |
+| `docs/` | 登录改造与数据隔离、容器化与插件热插拔、知识库、插件库优化方案、过滤器、轨迹速写、批量导入导出等设计文档 |
 
-### 8.5 踩坑记录（★核心章节：问题 → 根因 → 解决 → 预防）
+---
 
-**8.5.1【最严重】识别页启动必崩：lateinit 在 insets 监听器中被提前读取**
-
-- **现象**：真机点进识别页秒崩，`crash` 缓冲：`UninitializedPropertyAccessException: lateinit property btnReset has not been initialized`，栈指向 `ScanActivity.setupImmersive`。
-- **根因**：`onCreate` 里 `setupImmersive()` 排在视图绑定**之前**执行，而它内部 `ViewCompat.setOnApplyWindowInsetsListener(btnReset)` 的写法**立即解引用 lateinit 字段**（哪怕只是注册监听）。当初为了「右上角重置按钮避让状态栏」加的这段。
-- **解决**：整体移除重置功能（用户决定）；崩溃路径物理删除。
-- **预防（本项目铁律）**：
-  1. insets 监听器里**只用局部 `findViewById`**，禁止引用 lateinit 成员——HomeActivity / ResultActivity / ScanActivity 三处 `setupImmersive()` 现在都遵守这个模式，改 UI 时别破坏；
-  2. 布局新增带 id 的控件后，Activity 里引用它的顺序是「setContentView → findViewById → 才能用」；
-  3. 排查这类问题不要猜，先 `adb logcat -b crash -d | grep jztools`。
-
-**8.5.2 Material 组件属性名想当然（两次编译失败）**
-
-- `?attr/materialButtonTonalStyle` **在 material 1.12.0 不存在** → AAPT linking failed。正解：直接引用样式 `@style/Widget.Material3.Button.TonalButton`（或 `.Icon`/`.OutlinedButton` 变体）。
-- BottomNavigationView 的图标着色属性是 **`itemIconTint`**，不是 `itemIconTintList`。
-- **通用办法**：GradleHome 缓存里有 AAR，解包查真实属性/样式名：
-  `unzip material-1.12.0.aar -d /tmp/mat` 后 grep `res/values/values.xml`（缓存路径 `D:/GradleHome/caches/modules-2/files-2.1/com.google.android.material/material/1.12.0/<hash>/`）。
-
-**8.5.3 Kotlin 表达式体函数里不能写 return**
-
-`fun restore(...)?: T = try { ... return null ... }` 直接编译错（`Returns are not allowed for functions with expression body`）。带 return 的函数一律写块体 `{ }`（`HistoryStore.restore` 已改）。
-
-**8.5.4 单元测试里的 JSON 字符串转义**
-
-测试非法 base64 时在 Kotlin 字符串模板里嵌了裸 `"`（`${'"'}`），生成的**不是合法 JSON**，Gson 解析失败走到 Invalid 分支——用例名义上测 fileBytes 实际测的是信封解析。教训：测试 JSON 的 data 值选不含引号的字符（`@@非法##`）。
-
-**8.5.5 「word 还原不了原文件」是链路设计，不是 APP 缺陷（v2 之前的根本原因）**
-
-v1 封装端把 word/excel **只提取文本**放进二维码（`routes.py` 旧注释原话："只提取文本信息…不保留宏与文档样式"），且 `name` 按规范**去掉了扩展名**——APP 端拿到的东西里根本没有原始文件，无论结果页怎么改都不可能"还原原文件"。排查这类"还原不对"的投诉，**先看封装端塞进了什么数据**（桌面端 `plugins/info-transfer/backend/routes.py` 的 `extract_doc`），再改接收端。v1.4 的过渡方案（DocxWriter 用逐段文本重建可编辑 .docx）保留用于兼容旧码；真正的修复是 v2 的 `fmt=file` 完整传输（改动涉及桌面插件 + Web 前端 + APP 三端 + 两份文档，一次改齐）。
-
-**8.5.6 编辑大文件的事故两次（同会话内）**
-
-- `ScanActivity.kt` 出现过**重复 import**（`HistoryStore` 两行）导致 Conflicting import；
-- `resetAll()` 曾被错误地插入成两份。
-- 原因：长会话中凭记忆 Edit，没先 Read。**预防**：对同一文件多次编辑后、编译报 import/重复符号错时，先 Read 全文核对；能 replace_all 清理的就 replace_all。
-
-**8.5.7 历史存储回读必须复用协议解析（数据语义陷阱）**
-
-excel 信封的单元格数字在扫码解析时**按原始文本保留**（Gson `1 → "1"`，防变 1.0）、日期已是字符串。`HistoryStore.restore` 如果自己 `asJsonPrimitive.asString` 随手解析会悄悄改变语义——必须走 `EnvelopeParser.jsonToRows`（已如此，改动时保持）。
-
-**8.5.8 协议 v2 的数据量代价（新开发者最容易忽略）**
-
-`fmt=file` 用 base64 装整个文件，体积 **+33%**；静态码每张约 20KB、上限 200 页（超出 `DataOverflowError` 报「数据量过大」）；20MB 上传上限不变。**大文件务必引导用户用二维码视频流**（QR-transfer，zfec 纠错，相机模式每码重复 5 帧）。改封装端分页参数前先读 `routes.py` 的 `_build_static_pages`。
-
-**8.5.9 桌面端改动不会热生效**
-
-`routes.py` 是随 Flask 应用启动时注册的，**改完必须重启 JZToolsHub 服务**，否则前端表现"改了没生效"。README/依赖（requirements.txt）也同步过（python-docx/xlrd 已移除）。
-
-### 8.6 当前已知问题与待办
-
-1. **「重置」功能处于移除状态**（8.5.1 事故后用户要求移除）。恢复指引：`btn_reset`/`toast_reset` 字符串、`ic_refresh` 图标、`CameraScanner` 的亮度采样回调（`onBrightness` 参数，现为 null 跳过）都还在；`resetAll` 逻辑 git 无从找回（见本节第 7 条），需按"清 PageCollector + frameCollector=null + 删暂存 + resetDedupe + 代数计数防后台回写"重写。**唯一硬性要求：insets 监听器不得引用 lateinit**（8.5.1）。
-2. `CameraScanner.averageLuminance` 亮度采样代码保留但无人调用（每 12 帧 Y 平面抽样，不影响 ML Kit）。要么接回去（重置按钮自适应配色），要么删。
-3. **file 协议端到端尚未真机验证**：桌面封装 .docx → APP 扫码/扫视频 → 导出，与原文件逐字节比对。桌面端记得先重启服务（8.5.9）。
-4. 手势条/三键导航两种模式、刘海屏、暗色模式（`values-night/colors.xml` 已配 tonal 容器色）未做真机回归。
-5. 结果页依赖 `ResultStore` 内存单例：**进程被杀后从最近任务恢复 ResultActivity 会直接 finish**（`ResultStore.current == null`）。历史卡片重新点开即可恢复，影响轻微；若要彻底修复可让 ResultActivity 兜底从 HistoryStore 取最新一条。
-6. `values-night` 只覆盖了 `secondary_container`；卡片/背景色走 Material3 默认 DayNight，未做深色专项审查。
-7. **android-app/ 未纳入版本管理，本轮全部改动没有提交过**（详见第 2 节，是否提交由人工决定）。
-
-### 8.7 回归验证清单（改完代码照此走一遍）
-
-- [ ] `assembleDebug` + `testDebugUnitTest` 全绿（命令见 8.2）
-- [ ] 主页：空状态文案 / 历史卡片（徽标四色+file 青色）/ 长按删除 / 菜单清空（有确认框）/ FAB 进识别页
-- [ ] 识别页：权限拒绝时仍可「导入图片」；同码面返回再进可重扫（resetDedupe）；多页码收齐出结果、中断后「继续收集/放弃」可用
-- [ ] 导入图片多选（一次拆分多张）、导入视频（.mp4）
-- [ ] 结果页：text/markdown/word(旧码)/excel(旧码)/file 五种徽标与统计；文本 4000 字符截断、excel 100 行截断；file 不显示内容
-- [ ] 导航栏：导出（下载目录见文件，file 带原扩展名）、复制（excel 得 TSV；file 提示改导出）、分享（file 在微信等显示原文件名）、长按出名称气泡
-- [ ] 从历史进入结果页无「重新扫描」按钮；从识别页进入有
-- [ ] 沉浸式：三个页面状态栏延伸、底部不压手势条（手势/三键两种导航各试一次）
-- [ ] file 端到端：桌面封装 → APP 还原 → 与原文件哈希一致
-
-### 8.8 关键设计决策速记（为什么这么做）
-
-- **三 Activity 而非单 Activity+Fragment**：规格文档 2.2 的约定，页面少、最简。
-- **历史一条一 JSON 文件**而非 SQLite/SharedPreferences：数量级小、单条删除/清空就是删文件、Gson 直接对齐信封结构。
-- **ResultStore 内存单例**传大文本：Intent 放 base64 大字符串会 TransactionTooLarge。
-- **错误文案逐字契约**：APP 端文案与《移动端APP.md》3.5 对照，桌面端按文案做 e2e 断言，改文案 = 改两处文档。
-- **file 只传不解析**：桌面端不再 import python-docx/xlrd（解析=丢信息的根源）；.txt/.md 保留文本提取是因为小且两端可预览。
-- **亮度采样放 CameraScanner 而非独立 ImageAnalysis**：复用同一分析管线，绝对索引读 Y 平面不移动 buffer position，对 ML Kit 无副作用。
-
-## 9. 关键信息速查
-
-- 启动：`python app.py`（默认 `0.0.0.0:5000`，`JZTOOLS_PORT`/`JZTOOLS_HOST` 可覆盖）。
-- **打包发布**：`powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "x.y.z"`
-  （产物 `deploy\JZToolsHub\` + `deploy\JZToolsHub-v<x.y.z>.zip`；`-Python` 可换解释器；
-  安装/卸载脚本源文件在仓库根目录，打包时自动复制进部署包，**改脚本只改根目录再重新打包**）。
-- **目标机安装 / 更新 / 卸载**：解压 zip → 双击 `一键安装.bat`（装/更一体）→ `start.bat` 启动；
-  卸载双击 `一键卸载.bat`。发版必须递增 `-Version`，否则目标机模板同步不触发。
-- 默认管理员：`admin` / `admin123`（首启自动生成于数据根目录 `config/admin.json`，登录后请尽快改密）。
-- 管理后台：`/admin`；会话超时 `session.idle_minutes`（默认 30 分钟）/ `session.absolute_hours`（默认 12 小时）。
-- 访问日志：数据根目录 `logs/access.log`（TAB 分隔，异步落盘，`site.logging` 开关）。
-- 快速自测（不进浏览器）：
-  ```python
-  import sys; sys.path.insert(0, r"D:\JZToolsHub")
-  import app as m
-  m.setup_access_logging(m.app)
-  m.register_plugin_backends(m.app)
-  c = m.app.test_client()
-  c.post("/api/login", json={"username": "admin", "password": "admin123"})
-  ```
-- 插件后端写法：`plugins/<id>/backend/routes.py` 导出 `register(app)`；会话取
-  `from jztools_admin.routes import get_session_user`；日志操作标签取
-  `from jztools_admin.routes import set_operation`（均带 try/except 兜底）。
-- **改完功能必同步的文档**：`README.md`（HTTP API 表、内置插件一览、目录结构、故障排查——
-  接口有增删时至少同步 API 表）、本文件第 2 节（git 最近提交）、必要时 `插件设计规范.md`。
-  **改信息传输协议时必须四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 +
-  《移动端APP.md》（改完记得重启 JZToolsHub 服务，见 8.5.9）。
-- 关键文档：`README.md`（架构/API 表/日志/**代码阅读地图**/打包发布流程/模板同步机制/
-  「信息传输与移动端 APP」章节）、`移动端APP.md`（信息传输协议权威规范，v1.5）、
-  `plugins/info-transfer/README.md`（封装端功能与接口）、
-  `插件设计规范.md`（B-1~B-21、SEC-1~11，含封装型 B 型插件全套规范）、
-  `docs/`（登录改造与数据隔离 / 容器化与插件热插拔 两份历史设计文档）、
-  `android-app/InfoParse/`（移动端源码，交接见本文件第 8 节）。
+*接手者请优先处理 §4 的 P0 清单，并在完成任何功能改动后按 §10.1 同步文档。*
