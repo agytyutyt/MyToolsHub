@@ -467,7 +467,34 @@ body {
 /* PDF 页面容器 —— 仅保留页与页之间的间隔，不做卡片投影；水平居中 */
 .pdf-page-box { background: #fff; }
 .pdf-page-box canvas { display: block; }
-#reader-container > div:first-child:not(.paper):not(.sheet-tabs):not(.kb-office) {
+/* PDF 流式连续容器（pdf.js）：页间留间隔，占位页显示页码 */
+.pdf-scroll .pdf-page-box { margin: 0 0 14px; }
+.pdf-page-box.loading {
+  background: #f4f6f8;
+  position: relative;
+}
+.pdf-page-box.loading::after {
+  content: attr(data-page);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b6bcc6;
+  font-size: 14px;
+}
+
+/* 缩放组（常驻 dock）：所有格式的预览内容缩放（不改浏览器页面缩放） */
+.zoom { display: inline-flex; align-items: center; }
+.zoom > * + * { margin-left: 6px; }
+
+/* SheetJS 降级渲染外层容器（通用内容缩放的作用目标，本身不加样式） */
+.kb-sheet-fallback { min-width: 0; }
+
+#reader-container > div:first-child:not(.paper):not(.sheet-tabs):not(.kb-office):not(.kb-sheet-fallback) {
   display: flex;
   flex-direction: column;
   align-items: center;

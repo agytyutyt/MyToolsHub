@@ -251,7 +251,7 @@ def _migrate_files():
 
 # 预览缓存格式版本：**引擎渲染行为发生变化时递增**（vendor 补丁/升级），
 # 读取时版本不符即视为无缓存重新渲染 —— 否则升级引擎后旧缓存会让修复"不生效"。
-PREVIEW_CACHE_VERSION = 2
+PREVIEW_CACHE_VERSION = 3   # v3：.doc 归一化警告文案按 flow 模式分流（旧缓存警告横幅需重新生成）
 
 
 def _preview_cache_path(fid):

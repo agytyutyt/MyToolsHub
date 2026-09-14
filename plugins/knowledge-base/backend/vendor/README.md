@@ -51,6 +51,14 @@
         `merge_para` 无条件透传），渲染时按「最近来源整组覆盖」取用。
      回归自测：`backend/test_dhr_indent_numid.py`（14 项断言，含覆盖矩阵）。
      上游同缺陷待同步。
+
+  5. `dhr/__init__.py` `normalize_doc`：`.doc` 归一化警告**按渲染模式分流文案**
+     （用户实测反馈）。原文案"分页位置可能不精确，建议使用流式模式"对**所有**
+     .doc 一律插入，但本插件自阶段 8 起 `office_render.render_word` 恒以
+     `mode="flow"` 渲染——用户已在流式模式下，"建议使用流式模式"是误导。
+     补丁：`normalize_doc` 增加 `mode` 参数，flow 模式改用
+     "…个别复杂版式（分栏/文本框等）可能与原件存在细微差异"，非 flow 保留原文案；
+     `convert()` 透传 `opts.mode`。上游待同步。
 - **接入方式**：`../office_render.py` 在 import 前把本目录插入 `sys.path`
   （dhr 依赖顶层 `xhr` 包，两包必须同为顶层可导入）
 - 上游文档：设计文档/API 参考/known-issues 见上游 `docs/`；格式层踩坑见上游

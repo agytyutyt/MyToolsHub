@@ -107,6 +107,33 @@
     return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/preview";
   }
 
+  // ==================== 通用 HTML 内容缩放（Word/Excel/MD/文本等） ====================
+  // 仅缩放预览内容元素（CSS zoom：随内容重排、滚动条正确），不改浏览器页面缩放。
+  // PDF/OFD 走各自引擎的原生缩放，不经此路径。
+  var htmlZoom = { el: null, scale: 1 };
+  var HTML_ZOOM_MIN = 0.5, HTML_ZOOM_MAX = 3.0, HTML_ZOOM_STEP = 0.1;
+
+  function htmlZoomApply() {
+    if (htmlZoom.el) htmlZoom.el.style.zoom = String(htmlZoom.scale);
+    if (callbacks && callbacks.onZoom) callbacks.onZoom(htmlZoom.scale);
+  }
+
+  function htmlZoomIn() {
+    htmlZoom.scale = Math.min(HTML_ZOOM_MAX, Math.round((htmlZoom.scale + HTML_ZOOM_STEP) * 10) / 10);
+    htmlZoomApply();
+  }
+
+  function htmlZoomOut() {
+    htmlZoom.scale = Math.max(HTML_ZOOM_MIN, Math.round((htmlZoom.scale - HTML_ZOOM_STEP) * 10) / 10);
+    htmlZoomApply();
+  }
+
+  // 渲染器注册缩放目标（渲染完内容后调用）；scale 每次渲染重置为 1
+  function setZoomTarget(el) {
+    htmlZoom.el = el;
+    htmlZoom.scale = 1;
+  }
+
   // ==================== 渲染器：Office 预览（服务端 xhr/dhr 双引擎） ====================
   // 后端按需渲染并缓存：Word = dhr 流式文档片段（<style>+<div class="kbdoc">）；
   // Excel = xhr 表格片段（<div class="kbsheet">，含 .kbsheet-tabs 页签与多个
@@ -146,6 +173,7 @@
           box.insertBefore(st, box.firstChild);
         }
         container().appendChild(box);
+        setZoomTarget(box);   // Word/Excel 引擎预览支持内容缩放
         // Excel 页签接线（与 xhr 引擎 runtime 同款逻辑：hidden 属性切显隐）
         var activeSheet = null;
         if (isSheet) {
@@ -221,6 +249,7 @@
         div.className = "paper";
         div.innerHTML = clean;
         container().appendChild(div);
+        setZoomTarget(div);
         status(null);
         callbacks.onReady("复制原文");
         return {
@@ -255,12 +284,18 @@
       .then(function (results) {
         var buf = results[0];
         var wb = window.XLSX.read(buf, { type: "array" });
+        // 外层缩放容器：SheetJS 降级渲染产两个兄弟节点（页签 + 表格区），
+        // 统一包一层供通用内容缩放（style.zoom）作用
+        var zoomBox = document.createElement("div");
+        zoomBox.className = "kb-sheet-fallback";
+        container().appendChild(zoomBox);
         var tabs = document.createElement("div");
         tabs.className = "sheet-tabs";
         var wrap = document.createElement("div");
         wrap.className = "sheet-table-wrap";
-        container().appendChild(tabs);
-        container().appendChild(wrap);
+        zoomBox.appendChild(tabs);
+        zoomBox.appendChild(wrap);
+        setZoomTarget(zoomBox);
         var names = wb.SheetNames || [];
         var tableHtmls = {};
         names.forEach(function (name) {
@@ -311,10 +346,13 @@
       });
   }
 
-  // ==================== 渲染器：PDF（PDF.js） ====================
+  // ==================== 渲染器：PDF（PDF.js，流式连续布局） ====================
   var pdfState = null;
 
   // url 为空 = 默认 /raw（渲染件）；word/excel 的 PDF 预览传 /pdf
+  // 流式连续布局：全部页面纵向排列（页间留间隔），占位框按各页比例预留尺寸，
+  // 进入视口附近才渲染（IntersectionObserver，Chrome 72 可用）——
+  // 大文档不卡首屏；页码指示随滚动更新，‹ › 改为滚动到上/下一页。
   function renderPdf(file, opts) {
     var src = (opts && opts.url) ? fetchUrl(file, opts.url) : fetchRaw(file);
     return Promise.all([src, loadScript(V + "pdf/pdf.min.js?v=1")])
@@ -325,56 +363,175 @@
         return pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
       })
       .then(function (doc) {
-        var page = 1;
         var total = doc.numPages;
-        var scale = 1.25; // 默认放大展示（A4 在 scale 1.0 下仅约 595px 宽，偏小）
+        var scale = 1.25;   // 默认放大展示（A4 在 scale 1.0 下仅约 595px 宽，偏小）
+        var dpr = window.devicePixelRatio || 1;
+        var gen = 0;        // 渲染代次：缩放重排后旧任务完成也作废（防旧 scale 画布误入）
         var box = document.createElement("div");
+        box.className = "pdf-scroll";
         container().appendChild(box);
-        var renderTask = null;
 
-        function renderCurrent() {
-          if (renderTask) { try { renderTask.cancel(); } catch (e) { /* 忽略 */ } }
-          status("渲染第 " + page + " 页…");
-          return doc.getPage(page).then(function (pg) {
-            var dpr = window.devicePixelRatio || 1;
-            var base = pg.getViewport({ scale: scale * dpr });
-            var canvas = document.createElement("canvas");
-            canvas.width = base.width;
-            canvas.height = base.height;
-            canvas.style.width = (base.width / dpr) + "px";
-            canvas.style.height = (base.height / dpr) + "px";
-            var ctx = canvas.getContext("2d");
-            renderTask = pg.render({ canvasContext: ctx, viewport: base });
-            return renderTask.promise.then(function () {
-              box.innerHTML = "";
-              var wrap = document.createElement("div");
-              wrap.className = "pdf-page-box";
-              wrap.appendChild(canvas);
-              box.appendChild(wrap);
-              status(null);
-              if (callbacks.onReady) callbacks.onReady("复制本页");
-              callbacks.onPage(page, total, scale);
-            }).catch(function (e) {
-              // 用户翻页/缩放导致的主动取消不算错误
-              if (e && e.name === "RenderingCancelledException") return;
-              throw e;
+        var wraps = [null];     // 1-based：每页占位容器
+        var rendered = [false]; // 1-based：画布是否已渲染
+        var tasks = {};         // page -> renderTask（在途任务，缩放/销毁时取消）
+        var queue = [];         // 待渲染页号
+        var pumping = false;
+        var current = 1;
+        var firstDone = false;
+        var io = null;
+        var scrollBound = false;
+
+        // 先取全部页面的元数据 viewport（不渲染，开销小），据此建占位框
+        var metas = [];
+        for (var mi = 1; mi <= total; mi++) metas.push(doc.getPage(mi));
+        return Promise.all(metas).then(function (pages) {
+          var meta = [];
+          pages.forEach(function (pg) { meta[pg.pageNumber] = pg.getViewport({ scale: 1 }); });
+
+          for (var i = 1; i <= total; i++) {
+            var w = document.createElement("div");
+            w.className = "pdf-page-box loading";
+            w.setAttribute("data-page", i);
+            w.style.width = (meta[i].width * scale) + "px";
+            w.style.height = (meta[i].height * scale) + "px";
+            box.appendChild(w);
+            wraps[i] = w;
+          }
+
+          function enqueue(p) {
+            if (!rendered[p] && queue.indexOf(p) < 0) { queue.push(p); pump(); }
+          }
+
+          function renderPage(p) {
+            if (rendered[p]) return Promise.resolve();
+            var g = gen;
+            return doc.getPage(p).then(function (pg) {
+              if (g !== gen || rendered[p]) return null;
+              var base = pg.getViewport({ scale: scale * dpr });
+              var canvas = document.createElement("canvas");
+              canvas.width = base.width;
+              canvas.height = base.height;
+              canvas.style.width = (base.width / dpr) + "px";
+              canvas.style.height = (base.height / dpr) + "px";
+              var ctx = canvas.getContext("2d");
+              var task = pg.render({ canvasContext: ctx, viewport: base });
+              tasks[p] = task;
+              return task.promise.then(function () {
+                delete tasks[p];
+                if (g !== gen || rendered[p]) return null; // 缩放竞态：旧代次产物丢弃
+                var w = wraps[p];
+                w.innerHTML = "";
+                w.className = "pdf-page-box";
+                w.appendChild(canvas);
+                rendered[p] = true;
+                if (!firstDone) {
+                  firstDone = true;
+                  status(null);
+                  if (callbacks.onReady) callbacks.onReady("复制本页");
+                }
+                if (p === current && callbacks.onPage) callbacks.onPage(current, total, scale);
+                return null;
+              }).catch(function (e) {
+                delete tasks[p];
+                // 缩放/销毁导致的主动取消不算错误
+                if (e && e.name === "RenderingCancelledException") return null;
+                throw e;
+              });
             });
-          });
-        }
+          }
 
-        function safeRender() {
-          renderCurrent().catch(function (e) {
-            status("PDF 渲染失败：" + (e && e.message ? e.message : "未知错误"));
-          });
-        }
+          function pump() {
+            if (pumping) return;
+            pumping = true;
+            function step() {
+              if (!queue.length) { pumping = false; return; }
+              // 离视口中心最近的页优先渲染
+              var mid = window.pageYOffset + window.innerHeight / 2;
+              var best = -1, bestDist = Infinity, bestIdx = -1;
+              for (var i = 0; i < queue.length; i++) {
+                var w = wraps[queue[i]];
+                var top = w.getBoundingClientRect().top + window.pageYOffset;
+                var d = Math.abs(top + w.offsetHeight / 2 - mid);
+                if (d < bestDist) { bestDist = d; best = queue[i]; bestIdx = i; }
+              }
+              queue.splice(bestIdx, 1);
+              return renderPage(best).then(step, step);
+            }
+            Promise.resolve().then(step);
+          }
 
-        pdfState = {
-          prevPage: function () { if (page > 1) { page--; safeRender(); } },
-          nextPage: function () { if (page < total) { page++; safeRender(); } },
-          zoomIn: function () { if (scale < 3) { scale = Math.min(3, scale + 0.2); safeRender(); } },
-          zoomOut: function () { if (scale > 0.4) { scale = Math.max(0.4, scale - 0.2); safeRender(); } },
-          copy: function () {
-            return doc.getPage(page).then(function (pg) {
+          function updateCurrent() {
+            var mid = window.pageYOffset + window.innerHeight / 2;
+            var best = 1, bestDist = Infinity;
+            for (var i = 1; i <= total; i++) {
+              var w = wraps[i];
+              var top = w.getBoundingClientRect().top + window.pageYOffset;
+              var d = Math.abs(top + w.offsetHeight / 2 - mid);
+              if (d < bestDist) { bestDist = d; best = i; }
+            }
+            if (best !== current) {
+              current = best;
+              if (callbacks.onPage) callbacks.onPage(current, total, scale);
+            }
+          }
+
+          var scrollTick = false;
+          function onScroll() {
+            if (scrollTick) return;
+            scrollTick = true;
+            setTimeout(function () { scrollTick = false; updateCurrent(); }, 120);
+          }
+
+          function bindScroll() {
+            if (scrollBound) return;
+            scrollBound = true;
+            window.addEventListener("scroll", onScroll, false);
+          }
+
+          // 缩放：取消在途任务 → 清已渲染画布 → 重设占位尺寸 → 视口附近重新入队；
+          // 保持滚动位置比例（内容总高变了，按比例还原阅读位置）
+          function applyScale(ns) {
+            scale = ns;
+            gen++;
+            var max = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+            var ratio = (max > window.innerHeight)
+              ? window.pageYOffset / (max - window.innerHeight) : 0;
+            for (var tp in tasks) { try { tasks[tp].cancel(); } catch (e) { /* 忽略 */ } }
+            queue.length = 0;
+            for (var i = 1; i <= total; i++) {
+              var w = wraps[i];
+              if (rendered[i]) {
+                w.innerHTML = "";
+                w.className = "pdf-page-box loading";
+                rendered[i] = false;
+              }
+              w.style.width = (meta[i].width * scale) + "px";
+              w.style.height = (meta[i].height * scale) + "px";
+            }
+            // IO 对"已相交未变化"的元素不会重复回调，手动把视口附近的页入队
+            var vh = window.innerHeight;
+            for (var j = 1; j <= total; j++) {
+              var r = wraps[j].getBoundingClientRect();
+              if (r.bottom > -1200 && r.top < vh + 1200) enqueue(j);
+            }
+            if (callbacks.onPage) callbacks.onPage(current, total, scale);
+            setTimeout(function () {
+              var max2 = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+              window.scrollTo(0, ratio * Math.max(0, max2 - window.innerHeight));
+              updateCurrent();
+            }, 80);
+          }
+
+          function scrollToPage(p) {
+            if (p < 1 || p > total) return;
+            current = p;
+            var top = wraps[p].getBoundingClientRect().top + window.pageYOffset - 70;
+            window.scrollTo(0, top);
+            if (callbacks.onPage) callbacks.onPage(current, total, scale);
+          }
+
+          function pageText(p) {
+            return doc.getPage(p).then(function (pg) {
               return pg.getTextContent().then(function (tc) {
                 var lines = [];
                 var last = null;
@@ -388,15 +545,41 @@
                 return lines.join("\n");
               });
             });
-          },
-          onPageChange: function () { callbacks.onPage(page, total, scale); }
-        };
-        onCleanup(function () {
-          if (renderTask) { try { renderTask.cancel(); } catch (e) { /* 忽略 */ } }
-          try { doc.destroy(); } catch (e) { /* 忽略 */ }
-          pdfState = null;
+          }
+
+          if (window.IntersectionObserver) {
+            io = new IntersectionObserver(function (entries) {
+              entries.forEach(function (en) {
+                if (!en.isIntersecting) return;
+                var p = Number(en.target.getAttribute("data-page"));
+                enqueue(p);
+              });
+            }, { rootMargin: "1200px 0px" });
+            for (var oi = 1; oi <= total; oi++) io.observe(wraps[oi]);
+          } else {
+            // 极老内核无 IO：退化为顺序渲染全部页
+            for (var ai = 1; ai <= total; ai++) queue.push(ai);
+          }
+          bindScroll();
+
+          pdfState = {
+            prevPage: function () { scrollToPage(current - 1); },
+            nextPage: function () { scrollToPage(current + 1); },
+            zoomIn: function () { if (scale < 3) applyScale(Math.min(3, scale + 0.2)); },
+            zoomOut: function () { if (scale > 0.4) applyScale(Math.max(0.4, scale - 0.2)); },
+            copy: function () { return pageText(current); },
+            onPageChange: function () { if (callbacks.onPage) callbacks.onPage(current, total, scale); }
+          };
+          onCleanup(function () {
+            gen++;
+            if (io) { try { io.disconnect(); } catch (e) { /* 忽略 */ } }
+            if (scrollBound) window.removeEventListener("scroll", onScroll, false);
+            for (var tp in tasks) { try { tasks[tp].cancel(); } catch (e) { /* 忽略 */ } }
+            try { doc.destroy(); } catch (e) { /* 忽略 */ }
+            pdfState = null;
+          });
+          pump();
         });
-        safeRender();
       });
   }
 
@@ -499,6 +682,8 @@
     destroy();
     callbacks = cbs || {};
     current = file;
+    htmlZoom.el = null;
+    htmlZoom.scale = 1;
     // ★预览分派（阶段 8）：Word/Excel → 服务端 xhr/dhr 引擎按需渲染的 HTML
     //   预览（样式还原、连续单页），失败自动回退降级渲染器（mammoth / SheetJS）；
     //   其余格式按扩展名分派（原生 PDF 仍走 PDF.js）。
@@ -552,13 +737,23 @@
   }
 
   // ==================== 对外接口（app.js 调用） ====================
+  // 缩放分派：PDF/OFD 用引擎原生缩放（重渲染/自带 API），
+  // 其余格式走通用 HTML 内容缩放（CSS zoom，不改浏览器页面缩放）。
   window.KBReader = {
     render: render,
     destroy: destroy,
     prevPage: function () { if (pdfState) pdfState.prevPage(); else if (ofdState) ofdState.prevPage(); },
     nextPage: function () { if (pdfState) pdfState.nextPage(); else if (ofdState) ofdState.nextPage(); },
-    zoomIn: function () { if (pdfState) pdfState.zoomIn(); else if (ofdState) ofdState.zoomIn(); },
-    zoomOut: function () { if (pdfState) pdfState.zoomOut(); else if (ofdState) ofdState.zoomOut(); },
+    zoomIn: function () {
+      if (pdfState) return pdfState.zoomIn();
+      if (ofdState) return ofdState.zoomIn();
+      htmlZoomIn();
+    },
+    zoomOut: function () {
+      if (pdfState) return pdfState.zoomOut();
+      if (ofdState) return ofdState.zoomOut();
+      htmlZoomOut();
+    },
     copy: function () { return Promise.resolve(); },
     onResize: function () { /* EasyOFD 容器自适应，无需处理 */ }
   };

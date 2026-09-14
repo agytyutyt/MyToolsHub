@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>知识库</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=24">
+  <link rel="stylesheet" href="./style.css?v=25">
 
 </head>
 <body>
@@ -85,16 +85,18 @@
       <span class="badge" id="dock-ext"></span>
       <span class="dock-title" id="dock-title"></span>
       <span class="pager-sep"></span>
-      <!-- PDF / OFD 专属导航（其余格式隐藏） -->
+      <!-- 缩放（常驻）：所有格式均可缩放预览内容（不改浏览器页面缩放） -->
+      <span id="reader-zoom" class="zoom">
+        <button id="btn-zoom-out" class="icon-btn" title="缩小">－</button>
+        <span class="zoom-indicator" id="zoom-indicator">100%</span>
+        <button id="btn-zoom-in" class="icon-btn" title="放大">＋</button>
+      </span>
+      <span class="pager-sep"></span>
+      <!-- PDF / OFD 专属页码导航（其余格式隐藏） -->
       <span id="reader-pager" class="pager hidden">
         <button id="btn-prev-page" class="icon-btn" title="上一页">‹</button>
         <span class="page-indicator" id="page-indicator">1 / 1</span>
         <button id="btn-next-page" class="icon-btn" title="下一页">›</button>
-        <span class="pager-sep"></span>
-        <button id="btn-zoom-out" class="icon-btn" title="缩小">－</button>
-        <span class="zoom-indicator" id="zoom-indicator">100%</span>
-        <button id="btn-zoom-in" class="icon-btn" title="放大">＋</button>
-        <span class="pager-sep"></span>
       </span>
       <button id="btn-copy" class="btn btn-primary btn-icon" title="复制">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -124,7 +126,7 @@
 
   <div id="snackbar" class="snackbar"></div>
 
-  <script src="./reader.js?v=6"></script>
-  <script src="./app.js?v=16"></script>
+  <script src="./reader.js?v=7"></script>
+  <script src="./app.js?v=17"></script>
 </body>
 </html>

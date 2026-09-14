@@ -658,6 +658,10 @@
         $("btn-prev-page").disabled = page <= 1;
         $("btn-next-page").disabled = page >= total;
       },
+      // 通用内容缩放指示（Word/Excel/MD/文本等非翻页格式）
+      onZoom: function (zoom) {
+        $("zoom-indicator").textContent = Math.round(zoom * 100) + "%";
+      },
       onFail: function (msg) {
         $("reader-status").textContent = msg;
         $("reader-status").className = "reader-status";
@@ -681,6 +685,7 @@
     showReaderNotice(f);
     $("btn-copy").disabled = true;
     $("reader-pager").className = "pager hidden";
+    $("zoom-indicator").textContent = "100%";   // 每次打开重置内容缩放
     window.KBReader.render(f, readerCbs());
     // 仍在生成 PDF：轮询等待，就绪后自动重渲染切到 PDF 视图
     window.scrollTo(0, 0);
@@ -698,6 +703,7 @@
     $("reader-container").innerHTML = "";
     $("btn-copy").title = "复制";
     $("reader-pager").className = "pager hidden";
+    $("zoom-indicator").textContent = "100%";
     window.scrollTo(0, state.listScroll || 0);
   }
 

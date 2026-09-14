@@ -74,6 +74,8 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 - **优雅降级（B-4）**：引擎未加载 / 渲染失败 → `GET /preview` 返回 404，前端自动
   回退 mammoth（Word）/ SheetJS（Excel）简化渲染；上传/阅读/下载不受影响。
 - **连续单页**：Word 流式排版（flow），Excel 整表横向滚动——都没有打印分页。
+  `.doc` 归一化的顶部提示按模式分流文案：流式预览只提示"个别复杂版式可能与
+  原件存在细微差异"（不再出现误导性的"建议使用流式模式"）。
 - **只读与安全**：不生成任何编辑控件；引擎侧全部文本转义 + URL 协议/字体白名单，
   前端侧正文过 DOMPurify（引擎 CSS 为静态内容，摘取后原样挂回，不经消毒）。
 
@@ -92,8 +94,9 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
   无需手工清缓存、无需重启服务。排查渲染问题时也可手工删除受影响文件的缓存
   （`data/files/<id>.preview.json`，或整批 `*.preview.json`）。删除文档时缓存自动清理。
 - **vendor 引擎升级流程**：① 整目录替换 `backend/vendor/{xhr,dhr}`；② **重打补丁**——按
-  `vendor/README.md` 的补丁清单逐条恢复（现有 4 条：xhr 缺格样式、xhr `Optional` 导入、
-  dhr numId=0 语义、dhr 字符缩进/形态覆盖）；③ 递增 `routes.py` 的 `PREVIEW_CACHE_VERSION`；
+  `vendor/README.md` 的补丁清单逐条恢复（现有 5 条：xhr 缺格样式、xhr `Optional` 导入、
+  dhr numId=0 语义、dhr 字符缩进/形态覆盖、dhr `.doc` 警告按模式分流）；③ 递增
+  `routes.py` 的 `PREVIEW_CACHE_VERSION`；
   ④ 重跑 `backend/test_routes_preview.py` 与 `backend/test_dhr_indent_numid.py` 回归；
   ⑤ `python backend/_build_phase8.py` 重建目检页人工核对样式。
 - **前端注入约定**：reader.js 对引擎 HTML 的处理是「摘取全部 `<style>` 块 → 正文过

@@ -62,8 +62,23 @@ def parse_to_model(data: bytes, options: Optional[ParseOptions] = None) -> Docum
     return _parse(ing["files"], opts)
 
 
-def normalize_doc(data: bytes, soffice_path: Optional[str] = None) -> DocumentModel:
-    """`.doc` → DocumentModel（LibreOffice 归一化通道，T-901）。"""
+def _doc_warning(mode: Optional[str]) -> str:
+    """`.doc` 归一化的用户可见提示（按渲染模式给出准确文案）。
+
+    flow（流式，本插件的唯一使用形态）下不存在"分页位置"概念，
+    原文案"建议使用流式模式"对用户是误导（本就在流式模式），故分流文案。
+    """
+    if mode == "flow":
+        return ".doc 经 LibreOffice 归一化渲染，个别复杂版式（分栏/文本框等）可能与原件存在细微差异"
+    return ".doc 经 LibreOffice 归一化渲染；分页位置可能不精确，建议使用流式模式"
+
+
+def normalize_doc(data: bytes, soffice_path: Optional[str] = None,
+                  mode: Optional[str] = None) -> DocumentModel:
+    """`.doc` → DocumentModel（LibreOffice 归一化通道，T-901）。
+
+    mode 为渲染模式（flow/paged/print），仅影响顶部提示条文案。
+    """
     from .normalize import docx_files_of, normalize_doc_to_docx
 
     docx_bytes = normalize_doc_to_docx(data, soffice_path=soffice_path)
@@ -72,7 +87,7 @@ def normalize_doc(data: bytes, soffice_path: Optional[str] = None) -> DocumentMo
     model.meta["sourceFormat"] = "doc"
     if not model.meta.get("warnings"):
         model.meta["warnings"] = []
-    model.meta["warnings"].insert(0, ".doc 经 LibreOffice 归一化渲染；分页位置可能不精确，建议使用流式模式")
+    model.meta["warnings"].insert(0, _doc_warning(mode))
     return model
 
 
@@ -86,7 +101,7 @@ def convert(data: bytes, options: Optional[ConvertOptions] = None) -> ConvertRes
     ing = ingest_doc(data)
 
     if ing["format"] == "doc":
-        model = normalize_doc(data)
+        model = normalize_doc(data, mode=opts.mode)
     elif ing["format"] == "rtf":
         raise XhrError("UNSUPPORTED_FORMAT", "RTF 暂不支持，请先用 Word/WPS 另存为 .docx")
     else:
