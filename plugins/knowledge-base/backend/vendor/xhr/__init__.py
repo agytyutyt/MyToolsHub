@@ -10,6 +10,8 @@
     result = convert(b"……xlsx 字节……", mode="document", with_runtime=True)
     print(result.html)
 """
+from typing import Optional  # 本地补丁：见 vendor/README.md（上游缺该导入，见文件末尾说明）
+
 from .core import *  # noqa: F401,F403
 from .ingest import IngestResult, ingest, sniff  # noqa: F401
 from .style import *  # noqa: F401,F403

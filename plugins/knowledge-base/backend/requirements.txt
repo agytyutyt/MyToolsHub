@@ -7,8 +7,11 @@
 #   Office 预览（阶段 8）用 vendor/ 下的 xhr/dhr 双引擎，纯标准库零第三方依赖，
 #   不列在下面（PyInstaller spec 的 PACKAGES 也无需为它们加条目）；vendor 的
 #   .xls 高保真/.doc 归一化通道可选用到 LibreOffice（外部程序）。
-#   注意：引擎要求 Python >= 3.10（xhr/dhr 的 pyproject 声明），打包 venv
-#   build-314（3.14.x）满足；降级到 3.8 打包会使引擎不可用（预览回退降级渲染）。
+#   引擎的 Python 版本要求：**3.8 ~ 3.14 全域可用**，本项目的打包基线为 3.14。
+#   （先前此处写的"引擎要求 Python >= 3.10"是错的，已纠正——那是上游 pyproject 的
+#   元数据，不是运行时约束。真正的问题是 vendor/xhr/__init__.py 少了一行
+#   `from typing import Optional`，导致 Python ≤3.13 导入即 NameError；详见
+#   vendor/README.md 的补丁清单与 docs/Python版本选型评估.md §1.5。）
 #   任一缺失时插件其余功能不受影响，仅该格式的自动转换不可用（页面明确提示，
 #   见 GET /api/knowledge-base/status 的 convert_legacy 字段）。
 #
