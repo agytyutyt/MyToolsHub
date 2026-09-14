@@ -92,8 +92,8 @@ python app.py
 | 项 | 值 |
 | --- | --- |
 | 当前分支 | `main` |
-| HEAD | `6ad5a6b`（第四轮：LibreOffice 随包裁剪核心包 + v1.8 出包） |
-| 第四轮（核心包瘦身） | `6ad5a6b` LibreOffice 核心包替代 MSI（分发包 618.4 → **437.5 MB**，并改写包内 manifest）；`9c8b0af` 打包标注脏工作区 + `-ZipOnly` |
+| HEAD | `0bc30ab`（收尾：manifest 组件名同步 + v1.8 实测数据回写） |
+| 第四轮（核心包瘦身） | `6ad5a6b` LibreOffice 核心包替代 MSI（分发包 618.4 → **437.5 MB**，并改写包内 manifest）；`0bc30ab` 补写 manifest 组件名与文档实测数据；`9c8b0af` 打包标注脏工作区 + `-ZipOnly` |
 | 第三轮（离线部署） | `fd06e32` 离线部署包随包分发 Chrome / LibreOffice；`9bc0d53` 取消 Win7 兼容 + OS/浏览器双基线 |
 | 第二轮（P0 修复三连） | `e907b5e` 日志补记 / `05cc6ea` 仓库卫生与文档 / `03137d7` 路由前缀与加载隔离 / `8d0301d` 模板命名分离与打包防呆 |
 | 第一轮（文档重写） | `7d2d3dc` README/HANDOFF 全面重写 + 新增 20260914 评估报告 |
