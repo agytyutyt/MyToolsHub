@@ -1,7 +1,16 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（第十轮：**插件升级改为"后台上传即全自动"** —— 管理员在「插件管理」页
+> 最后更新：2026-09-15（第十一轮：**插件包校验失败不再只报"HTTP 400"** —— 后端 `upload`/`apply`
+> 的 400 响应补 `error` 摘要，前端 `admin-common.js` 的 `api()` 透传 `errors[]`，插件管理页把
+> 拒绝原因**逐条列出**并按类型给出处置建议（同版本重装→勾「强制」、主程序过低→先升主包、
+> 缺 `version.json`→检查部署目录、哈希不符→重拷原包）。起因：目标机上传 admin 1.3.0 包只看到
+> "校验未通过：HTTP 400"，真实原因被前端吞掉；沙箱复现确认标准目标机（admin 1.2.0 + 主程序
+> 1.9.0）校验本应通过，被拒只可能是同版本重装 / 主程序版本不符 / 包损坏三类。
+> **文档同步**：README 新增 §3.4「插件包：只升级一个插件（出包 + 目标机更新）」
+> （出包前置、参数、产物与登记、两条更新入口、校验被拒排查表、回滚）与 §12 两条排查项。
+> admin 插件随本次修复升到 **1.3.1** 并重新出包。
+> 第十轮：**插件升级改为"后台上传即全自动"** —— 管理员在「插件管理」页
 > 上传 zip（**不解压**），程序自动完成 **校验 → 备份 → 替换 → 停服重启**，页面轮询到服务恢复后
 > 自动刷新；`apply` / `rollback` / `batch-apply` 三个入口共用 `_maybe_auto_restart()`
 > （`plugins/admin/backend/routes.py`），统一返回 `restarting` / `restart_message`，
@@ -178,6 +187,19 @@ python app.py
 > 核心包重建用 `tools/build-libreoffice-core.py`，裁剪理由见 `docs/离线部署包说明.md` §3。
 > 只改了文档要重出 zip：`build-deploy.ps1 -ZipOnly`（跳过 PyInstaller 与组装，实测约 2 分钟，
 > 但**要先把新文件复制进 `deploy/JZToolsHub/`**）。全量打包实测在 10 分钟内跑完。
+
+**插件包产物（与主包并列分发，只升级单个插件；出包前置与参数见 README §3.4）**
+
+| 插件 | 包 | 体积 | sha256（前 16 位） | 说明 |
+| --- | --- | --- | --- | --- |
+| admin | `deploy/插件包/JZToolsHub-插件-admin-v1.3.1.zip` | 0.11 MB / 25 文件 | `a719fd33739b9529` | 含"上传即自动重启" + **校验失败逐条提示**；`min_app_version=1.9.0`、`requires_restart=true` |
+| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.1.0.zip` | 1.22 MB / 80 文件 | `891a304f50fd036e` | 预览三项优化（见第九轮） |
+
+发布登记（入库、sha256 冻结值、逐文件哈希）：`tools/plugin-packages.json`；
+随介质分发的索引：`deploy/插件包/index.json`（共享盘批量更新读它）。
+**目标机两种更新方式**：① 管理后台「插件管理」上传 zip（免解压，自动校验 → 备份 → 替换 →
+停服重启 → 页面自刷新）；② 解压后双击「安装插件.bat」（`-List` 体检 / `-DryRun` 预演 /
+`-Rollback <id>` 回滚）。回滚在后台点该插件行的「回滚」即可，同样会自动重启生效。
 
 ### 2.3 无硬性阻塞，但以下事项未充分验证
 
@@ -362,59 +384,60 @@ python app.py
     - 各插件页内图标优先自带 SVG（`plugins/trajectory-sketch/frontend/icons/`）。
     新样式优先用纯文本或自绘 SVG；新增插件 emoji 图标只需在 `static/js/jz-icon.js` 的 MAP 补一条。
 16. **知识库「已转换」提示用 `sessionStorage` 记忆关闭状态**，不能用 `localStorage`（一个文件被多人先后打开，互不影响）。
-17. **目标机 OS 基线与浏览器基线是两件独立的事**：OS 基线是 Windows 10+，浏览器基线是 Chrome ≥72。**取消 Win7 支持不等于可以放宽浏览器基线**——若要提浏览器基线，必须先确认内网老浏览器确实已升级，否则会出现"在 Win10 机器上照样白屏"的误判（详见 §1.1 与 README §2.1）。
+17. **前端通用 `api()` 抛错只取 `data.error`，后端用 `errors[]` 的 400 会被吞成"HTTP 400"**（2026-09-15 修）：插件包校验失败时后端返回 `{ok:false, errors:[…]}`，而 `admin-common.js` 的旧实现是 `throw new Error(data.error || 'HTTP ' + res.status)`——管理员只看到"校验未通过：HTTP 400"，真正的"同版本重装 / 主程序版本过低 / 哈希不符"全被丢掉，现场无法自助处理。修法两侧都要有：① 后端 `upload` / `apply` 的 400 响应**同时给 `error` 摘要**（`"；".join(errors)`）；② 前端 `api()` 兜底也拼 `errors`，并给 error 对象挂 `err.errors`，页面据此逐条渲染 + 按类型提示下一步。**凡是后端用数组给原因的接口，都必须保证 `error` 摘要存在。**
+18. **目标机 OS 基线与浏览器基线是两件独立的事**：OS 基线是 Windows 10+，浏览器基线是 Chrome ≥72。**取消 Win7 支持不等于可以放宽浏览器基线**——若要提浏览器基线，必须先确认内网老浏览器确实已升级，否则会出现"在 Win10 机器上照样白屏"的误判（详见 §1.1 与 README §2.1）。
 
 ### 7.4 打包 / 安装脚本与本地环境
 
-18. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
-19. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
-20. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1:264` 有守卫，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（`:276`）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
-21. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
+19. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
+20. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
+21. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1:264` 有守卫，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（`:276`）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
+22. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
     *（2026-09-14 起 `build-deploy.ps1` 已防呆：不传 `-Version` 会自动递增 patch；最终版本号与上一版相同时**直接报错中止**，确需同号重打要显式加 `-Force`。）*
-22. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（< 4 即中止）。
-23. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
-24. **打包解释器必须与基线一致，且依赖必须装齐**（2026-09-14 起脚本已加两道前置检查）：
+23. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（< 4 即中止）。
+24. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
+25. **打包解释器必须与基线一致，且依赖必须装齐**（2026-09-14 起脚本已加两道前置检查）：
     - `build-deploy.ps1` 会打印解释器版本，**与基线 3.14 不符时告警**（用 3.8/3.10 打出来的包会缺功能且无人察觉）；
     - 会逐个 import `JZToolsHub.spec` 里 collect_all 的 14 个库并列出缺失项——**缺库不会让打包失败**，只会产出功能残缺的包，所以必须显式拦截；
     - `version.json` 现在记录 `{app, schema, commit, built_at, python}`，目标机可据此核对"包是哪个提交、哪个 Python 打的"；
     - 其中 **`zfec` 需要 `--find-links wheels`**（无 3.14 官方 wheel），详见 `wheels/README.md`。
-25. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
-26. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
-27. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
-28. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95~130s、解出 1522.6 MB / 19418 文件，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
+26. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
+27. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
+28. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
+29. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95~130s、解出 1522.6 MB / 19418 文件，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
     * **`msiexec /a` 会忽略 `ADDLOCAL` 功能选择**：按官方功能表只保留 378 个功能后，仍解出全量 19418 个文件（2026-09-14 实测）。所以"只装核心"只能**先全量解包再裁剪**。该 MSI 的功能划分本身是干净的（`gm_Langpack_*` 356.7 MB、`gm_r_ex_Dictionary_*` 455.2 MB、`gm_r_Files_Images` 71.7 MB），但 `/a` 不认。
     * **裁剪时 `presets\` 绝不能删**：删掉后 soffice 在**全新 user profile** 下报 `Fatal Error: … 安装无法完成`（退出码 77）。极其隐蔽——复用已初始化好的 profile 时裁剪树看起来完全正常，而**应用每次转换用的都是唯一临时 profile**（`xhr`/`dhr` 里都是 `tempfile.mkdtemp`），等于每次都是首次启动，**线上必崩**。`help\` / `readmes\` 反之是安全的（已逐项实测），别和 `presets\` 归成一类一起删。**测裁剪安全性必须每次用全新 profile**，否则结论是假阳性。
     * 落地方案：`tools/build-libreoffice-core.py` 在打包机解包 + 裁剪 + **构建期冒烟测试**（全新 profile 跑一次 CSV→XLSX）→ 产出 `runtime/libreoffice/libreoffice-core.zip`（357.5 MB → 164.5 MB、解包 557.9 MB / 2824 文件），打包时替代原始 MSI（`-KeepFullLibreOffice` 可保留完整版）。详见 `docs/离线部署包说明.md` §3.1。
-29. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。Python 侧用 `subprocess.run()` 则天然等待（`build-libreoffice-core.py` 就是这么调的）。
+30. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。Python 侧用 `subprocess.run()` 则天然等待（`build-libreoffice-core.py` 就是这么调的）。
     * **`.NET Framework` 的 `ZipFile.ExtractToDirectory` 没有 `bool` 覆盖重载**：只有 `(源,目标)` 与 `(源,目标,Encoding)` 两个。传第三个参数 `$true` 会被 PowerShell 绑到 `entryNameEncoding` 上并抛"无法将值 True 转换为类型 System.Text.Encoding"。需要覆盖解压时用逐条 `[IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $path, $true)`。
-30. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
-31. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
-32. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。
+31. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
+32. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
+33. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。
     * **组件已移出主包（2026-09-14 第六轮）**：主包默认不含 Chrome / LibreOffice，`install.ps1` 判断"是否处理离线组件"改为看**源包**里有没有 `runtime\manifest.json`（`$rtCarried = Test-Path (Join-Path $Source "runtime\manifest.json")`），而不是看目标目录——否则旧胖装残留的 `runtime\` 会让瘦包路径误触发。瘦包时只打印一句指引（浏览器用目标机自带 Chrome/Edge；高保真预览去装组件包）。
     * **LibreOffice 组件的一键安装是"纯解压"而非 `msiexec`**：`install-libreoffice-core.ps1` 把 `libreoffice-core.zip` 解到 `<程序目录>\runtime\libreoffice\`（恰好命中应用探测链的第三条路径），**不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"**，因此免管理员且对目标机使用者不可见（目标机 MS Office/WPS 与默认应用不受影响）。脚本最后写一个 `runtime\libreoffice-core.installed.json` 标记；`-Uninstall` 只删该目录与标记。
     * **不要给这个安装器加"注册"类动作**：一旦写 `HKLM`/`HKCR`、建开始菜单项或改文件关联，"对目标机不可见"这条就破了——需求明确要求不影响目标机默认打开方式。
     * **应用侧每次都重新探测 soffice**（`office_render._apply_soffice_env()` 无缓存），所以装/卸组件**无需重启工具箱**即生效；这也意味着不要在该链路上加进程级缓存。
     * `Expand-PayloadZip` 会返回 `$true`，裸调用会在控制台打出 `True` → 调用处用 `$null = Expand-PayloadZip ...` 抑制。
-33. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
-34. **打包前先提交，否则 `version.json` 的 `commit` 指向错误的提交**：`build-deploy.ps1` 记的是**构建那一刻的 HEAD**，工作区若有未提交改动，包内代码其实来自"HEAD + 改动"，事后无法据此定位源码。2026-09-14 已加防护：`git status --porcelain` 非空时把 `commit` 记成 `<sha>-dirty`。**正确姿势是先 commit 再打包**；若已用脏工作区打了包，要么重打，要么手工把 `version.json.commit` 校正为实际对应的提交（v1.7 首版就是后者）。
-35. **只重出 zip 用 `-ZipOnly`**：跳过 PyInstaller 与目录组装，实测约 2 分钟（全量打包约 16 分钟）。**前提是先把新文件复制进 `deploy\JZToolsHub\`**——它不重新组装，只压缩既有目录。另注意变量名不能叫 `$zipOnly`（PowerShell 变量名不分大小写，会与开关参数撞成同一变量）。
-36. **PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号**（`$PSNativeCommandArgumentPassing` 是 PS 7.3+ 才有）：`python -c "<脚本>"` 里只要有 `f"..."` 或 JSON 字面量就会被改坏，报 `File "<string>", line NN` 语法错。**修法：把脚本与参数写成临时文件再传路径**（见 `tools/build-plugin-package.ps1` 的依赖扫描），别内联。
-37. **`$pid` 是 PowerShell 只读自动变量**（当前进程号），拿它当循环变量会抛"无法覆盖变量 PID，因为该变量为只读变量或常量"；若这句在 `try {} catch {}` 里，会**静默跳过整段逻辑**（`install.ps1` 的插件防回退曾因此完全不生效，沙箱测试才暴露）。插件 id 一律用 `$pluginId` 之类的名字。
-39. **PS 5.1 按控制台代码页解码子进程 stdout**：`& git log ...` 抓到的中文提交信息会被按 GBK 解码成乱码（实测 `升级说明.md` 与 `index.json` 的 changelog 变成"鏇存柊…"）。修法：调用前临时 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`，`finally` 里还原（见 `build-plugin-package.ps1`）。
-40. **`display:flex` 会压过 `hidden` 属性**：给元素写了 `display:flex` 后，`el.hidden = true` 不再生效（作者样式优先于 UA 的 `[hidden]{display:none}`），页面会出现"空横幅常驻"。修法：补 `.your-class[hidden] { display: none; }`（见 `admin.css` 的 `.plugin-banner`）。
-41. **写全栈测试的沙箱隔离三件套**：① 数据根用 `JZTOOLS_DATA_ROOT` 显式指定；② 程序目录靠 `sys.path` 指向沙箱副本（`get_base_dir()` 取自模块 `__file__`，所以 `jztools_data` 也必须从沙箱导入——注意先清理 `sys.modules` 里的旧副本）；③ 测试里**断言** `get_base_dir()==沙箱` 且仓库插件目录未被改动。缺第③条时，"测试改到了真实仓库"会静默发生（本轮的 http 全链路测试就是这么防的）。
-42. **`app/` 目录名会与 `app.py` 撞成命名空间包**：把沙箱程序目录命名成 `app` 后，`import app` 拿到的是命名空间包（`__file__ is None`）而不是 `app.py`。沙箱目录改名 `prog` 即可。
-38. **"三分法"替换的基线不能用"本次备份快照"**：备份拍的是升级前的**磁盘现状**（含用户/第三方放进插件目录的文件），拿它当"旧版清单"会把用户文件误判成旧版文件删掉。正确基线是**上次由安装器写进去的文件清单**（`install-plugin.ps1` 存进状态登记的 `installed_files`），只有首次由整包安装的插件才退回快照口径。沙箱测试对这个行为有专门断言。
+34. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
+35. **打包前先提交，否则 `version.json` 的 `commit` 指向错误的提交**：`build-deploy.ps1` 记的是**构建那一刻的 HEAD**，工作区若有未提交改动，包内代码其实来自"HEAD + 改动"，事后无法据此定位源码。2026-09-14 已加防护：`git status --porcelain` 非空时把 `commit` 记成 `<sha>-dirty`。**正确姿势是先 commit 再打包**；若已用脏工作区打了包，要么重打，要么手工把 `version.json.commit` 校正为实际对应的提交（v1.7 首版就是后者）。
+36. **只重出 zip 用 `-ZipOnly`**：跳过 PyInstaller 与目录组装，实测约 2 分钟（全量打包约 16 分钟）。**前提是先把新文件复制进 `deploy\JZToolsHub\`**——它不重新组装，只压缩既有目录。另注意变量名不能叫 `$zipOnly`（PowerShell 变量名不分大小写，会与开关参数撞成同一变量）。
+37. **PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号**（`$PSNativeCommandArgumentPassing` 是 PS 7.3+ 才有）：`python -c "<脚本>"` 里只要有 `f"..."` 或 JSON 字面量就会被改坏，报 `File "<string>", line NN` 语法错。**修法：把脚本与参数写成临时文件再传路径**（见 `tools/build-plugin-package.ps1` 的依赖扫描），别内联。
+38. **`$pid` 是 PowerShell 只读自动变量**（当前进程号），拿它当循环变量会抛"无法覆盖变量 PID，因为该变量为只读变量或常量"；若这句在 `try {} catch {}` 里，会**静默跳过整段逻辑**（`install.ps1` 的插件防回退曾因此完全不生效，沙箱测试才暴露）。插件 id 一律用 `$pluginId` 之类的名字。
+40. **PS 5.1 按控制台代码页解码子进程 stdout**：`& git log ...` 抓到的中文提交信息会被按 GBK 解码成乱码（实测 `升级说明.md` 与 `index.json` 的 changelog 变成"鏇存柊…"）。修法：调用前临时 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`，`finally` 里还原（见 `build-plugin-package.ps1`）。
+41. **`display:flex` 会压过 `hidden` 属性**：给元素写了 `display:flex` 后，`el.hidden = true` 不再生效（作者样式优先于 UA 的 `[hidden]{display:none}`），页面会出现"空横幅常驻"。修法：补 `.your-class[hidden] { display: none; }`（见 `admin.css` 的 `.plugin-banner`）。
+42. **写全栈测试的沙箱隔离三件套**：① 数据根用 `JZTOOLS_DATA_ROOT` 显式指定；② 程序目录靠 `sys.path` 指向沙箱副本（`get_base_dir()` 取自模块 `__file__`，所以 `jztools_data` 也必须从沙箱导入——注意先清理 `sys.modules` 里的旧副本）；③ 测试里**断言** `get_base_dir()==沙箱` 且仓库插件目录未被改动。缺第③条时，"测试改到了真实仓库"会静默发生（本轮的 http 全链路测试就是这么防的）。
+43. **`app/` 目录名会与 `app.py` 撞成命名空间包**：把沙箱程序目录命名成 `app` 后，`import app` 拿到的是命名空间包（`__file__ is None`）而不是 `app.py`。沙箱目录改名 `prog` 即可。
+39. **"三分法"替换的基线不能用"本次备份快照"**：备份拍的是升级前的**磁盘现状**（含用户/第三方放进插件目录的文件），拿它当"旧版清单"会把用户文件误判成旧版文件删掉。正确基线是**上次由安装器写进去的文件清单**（`install-plugin.ps1` 存进状态登记的 `installed_files`），只有首次由整包安装的插件才退回快照口径。沙箱测试对这个行为有专门断言。
 
 ### 7.5 第三方库行为
 
-36. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
-37. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
-38. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
-39. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
-40. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
-41. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
-42. **vendor 引擎的 `Optional` 缺失（已修，但历史极隐蔽）**：`vendor/xhr/__init__.py:84`
+37. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
+38. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
+39. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
+40. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
+41. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
+42. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
+43. **vendor 引擎的 `Optional` 缺失（已修，但历史极隐蔽）**：`vendor/xhr/__init__.py:84`
     `def convert(data: bytes, options: Optional[ConvertOptions] = None)` 用了 `Optional` 却**既未导入、
     也未写 `from __future__ import annotations`**，而该注解是**运行时立即求值**的 →
     **Python ≤3.13 导入引擎即 `NameError`**，Word/Excel 预览整体失效。Python 3.14 因
@@ -424,7 +447,7 @@ python app.py
     `office_render.available=false` 能看出来。已补 `from typing import Optional` 并记入
     `vendor/README.md` 的**升级后必须重打清单**（与 `renderer/table.py` 补丁同级）。
     **推论：不要用 Python 3.14 的"能跑"去判断第三方代码的正确性**——PEP 649 会掩盖注解类缺陷。
-43. **新增依赖前先分清新旧 wheel 类型**：`cpXX-cpXX`（版本锁定，每个 Python 小版本都要等新 wheel）
+44. **新增依赖前先分清新旧 wheel 类型**：`cpXX-cpXX`（版本锁定，每个 Python 小版本都要等新 wheel）
     如 `zfec` / `numpy` / `pillow`；`cp3X-abi3`（稳定 ABI，跨版本可用）如 `opencv-python`（cp37-abi3）
     与 `cryptography`（cp311-abi3）。
     验证命令：`python -m pip download <包> --no-deps --only-binary :all: -d <临时目录>`
@@ -433,18 +456,18 @@ python app.py
 
 ### 7.6 工具链
 
-44. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
-45. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
-46. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
-47. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
-48. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
-49. **PowerShell 工具对"长命令"有硬限制，报的却是"权限拒绝"**（2026-09-14 实测，极易误判）：
+45. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
+46. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
+47. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
+48. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
+49. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
+50. **PowerShell 工具对"长命令"有硬限制，报的却是"权限拒绝"**（2026-09-14 实测，极易误判）：
     多行 / 体积大的 PowerShell 命令会稳定失败，报
     `[SandboxError] executable not found in sandbox PATH … CreateProcessW 失败 (win32_err=5, ERROR_ACCESS_DENIED) [target=…\powershell.EXE]`
     ——**这不是真的权限问题，而是命令规模触发的沙箱限制**。短命令正常，长命令必挂；`Set-ExecutionPolicy` 本身也会触发。
     对策：把长逻辑写进 `.ps1` 文件，命令只留 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <脚本> -短参数`；
     或把命令拆成多条短命令。**别据此断定"沙箱禁止了 PowerShell"**。偶尔连短命令也失败是环境瞬时不稳，重试即可。
-50. **跑打包/构建脚本时不要加 `2>&1 |` 重定向**（2026-09-14 实测，会静默杀掉构建）：
+51. **跑打包/构建脚本时不要加 `2>&1 |` 重定向**（2026-09-14 实测，会静默杀掉构建）：
     `powershell … -File build-deploy.ps1 … 2>&1 | Out-File build.log` 会把 PyInstaller 写到 stderr 的
     普通 INFO 日志在合并后渲染成 `NativeCommandError`（`RemoteException`），外层管道据此中止，
     **内层 `powershell.exe` 被连带杀掉**。现象极具误导性：日志停在 `Building COLLECT`（像 COLLECT 失败），
@@ -615,9 +638,12 @@ powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1      
 powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1 -Component All  # 另加 Chrome
 
 # 出「插件包」（只升级某一个插件；产出 deploy\插件包\ + 登记 tools\plugin-packages.json）
+#   前置：改了插件就递增 manifest.version，改了前端资源还要递增入口页的 ?v=N（先 commit 再出包）
 #   构建期强制校验：版本递增 / ?v=N 递增 / 依赖白名单 / 运行态数据零夹带（任一失败即中止）
 powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id knowledge-base
 #   -Version/-From/-FromMin/-FromMax/-MinApp/-Notes/-OutDir/-RegistryFile/-RunTests/-SkipChecks
+#   -Publish \\fileserver\JZToolsHub\插件包   出包后投递共享盘（含 index.json，供批量更新）
+#   报"依赖了框架未打包的第三方库"时：把该库加进 JZToolsHub.spec 的 PACKAGES，别用 -SkipChecks
 
 # 插件升级链路回归（沙箱：假程序目录 + 假数据根，不动真实安装与真实数据根；77 项断言）
 powershell -ExecutionPolicy Bypass -File tools\e2e\plugin-upgrade-sandbox-tests.ps1
@@ -630,6 +656,11 @@ python tools/build-zfec-wheel.py
 # 目标机：解压主包 zip → 双击 一键安装.bat → start.bat 启动；卸载双击 一键卸载.bat
 #         高保真 Office 预览：解压 LibreOffice 组件包 → 双击 安装LibreOffice核心组件.bat（免管理员、对目标机隐身）
 #         胖包形态下组件随包，可重跑：runtime\安装离线组件.bat（装 Chrome 需管理员）
+# 目标机「单插件升级」两种方式（详见 README §3.4）：
+#   ① 管理后台 → 插件管理 → 离线升级包 选 zip（不要解压）→ 校验并预览 → 确认应用
+#      → 程序自动 备份 → 替换 → 含后端改动则停服重启 → 页面自动刷新（admin ≥1.3.0）
+#   ② 解压插件包 → 双击 安装插件.bat（-List 体检 / -DryRun 预演 / -Rollback <id> 回滚）
+#   校验被拒时页面会逐条列出原因（同版本重装 / 主程序过低 / 缺 version.json / 包损坏…）
 ```
 
 ```python

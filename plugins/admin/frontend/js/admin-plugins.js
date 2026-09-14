@@ -126,6 +126,31 @@
       </div>`;
   }
 
+  // 校验失败：把后端给的逐条原因列出来（不再只显示"HTTP 400"），并给出可操作的下一步
+  function errListHtml(err) {
+    const items = (err && Array.isArray(err.errors) && err.errors.length)
+      ? err.errors : [err && err.message ? err.message : '未知原因'];
+    return items.map(e => `<div class="plugin-plan-files">• ${esc(e)}</div>`).join('');
+  }
+
+  function rejectHint(err) {
+    const all = ((err && err.errors) || []).join('；') + '；' + ((err && err.message) || '');
+    if (/同版本重装|拒绝降级|不允许跳版升级/.test(all)) {
+      return '<div class="plugin-plan-line">如确需重装 / 降级，勾选上方「强制」后重新上传。</div>';
+    }
+    if (/主程序版本过低|请先升级主程序/.test(all)) {
+      return '<div class="plugin-plan-line">请先用整包升级主程序，再来上传本插件包。</div>';
+    }
+    if (/缺 version\.json|无法读取主程序版本/.test(all)) {
+      return '<div class="plugin-plan-line">程序目录缺少 version.json：确认部署目录由 build-deploy.ps1 完整产出；'
+        + '确属特殊情况可勾选「强制」跳过该项校验。</div>';
+    }
+    if (/哈希校验未通过|解压失败|包内缺少/.test(all)) {
+      return '<div class="plugin-plan-line">包文件在传递中损坏或被人改过：请重新拷贝原始 zip（用旁挂的 .sha256 核对），不要解压后重压。</div>';
+    }
+    return '';
+  }
+
   async function inspect() {
     const fileInput = document.getElementById('pkg-file');
     const f = fileInput.files && fileInput.files[0];
@@ -145,7 +170,7 @@
       showToast('校验通过，请确认计划后应用');
     } catch (err) {
       lastUpload = '';
-      box.innerHTML = `<div class="plugin-plan-line warn">校验未通过：${esc(err.message)}</div>`;
+      box.innerHTML = `<div class="plugin-plan-line warn">校验未通过：</div>${errListHtml(err)}${rejectHint(err)}`;
       showToast('校验未通过', true);
     }
   }

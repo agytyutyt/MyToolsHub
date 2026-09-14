@@ -257,6 +257,8 @@ class AdminPluginManagerTest(unittest.TestCase):
                             data={"file": (f, "same.zip")}, content_type="multipart/form-data")
         self.assertEqual(r.status_code, 400)
         self.assertTrue(any("同版本重装" in e for e in r.get_json()["errors"]))
+        # 前端通用 api() 抛错只取 data.error：没有摘要的话管理员只看到"HTTP 400"
+        self.assertIn("同版本重装", r.get_json().get("error") or "")
 
         # ---- 篡改包被拒（哈希）----
         bad = os.path.join(SANDBOX, "tampered.zip")

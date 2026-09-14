@@ -1494,8 +1494,12 @@ def register(app):
         except Exception as e:
             return jsonify({"error": "校验时出错：%s" % e}), 500
         if not inspected["ok"]:
+            # 同时给 error 摘要：前端通用 api() 抛错只取 data.error，
+            # 没有它的话管理员只会看到"HTTP 400"而看不到真正的拒绝原因。
             return jsonify({"ok": False, "file": name,
-                            "errors": inspected["errors"], "warnings": inspected["warnings"]}), 400
+                            "error": "；".join(inspected["errors"]),
+                            "errors": inspected["errors"],
+                            "warnings": inspected["warnings"]}), 400
         meta = inspected["meta"]
         plan = inspected["plan"]
         return jsonify({
@@ -1532,7 +1536,9 @@ def register(app):
         base, root = PROJECT_DIR, jztools_data.get_data_root()
         inspected = plugin_admin.inspect_package(path, base, root, force=bool(data.get("force")))
         if not inspected["ok"]:
-            return jsonify({"ok": False, "errors": inspected["errors"]}), 400
+            # 同上：带上 error 摘要，避免前端只显示"HTTP 400"
+            return jsonify({"ok": False, "error": "；".join(inspected["errors"]),
+                            "errors": inspected["errors"]}), 400
         report = plugin_admin.apply_package(
             base, root, inspected,
             purge_unknown=bool(data.get("purge_unknown")),

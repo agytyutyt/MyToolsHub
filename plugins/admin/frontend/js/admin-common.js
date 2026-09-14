@@ -9,14 +9,26 @@
   }
 
   // 统一的 JSON 请求封装：失败抛错，401/403 自动跳登录
+  //
+  // 错误信息口径（关键）：后端部分接口用 errors[] 数组给出"逐条原因"
+  // （如插件包校验：同版本重装 / 主程序版本过低 / 哈希不符……）。只取 data.error
+  // 会让管理员看到毫无信息量的 "HTTP 400"，因此这里把 errors 也拼进 message。
   async function api(url, options) {
     const res = await fetch(url, options);
     const data = await res.json().catch(() => ({}));
+    const errText = () => data.error
+      || (Array.isArray(data.errors) && data.errors.length ? data.errors.join('；') : '')
+      || ('HTTP ' + res.status);
     if (res.status === 401) {
       window.location.href = '/login?next=' + encodeURIComponent(location.pathname);
       throw new Error(data.error || '未登录');
     }
-    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    if (!res.ok) {
+      const err = new Error(errText());
+      err.errors = Array.isArray(data.errors) ? data.errors : [];
+      err.status = res.status;
+      throw err;
+    }
     return data;
   }
 
