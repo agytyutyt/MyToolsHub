@@ -1,17 +1,26 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（第六轮：**主包默认瘦身，Chrome 与 LibreOffice 一并移出打包文件，
-> 改为按需分发的「离线组件包」**；其中 LibreOffice 核心组件做成**一键安装、对目标机隐身、
-> 零副作用**的便携解包 —— 不写注册表 / 不建快捷方式 / 不改文件关联 / 不进"程序和功能"，
-> 目标机 Office/WPS 与默认应用均不受影响，应用装完即生效（无需重启）。新增
-> `tools/offline-runtime/install-libreoffice-core.ps1`（+ 装卸两个 bat）、
-> `tools/build-offline-component.ps1`、`docs/LibreOffice核心组件一键安装评估.md`。
+> 最后更新：2026-09-14（第八轮：**插件独立升级的阶段二/三落地** —— 管理后台新增「插件管理」页
+> （仅超级管理员）：插件盘点（版本/状态/备份/数据占用）、**上传插件包 → 只读校验 → 计划预览 →
+> 应用 → 一键回滚**、**共享盘批量更新**（填 `index.json` → 检查更新 → 批量升级）与「立即重启服务」
+> （冻结模式自重启）。服务端核心逻辑 `plugins/admin/backend/plugin_admin.py` 与目标机离线安装器
+> **同一套校验规则**；新增"待重启"标记（`jztools_data.mark_plugin_restart_pending` / 启动时清除）、
+> `JZTOOLS_DATA_ROOT` 环境变量（沙箱与受管环境）、出包工具 `-Publish <共享目录>`。
+> 验收：`test_admin_plugin_manager.py`（HTTP 全链路）、`test_plugin_admin.py`（19 例，含与出包工具的
+> 交叉验证）、PS 沙箱套件 77 项全绿；界面经浏览器实测（含上传应用与批量升级两条完整路径）。
+> 第七轮为**插件独立升级**（第四种分发物「插件包」：离线脚本升级 + 版本防回退 + 插件级配置模板同步）；
+> 第六轮为**主包默认瘦身**，Chrome 与 LibreOffice 移出为按需分发的「离线组件包」
+> （LibreOffice 核心组件一键安装、对目标机隐身、零副作用：不写注册表 / 不建快捷方式 /
+> 不改文件关联 / 不进"程序和功能"）；
 > 第五轮为 LibreOffice 改随包分发"裁剪核心包"（357.5 MB → 164.5 MB）；第四轮为打通离线部署；
 > 第三轮为取消 Win7 + vendor `Optional` 补丁 + zfec wheel 落库；第二轮为 P0 六项修复；
 > 第一轮为文档全面重写）。
-> 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
-> `docs/离线部署包说明.md`（离线包的组成、安装与适用场景）、
+>
+> 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律，
+> 第 15 章为插件独立升级约束 U-1~U-6）、
+> `docs/离线部署包说明.md`（离线包的组成、安装与适用场景，§11 为插件包）、
+> `docs/插件独立升级方案-设计文档.md`（插件包方案 / 包规范 / 验收口径 / 实施偏差）、
 > `docs/LibreOffice核心组件一键安装评估.md`（组件一键安装的评估与实测证据）、
 > `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（P0 修复方案与实测）、
 > `docs/Python版本选型评估.md`（版本基线的完整实测依据）、`wheels/README.md`（zfec wheel 的来源与重建）。
@@ -174,6 +183,8 @@ python app.py
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-14 | **插件独立升级（阶段二/三）：管理后台「插件管理」+ 共享盘批量更新** | 管理后台新增「插件管理」页（**仅超级管理员**，卡片在后台首页）：① **插件盘点**——代码版本 / 登记版本 / 状态（已启用·已停用·隐藏·待重启·登记不一致）/ 备份数 / 数据占用 / 回滚 / 启停；② **离线升级包**——选 zip → 只读校验 → **计划预览**（新增/修改/未变/删除/保留未知 + 基线说明 + 警示）→ 确认应用（自动备份旧版）→ 后端有改动时横幅提示「立即重启服务」；③ **共享盘批量更新**——填 `index.json` 路径 → 检查更新（逐项给出可升级/受阻原因）→ 勾选 → 批量升级（顺序应用，最后统一重启一次）。服务端 `plugins/admin/backend/plugin_admin.py` 与目标机 `install-plugin.ps1` **同一套校验规则**（包结构/schema/id/逐文件 SHA256/路径安全/体积与条目数上限/版本窗口/min_app/三分法替换），`apply` 时**服务端重新校验**（不信任前端状态，上传文件限定在数据根 `.staging/uploads/`）。新增"待重启"机制：应用后标记 `restart_pending`，`app.py` 在插件后端加载完成后清除；冻结模式自重启 = 分离的 `cmd` 助手轮询 PID → `cd /d <程序目录>` → `start /min <exe>` → `os._exit`。配套：`JZTOOLS_DATA_ROOT` 环境变量（沙箱/受管环境，显式指定时不读写指针）；出包工具 `-Publish <共享目录>`（投递 zip+sha256+index.json）。**修掉三个实测缺陷**：重启判定误把 `manifest.json` 变化算作"需重启"（两侧同步收口为只看 `backend/**`）；三分法基线在"无登记"时退回备份快照会误删用户文件（改为只清 `backend/*.py` 残留）；出包工具生成的 changelog 乱码（PS 5.1 按 GBK 解码 git 的 UTF-8 输出）。验收：`test_admin_plugin_manager.py`（进程内 HTTP 全链路：登录→盘点→上传→计划→应用→回滚→启停→索引→批量升级→重启接口→仓库未被触碰断言）、`test_plugin_admin.py`（19 例 + 与出包工具交叉验证）、PS 沙箱套件 77 项；界面经浏览器实测（含上传应用、待重启横幅、检查更新、批量升级） |
+| 2026-09-14 | **插件独立升级（第四种分发物：插件包）** | 单个插件可在目标机离线独立升级，不必重出整包。开发侧 `tools/build-plugin-package.ps1 -Id <插件id>` 出 `JZToolsHub-插件-<id>-v<版本>.zip`（通常 < 10MB），目标机双击「安装插件.bat」（`tools/plugin-upgrade/install-plugin.ps1`，**免管理员**）：先只读校验（包结构 / 逐文件 SHA256 / 目标机版本 / `min_app_version` / `upgrade_from_min-max`）→ 备份旧版到数据根 `backups\plugins\<id>\` → 三分法替换代码（只删"上次装进去、本版已没有"的文件；磁盘上多出的文件默认保留）→ 登记状态（`config\.app_state.json` 的 `plugins.<id>`：版本 / `code_sha256` / `installed_files` / 备份路径）→ 按需停启服务并冒烟（`/api/tools` + `/api/<id>/status`）。**任何拒绝都发生在第一次写操作之前**；失败前会把本次自己停掉的服务拉起来；`-List` 体检 / `-DryRun` 演算 / `-Rollback` 回滚 / `-Uninstall` 卸载。构建期强制四类校验：**版本递增**、**`?v=N` 递增**（F-2）、**依赖白名单**（框架 `PACKAGES` ∪ 插件 `vendor/`，防"本机能跑、现场 ImportError"）、**运行态数据零夹带**（与整包清理共用 `tools/plugin-payload-rules.json` 一份规则）。同时补上两条链路缺口：① `install.ps1` **插件版本防回退**（整包升级不再把单独升级过的插件静默降级；`-ForcePluginOverwrite` 可强制以主包为准并校正登记）；② `jztools_data.sync_plugin_templates()` **插件级配置模板同步**（按模板内容指纹门控，不受应用版本门控——插件单独升级后新增配置键自动补入数据根，只补缺失键、保留用户已改的值）。验证：沙箱端到端 `tools\e2e\plugin-upgrade-sandbox-tests.ps1`（**77 项断言全绿**：升级 / 四类拒绝 / 回滚 / 全新安装 / 卸载 / 服务运行时停启冒烟 / 整包防回退）+ 单元测试 `test_plugin_templates.py`（7 例全绿）。方案与实施偏差见 `docs/插件独立升级方案-设计文档.md`（附录 D）、目标机口径见 `docs/离线部署包说明.md` §11、开发约束见 `插件设计规范.md` §15（U-1~U-6）。**尚未真机演练**：真实 exe 的停启冒烟与真实插件的现场升级（见 §4 待办） |
 | 2026-09-14 | **主包瘦身 + 离线组件包 + LibreOffice 核心一键安装** | 主包**默认不再携带** Chrome / LibreOffice（`build-deploy.ps1` 用 `-WithOfflineRuntime` 才随包），体积 437.5 MB → 约 122 MB；新增 `tools/build-offline-component.ps1` 把组件打成可独立分发的「离线组件包」；LibreOffice 核心组件做成**一键安装 / 对目标机隐身 / 零副作用**（`tools/offline-runtime/install-libreoffice-core.ps1` + `安装LibreOffice核心组件.bat` + `卸载LibreOffice核心组件.bat`）：纯解压到 `<程序目录>\runtime\libreoffice\`，**不执行 msiexec、不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"**，目标机 Office/WPS 与默认应用不受影响、无任何 LibreOffice 图标，装完**无需重启**即生效（应用每次渲染都重新探测 soffice）。`install.ps1` 的离线组件判定改为看**源包**（`runtime\manifest.json`）以防旧胖装残留误触发，瘦包时只打印组件安装指引。实测：安装 rc=0 / 12.7s / 557.9MB / 2824 文件 + 内置冒烟通过；应用 `.doc→.docx` 8169B、`.xls→.xlsx` 5933B（回环校验通过）；卸载 rc=0。评估见 `docs/LibreOffice核心组件一键安装评估.md` |
 | 2026-09-14 | **LibreOffice 裁剪核心包 + v1.8 发版** | 应用只需 `.doc→.docx` / `.xls→.xlsx` 两条 soffice 转换，故不再随包分发完整版 MSI：新增 `tools/build-libreoffice-core.py`（`msiexec /a` 解包 → 裁剪 → **构建期全新 profile 冒烟测试** → zip + 溯源元数据），1522.6MB / 19418 文件 → **557.9MB / 2824 文件**、zip 164.5MB；`build-deploy.ps1` 默认用核心包替代 MSI 并改写包内 `manifest.json`（`-KeepFullLibreOffice` 可保留完整版，且校验核心包与源 MSI 的 sha256）；`setup-offline-runtime.ps1` 优先解压核心包（三级回退）→ 安装从 95~130s 降到约 24s；`fetch-offline-bundle.py` 加 `--core`。产出 `JZToolsHub-v1.8.zip`（**437.5MB**，较 v1.7 少约 181MB）。**关键坑：`presets\` 不能删（全新 profile 下 rc=77），且测裁剪安全性必须每次用全新 profile；`msiexec /a` 忽略 `ADDLOCAL`** |
 | 2026-09-14 | **离线部署包打通 + v1.7 发版** | `runtime/` 随包分发 Chrome 企业版 MSI（159.6MB）与 LibreOffice 26.8.0 MSI（357.5MB）；新增 `tools/fetch-offline-bundle.py`（断点续传 + sha256 冻结校验，清单入 `tools/offline-components.json`）与 `tools/offline-runtime/setup-offline-runtime.ps1`（Chrome 静默安装 / **LibreOffice `msiexec /a` 免管理员解包**）；`office_render` 新增便携 soffice 三级探测（**零配置**）；`install.ps1` 安装末尾自动处理离线组件且**失败不阻断**，并修掉覆盖 `version.json` 溯源字段的缺陷；打包脚本新增**离线组件完整性自检**与 `-SkipOfflineRuntime` / `-ZipOnly`；产出 `JZToolsHub-v1.7.zip`（618.4MB）。文档见 `docs/离线部署包说明.md`。实测：`.xls→.xlsx` 归一化、应用自动探测、`render_sheet` 真实渲染全绿 |
@@ -220,6 +231,8 @@ python app.py
 | 13 | 在 `/api/tools` 暴露 `plugin_errors`（默认空 dict），首页对加载失败的插件显示"暂不可用"（本轮只做了日志与 `_plugin_load_errors` 记录） |
 | 14 | **离线组件真机验证**：在一台**真的断网、无 Office 环境**的机器上走完整链路（解压主包 → 一键安装 → 解压 LibreOffice 组件包 → 双击 `安装LibreOffice核心组件.bat` → 启动 → 知识库打开 `.doc`/`.xls`）。开发机已用**模拟目标机**验证了解压安装（免管理员）/ 应用探测 / 两条转换链路 / 卸载，但 **Chrome 组件静默安装需提权**，开发会话无管理员权限未能实测 |
 | 15 | 每次发版前校准离线组件版本：Chrome 组件用固定 URL `stable`（内容随 Google 更新而变），冻结的 `sha256` 会随之失配 → 需重跑 `fetch-offline-bundle.py --pin`，或改用带版本号的下载地址。`build-offline-component.ps1` 会在打包前按 `tools/offline-components.json` 校验核心包体积与 sha256 |
+| 15.1 | **插件升级链路真机演练**（第七~八轮交付物的最后一步，全部要真实环境）：① 用真实 `JZToolsHub.exe` 走一次"升级 → 停服 → 替换 → 启动 → 冒烟"（沙箱用假进程/HTTP 桩与测试客户端替代）；② **冻结模式自重启**（`_spawn_self_restart()`）：后台应用含后端的插件包 → 点「立即重启服务」→ 确认进程真的重启且页面恢复；③ 对某个真实插件做"升版本 → 出包 → 现场升级 → 功能验收 → 回滚"全流程；④ 验证 `install.ps1` 的插件防回退与后台"启用/停用"在真实安装目录下的表现（沙箱已覆盖逻辑，真机确认提示语与权限） |
+| 15.2 | **共享盘（UNC）实测**：阶段三的索引与包文件读取用本地目录验证过，需在 `\\server\share` 上确认权限、路径含空格/中文、读取延迟与失败提示；另可考虑给包做签名（当前只有 sha256 旁挂 + 索引冻结值） |
 
 ### P2（体验与规范）
 
@@ -372,6 +385,13 @@ python app.py
 33. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
 34. **打包前先提交，否则 `version.json` 的 `commit` 指向错误的提交**：`build-deploy.ps1` 记的是**构建那一刻的 HEAD**，工作区若有未提交改动，包内代码其实来自"HEAD + 改动"，事后无法据此定位源码。2026-09-14 已加防护：`git status --porcelain` 非空时把 `commit` 记成 `<sha>-dirty`。**正确姿势是先 commit 再打包**；若已用脏工作区打了包，要么重打，要么手工把 `version.json.commit` 校正为实际对应的提交（v1.7 首版就是后者）。
 35. **只重出 zip 用 `-ZipOnly`**：跳过 PyInstaller 与目录组装，实测约 2 分钟（全量打包约 16 分钟）。**前提是先把新文件复制进 `deploy\JZToolsHub\`**——它不重新组装，只压缩既有目录。另注意变量名不能叫 `$zipOnly`（PowerShell 变量名不分大小写，会与开关参数撞成同一变量）。
+36. **PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号**（`$PSNativeCommandArgumentPassing` 是 PS 7.3+ 才有）：`python -c "<脚本>"` 里只要有 `f"..."` 或 JSON 字面量就会被改坏，报 `File "<string>", line NN` 语法错。**修法：把脚本与参数写成临时文件再传路径**（见 `tools/build-plugin-package.ps1` 的依赖扫描），别内联。
+37. **`$pid` 是 PowerShell 只读自动变量**（当前进程号），拿它当循环变量会抛"无法覆盖变量 PID，因为该变量为只读变量或常量"；若这句在 `try {} catch {}` 里，会**静默跳过整段逻辑**（`install.ps1` 的插件防回退曾因此完全不生效，沙箱测试才暴露）。插件 id 一律用 `$pluginId` 之类的名字。
+39. **PS 5.1 按控制台代码页解码子进程 stdout**：`& git log ...` 抓到的中文提交信息会被按 GBK 解码成乱码（实测 `升级说明.md` 与 `index.json` 的 changelog 变成"鏇存柊…"）。修法：调用前临时 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`，`finally` 里还原（见 `build-plugin-package.ps1`）。
+40. **`display:flex` 会压过 `hidden` 属性**：给元素写了 `display:flex` 后，`el.hidden = true` 不再生效（作者样式优先于 UA 的 `[hidden]{display:none}`），页面会出现"空横幅常驻"。修法：补 `.your-class[hidden] { display: none; }`（见 `admin.css` 的 `.plugin-banner`）。
+41. **写全栈测试的沙箱隔离三件套**：① 数据根用 `JZTOOLS_DATA_ROOT` 显式指定；② 程序目录靠 `sys.path` 指向沙箱副本（`get_base_dir()` 取自模块 `__file__`，所以 `jztools_data` 也必须从沙箱导入——注意先清理 `sys.modules` 里的旧副本）；③ 测试里**断言** `get_base_dir()==沙箱` 且仓库插件目录未被改动。缺第③条时，"测试改到了真实仓库"会静默发生（本轮的 http 全链路测试就是这么防的）。
+42. **`app/` 目录名会与 `app.py` 撞成命名空间包**：把沙箱程序目录命名成 `app` 后，`import app` 拿到的是命名空间包（`__file__ is None`）而不是 `app.py`。沙箱目录改名 `prog` 即可。
+38. **"三分法"替换的基线不能用"本次备份快照"**：备份拍的是升级前的**磁盘现状**（含用户/第三方放进插件目录的文件），拿它当"旧版清单"会把用户文件误判成旧版文件删掉。正确基线是**上次由安装器写进去的文件清单**（`install-plugin.ps1` 存进状态登记的 `installed_files`），只有首次由整包安装的插件才退回快照口径。沙箱测试对这个行为有专门断言。
 
 ### 7.5 第三方库行为
 
@@ -534,14 +554,25 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
   → .workbuddy/memory/YYYY-MM-DD.md（当日工作日志）
 ```
 
-改动**打包 / 安装 / 离线组件**链路时，另外几处必须一起改：
+改动**打包 / 安装 / 离线组件 / 插件升级**链路时，另外几处必须一起改：
 `build-deploy.ps1` ↔ `install.ps1` ↔ `tools/offline-runtime/`（脚本副本会随**胖包**分发到 `runtime/`，
 或随**组件包**分发）↔ `tools/build-offline-component.ps1`（组件包组装器，改组件目录结构要同步改它）
 + `docs/离线部署包说明.md`（包体组成与体积数字）+ `tools/offline-components.json`（组件清单）
 + `docs/LibreOffice核心组件一键安装评估.md`（改一键安装行为时）。
+**插件升级链路另有一条同步链**：`tools/plugin-payload-rules.json`（排除规则单一真源，插件包与整包清理共用）
+↔ `tools/build-plugin-package.ps1`（出包）↔ `tools/plugin-upgrade/`（目标机脚本，**构建时原样拷进包内，
+只改这里**）↔ `install.ps1`（插件版本防回退）↔ `jztools_data.sync_plugin_templates()`
++ `docs/插件独立升级方案-设计文档.md` + `docs/离线部署包说明.md` §11 + `插件设计规范.md` §15。
+**管理后台那条链（第八轮新增）**：`plugins/admin/backend/plugin_admin.py`（校验/应用/回滚/索引核心）
+↔ `plugins/admin/backend/routes.py`（9 个超管接口 + 页面 + 自重启）
+↔ `plugins/admin/frontend/{admin-plugins.html,js/admin-plugins.js,css/admin.css}`（页面）
+↔ `jztools_data.py`（待重启标记 / `JZTOOLS_DATA_ROOT`）↔ `app.py`（启动时清除标记）。
+改完**必须跑**：`python -m unittest test_plugin_admin test_admin_plugin_manager`（含"仓库未被触碰"断言）。
+改完**必须跑**：`tools\e2e\plugin-upgrade-sandbox-tests.ps1`（沙箱端到端，77 项断言）+ `python -m unittest test_plugin_templates`。
 
 > **主包瘦身是默认行为**：往包里塞东西之前先确认是不是应该做成"组件包"（可独立分发 / 升级 / 卸载、
 > 目标机按需安装）。默认瘦包这条线是 2026-09-14 第六轮定的，`-WithOfflineRuntime` 才回退到胖包。
+> **只改一个插件时优先出「插件包」**（第七轮）：比整包小两个数量级，且目标机免管理员、可回滚。
 
 改信息传输协议时**四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 + 《移动端APP.md》（改完记得重启服务）。
 改 vendor 引擎时**必须同步 `vendor/README.md` 的补丁清单**（升级 vendor 整目录替换后要重打四个补丁），
@@ -569,6 +600,16 @@ powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -WithOfflineRuntime # 
 # 打离线组件包（与主包并列分发，产出在 deploy/）
 powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1                 # LibreOffice 核心
 powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1 -Component All  # 另加 Chrome
+
+# 出「插件包」（只升级某一个插件；产出 deploy\插件包\ + 登记 tools\plugin-packages.json）
+#   构建期强制校验：版本递增 / ?v=N 递增 / 依赖白名单 / 运行态数据零夹带（任一失败即中止）
+powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id knowledge-base
+#   -Version/-From/-FromMin/-FromMax/-MinApp/-Notes/-OutDir/-RegistryFile/-RunTests/-SkipChecks
+
+# 插件升级链路回归（沙箱：假程序目录 + 假数据根，不动真实安装与真实数据根；77 项断言）
+powershell -ExecutionPolicy Bypass -File tools\e2e\plugin-upgrade-sandbox-tests.ps1
+# 插件相关 Python 测试（共 28 例：模板同步 7 + 插件管理核心 19 + 后台 HTTP 全链路 2）
+python -m unittest test_plugin_templates test_plugin_admin test_admin_plugin_manager
 
 # 重建 zfec 预编译 wheel（换 Python 小版本后）
 python tools/build-zfec-wheel.py

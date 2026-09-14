@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "插件 payload 的「代码 / 数据」边界规则（单一真源）。",
+    "",
+    "被两处共同读取，避免两条链路漂移（设计要求见 docs/插件独立升级方案-设计文档.md §4.4、§6.3）：",
+    "  1. tools/build-plugin-package.ps1 —— 产出插件包 payload 时按本清单剔除；",
+    "  2. build-deploy.ps1 §3.2 —— 组装整包时清理 plugins/ 下的运行时数据。",
+    "",
+    "exclude_dirs  —— 目录名精确匹配，命中则整目录剔除（任意层级）",
+    "exclude_files —— 文件名精确匹配，命中则剔除（任意层级）",
+    "exclude_globs —— 文件名通配匹配（* 与 ?）",
+    "required      —— payload 必须存在的文件（相对插件目录；<entry> 取 manifest.json 的 entry）",
+    "max_files / max_bytes —— 防误打包整个仓库的体积护栏",
+    "template_suffix —— 配置模板命名后缀（命名纪律：模板不得叫 config.json，见 jztools_data.py:74）"
+  ],
+  "schema": 1,
+  "exclude_dirs": ["data", ".task_cache", "__pycache__", "out", "node_modules", ".venv", "venv", ".git"],
+  "exclude_files": [
+    "config.json",
+    "config.local.json",
+    ".env",
+    ".DS_Store",
+    "Thumbs.db"
+  ],
+  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old"],
+  "required": ["manifest.json", "README.md"],
+  "max_files": 5000,
+  "max_bytes": 209715200,
+  "template_suffix": ".template.json"
+}

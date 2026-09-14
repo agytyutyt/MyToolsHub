@@ -158,14 +158,35 @@ Copy-Item -Force (Join-Path $Root "config\tools.json") (Join-Path $AppDir "confi
 # ★ 只删精确名 config.json（本机运行时配置，含 API Key）——配置模板一律命名
 #   *.template.json，与运行时配置分离，不会被这条规则命中（历史教训见
 #   docs/P0问题修复方案.md FIX-1：模板曾叫 config.json，被此处删掉导致同步链路静默失效）。
+# ★ 规则来自 tools\plugin-payload-rules.json —— 与「插件包」构建工具共用同一份清单，
+#   避免"整包"与"插件包"两条链路漂移（见 docs\插件独立升级方案-设计文档.md §4.4 / §6.3）。
+$rulesFile = Join-Path $Root "tools\plugin-payload-rules.json"
+$excludeDirs  = @("data", ".task_cache", "__pycache__", "out")
+$excludeFiles = @("config.json", "config.local.json", ".env", ".DS_Store", "Thumbs.db")
+$excludeGlobs = @("*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old")
+if (Test-Path $rulesFile) {
+    try {
+        $rules = Get-Content -LiteralPath $rulesFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($rules.exclude_dirs)  { $excludeDirs  = @($rules.exclude_dirs) }
+        if ($rules.exclude_files) { $excludeFiles = @($rules.exclude_files) }
+        if ($rules.exclude_globs) { $excludeGlobs = @($rules.exclude_globs) }
+        Write-Host "    运行态清理规则来自 tools\plugin-payload-rules.json"
+    } catch {
+        Write-Warning "读取 $rulesFile 失败，改用内置默认规则：$($_.Exception.Message)"
+    }
+} else {
+    Write-Warning "缺少 $rulesFile，改用内置默认规则"
+}
 $pluginDir = Join-Path $AppDir "plugins"
 if (Test-Path $pluginDir) {
   Get-ChildItem -Recurse -Directory $pluginDir |
-    Where-Object { $_.Name -in @("data", ".task_cache", "__pycache__", "out") } |
+    Where-Object { $excludeDirs -contains $_.Name } |
     Remove-Item -Recurse -Force
   Get-ChildItem -Recurse -File $pluginDir |
-    Where-Object { $_.Name -like "*.pyc" -or $_.Name -eq "config.json" } |
-    Remove-Item -Force
+    Where-Object {
+        $n = $_.Name
+        ($excludeFiles -contains $n) -or (@($excludeGlobs | Where-Object { $n -like $_ }).Count -gt 0)
+    } | Remove-Item -Force
 }
 
 # 3.2.1 模板自检：清理后必须仍保留同步模板（防止未来有人把模板又命名回 config.json）

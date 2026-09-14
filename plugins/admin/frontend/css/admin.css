@@ -710,3 +710,59 @@ select.admin-input {
 .batch-tip.batch-warn b {
   color: #a15c00;
 }
+
+/* ===== 插件管理页（阶段二·三）：状态条 / 计划预览 / 盘点表补充样式 ===== */
+.plugin-banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 12px 16px; border-radius: 12px;
+  background: #fff8e1; border: 1px solid #f0d48a; color: #7a5a00;
+  font-size: 14px;
+}
+.plugin-banner-text { flex: 1 1 320px; }
+.plugin-banner .admin-btn { flex: 0 0 auto; }
+
+.plugin-name { display: flex; align-items: center; gap: 8px; }
+.plugin-icon { font-size: 18px; line-height: 1; }
+.plugin-id {
+  margin-left: 8px; padding: 1px 6px; border-radius: 6px;
+  background: rgba(66, 133, 244, .10); color: #5f6368;
+  font-size: 12px; font-family: "Roboto Mono", Consolas, monospace;
+}
+
+.plugin-chip {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  background: rgba(60, 64, 67, .08); color: #5f6368; font-size: 12px; white-space: nowrap;
+}
+.plugin-chip.ok   { background: rgba(52, 168, 83, .12); color: #1e7e34; }
+.plugin-chip.warn { background: rgba(251, 188, 5, .18); color: #8a6d00; }
+
+.admin-empty { padding: 18px; color: #80868b; text-align: center; }
+
+.plugin-check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: #5f6368; margin-top: 8px;
+}
+.plugin-check input { accent-color: #1a73e8; }
+
+.plugin-plan {
+  margin-top: 14px; padding: 14px 16px; border-radius: 12px;
+  background: #f8f9fa; border: 1px solid #e8eaed; font-size: 14px;
+}
+.plugin-plan-head { margin-bottom: 8px; font-size: 15px; }
+.plugin-plan-line { margin-top: 6px; line-height: 1.6; }
+.plugin-plan-line.warn { color: #8a6d00; }
+.plugin-muted { color: #80868b; font-size: 13px; }
+.plugin-plan-files {
+  margin-top: 4px; padding: 8px 10px; border-radius: 8px; background: #fff;
+  border: 1px dashed #dadce0; max-height: 160px; overflow: auto;
+  font-family: "Roboto Mono", Consolas, monospace; font-size: 12px; color: #5f6368;
+}
+.plugin-plan-actions {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px;
+}
+
+/* 宽版卡片：盘点表这类宽内容不受 720px 表单宽度限制 */
+.settings-card.wide { max-width: none; }
+
+/* hidden 属性必须能压住 .plugin-banner 的 display:flex（作者样式优先于 UA 的 [hidden] 规则） */
+.plugin-banner[hidden] { display: none; }

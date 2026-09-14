@@ -11,7 +11,8 @@ echo.
 
 cd /d "%~dp0"
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
+rem 参数透传：双击=普通安装/更新；命令行可加 -NoRegistry（绿色）/ -ForcePluginOverwrite / -DataRoot 等
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1" %*
 set "RC=%ERRORLEVEL%"
 
 echo.

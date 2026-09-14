@@ -198,6 +198,15 @@ powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
 #         --core 会顺带生成 LibreOffice 裁剪核心包（随包时用它替代原始 MSI，省 193MB）
 python tools\fetch-offline-bundle.py --core
 
+# 插件包：只升级某一个插件时出的小包（通常 < 10 MB，不必重出整包）
+#   产物：deploy\插件包\JZToolsHub-插件-<id>-v<版本>.zip（+ .sha256 旁挂）
+#   登记：tools\plugin-packages.json（入库；版本递增/缓存戳/依赖白名单校验的基线）
+#   构建期强制校验：版本递增、?v=N 递增、依赖白名单、运行态数据零夹带（见输出）
+powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id knowledge-base
+
+# 插件升级链路的端到端回归测试（沙箱：假程序目录 + 假数据根；不触碰真实安装与真实数据根）
+powershell -ExecutionPolicy Bypass -File tools\e2e\plugin-upgrade-sandbox-tests.ps1
+
 # 组件包：主包默认不含组件，组件单独打成「一键安装包」分发（产出在 deploy\ 下）
 powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1                  # LibreOffice 核心
 powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1 -Component All   # 另加 Chrome
@@ -277,7 +286,7 @@ JZToolsHub/
 │   ├── tools.json             # ★ 工具注册清单模板（站点信息 + 分类 + 工具条目）
 │   └── data_root.json         # 数据根目录备份指针（开发机产物，见 §12 注意事项）
 ├── plugins/                   # ★ 插件目录（一切皆插件）
-│   ├── admin/                 #   核心插件：登录鉴权 / 组织人员 / 权限 / 批量导入导出
+│   ├── admin/                 #   核心插件：登录鉴权 / 组织人员 / 权限 / 批量导入导出 / 插件管理（插件包升级）
 │   ├── notice-board/          #   公告板（home_card() 动态卡片）
 │   ├── knowledge-base/        #   知识库（Office 预览引擎 vendor 在 backend/vendor/）
 │   ├── file-filter/           #   过滤器（提供 /apply 供其他插件复用）
@@ -304,6 +313,11 @@ JZToolsHub/
 │   ├── fetch-offline-bundle.py#   ★ 下载离线运行组件到 runtime/（断点续传 + sha256 校验）
 │   ├── offline-components.json#   ★ 组件清单：URL / 版本 / 冻结 sha256 / 许可证（入库，可评审）
 │   ├── build-offline-component.ps1 # ★ 把组件打成可单独分发的一键安装包（默认 LibreOffice 核心）
+│   ├── plugin-payload-rules.json   # ★ 插件 payload 的"代码/数据"边界规则（插件包与整包清理共用同一份）
+│   ├── build-plugin-package.ps1    # ★ 出「插件包」：单个插件独立升级用的小包（< 10MB）
+│   ├── plugin-packages.json        #   已发布插件包登记（入库；sha256 冻结值 + 各文件指纹 + 缓存戳基线）
+│   ├── plugin-upgrade/        #   ★ 随插件包分发的目标机脚本（安装/升级/回滚/卸载/体检，免管理员）
+│   ├── e2e/                   #   ★ 插件升级链路端到端回归测试（沙箱：假程序目录 + 假数据根）
 │   └── offline-runtime/       #   ★ 随组件包分发的安装脚本与说明
 │       ├── install-libreoffice-core.ps1 # 一键安装 LibreOffice 核心（免管理员、对目标机隐身）
 │       ├── 安装LibreOffice核心组件.bat   # 双击入口（免管理员）
@@ -317,6 +331,7 @@ JZToolsHub/
 ├── JZToolsHub.spec            # PyInstaller 打包配置（显式收集插件后端动态导入的库）
 ├── build-deploy.ps1           # 一键打包脚本
 ├── install.ps1                # 一键安装 / 更新 / 卸载核心逻辑（源文件）
+├── test_plugin_templates.py   # 插件级配置模板同步的单元测试（python -m unittest test_plugin_templates）
 ├── 一键安装.bat  一键卸载.bat   # 双击入口
 └── README.md  HANDOFF.md
 ```
@@ -329,7 +344,8 @@ JZToolsHub/
 │   ├── tools.json             # 工具注册清单（首启从程序目录模板复制，之后改这里）
 │   ├── admin.json             # 单位/部门/人员/角色（敏感字段 Fernet 加密）
 │   ├── .admin_key             # 加密密钥（必须与 admin.json 同目录迁移）
-│   └── .app_state.json        # 记录 last_app 版本号，控制模板同步幂等
+│   └── .app_state.json        # 记录 last_app 版本号 + 各插件已装版本/模板指纹（模板同步幂等依据）
+├── backups/plugins/<id>/      # 插件包升级的旧版代码备份（-Rollback 的输入，默认保留 3 份）
 ├── logs/access.log            # 访问日志（按天滚动，保留 30 天）
 └── plugins/<id>/              # 各插件运行数据
     ├── data/                  #   业务记录（共享文档 / 公告 / 战果台账 / 知识库 files）
@@ -571,8 +587,10 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | 改名称 / 描述 / 排序 | 编辑数据根目录 `config/tools.json` | 否 |
 | 临时下线 / 恢复 | 该条目 `enabled: false` / `true` | 否 |
 | 按人授权 | 管理后台「人员管理 → 权限」勾选插件 ID | 否（重新登录或刷新会话） |
-| 新增 / 升级插件 | 覆盖目录 → 前端递增 `?v=` → 有后端改动则重启 | 视改动而定 |
-| 卸载插件 | 先删 `tools.json` 条目 → 备份数据 → 再删目录 → 重启 | 是 |
+| 新增 / 升级插件 | **推荐**：用插件包——开发侧 `tools\build-plugin-package.ps1 -Id <插件id>` 出包，目标机二选一：① 双击「安装插件.bat」（离线脚本，免管理员，自动校验/备份/回滚）② 管理后台「插件管理」页上传（免命令行，同一套规则）。见 `docs/离线部署包说明.md` §11；手工覆盖目录亦可，但需递增 `?v=` 与 `manifest.version` | 视改动而定（脚本：含后端改动自动重启；后台：点「立即重启服务」） |
+| 批量更新多个插件 | 管理后台「插件管理」→ 共享盘批量更新：填 `index.json` 路径 → 检查更新 → 勾选 → 批量升级（后端有改动时最后统一重启一次） | 视改动而定 |
+| 回滚插件 | 管理后台「插件管理」→ 该行「回滚」，或命令行 `install-plugin.ps1 -Rollback <插件id>` | 视改动而定 |
+| 卸载插件 | 用插件包：`install-plugin.ps1 -Uninstall <插件id>`；手工方式：先删 `tools.json` 条目 → 备份数据 → 再删目录 → 重启 | 是 |
 | 换数据目录 | 后台「系统设置」→ 输入新路径 →「更改并迁移」 | 否（自动迁移） |
 
 ---
@@ -598,10 +616,17 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | --- | --- |
 | `GET /login`、`POST /api/login`、`POST /api/logout`、`GET /api/session` | 登录闭环（`logout` 是 **POST**） |
 | `POST /api/account/password` | 自助改密 `{old_password, new_password}`（新密码 ≥6 位） |
-| `GET /admin`、`GET /admin/<module>` | 后台页面（`unit` / `department` / `user` / `settings`） |
+| `GET /admin`、`GET /admin/<module>` | 后台页面（`unit` / `department` / `user`；`/admin/settings` 与 `/admin/plugins` 仅超管） |
 | `GET /api/admin/summary` | 后台总览（各模块记录数 + 当前账号可访问性） |
 | `GET /api/admin/org-tree` | 组织架构树（只读，供业务插件选可见范围） |
 | `GET\|POST /api/admin/data-settings` | 查看 / 修改数据根目录（仅超管） |
+| `GET /api/admin/plugins` | 插件盘点：代码版本 / 登记版本 / 待重启 / 备份数 / 数据占用 / 启停（仅超管） |
+| `POST /api/admin/plugins/upload` | 上传插件包（multipart `file`）→ 只读校验 → 返回应用计划（仅超管） |
+| `POST /api/admin/plugins/apply` | 应用上传的包（服务端重新校验 → 备份 → 替换 → 登记；仅超管） |
+| `GET /api/admin/plugins/backups`、`POST /api/admin/plugins/rollback` | 备份清单 / 回滚（仅超管） |
+| `POST /api/admin/plugins/enable` | 启用 / 停用插件（写数据根 `tools.json`；仅超管） |
+| `GET /api/admin/plugins/index`、`POST /api/admin/plugins/batch-apply` | 共享盘索引检查更新 / 批量升级（仅超管） |
+| `POST /api/admin/plugins/restart` | 重启服务让插件代码生效（打包运行下自重启；源码模式返回提示；仅超管） |
 | `GET\|POST /api/admin/units`、`PUT\|DELETE /api/admin/units/<id>` | 单位 CRUD（需 `unit` 权限） |
 | `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门 CRUD（需 `department` 权限） |
 | `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员 CRUD（需 `user` 权限）；密码/身份证/API Key 加密存储 |
@@ -698,7 +723,14 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 ### 10.2 触发与规则
 
-触发条件：程序目录 `version.json` 的 `app` ≠ 数据根目录 `config/.app_state.json` 的 `last_app`（一致则跳过，幂等）。
+触发条件（两条，各自独立）：
+
+1. **应用版本门控**：程序目录 `version.json` 的 `app` ≠ 数据根目录 `config/.app_state.json` 的 `last_app`
+   （一致则跳过，幂等）——管下面这张清单里的框架级与既有插件模板。
+2. **插件模板门控**：`plugins/<id>/**/*.template.json` 的**内容指纹**与状态登记里的记录不同即同步
+   （`jztools_data.sync_plugin_templates()`）。这条**不受应用版本门控**——插件可以经「插件包」单独升级
+   而应用版本不变（见 `docs/插件独立升级方案-设计文档.md` §8），此时插件新增的配置键靠它自动补入。
+   手工覆盖插件目录的场景同样由它兜底。
 
 | 模板（程序目录 → 数据根目录） | 模式 | 含义 |
 | --- | --- | --- |
@@ -707,6 +739,10 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | `plugins/character-graph/backend/config.template.json` | ensure-keys | 同上（含 `ui.api_source`） |
 | `plugins/trajectory-sketch/backend/config.template.json` | ensure-keys | 保留管理员自定义的保留字段名单 / 列映射 / 阈值 / 报告文案 |
 | `plugins/file-filter/backend/config.template.json` | ensure-keys | 保留管理员配置（保留字段名单 / 后处理规则 / LLM） |
+
+> 第 2 条门控使"新增带模板的插件"**不再需要两处手工登记**：把 `backend/config.template.json`
+> 放进插件目录即可（模板内可用 `"_mode": "overwrite"` 声明整份覆盖；缺省 `ensure-keys` 只补缺失键）。
+> 目标机路径映射：`plugins/<id>/backend/config.template.json` → 数据根 `plugins/<id>/config.json`。
 
 > **模板命名纪律：配置模板一律命名 `config.template.json`，与运行时 `config.json` 分离。**
 > 打包脚本会删除插件树内所有 `config.json`（清掉本机含 API Key 的运行时配置），模板若沿用

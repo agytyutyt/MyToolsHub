@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import time
 import uuid
 from datetime import timedelta
@@ -629,6 +630,60 @@ def _register_batch_io(app):
     })
 
 
+def _load_plugin_admin():
+    """载入同包 plugin_admin 子模块（插件包校验 / 应用 / 回滚 / 索引，纯逻辑）。
+
+    优先按包内相对导入加载；极端情况下（模块被单独按路径执行）回退为按文件路径加载。
+    """
+    try:
+        from . import plugin_admin  # noqa: WPS433 - 包内相对导入为常规路径
+        return plugin_admin
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plugin_admin.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_plugin_admin", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+def _spawn_self_restart():
+    """冻结模式自重启：spawn 独立 cmd，等本进程退出后按原工作目录重新拉起 exe。
+
+    见 docs/插件独立升级方案-设计文档.md §9.3。返回 (ok, error)。
+    要点：① 先回 HTTP 响应再退出（调用方在本函数内用 threading.Timer 延迟 os._exit）；
+         ② 助手轮询本进程 PID 而不是固定延时（避免端口未释放导致启动即失败）；
+         ③ `cd /d <程序目录>` 必须带（与托盘/快捷方式同款工作目录约定）。
+    """
+    import subprocess
+    import tempfile
+    import threading
+
+    exe = sys.executable
+    base = PROJECT_DIR
+    pid = os.getpid()
+    helper = os.path.join(tempfile.gettempdir(), "jz-restart-%d.cmd" % pid)
+    try:
+        # 助手内容全是 ASCII，而路径可能含中文 → 用系统默认 ANSI（GBK）编码写盘
+        with open(helper, "w", encoding="gbk", errors="replace") as f:
+            f.write("@echo off\r\n")
+            f.write(":wait\r\n")
+            f.write('tasklist /FI "PID eq %d" | find "%d" >nul && '
+                    '(timeout /t 1 /nobreak >nul & goto wait)\r\n' % (pid, pid))
+            f.write('cd /d "%s"\r\n' % base)
+            f.write('start "" /min "%s"\r\n' % exe)
+            f.write('del "%%~f0"\r\n')
+        flags = 0
+        for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP"):
+            flags |= getattr(subprocess, name, 0)
+        subprocess.Popen(["cmd", "/c", helper], creationflags=flags, close_fds=True, cwd=base)
+    except Exception as e:  # pragma: no cover - 平台/权限异常
+        return False, "启动重启助手失败：%s" % e
+
+    threading.Timer(0.6, lambda: os._exit(0)).start()
+    return True, ""
+
+
 # ===================== 路由注册 =====================
 
 def register(app):
@@ -821,6 +876,13 @@ def register(app):
         modules.append({
             "id": "settings",
             "name": "系统设置",
+            "count": 0,
+            "allowed": bool(info.get("super_admin")),
+        })
+        # 插件管理：插件包升级 / 回滚 / 批量更新（阶段二/三），同样仅超级管理员
+        modules.append({
+            "id": "plugins",
+            "name": "插件管理",
             "count": 0,
             "allowed": bool(info.get("super_admin")),
         })
@@ -1296,6 +1358,251 @@ def register(app):
         if err:
             return jsonify({"error": err}), 400
         return jsonify({"ok": True, "data_root": root, "migrated": moved})
+
+    # ---------------- 插件管理（插件包：上传 / 应用 / 回滚 / 批量升级，仅超级管理员） ----------------
+    # 设计：docs/插件独立升级方案-设计文档.md §9（阶段二：应用内升级）与 §10（阶段三：共享盘索引）
+    # 安全（PU-1~PU-6）：全部仅限超级管理员；上传包先落到数据根 .staging\uploads\（不落程序目录），
+    #   校验通过才允许应用；apply 时服务端**重新校验一遍**（不信任前端传来的任何状态）；
+    #   逐条规则与目标机离线安装器 tools/plugin-upgrade/install-plugin.ps1 一致。
+
+    plugin_admin = _load_plugin_admin()
+
+    def _plugin_mgr_ok():
+        info = get_session_user()
+        return bool(info and info.get("super_admin"))
+
+    def _staging_uploads_dir():
+        path = os.path.join(jztools_data.get_data_root(), ".staging", "uploads")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _resolve_upload(name):
+        """把前端回传的文件名解析为暂存目录内的绝对路径（拒绝任何路径穿越）。"""
+        raw = str(name or "")
+        base = os.path.basename(raw)
+        if not base or base != raw or not base.lower().endswith(".zip"):
+            return None
+        path = os.path.join(_staging_uploads_dir(), base)
+        return path if os.path.isfile(path) else None
+
+    @app.get("/admin/plugins")
+    @login_required
+    def admin_plugins_page():
+        """插件管理页（仅超级管理员）。"""
+        if not _plugin_mgr_ok():
+            return redirect(url_for("admin_index"))
+        return send_from_directory(FRONTEND_DIR, "admin-plugins.html")
+
+    @app.get("/api/admin/plugins")
+    @login_required
+    def admin_api_plugins():
+        """插件盘点：代码版本 / 登记版本 / 待重启 / 备份数 / 数据占用 / 启停。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        set_operation("查询插件列表")
+        rows = plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
+        cfg = load_admin_config()
+        return jsonify({
+            "ok": True,
+            "plugins": rows,
+            "app_version": plugin_admin.app_version(PROJECT_DIR) or "",
+            "data_root": jztools_data.get_data_root(),
+            "index_path": cfg.get("plugin_index_path") or "",
+            "frozen": bool(getattr(sys, "frozen", False)),
+            "restart_pending": [r["id"] for r in rows if r["restart_pending"]],
+        })
+
+    @app.post("/api/admin/plugins/upload")
+    @login_required
+    def admin_api_plugins_upload():
+        """上传插件包并只读校验；返回应用计划（尚未写程序目录）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        set_operation("上传插件包")
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "请选择插件包（.zip）"}), 400
+        if not f.filename.lower().endswith(".zip"):
+            return jsonify({"error": "只接受 .zip 插件包（由 tools\\build-plugin-package.ps1 生成）"}), 400
+        if request.content_length and request.content_length > plugin_admin.MAX_ZIP_BYTES:
+            return jsonify({"error": "包体积超过上限 %.0f MB" % (plugin_admin.MAX_ZIP_BYTES / 1048576)}), 413
+        force = str(request.form.get("force") or "").lower() in ("1", "true", "on")
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(f.filename))
+        name = "%s-%s" % (plugin_admin.now_stamp(), safe)
+        dest = os.path.join(_staging_uploads_dir(), name)
+        try:
+            f.save(dest)
+        except Exception as e:
+            return jsonify({"error": "保存上传文件失败：%s" % e}), 500
+        try:
+            inspected = plugin_admin.inspect_package(dest, PROJECT_DIR, jztools_data.get_data_root(), force=force)
+        except Exception as e:
+            return jsonify({"error": "校验时出错：%s" % e}), 500
+        if not inspected["ok"]:
+            return jsonify({"ok": False, "file": name,
+                            "errors": inspected["errors"], "warnings": inspected["warnings"]}), 400
+        meta = inspected["meta"]
+        plan = inspected["plan"]
+        return jsonify({
+            "ok": True, "file": name, "id": meta.get("id"), "version": meta.get("version"),
+            "from_version": inspected["from_version"],
+            "requires_restart": inspected["restart_needed"],
+            "restart_reason": inspected["restart_reason"],
+            "min_app_version": meta.get("min_app_version") or "",
+            "warnings": inspected["warnings"],
+            "plan": {
+                "new": len(plan.get("new") or []),
+                "changed": len(plan.get("changed") or []),
+                "unchanged": plan.get("unchanged") or 0,
+                "deleted": len(plan.get("deleted") or []),
+                "unknown": len(plan.get("unknown") or []),
+                "base_source": plan.get("base_source") or "",
+                "deleted_files": (plan.get("deleted") or [])[:50],
+                "unknown_files": (plan.get("unknown") or [])[:50],
+            },
+        })
+
+    @app.post("/api/admin/plugins/apply")
+    @login_required
+    def admin_api_plugins_apply():
+        """应用已上传的插件包：服务端重新校验 → 备份 → 替换 → 登记（可回滚）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        path = _resolve_upload(data.get("file"))
+        if not path:
+            return jsonify({"error": "上传的包不存在或已过期，请重新上传"}), 404
+        set_operation("应用插件包")
+        base, root = PROJECT_DIR, jztools_data.get_data_root()
+        inspected = plugin_admin.inspect_package(path, base, root, force=bool(data.get("force")))
+        if not inspected["ok"]:
+            return jsonify({"ok": False, "errors": inspected["errors"]}), 400
+        report = plugin_admin.apply_package(
+            base, root, inspected,
+            purge_unknown=bool(data.get("purge_unknown")),
+            update_entry=bool(data.get("update_entry")),
+        )
+        if report.get("ok"):
+            try:
+                os.remove(path)          # 应用成功即清理上传包（PU-5）
+            except OSError:
+                pass
+        report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(base, root)
+                                     if r["restart_pending"]]
+        return jsonify(report), (200 if report.get("ok") else 500)
+
+    @app.get("/api/admin/plugins/backups")
+    @login_required
+    def admin_api_plugins_backups():
+        """某插件的备份清单（供回滚选择）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        pid = (request.args.get("id") or "").strip()
+        if not plugin_admin.PLUGIN_ID_RE.match(pid):
+            return jsonify({"error": "插件 id 非法"}), 400
+        set_operation("查询插件备份")
+        items = plugin_admin.list_backups(jztools_data.get_data_root(), pid)
+        return jsonify({"ok": True, "backups": [
+            {"name": it["name"], "size": it["size"], "mtime": it["mtime"]} for it in items]})
+
+    @app.post("/api/admin/plugins/rollback")
+    @login_required
+    def admin_api_plugins_rollback():
+        """回滚插件到某个备份（缺省=最近一份）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "").strip()
+        if not plugin_admin.PLUGIN_ID_RE.match(pid):
+            return jsonify({"error": "插件 id 非法"}), 400
+        set_operation("回滚插件")
+        # 只允许回滚到该插件备份目录内的文件（拒绝任意路径）
+        backup = None
+        name = os.path.basename(str(data.get("backup") or ""))
+        if name:
+            candidate = os.path.join(plugin_admin.backups_dir(jztools_data.get_data_root(), pid), name)
+            if os.path.isfile(candidate):
+                backup = candidate
+            else:
+                return jsonify({"error": "指定的备份不存在"}), 404
+        report = plugin_admin.rollback_plugin(PROJECT_DIR, jztools_data.get_data_root(), pid, backup)
+        report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
+                                     if r["restart_pending"]]
+        return jsonify(report), (200 if report.get("ok") else 500)
+
+    @app.post("/api/admin/plugins/enable")
+    @login_required
+    def admin_api_plugins_enable():
+        """启用 / 停用插件（写数据根 tools.json，不动代码与数据）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "").strip()
+        if not plugin_admin.PLUGIN_ID_RE.match(pid):
+            return jsonify({"error": "插件 id 非法"}), 400
+        enabled = bool(data.get("enabled"))
+        set_operation("启用插件" if enabled else "停用插件")
+        ok = plugin_admin.set_plugin_enabled(jztools_data.get_data_root(), pid, enabled)
+        if not ok:
+            return jsonify({"error": "tools.json 中没有该插件的注册条目"}), 404
+        return jsonify({"ok": True, "id": pid, "enabled": enabled})
+
+    @app.get("/api/admin/plugins/index")
+    @login_required
+    def admin_api_plugins_index():
+        """读取共享盘索引并比对已装版本（阶段三）。path 缺省用上次记住的路径。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        cfg = load_admin_config()
+        path = (request.args.get("path") or "").strip() or (cfg.get("plugin_index_path") or "")
+        if not path:
+            return jsonify({"error": "请填写索引文件路径（共享盘上的 index.json）"}), 400
+        set_operation("检查插件更新")
+        res = plugin_admin.check_updates(PROJECT_DIR, jztools_data.get_data_root(), path)
+        if not res.get("ok"):
+            return jsonify(res), 400
+        # 记住路径，下次免填（同一台机器上通常固定一个共享目录）
+        if cfg.get("plugin_index_path") != path:
+            cfg["plugin_index_path"] = path
+            save_admin_config(cfg)
+        return jsonify(res)
+
+    @app.post("/api/admin/plugins/batch-apply")
+    @login_required
+    def admin_api_plugins_batch_apply():
+        """按索引批量应用插件包（顺序应用；后端改动则最后统一重启一次）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        cfg = load_admin_config()
+        index_path = (data.get("index_path") or "").strip() or (cfg.get("plugin_index_path") or "")
+        ids = [str(x) for x in (data.get("ids") or []) if str(x)]
+        if not index_path or not ids:
+            return jsonify({"error": "请先检查更新并勾选要升级的插件"}), 400
+        set_operation("批量升级插件")
+        res = plugin_admin.batch_apply(PROJECT_DIR, jztools_data.get_data_root(), index_path, ids)
+        res["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
+                                  if r["restart_pending"]]
+        return jsonify(res)
+
+    @app.post("/api/admin/plugins/restart")
+    @login_required
+    def admin_api_plugins_restart():
+        """重启服务让新插件代码生效（仅打包运行；源码模式提示手工重启）。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        set_operation("重启服务（插件生效）")
+        rows = plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
+        pending = [r["id"] for r in rows if r["restart_pending"]]
+        if not getattr(sys, "frozen", False):
+            return jsonify({"ok": False, "pending": pending,
+                            "message": "源码开发模式不自动重启：Flask 调试重载通常会自行重启；"
+                                       "若未生效请手工重启 python app.py"})
+        ok, err = _spawn_self_restart()
+        if not ok:
+            return jsonify({"ok": False, "pending": pending, "error": err}), 500
+        return jsonify({"ok": True, "pending": pending,
+                        "message": "服务正在重启，约 5~10 秒后本页会自动重新加载"})
 
     # ---------------- 批量导入导出（单位 / 部门 / 人员） ----------------
 

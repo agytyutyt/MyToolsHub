@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>插件管理 · 管理后台</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=14">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=7">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
+</head>
+<body>
+  <header class="app-bar">
+    <a href="/" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title" data-suffix=" · 管理后台">JZ 工具箱 · 管理后台</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="user-menu" id="user-slot"></div>
+  </header>
+
+  <main class="admin-content" id="app">
+    <div class="admin-head">
+      <div>
+        <h1>插件管理</h1>
+        <div class="admin-sub">
+          用「插件包」单独升级某一个插件（不必重出整包）：先校验、再备份、后替换，可一键回滚。
+          插件的用户数据全程不受影响。
+        </div>
+      </div>
+      <a class="admin-btn" href="/admin">← 后台首页</a>
+    </div>
+
+    <div class="plugin-banner" id="restart-banner" hidden>
+      <span class="plugin-banner-text" id="restart-banner-text"></span>
+      <button type="button" class="admin-btn primary" id="btn-restart">立即重启服务</button>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>插件盘点</h3>
+      <p class="settings-desc">
+        「代码版本」= 程序目录里插件目录的当前版本；「登记版本」= 上次通过插件包安装时登记的版本。
+        两者不一致通常说明目录被人工改动过。<span id="app-version-note"></span>
+      </p>
+      <div class="data-table-wrap">
+        <table class="data-table" id="plugin-table">
+          <thead>
+            <tr>
+              <th>插件</th>
+              <th>代码版本</th>
+              <th>登记版本</th>
+              <th>状态</th>
+              <th>备份</th>
+              <th>数据占用</th>
+              <th style="text-align:right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="plugin-rows">
+            <tr><td colspan="7" class="admin-empty">加载中…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="settings-card">
+      <h3>离线升级包（单个插件）</h3>
+      <p class="settings-desc">
+        选择由 <code>tools\build-plugin-package.ps1</code> 生成的
+        <code>JZToolsHub-插件-&lt;插件id&gt;-v&lt;版本&gt;.zip</code>。
+        上传后先做只读校验并给出计划，确认无误再应用（应用前会自动备份旧版）。
+      </p>
+      <div class="settings-form">
+        <div class="form-row">
+          <input type="file" id="pkg-file" class="admin-input" accept=".zip">
+          <button type="button" class="admin-btn primary" id="btn-inspect">校验并预览</button>
+        </div>
+        <label class="plugin-check">
+          <input type="checkbox" id="opt-force"> 强制（允许同版本重装 / 降级 / 越过版本区间）
+        </label>
+        <label class="plugin-check">
+          <input type="checkbox" id="opt-purge"> 同时清理"新旧版本都没有"的未知文件
+        </label>
+        <label class="plugin-check">
+          <input type="checkbox" id="opt-update-entry"> 用包内条目更新工具列表里的名称/描述
+        </label>
+      </div>
+      <div id="inspect-result"></div>
+    </div>
+
+    <div class="settings-card">
+      <h3>共享盘批量更新</h3>
+      <p class="settings-desc">
+        指向内网共享盘上由出包工具维护的 <code>index.json</code>（与包文件同一目录）。
+        检查更新只读索引与包文件；批量升级会按顺序应用勾选的包，后端有改动时统一重启一次。
+      </p>
+      <div class="settings-form">
+        <label for="index-path">索引文件路径</label>
+        <div class="form-row">
+          <input type="text" id="index-path" class="admin-input"
+                 placeholder="\\fileserver\JZToolsHub\插件包\index.json">
+          <button type="button" class="admin-btn primary" id="btn-check">检查更新</button>
+        </div>
+      </div>
+      <div id="index-result"></div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/plugin/admin/js/admin-common.js?v=5"></script>
+  <script src="/plugin/admin/js/admin-plugins.js?v=1"></script>
+</body>
+</html>

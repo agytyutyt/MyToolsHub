@@ -6,11 +6,16 @@
 #   卸载：          powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 #   卸载（保留用户数据）：powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall -KeepData
 #   自定义安装目录：powershell -ExecutionPolicy Bypass -File install.ps1 -InstallDir D:\JZToolsHub
+#   强制以主包为准：powershell -ExecutionPolicy Bypass -File install.ps1 -ForcePluginOverwrite
+#   绿色模式（不写注册表/不建快捷方式）：powershell -ExecutionPolicy Bypass -File install.ps1 -NoRegistry
 #
 # 行为：
 #   - 已安装  → 停止旧服务 → 更新项目文件 → 同步配置模板到用户数据根目录 → 重建快捷方式
 #   - 未安装  → 完整安装到 %LOCALAPPDATA%\JZToolsHub（可 -InstallDir 覆盖）
 #   - 卸载    → 停止服务 → 删除项目文件 → 删除用户数据根目录（默认；-KeepData 保留）
+#
+# 插件版本防回退：plugins\ 下已用「插件包」单独升级到更高版本的插件会被跳过（保持现状），
+# 避免整包更新把它们静默降级；确需以主包为准时加 -ForcePluginOverwrite。
 #
 # 用户数据（数据根目录，默认 %USERPROFILE%\.jztoolshub）独立于程序目录存放，
 # 升级时只同步「配置模板」（prompt.json / tools.json 等），账号、台账、文档、
@@ -20,7 +25,10 @@
 param(
     [switch]$Uninstall,
     [switch]$KeepData,          # 卸载时保留用户数据根目录（默认删除）
-    [string]$InstallDir = ""    # 安装目录；留空时用 %LOCALAPPDATA%\JZToolsHub
+    [switch]$ForcePluginOverwrite,  # 更新时不跳过"已单独升级到更高版本"的插件（默认跳过，防回退）
+    [switch]$NoRegistry,        # 绿色模式：不写注册表、不建快捷方式（受管环境/移动介质部署）
+    [string]$InstallDir = "",   # 安装目录；留空时用 %LOCALAPPDATA%\JZToolsHub
+    [string]$DataRoot = ""      # 数据根目录；留空时按 .jztoolshub.json 指针自动解析
 )
 $ErrorActionPreference = "Stop"
 
@@ -28,7 +36,7 @@ $AppName  = "JZToolsHub"
 $ExeName  = "$AppName.exe"
 $Source   = $PSScriptRoot                 # 一键安装包所在目录（解压后的程序目录）
 $RegKey   = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
-$DataRoot = ""                            # 数据根目录，启动时解析
+# $DataRoot 由参数给出时以参数为准；为空则启动时按指针解析（见 Get-DataRootDir）
 # 默认安装目录：%LOCALAPPDATA%\JZToolsHub（不能在 param 里用 $env:，这里兜底解析）
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
     $InstallDir = Join-Path $env:LOCALAPPDATA $AppName
@@ -44,6 +52,10 @@ if (Test-Path $verFile) {
 # ---------------- 数据根目录解析 ----------------
 function Get-DataRootDir {
     param([string]$Target)
+    # 显式 -DataRoot 优先（数据根不在默认位置 / 受管环境）
+    if (-not [string]::IsNullOrWhiteSpace($script:DataRoot)) {
+        return [System.IO.Path]::GetFullPath($script:DataRoot)
+    }
     # 主指针：用户目录 .jztoolshub.json（整体替换程序文件夹后仍可找到）
     $ptr = Join-Path $env:USERPROFILE ".jztoolshub.json"
     if (Test-Path $ptr) {
@@ -69,9 +81,31 @@ function Stop-JZService {
     if ($p) { $p | Stop-Process -Force; Start-Sleep -Milliseconds 600 }
 }
 
+# ---------------- 语义化版本比较（插件版本防回退用） ----------------
+# 返回 -1 / 0 / 1；任一侧不是 主.次.修订 时返回 $null（调用方按"不参与比较"处理）
+function Compare-SemVer {
+    param([string]$A, [string]$B)
+    if ($A -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
+    $pa = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    if ($B -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
+    $pb = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    for ($i = 0; $i -lt 3; $i++) {
+        if ($pa[$i] -gt $pb[$i]) { return 1 }
+        if ($pa[$i] -lt $pb[$i]) { return -1 }
+    }
+    return 0
+}
+
 # ---------------- 已安装信息 ----------------
 function Get-InstalledInfo {
     # 返回 @{ Dir; Version } 或 $null
+    # 显式 -InstallDir 且该目录已是安装目录 → 以它为准（否则本机注册表登记过其它位置时会改错地方）
+    if (-not [string]::IsNullOrWhiteSpace($script:InstallDir) -and (Test-Path (Join-Path $script:InstallDir $ExeName))) {
+        $v = $null
+        $vf = Join-Path $script:InstallDir "version.json"
+        if (Test-Path $vf) { try { $v = (Get-Content $vf -Raw | ConvertFrom-Json).app } catch {} }
+        return @{ Dir = $script:InstallDir; Version = $v }
+    }
     $reg = Get-ItemProperty -Path $RegKey -ErrorAction SilentlyContinue
     if ($reg -and (Test-Path $reg.InstallLocation)) {
         $v = $null
@@ -292,15 +326,91 @@ if ($info) {
 
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 
+# ---- 插件版本防回退（单独升级过的插件不被整包覆盖回去）----
+# 背景：本脚本把 plugins\ 整体覆盖到目标目录。若某个插件已用「插件包」单独升级到更高版本，
+# 直接覆盖会把它静默降级回主包内嵌版本（见 docs\插件独立升级方案-设计文档.md §7）。
+# 规则：数据根状态登记（config\.app_state.json → plugins.<id>.version）高于主包内嵌版本 → 跳过该插件；
+#       确需"以主包为准"覆盖时用 -ForcePluginOverwrite。
+$statePath = Join-Path (Get-DataRootDir -Target $Target) "config\.app_state.json"
+$skipPlugins = @{}
+if ((Test-Path -LiteralPath $statePath) -and (-not $ForcePluginOverwrite)) {
+    try {
+        $stateObj = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($stateObj.plugins) {
+            foreach ($p in $stateObj.plugins.PSObject.Properties) {
+                $pluginId = $p.Name
+                $regVer = [string]$p.Value.version
+                $srcMan = Join-Path (Join-Path $Source "plugins\$pluginId") "manifest.json"
+                if (-not $regVer -or -not (Test-Path -LiteralPath $srcMan)) { continue }
+                $pkgVer = ""
+                try { $pkgVer = [string]((Get-Content -LiteralPath $srcMan -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { }
+                if (-not $pkgVer) { continue }
+                if ((Compare-SemVer $regVer $pkgVer) -eq 1) { $skipPlugins[$pluginId] = @{ reg = $regVer; pkg = $pkgVer } }
+            }
+        }
+    } catch {
+        Write-Host "  [提示] 插件版本防回退检查已跳过（状态文件不可读）：$($_.Exception.Message)"
+    }
+}
+
 # ---- 复制项目文件（源为解压目录时复制；源=目标则就地更新） ----
 $SourceFull = [System.IO.Path]::GetFullPath($Source)
 $TargetFull = [System.IO.Path]::GetFullPath($Target)
 if ($SourceFull -ne $TargetFull) {
     Write-Host "  正在复制项目文件 → $Target"
+    if ($skipPlugins.Count -gt 0) {
+        Write-Host "  ---- 插件版本防回退 ----"
+        foreach ($k in $skipPlugins.Keys) {
+            Write-Host "    跳过 $k：已单独升级到 $($skipPlugins[$k].reg)（主包内嵌 $($skipPlugins[$k].pkg)）→ 保持现状"
+        }
+        Write-Host "    如需以主包为准覆盖这些插件，请加 -ForcePluginOverwrite"
+    }
     $exclude = @(".zcode", "deploy", "dist", "build", "__pycache__")
     Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
         if ($_.Name -in $exclude) { return }
+        if ($_.Name -eq "plugins" -and $skipPlugins.Count -gt 0) {
+            # 逐插件复制，跳过受保护插件（其余插件照常更新）
+            $dstPlugins = Join-Path $Target "plugins"
+            New-Item -ItemType Directory -Force -Path $dstPlugins | Out-Null
+            Get-ChildItem -LiteralPath $_.FullName -Force | ForEach-Object {
+                if ($skipPlugins.ContainsKey($_.Name)) { return }
+                Copy-Item -LiteralPath $_.FullName -Destination $dstPlugins -Recurse -Force
+            }
+            return
+        }
         Copy-Item -LiteralPath $_.FullName -Destination $Target -Recurse -Force
+    }
+
+    # 状态登记校正：被主包覆盖的插件（含 -ForcePluginOverwrite 场景），登记版本改为主包内嵌版本，
+    # 否则登记与实际不符，下次插件包升级的版本判定会失真。
+    if (Test-Path -LiteralPath $statePath) {
+        try {
+            $stateObj = Get-Content -LiteralPath $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $fixed = 0
+            if ($stateObj.plugins) {
+                foreach ($p in @($stateObj.plugins.PSObject.Properties)) {
+                    $pluginId = $p.Name
+                    if ($skipPlugins.ContainsKey($pluginId)) { continue }
+                    $srcMan = Join-Path (Join-Path $Source "plugins\$pluginId") "manifest.json"
+                    if (-not (Test-Path -LiteralPath $srcMan)) { continue }
+                    $pkgVer = ""
+                    try { $pkgVer = [string]((Get-Content -LiteralPath $srcMan -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { }
+                    if (-not $pkgVer) { continue }
+                    if ([string]$p.Value.version -ne $pkgVer) {
+                        $p.Value | Add-Member -NotePropertyName version -NotePropertyValue $pkgVer -Force
+                        $p.Value | Add-Member -NotePropertyName installed_by -NotePropertyValue "install.ps1/$Version" -Force
+                        $p.Value | Add-Member -NotePropertyName installed_at -NotePropertyValue (Get-Date -Format "o") -Force
+                        $fixed++
+                    }
+                }
+            }
+            if ($fixed -gt 0) {
+                [System.IO.File]::WriteAllText($statePath, ($stateObj | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
+                Write-Host "  已校正 $fixed 个插件的状态登记（以主包内嵌版本为准）"
+            }
+        } catch {
+            Write-Host "  [提示] 状态登记校正失败（不影响安装）：$($_.Exception.Message)"
+        }
     }
 } else {
     Write-Host "  就地更新（源目录即为安装目录），跳过文件复制"
@@ -355,18 +465,22 @@ if ($rtCarried -and (Test-Path $rtSetup)) {
     Write-Host "                （免管理员、无快捷方式、不改文件关联与默认应用，对使用者不可见）"
 }
 
-# ---- 注册表与快捷方式 ----
-Write-Registry -Dir $Target
-$lnkDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-New-Item -ItemType Directory -Force -Path $lnkDir | Out-Null
-New-Shortcut -Link (Join-Path $lnkDir "$AppName.lnk") -Target $exe
-# 桌面路径可能为空（重定向 profile / 服务账户）：为空时跳过桌面快捷方式
-$desktop = [Environment]::GetFolderPath("Desktop")
-if (-not [string]::IsNullOrWhiteSpace($desktop)) {
-    New-Shortcut -Link (Join-Path $desktop "$AppName.lnk") -Target $exe
-    Write-Host "  已创建开始菜单与桌面快捷方式"
+# ---- 注册表与快捷方式（-NoRegistry 绿色模式：两者都跳过） ----
+if (-not $NoRegistry) {
+    Write-Registry -Dir $Target
+    $lnkDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    New-Item -ItemType Directory -Force -Path $lnkDir | Out-Null
+    New-Shortcut -Link (Join-Path $lnkDir "$AppName.lnk") -Target $exe
+    # 桌面路径可能为空（重定向 profile / 服务账户）：为空时跳过桌面快捷方式
+    $desktop = [Environment]::GetFolderPath("Desktop")
+    if (-not [string]::IsNullOrWhiteSpace($desktop)) {
+        New-Shortcut -Link (Join-Path $desktop "$AppName.lnk") -Target $exe
+        Write-Host "  已创建开始菜单与桌面快捷方式"
+    } else {
+        Write-Host "  已创建开始菜单快捷方式（桌面路径不可用，跳过桌面快捷方式）"
+    }
 } else {
-    Write-Host "  已创建开始菜单快捷方式（桌面路径不可用，跳过桌面快捷方式）"
+    Write-Host "  [-NoRegistry] 绿色模式：未写注册表、未建快捷方式"
 }
 
 Write-Host ""

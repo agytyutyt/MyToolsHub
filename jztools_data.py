@@ -26,6 +26,7 @@
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 
@@ -143,8 +144,18 @@ def _write_pointer_file(path, root):
 def get_data_root():
     """返回当前数据根目录绝对路径（存在性懒处理，首次解析即写入指针）。
 
-    解析优先级：主指针（用户目录）> 备份指针（程序目录 config/）> 默认用户目录。
+    解析优先级：环境变量 ``JZTOOLS_DATA_ROOT`` > 主指针（用户目录）> 备份指针（程序目录）> 默认用户目录。
+    环境变量用于自动化与受管环境（CI / 沙箱演练 / 服务账户）：显式指定时**不读写指针文件**，
+    避免把演练环境的数据根写进用户目录的指针。
     """
+    env_root = os.environ.get("JZTOOLS_DATA_ROOT")
+    if env_root:
+        try:
+            path = os.path.abspath(os.path.expanduser(env_root))
+            os.makedirs(path, exist_ok=True)
+            return path
+        except Exception as e:
+            log.warning("JZTOOLS_DATA_ROOT 不可用（%s）：%s，回退到指针解析", env_root, e)
     root = _read_pointer_file(POINTER_USER_FILE)
     if root is None:
         root = _read_pointer_file(os.path.join(get_base_dir(), BACKUP_POINTER_REL))
@@ -452,21 +463,233 @@ def sync_templates():
     ``config/.app_state.json`` 中记录的 last_app 不一致时，
     执行 _TEMPLATE_SYNC 清单中所有条目，并更新 last_app。
     版本一致时跳过（幂等）。
+
+    另：插件可经「插件包」单独升级而**不改应用版本**（见
+    docs/插件独立升级方案-设计文档.md §8），因此插件级模板（plugins/<id>/**/*.template.json）
+    的同步不受应用版本门控，每次启动按内容指纹增量补键（sync_plugin_templates）。
     """
     base = get_base_dir()
     root = get_data_root()
     version = _read_version(base)
-    if not version:
-        return 0
-    state = _read_app_state()
-    if version == state.get("last_app"):
-        return 0
-    synced = _sync_templates(base, root, version)
-    state["last_app"] = version
-    _write_app_state(state)
-    if synced:
-        log.info("模板同步完成：%d 个文件已同步（版本 %s）", synced, version)
+    synced = 0
+    if version:
+        state = _read_app_state()
+        if version != state.get("last_app"):
+            synced = _sync_templates(base, root, version)
+            state["last_app"] = version
+            _write_app_state(state)
+            if synced:
+                log.info("模板同步完成：%d 个文件已同步（版本 %s）", synced, version)
+    # 插件级模板同步：不受应用版本门控（插件单独升级时应用版本可能不变）
+    synced += sync_plugin_templates(base, root)
     return synced
+
+
+# ===================== 插件级配置模板同步（插件单独升级后自动补键） =====================
+# 命名/目标映射与 tools/build-plugin-package.ps1、tools/plugin-upgrade/install-plugin.ps1 保持一致：
+#   plugins/<id>/backend/config.template.json → 数据根 plugins/<id>/config.json
+# 门控：模板内容指纹（复用 _file_hash16）——指纹没变就不打扰用户已保存的配置（幂等）。
+
+_TEMPLATE_SUFFIX = ".template.json"
+_TEMPLATE_SKIP_DIRS = {"__pycache__", ".task_cache", "data", "out", "node_modules",
+                       ".venv", "venv", ".git", "vendor"}
+_PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _plugin_template_files(plugin_dir):
+    """列出插件目录下的模板文件（相对插件目录的 posix 路径）。"""
+    found = []
+    for root_dir, dirs, files in os.walk(plugin_dir):
+        dirs[:] = [d for d in dirs if d not in _TEMPLATE_SKIP_DIRS]
+        for name in files:
+            if name.endswith(_TEMPLATE_SUFFIX):
+                rel = os.path.relpath(os.path.join(root_dir, name), plugin_dir)
+                found.append(rel.replace(os.sep, "/"))
+    return sorted(found)
+
+
+def _template_target_name(rel):
+    """``backend/config.template.json`` → ``config.json``（去掉 .template 标记）。"""
+    base = os.path.basename(rel)
+    if ".template." in base:
+        return base.replace(".template.", ".", 1)
+    return base
+
+
+def _template_mode(src):
+    """模板声明的同步模式：_mode 字段优先，缺省 ensure-keys（只补缺失键）。"""
+    obj = _read_json_file(src)
+    if isinstance(obj, dict) and obj.get("_mode"):
+        return str(obj["_mode"])
+    return "ensure-keys"
+
+
+def _state_path_at(root):
+    """给定数据根目录 → 应用状态文件路径（供带 base/root 参数的可测试路径使用）。"""
+    return os.path.join(root, "config", ".app_state.json")
+
+
+def _read_state_at(root):
+    obj = _read_json_file(_state_path_at(root))
+    return obj if isinstance(obj, dict) else {}
+
+
+def _write_state_at(root, state):
+    _write_json_file(_state_path_at(root), state)
+
+
+def _sync_one_template(src, dst, mode):
+    """按模式把单个模板同步到数据根运行配置；成功返回 True。"""
+    tmpl = _read_json_file(src)
+    if not isinstance(tmpl, dict):
+        log.warning("插件模板同步：模板不是合法 JSON，跳过 %s", src)
+        return False
+    tmpl = dict(tmpl)
+    tmpl.pop("_mode", None)          # _mode 是元信息，不写进用户配置
+    try:
+        if mode == "merge-tools":
+            user = _read_json_file(dst)
+            if not isinstance(user, dict):
+                user = {}
+            _write_json_file(dst, _merge_tools(user, tmpl))
+            return True
+        if mode == "overwrite":
+            if os.path.isfile(dst):
+                bak = dst + ".bak-old"
+                if not os.path.isfile(bak):
+                    shutil.copyfile(dst, bak)
+            _write_json_file(dst, tmpl)
+            log.info("插件模板同步：已覆盖 %s（旧配置备份 .bak-old）", dst)
+            return True
+        user = _read_json_file(dst)
+        if not isinstance(user, dict):
+            user = {}
+        _ensure_deep_keys(user, tmpl)
+        _write_json_file(dst, user)
+        log.info("插件模板同步：已补全 %s（保留用户已有配置）", dst)
+        return True
+    except Exception as e:
+        log.warning("插件模板同步：%s 处理失败（%s）", dst, e)
+        return False
+
+
+def sync_plugin_templates(base=None, root=None):
+    """按插件模板内容指纹增量同步一次；返回同步的文件数（0 = 无需同步）。
+
+    覆盖两种场景：
+      ① 插件经「插件包」独立升级（应用版本不变）后，新增配置键自动下发；
+      ② 手工覆盖插件目录（未走安装器）时，同样在下次启动补键。
+    状态记录在数据根 config/.app_state.json 的 plugins.<id>.templates（模板指纹），
+    与「已装版本」登记共用同一文件（见 install-plugin.ps1 的状态登记）。
+    """
+    base = base or get_base_dir()
+    root = root or get_data_root()
+    plugins_dir = os.path.join(base, "plugins")
+    if not os.path.isdir(plugins_dir):
+        return 0
+    state = _read_state_at(root)
+    if not isinstance(state, dict):
+        return 0
+    plugins_state = state.get("plugins")
+    if not isinstance(plugins_state, dict):
+        plugins_state = {}
+        state["plugins"] = plugins_state
+    synced = 0
+    for pid in sorted(os.listdir(plugins_dir)):
+        if not _PLUGIN_ID_RE.match(pid or ""):
+            continue
+        pdir = os.path.join(plugins_dir, pid)
+        if not os.path.isdir(pdir):
+            continue
+        rels = _plugin_template_files(pdir)
+        if not rels:
+            continue
+        entry = plugins_state.get(pid)
+        if not isinstance(entry, dict):
+            entry = {}
+            plugins_state[pid] = entry
+        recorded = entry.get("templates")
+        if not isinstance(recorded, dict):
+            recorded = {}
+        for rel in rels:
+            src = os.path.join(pdir, *rel.split("/"))
+            h = _file_hash16(src)
+            if not h or recorded.get(rel) == h:
+                continue                      # 指纹没变 → 幂等跳过
+            dst = os.path.join(root, "plugins", pid, _template_target_name(rel))
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+            except OSError as e:
+                log.warning("插件模板同步：创建目录失败（%s）：%s", dst, e)
+                continue
+            if _sync_one_template(src, dst, _template_mode(src)):
+                recorded[rel] = h
+                synced += 1
+        entry["templates"] = recorded
+    if synced:
+        _write_state_at(root, state)
+    return synced
+
+
+# ===================== 插件"待重启"标记（管理后台应用插件包后） =====================
+# 管理后台在页内应用插件包（阶段二）时，后端代码换了但进程还在跑旧代码；
+# 这时在状态登记里打一个 restart_pending 标记，页面上提示"需重启生效"，
+# 启动完成后由 app.py 调 clear_plugin_restart_flags() 清掉
+# （见 docs/插件独立升级方案-设计文档.md §9）。
+
+
+def mark_plugin_restart_pending(plugin_id, note="", root=None):
+    """标记某插件"代码已替换、待重启生效"；返回状态文件相对路径。
+
+    ``root`` 显式给出数据根目录（管理后台在页内应用插件包时传入当前数据根，
+    单元测试传沙箱目录）；缺省用 get_data_root()。
+    """
+    state = _read_state_at(root) if root else _read_app_state()
+    plugins_state = state.get("plugins")
+    if not isinstance(plugins_state, dict):
+        plugins_state = {}
+        state["plugins"] = plugins_state
+    entry = plugins_state.get(plugin_id)
+    if not isinstance(entry, dict):
+        entry = {}
+        plugins_state[plugin_id] = entry
+    entry["restart_pending"] = True
+    entry["restart_pending_at"] = _now_iso()
+    if note:
+        entry["restart_pending_note"] = str(note)[:200]
+    if root:
+        _write_state_at(root, state)
+    else:
+        _write_app_state(state)
+    return _APP_STATE_FILE
+
+
+def clear_plugin_restart_flags(root=None):
+    """清空所有插件的"待重启"标记；返回被清除的插件数。
+
+    在启动流程的**插件后端加载完成后**调用（此时磁盘上的代码已在运行）。
+    """
+    state = _read_state_at(root) if root else _read_app_state()
+    plugins_state = state.get("plugins")
+    if not isinstance(plugins_state, dict):
+        return 0
+    cleared = []
+    for pid, entry in plugins_state.items():
+        if isinstance(entry, dict) and entry.pop("restart_pending", None):
+            entry.pop("restart_pending_at", None)
+            entry.pop("restart_pending_note", None)
+            cleared.append(pid)
+    if cleared:
+        if root:
+            _write_state_at(root, state)
+        else:
+            _write_app_state(state)
+    return len(cleared)
+
+
+def _now_iso():
+    from datetime import datetime
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def data_usage_summary():

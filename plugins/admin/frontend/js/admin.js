@@ -10,6 +10,13 @@
     user: { icon: '1f465.svg', accent: '#34A853' },
     permission: { icon: '1f6e1.svg', accent: '#FBBC05' },
     settings: { icon: '2699.svg', accent: '#607D8B' },
+    plugins: { icon: '1f9e9.svg', accent: '#009688' },
+  };
+
+  // 固定文案的模块：卡片不显示"记录数"，改用一句说明
+  const MODULE_DESC = {
+    settings: '数据根目录与系统配置',
+    plugins: '插件包升级 / 回滚 / 批量更新（仅超级管理员）',
   };
 
   function hexToRgb(hex) {
@@ -20,14 +27,12 @@
 
   function moduleCard(m) {
     const meta = MODULE_META[m.id] || { icon: '1f9e9.svg', accent: '#4285F4' };
-    const countLabel = m.id === 'permission' ? '角色数'
-      : m.id === 'settings' ? '数据目录' : '记录数';
-    const countText = m.id === 'settings'
-      ? '数据根目录与系统配置'
-      : `${countLabel} ${m.count} 条`;
-    const tag = m.id === 'settings' ? 'div' : 'a';
-    const hrefAttr = m.id === 'settings' ? '' : ' href="/admin/' + m.id + '"';
-    const clickAttr = m.id === 'settings' ? ' data-settings-card' : '';
+    const countLabel = m.id === 'permission' ? '角色数' : '记录数';
+    const countText = MODULE_DESC[m.id] || `${countLabel} ${m.count} 条`;
+    const isModal = m.id === 'settings';                 // 系统设置走弹窗；其余模块跳独立页面
+    const tag = isModal ? 'div' : 'a';
+    const hrefAttr = isModal ? '' : ' href="/admin/' + m.id + '"';
+    const clickAttr = isModal ? ' data-settings-card' : '';
     return '<' + tag + ' class="tool-card"' + hrefAttr + clickAttr
       + ' style="--tool-accent: ' + meta.accent + '; --tool-accent-rgb: ' + hexToRgb(meta.accent) + ';cursor:pointer">'
       + '<div class="admin-module-icon" style="background: rgba(' + hexToRgb(meta.accent) + ', .12);"><img class="tool-icon-img" src="/static/icons/' + encodeURIComponent(meta.icon) + '" alt=""></div>'
