@@ -15,6 +15,15 @@
 
 ## B 分发物
 
+- **插件升级主流程 = 后台上传即全自动**（admin ≥1.3.0）：管理员上传 zip（**不解压**）→
+  校验 → 备份 → 替换 → **自动停服重启** → 页面自动刷新。三个入口共用
+  `routes.py:_maybe_auto_restart()`（`/apply`、`/rollback`、`/batch-apply`：批量有失败项则跳过重启）；
+  响应回 `restarting` / `restart_message`，前端 `waitAndReload()` 轮询到服务恢复再刷新。
+  **顺序是"先替换、后停服"**（替换失败时服务仍活着可回滚），不是先停服。
+- **插件依赖白名单的真源 = `JZToolsHub.spec` 的 `PACKAGES`**（出包工具 C-4 校验读它）。
+  插件后端 import 了第三方库却报"框架未打包"时，**先往 PACKAGES 登记，不要 `-SkipChecks`**
+  （flask / werkzeug 就是这么补进去的）。
+
 - 主包默认瘦身（v1.9.0 = zip 122MB，无 `runtime/`）；`-WithOfflineRuntime` 才含组件。
   组件包独立分发：`JZToolsHub-离线组件-LibreOffice核心-<v>.zip`（免管理员）/
   `…Chrome-<v>.zip`（需管理员）。`install.ps1` 判定看**源包** `runtime\manifest.json`，非目标目录。
@@ -28,7 +37,13 @@
 - soffice 探测：插件 config `office.soffice_path` > 环境变量 `XHR_SOFFICE` >
   `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时有限深度 glob）。
 - 打包耗时全量 5~10min；`-ZipOnly` ≈2min（**先把新文件复制进 `deploy/JZToolsHub/`**）；
-  **先 commit 再打包**（否则 version.json.commit 记 `<sha>-dirty`）。
+   **先 commit 再打包**（否则 version.json.commit 记 `<sha>-dirty`）。
+- **PyInstaller 多入口可共享 `_internal`（2026-09-15 实测）**：两个 `Analysis` → 两个 `EXE`
+  → **同一个 `COLLECT`**，两个 exe 的 `sys._MEIPASS` 相同，依赖二进制只有一份；
+  多一个入口的增量 **3.00 MB / +9.7% 且为一次性**（`_internal` 不增大，增量就是第二个
+  exe 的 bootloader + 自带 PYZ）。且 `build-deploy.ps1:132` 是整目录搬运，
+  **新增 exe 不用改构建脚本**。冷启动 431ms（stdlib+cryptography 口径）。
+  详见 `docs/插件热插拔-容器化改造评估.md` 附录 A。
 
 ## C Python / 浏览器基线
 
@@ -61,6 +76,9 @@
   **每次工具调用 = 新浏览器会话**，多步操作必须在同一次 Bash 调用里 `;` 串联；
   eval 表达式禁 `|` `&` `>` 字符；先 `set viewport 1440 1000`；插件页直开
   `/plugin/<id>/index.html`；本机访问设 `no_proxy=127.0.0.1,localhost`（curl 需 `--noproxy '*'`）。
+  登录态：同一次调用内 `eval "fetch('/api/login',{method:'POST',...})"`；`click` 偶尔不触发，
+  **用 `eval "el.click()"` 更稳**。**往日志/文件写含反引号的内容别用 Bash 内联 python -c**
+  （反引号被命令替换吞掉）——写脚本文件再跑。
 - 本机 `pip wheel <sdist>` 必失败（沙箱禁 reg.exe/cmd.exe）→ 把已编译产物重打成 wheel。
 - HTTP 走代理 `http://127.0.0.1:49237`；本机端口测试避开 5099（曾有残留旧进程）。
 - venv：`C:\Users\yfjz\.workbuddy\binaries\python\envs\default\Scripts\python.exe`（flask/openpyxl/python-docx 全）。
