@@ -1,10 +1,12 @@
-# HANDOFF.md — JZToolsHub 交接文档
+﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（第三轮：**取消 Windows 7 兼容** + **修 vendor 引擎 `Optional` 未导入** +
-> **zfec 预编译 wheel 落库** + **明确 OS/浏览器双基线** + 打包脚本记录解释器版本与依赖自检。
+> 最后更新：2026-09-14（第四轮：**打通离线部署** —— 部署包内置 Chrome 与 LibreOffice 安装包
+> 并自动安装/解包，目标机无外网即可完整部署；新增 `tools/fetch-offline-bundle.py` 组件获取器、
+> `docs/离线部署包说明.md`。第三轮为取消 Win7 + vendor `Optional` 补丁 + zfec wheel 落库；
 > 第二轮为 P0 六项修复；第一轮为文档全面重写）。
 > 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
+> `docs/离线部署包说明.md`（离线包的组成、安装与适用场景）、
 > `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（P0 修复方案与实测）、
 > `docs/Python版本选型评估.md`（版本基线的完整实测依据）、`wheels/README.md`（zfec wheel 的来源与重建）。
 
@@ -42,6 +44,8 @@
 | 操作系统 | **Windows 10 及以上（x64）** | **不支持 Windows 7**（2026-09-14 起取消，3.8 打包支线已删除） |
 | Python | **3.14**（打包与生产唯一基线） | 开发机最低 3.12；3.15 发布后不急于跟进（见 `docs/Python版本选型评估.md` §6） |
 | 浏览器 | **Chrome ≥ 72**（Edge ≥ 79、同内核国产浏览器） | 与 OS 基线**互相独立**：§7.3 的旧浏览器兼容措施不能删 |
+| 网络 | 目标机**可完全无外网** | 部署包自带 Chrome / LibreOffice 离线安装包（`runtime/`），依赖全部随包；装完不联网即可跑。见 `docs/离线部署包说明.md` |
+| 许可证 | Chrome（专有）/ LibreOffice（MPL-2.0） | 再分发口径与替代方案见 `runtime/README.md` §6 |
 
 > ⚠️ **最容易犯的错：把"取消 Win7"理解成"可以删掉旧浏览器兼容代码"**。两者触发条件不同——
 > 前者是操作系统，后者是浏览器版本 / 缺少彩色 emoji 字体。详见 §7.3 第 17 条。
@@ -96,11 +100,27 @@ python app.py
 > 早前版本文档记录的"大量未提交改动"与"最新提交 7269cb8"已过时：相关改动已随后续提交入库。
 > `G2改造` 分支的连续曲率圆角引擎（jz-radius v1.2 + 基准页 + 设计文档）**未并入 main**，打包不含。
 
-### 2.2 产物状态（需人工确认后决定是否重打）
+### 2.2 产物状态
 
-- 最近一次明确记录的打包是 **v1.6**（2026-09-11，`deploy/JZToolsHub-v1.6.zip` 约 102MB）。
-- 但 `ca69141` / `98dabe7` / `77e0f22`（2026-09-13 ~ 09-14）的知识库 Office 预览引擎改造**在此之后**。
-- **结论：若要发布含最新知识库预览的版本，必须重新打包并递增 `-Version`**（否则目标机模板同步不触发）。
+**最新产物：v1.7 离线部署包（2026-09-14）**
+
+| 项 | 值 |
+| --- | --- |
+| 部署目录 | `deploy/JZToolsHub/` — **777.5 MB / 2886 个文件** |
+| 分发包 | `deploy/JZToolsHub-v1.7.zip` — **618.4 MB** |
+| 版本 | `1.7`（上一版 1.6，脚本自动递增） |
+| 打包解释器 | Python **3.14.7**（基线 3.14，符合） |
+| 构建提交 | `9bc0d53`（写入 `version.json.commit`） |
+| 离线组件 | Chrome 企业版 MSI 159.6 MB + LibreOffice 26.8.0 MSI 357.5 MB（`runtime/` 合计 517.2 MB） |
+| 包内新改动 | 知识库 Office 预览引擎改造（09-13）+ P0 六项修复 + 离线部署能力 |
+
+体积构成：`_internal/` 224.4 MB（Python 运行时与依赖）、`runtime/` 517.2 MB（离线组件）、
+`JZToolsHub.exe` 19.0 MB、`plugins/` 16.1 MB，其余不足 1 MB。
+
+> 相对 v1.6（约 102 MB）体积增长 6 倍，全部来自随包分发的两个第三方安装包。
+> 不想带它们：`build-deploy.ps1 -SkipOfflineRuntime` 出瘦包。
+> 只改了文档要重出 zip：`build-deploy.ps1 -ZipOnly`（跳过 PyInstaller 与组装，实测约 2 分钟，
+> 但**要先把新文件复制进 `deploy/JZToolsHub/`**）。全量打包约 16 分钟。
 
 ### 2.3 无硬性阻塞，但以下事项未充分验证
 
@@ -117,6 +137,7 @@ python app.py
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-14 | **离线部署包打通 + v1.7 发版** | `runtime/` 随包分发 Chrome 企业版 MSI（159.6MB）与 LibreOffice 26.8.0 MSI（357.5MB）；新增 `tools/fetch-offline-bundle.py`（断点续传 + sha256 冻结校验，清单入 `tools/offline-components.json`）与 `tools/offline-runtime/setup-offline-runtime.ps1`（Chrome 静默安装 / **LibreOffice `msiexec /a` 免管理员解包**）；`office_render` 新增便携 soffice 三级探测（**零配置**）；`install.ps1` 安装末尾自动处理离线组件且**失败不阻断**，并修掉覆盖 `version.json` 溯源字段的缺陷；打包脚本新增**离线组件完整性自检**与 `-SkipOfflineRuntime` / `-ZipOnly`；产出 `JZToolsHub-v1.7.zip`（618.4MB）。文档见 `docs/离线部署包说明.md`。实测：`.xls→.xlsx` 归一化、应用自动探测、`render_sheet` 真实渲染全绿 |
 | 2026-09-14 | 知识库阅读体验收尾 | `.reader-frame` 改 `width: fit-content` 贴合预览内容宽度；Word 超版心固定宽表格在卡片内横向滚动；长 token 断词修复横向滚动条（style.css v24） |
 | 2026-09-13 | 知识库 Office 预览引擎替换 | 引入 `backend/vendor/{xhr,dhr}` 双引擎（纯标准库，零新增 pip 依赖），**舍弃** LibreOffice 转 PDF 与 openpyxl 手绘 HTML 两套旧方案；新增适配层 `office_render.py`；`/preview` 改为按需同步渲染 + 磁盘缓存 `<id>.preview.json`，失败 404 前端回退 mammoth/SheetJS |
 | 2026-09-11 | 知识库旧版格式自动转换 | `doc_convert.py`（olefile + python-docx / xlrd + openpyxl，纯 Python，不依赖 Office COM）；上传白名单加 `.doc`，元数据记 `original_ext`，页面三处提示 |
@@ -135,11 +156,11 @@ python app.py
 ### P0（建议下次发版前处理）
 
 > **2026-09-14 更新：1~6 项已全部修复并实测通过**（方案见 `docs/P0问题修复方案.md`，实测结果见评估报告 §5.1）。
-> 仅剩第 1 项的发版动作待执行（代码已就绪，需重新打包并递增 `-Version`）。
+> 第 1 项（发版）已于同日执行完毕，产出 **v1.7 离线部署包**（见 §2.2 与 `docs/离线部署包说明.md`）。
 
 | # | 事项 | 状态 |
 | --- | --- | --- |
-| 1 | 重新打包并发版 | ⏳ **待执行**：2026-09-13 起（知识库引擎改造 + 本轮修复）尚未进入任何 zip；发版需递增 `-Version`（不传会自动递增，与上一版相同会直接报错中止） |
+| 1 | 重新打包并发版 | ✅ **已完成**：`deploy/JZToolsHub-v1.7.zip`；版本 1.6 → 1.7 自动递增，打包解释器 Python 3.14.7；已包含知识库引擎改造、P0 六项修复，并新增随包离线组件 |
 | 2 | 清理/补齐模板同步清单 | ✅ 已修：模板统一改名 `config.template.json`，移除 2 条失效的 `prompt.json` 登记，补齐 case-report / character-graph / file-filter 三个模板。实测同步 **5 / 5 全绿**，4 个运行时 config.json 正确初始化 |
 | 3 | 模板被打包脚本删除 | ✅ 已修：模板改名后不再命中"删 `config.json`"规则（规则为精确名匹配）；`build-deploy.ps1` 新增打包后自检（`*.template.json` 少于 4 个即中止） |
 | 4 | `config/data_root.json` 移出版本库 | ✅ 已修：`.gitignore` + `git rm --cached`；`git ls-files config` 现只剩 `tools.json` |
@@ -157,16 +178,19 @@ python app.py
 | 11 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
 | 12 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
 | 13 | 在 `/api/tools` 暴露 `plugin_errors`（默认空 dict），首页对加载失败的插件显示"暂不可用"（本轮只做了日志与 `_plugin_load_errors` 记录） |
+| 14 | **离线包真机验证**：在一台**真的断网**机器上走完整链路（解压 → 一键安装 → Chrome 安装 → LibreOffice 解包 → 启动 → 知识库打开 `.doc`/`.xls`）。开发机已验证 `msiexec /a` 解包（免管理员）与渲染链路，但 **Chrome 静默安装需提权**，开发会话无管理员权限未能实测 |
+| 15 | 每次发版前校准 `runtime/` 组件版本：Chrome 组件用固定 URL `stable`（内容随 Google 更新而变），冻结的 `sha256` 会随之失配 → 需重跑 `fetch-offline-bundle.py --pin`，或改用带版本号的下载地址 |
 
 ### P2（体验与规范）
 
 | # | 事项 |
 | --- | --- |
-| 14 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
-| 13 | 在目标机做一次「全新安装 → 更新 → 卸载」三段式实测 |
-| 14 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 合计约 1.2GB（含 3 个历史版本目录与 11 个旧 zip） |
-| 15 | 生产部署评估：当前上限约 300 并发（Flask/waitress 单进程线程模型），高负载建议 Gunicorn 多进程 + Nginx 反代 |
-| 16 | 移动端：恢复或彻底移除「重置」功能；`CameraScanner.averageLuminance` 亮度采样保留但无人调用 |
+| 16 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
+| 17 | 在目标机做一次「全新安装 → 更新 → 卸载」三段式实测 |
+| 18 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 与 `runtime/` 合计约 2.5GB（含 4 个历史版本目录与 12 个旧 zip） |
+| 19 | 生产部署评估：当前上限约 300 并发（Flask/waitress 单进程线程模型），高负载建议 Gunicorn 多进程 + Nginx 反代 |
+| 20 | 移动端：恢复或彻底移除「重置」功能；`CameraScanner.averageLuminance` 亮度采样保留但无人调用 |
+| 21 | 知识库 `.xls`/`.doc` 每次转换都新建临时 profile（vendor 行为，实测约 30~60s/次）——若该路径调用频繁，考虑在适配层做 profile 复用（历史上曾用 `<数据根>/.lo-profile/` 把冷启动从 37~40s 降到 15~18s） |
 
 ---
 
@@ -288,19 +312,25 @@ python app.py
     - 会逐个 import `JZToolsHub.spec` 里 collect_all 的 14 个库并列出缺失项——**缺库不会让打包失败**，只会产出功能残缺的包，所以必须显式拦截；
     - `version.json` 现在记录 `{app, schema, commit, built_at, python}`，目标机可据此核对"包是哪个提交、哪个 Python 打的"；
     - 其中 **`zfec` 需要 `--find-links wheels`**（无 3.14 官方 wheel），详见 `wheels/README.md`。
-24. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
-25. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
-26. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
+25. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
+26. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
+27. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
+28. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95s、解出 1.5GB，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
+29. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。
+30. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
+31. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
+32. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。
+33. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
 
 ### 7.5 第三方库行为
 
-27. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
-28. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
-29. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
-30. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
-31. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
-32. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
-33. **vendor 引擎的 `Optional` 缺失（已修，但历史极隐蔽）**：`vendor/xhr/__init__.py:84`
+34. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
+35. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
+36. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
+37. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
+38. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
+39. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
+40. **vendor 引擎的 `Optional` 缺失（已修，但历史极隐蔽）**：`vendor/xhr/__init__.py:84`
     `def convert(data: bytes, options: Optional[ConvertOptions] = None)` 用了 `Optional` 却**既未导入、
     也未写 `from __future__ import annotations`**，而该注解是**运行时立即求值**的 →
     **Python ≤3.13 导入引擎即 `NameError`**，Word/Excel 预览整体失效。Python 3.14 因
@@ -310,7 +340,7 @@ python app.py
     `office_render.available=false` 能看出来。已补 `from typing import Optional` 并记入
     `vendor/README.md` 的**升级后必须重打清单**（与 `renderer/table.py` 补丁同级）。
     **推论：不要用 Python 3.14 的"能跑"去判断第三方代码的正确性**——PEP 649 会掩盖注解类缺陷。
-34. **新增依赖前先分清新旧 wheel 类型**：`cpXX-cpXX`（版本锁定，每个 Python 小版本都要等新 wheel）
+41. **新增依赖前先分清新旧 wheel 类型**：`cpXX-cpXX`（版本锁定，每个 Python 小版本都要等新 wheel）
     如 `zfec` / `numpy` / `pillow`；`cp3X-abi3`（稳定 ABI，跨版本可用）如 `opencv-python`（cp37-abi3）
     与 `cryptography`（cp311-abi3）。
     验证命令：`python -m pip download <包> --no-deps --only-binary :all: -d <临时目录>`
@@ -319,11 +349,11 @@ python app.py
 
 ### 7.6 工具链
 
-35. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
-36. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
-37. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
-38. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
-39. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
+42. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
+43. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
+44. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
+45. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
+46. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
 
 ---
 
@@ -438,6 +468,10 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
   → .workbuddy/memory/YYYY-MM-DD.md（当日工作日志）
 ```
 
+改动**打包 / 安装 / 离线组件**链路时，另外三处必须一起改：
+`build-deploy.ps1` ↔ `install.ps1` ↔ `tools/offline-runtime/`（脚本副本会随包分发到 `runtime/`）
++ `docs/离线部署包说明.md`（包体组成与体积数字）+ `tools/offline-components.json`（组件清单）。
+
 改信息传输协议时**四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 + 《移动端APP.md》（改完记得重启服务）。
 改 vendor 引擎时**必须同步 `vendor/README.md` 的补丁清单**（升级 vendor 整目录替换后要重打两个补丁）。
 
@@ -451,13 +485,19 @@ python -m pip install --find-links wheels -r plugins/<id>/backend/requirements.t
 # 启动（源码）
 python app.py
 
-# 打包（-Version 省略会自动递增；写出的 version.json 含 commit/built_at/python）
+# 下载离线运行组件（Chrome / LibreOffice，约 517MB，支持断点续传；--verify-only 只校验）
+python tools/fetch-offline-bundle.py
+python tools/fetch-offline-bundle.py --verify-only
+
+# 打包（-Version 省略会自动递增；写出的 version.json 含 commit/built_at/python/offline）
 powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -SkipOfflineRuntime   # 瘦包
 
 # 重建 zfec 预编译 wheel（换 Python 小版本后）
 python tools/build-zfec-wheel.py
 
 # 目标机：解压 zip → 双击 一键安装.bat → start.bat 启动；卸载双击 一键卸载.bat
+#         离线组件可单独重跑：右键 runtime\安装离线组件.bat → 以管理员身份运行
 ```
 
 ```python
@@ -480,7 +520,9 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | `20260914评估报告.md` | 插件规范符合性分析、开发/更新/移除便利性评估、规范优化建议、项目问题清单（P0 已修，附实测） |
 | `docs/P0问题修复方案.md` | P0 六项的补丁级方案 + 实施清单 + 实测结果（含两处与原方案不同的判断） |
 | `docs/Python版本选型评估.md` | Python 版本基线的完整实测依据：vendor 引擎一行 bug、三版本对照、zfec 无 wheel、升级节奏建议 |
+| `docs/离线部署包说明.md` | **离线部署包**的组成、体积/时间成本、部署流程、适用场景、校验与已知限制 |
 | `wheels/README.md` | zfec 预编译 wheel 的成因、来源、许可证（GPL-2+）、使用方式与重建步骤 |
+| `runtime/README.md`（源在 `tools/offline-runtime/`） | 离线运行组件（Chrome / LibreOffice）的清单、安装方式、校验与再分发口径 |
 | `docs/` | 登录改造与数据隔离、容器化与插件热插拔、知识库、插件库优化方案、过滤器、轨迹速写、批量导入导出等设计文档 |
 
 ---

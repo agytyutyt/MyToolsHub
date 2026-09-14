@@ -1,5 +1,44 @@
 # JZToolsHub 项目长期记忆
 
+## 离线部署包（2026-09-14 建立，动打包/安装必须连带看这里）
+
+- **产物**：`deploy/JZToolsHub-v<版本>.zip`（v1.7 = **618.4MB**；部署目录 777.5MB / 2886 文件）。
+  体积大头是随包分发的第三方安装包：`runtime/` 517.2MB（Chrome 企业版 MSI 159.6MB +
+  LibreOffice 26.8.0 MSI 357.5MB）。
+- **四件套（改一个必须看另外三个）**：
+  `tools/offline-components.json`（清单，入库）→ `tools/fetch-offline-bundle.py`（下载/校验）
+  → `tools/offline-runtime/*`（随包脚本，会被复制到部署包的 `runtime/`）
+  → `build-deploy.ps1` 的 3.2.2 段（组装 + 按 manifest 校验完整性）。
+- **`runtime/` 已 gitignore**；二进制不入库，由获取脚本随时重建。
+  **便携解包目录绝不能放进仓库 `runtime/`**（会与 MSI 一起打进包，体积翻倍）。
+- **LibreOffice 用 `msiexec /a`（管理安装）**：免管理员、不写注册表，解出即可运行
+  （实测 26.8.0：退出码 0 / 95.5s / **解出 1.52GB** / `program\soffice.exe` 直接在 TARGETDIR 根下）。
+  调 msiexec 必须 `Start-Process -Wait -PassThru` 取 ExitCode（`&` 会提前返回）。
+- **应用侧自动探测便携 soffice（零配置）**，优先级：
+  插件配置 `office.soffice_path` > 环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`
+  （多套一层时在 `runtime/libreoffice/**` 有限深度 glob）。
+- **Chrome 是全机 MSI，需要管理员**；LibreOffice 不需要。所以 `setup-offline-runtime.ps1`
+  对 Chrome 提权失败只打印指引、**不报错**（离线组件失败绝不能阻断安装）。
+  `install.ps1` 调它必须走**子进程**（该脚本以 `exit` 结尾，dot-source 会终止安装流程）。
+- **打包耗时**：全量约 16 分钟（PyInstaller 约 5min，其余为 777MB 文件复制与压缩）；
+  只重出 zip 用 `build-deploy.ps1 -ZipOnly` **约 2 分钟**（**先把新文件复制进 `deploy/JZToolsHub/`**）；
+  出瘦包用 `-SkipOfflineRuntime`。
+- **发版前校准组件**：Chrome 用的是固定 URL `stable`，内容会随 Google 更新，
+  冻结的 sha256 会失配 → 重跑 `fetch-offline-bundle.py --pin`。
+- 未验证：Chrome 静默安装（需提权，开发会话没有）、真断网机器的完整链路走查。
+
+## 本机（开发机）工具坑速记（2026-09-14 实测新增）
+
+- **PowerShell 变量名不区分大小写**：局部变量不要与 switch 参数同名
+  （`$zipOnly` vs `-ZipOnly` 会撞成同一变量，给 SwitchParameter 赋字符串直接抛错）。
+- **沙箱会误报，以脚本自身日志为准**：命令里含 `C:\Windows\System32\...` 路径、
+  用 `Start-Process`、或长任务收尾时的文件访问，都可能触发 `SandboxError`
+  （曾把一次成功的打包任务判成 failed）。**不要把沙箱报错当成事实结论。**
+- HTTP 下载走代理 `http://127.0.0.1:49237`（环境变量 `http_proxy`/`https_proxy`），
+  Python `urllib` 用 `getproxies()` 即可，无需手工设。
+- 大文件下载用 Python 脚本（`urllib` + Range 续传）比 PowerShell 稳；输出用
+  `sys.stdout.reconfigure(encoding="utf-8")` 避免乱码。
+
 ## Python 版本基线（2026-09-14 实测定论）
 
 - **Win7 目标机支持已取消**（2026-09-14），目标机基线 = **Windows 10+**。

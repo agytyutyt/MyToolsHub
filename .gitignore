@@ -10,6 +10,10 @@ build/
 dist/
 deploy/
 
+# 离线部署组件（Chrome / LibreOffice 安装包，约 500MB，可随时重建，勿入库）
+# 由 tools/fetch-offline-bundle.py 下载，清单见 tools/offline-components.json
+runtime/
+
 # 运行时日志与进程文件
 logs/
 .server.*
@@ -51,7 +55,6 @@ plugins/map-marker/frontend/simulate_yunfu_5min.py
 .idea/
 *.swp
 .DS_Store
-
 # 环境变量
 .env
 

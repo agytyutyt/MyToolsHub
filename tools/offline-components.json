@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "离线部署所需的第三方组件清单（随包分发，供无网络目标机使用）。",
+    "本文件入库（体积很小），组件二进制本身不入库——由 tools/fetch-offline-bundle.py",
+    "下载到 runtime/ 目录（已 gitignore），再由 build-deploy.ps1 复制进部署包。",
+    "",
+    "sha256 字段为首次下载时实测并回写的「冻结值」：填上之后再次下载会强校验，",
+    "从而保证每次出的离线包用的是同一份字节。注意 sha256 只能证明「与打包时一致」，",
+    "不能证明上游来源真实性（Chrome MSI 官方不发布哈希；LibreOffice 官方提供 .asc",
+    "GPG 签名，如需强验证请另行用 gpg 校验）。",
+    "",
+    "install 取值：",
+    "  msi-silent       —— msiexec /i <msi> /qn（需管理员，全机安装）",
+    "  msi-admin-unpack —— msiexec /a <msi> /qn TARGETDIR=<dir>（无需管理员，解出可直接运行的便携目录）",
+    "  manual           —— 随包分发，由人工双击安装"
+  ],
+  "schema": 1,
+  "dest_dir": "runtime",
+  "components": [
+    {
+      "id": "chrome",
+      "name": "Google Chrome 企业版离线安装包（x64）",
+      "version": "stable",
+      "url": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi",
+      "file": "googlechromestandaloneenterprise64.msi",
+      "subdir": "chrome",
+      "install": "msi-silent",
+      "required": true,
+      "license": "专有软件（Google Chrome 服务条款）。企业版 MSI 面向受管环境的批量部署，不自带 Google Update 自动更新。",
+      "why": "目标机浏览器基线为 Chrome ≥72；内网无网络时无法在线安装 Chrome，故随包分发离线安装包。",
+      "sha256": "7baa1a89de55e8ba68d3d0c912fe677ddd807e91fb0ee4532c6b6cc527197ddb",
+      "size": 167378944
+    },
+    {
+      "id": "libreoffice",
+      "name": "LibreOffice 完整版（Windows x86-64 MSI）",
+      "version": "26.8.0",
+      "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/win/x86_64/LibreOffice_26.8.0_Win_x86-64.msi",
+      "file": "LibreOffice_26.8.0_Win_x86-64.msi",
+      "subdir": "libreoffice",
+      "install": "msi-admin-unpack",
+      "required": false,
+      "license": "MPL-2.0（另有 LGPL-3.0 部分）。可自由再分发。",
+      "why": "知识库插件的 .doc 归一化与 .xls 高保真渲染依赖 soffice.exe；缺失时仅这两条窄路径降级，其余功能不受影响。",
+      "sha256": "4aa6c6e1895f4055104effcb556bd3362d20c6ad707c149543304f395ef9db95",
+      "size": 374906880
+    }
+  ]
+}

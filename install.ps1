@@ -310,14 +310,42 @@ if ($SourceFull -ne $TargetFull) {
 $exe = Join-Path $Target $ExeName
 if (-not (Test-Path $exe)) { throw "安装目录缺少 $ExeName，请确认在一键安装包（含 exe 的目录）内执行" }
 
-# ---- 写版本号 ----
+# ---- 写版本号（保留打包期元信息：commit / built_at / python / offline）----
+# 此前这里直接覆盖为 {app, schema}，会把 build-deploy.ps1 写入的溯源字段抹掉，
+# 导致装完之后再也无法从 version.json 判断包内代码出自哪个提交（可维护性隐患）。
+$verFile = Join-Path $Target "version.json"
 $verObj = @{ app = $Version; schema = 1 }
-ConvertTo-Utf8NoBom -Path (Join-Path $Target "version.json") -Json ($verObj | ConvertTo-Json)
+if (Test-Path $verFile) {
+    try {
+        $cur = Get-Content $verFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($p in $cur.PSObject.Properties) {
+            if (-not $verObj.ContainsKey($p.Name)) { $verObj[$p.Name] = $p.Value }
+        }
+    } catch {}
+}
+$verObj["app"] = $Version
+ConvertTo-Utf8NoBom -Path $verFile -Json ($verObj | ConvertTo-Json)
 
 # ---- 解析数据根目录并同步配置模板 ----
 $DataRoot = Get-DataRootDir -Target $Target
 Write-Host "  用户数据根目录：$DataRoot"
 Sync-ConfigTemplates -SourceDir $Source -DataDir $DataRoot -Version $Version
+
+# ---- 离线运行组件（Chrome / LibreOffice，随包分发；缺省不阻断安装）----
+$rtDir = Join-Path $Target "runtime"
+$rtSetup = Join-Path $rtDir "setup-offline-runtime.ps1"
+if (Test-Path $rtSetup) {
+    Write-Host ""
+    Write-Host "  ---- 离线运行组件（Chrome / LibreOffice）----"
+    # 用子进程执行：setup 脚本以 exit 结束，dot-source 会连带终止本次安装流程
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $rtSetup -RuntimeDir $rtDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [注意] 离线组件处理存在失败项（退出码 $LASTEXITCODE），不影响工具箱本体使用。"
+        Write-Host "         可稍后重跑：powershell -ExecutionPolicy Bypass -File `"$rtSetup`""
+    }
+} else {
+    Write-Host "  （包内无 runtime\setup-offline-runtime.ps1，跳过离线组件；目标机需自备浏览器）"
+}
 
 # ---- 注册表与快捷方式 ----
 Write-Registry -Dir $Target

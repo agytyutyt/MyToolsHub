@@ -12,11 +12,15 @@
 #       确需同号重打时加 -Force。
 #       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json，并在与基线
 #       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
+#       默认会把仓库 runtime\ 下的离线运行组件（Chrome / LibreOffice 安装包）一并打进包，
+#       供无外网目标机部署；只想做瘦包时加 -SkipOfflineRuntime。
 param(
     [string]$Python = "python",
     [string]$DeployName = "JZToolsHub",
     [string]$Version = "",
-    [switch]$Force
+    [switch]$Force,
+    [switch]$SkipOfflineRuntime,   # 不打包 runtime\ 离线运行组件（产出瘦包）
+    [switch]$ZipOnly               # 跳过 PyInstaller 与目录组装，仅用既有部署目录重生成 zip
 )
 $ErrorActionPreference = "Stop"
 
@@ -46,6 +50,26 @@ $PrevVer = ""
 $oldVerFile = Join-Path $AppDir "version.json"
 if (Test-Path $oldVerFile) {
     try { $PrevVer = (Get-Content $oldVerFile -Raw | ConvertFrom-Json).app } catch {}
+}
+
+# -ZipOnly：只改了文档 / 前端时不必重跑 PyInstaller（省十几分钟），
+#           直接用既有 deploy\<DeployName>\ 重新压缩。版本号沿用部署目录里的值。
+if ($ZipOnly) {
+    $exePath = Join-Path $AppDir "JZToolsHub.exe"
+    if (-not (Test-Path $exePath)) {
+        throw "-ZipOnly 需要既有的完整部署目录，但 $exePath 不存在。请先正常打包一次。"
+    }
+    if (-not $PrevVer) { throw "-ZipOnly 无法从 $oldVerFile 读到版本号。" }
+    $Version = $PrevVer
+    # 注意：变量名不能叫 $zipOnly —— PowerShell 变量名不区分大小写，
+    # 会与开关参数 -ZipOnly 撞成同一个变量（赋值字符串给 SwitchParameter 直接报错）。
+    $zipPath = Join-Path $Deploy "JZToolsHub-v$Version.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    Write-Host "==> [-ZipOnly] 压缩既有部署目录（版本 $Version，跳过打包与组装）..."
+    Write-Host "    提示：部署目录里若还是旧文档，请先从仓库复制最新文件进去。"
+    Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $zipPath -CompressionLevel Fastest
+    Write-Host "==> 已生成安装包：$zipPath（$([math]::Round((Get-Item $zipPath).Length/1MB,1)) MB）"
+    exit 0
 }
 
 # 版本号：-Version 未指定时自动递增 patch（1.6 → 1.7）
@@ -146,6 +170,57 @@ if ($tpl.Count -lt $tplExpect) {
 }
 Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留"
 
+# 3.2.2 离线运行组件（Chrome / LibreOffice 安装包 + 随包安装脚本）
+#   源 A：<仓库>\runtime\           —— 由 tools/fetch-offline-bundle.py 从官方源下载（已 gitignore）
+#   源 B：tools\offline-runtime\    —— 随包脚本与说明（入库，随每版一起更新）
+#   组装后：<AppDir>\runtime\{ manifest.json, README.md, 安装离线组件.bat,
+#                              setup-offline-runtime.ps1, chrome\*.msi, libreoffice\*.msi }
+if ($SkipOfflineRuntime) {
+    Write-Host "==> 跳过离线运行组件（-SkipOfflineRuntime）"
+} else {
+    Write-Host "==> 组装离线运行组件（Chrome / LibreOffice）..."
+    $rtSrc   = Join-Path $Root "runtime"
+    $rtDst   = Join-Path $AppDir "runtime"
+    $rtTools = Join-Path $Root "tools\offline-runtime"
+    New-Item -ItemType Directory -Force -Path $rtDst | Out-Null
+
+    if (Test-Path $rtSrc) {
+        Copy-Item -Recurse -Force (Join-Path $rtSrc "*") $rtDst
+    } else {
+        Write-Warning "  未找到 $rtSrc —— 本次产出的包不含离线组件，目标机需自备浏览器与 LibreOffice。"
+        Write-Warning "  先在有网机器执行：python tools\fetch-offline-bundle.py"
+    }
+    if (Test-Path $rtTools) { Copy-Item -Recurse -Force (Join-Path $rtTools "*") $rtDst }
+
+    # 清单自检：manifest.json 声明了什么，包里就必须有什么、且体积一致。
+    # （缺文件不打自招是好事；怕的是「清单说有两个组件、实际只有一个」而无人察觉）
+    $rtMf = Join-Path $rtDst "manifest.json"
+    if (Test-Path $rtMf) {
+        $mf = Get-Content $rtMf -Raw -Encoding UTF8 | ConvertFrom-Json
+        $miss = @()
+        $bad  = @()
+        foreach ($c in $mf.components) {
+            $fp = Join-Path (Join-Path $rtDst $c.subdir) $c.file
+            if (-not (Test-Path $fp)) {
+                $miss += "$($c.subdir)\$($c.file)"
+            } elseif ((Get-Item $fp).Length -ne [int64]$c.size) {
+                $bad += "$($c.subdir)\$($c.file)"
+            }
+        }
+        if ($miss.Count -or $bad.Count) {
+            throw ("离线组件不完整：缺失 [" + ($miss -join ", ") + "]，体积不符 [" + ($bad -join ", ") +
+                   "]。请重跑 tools\fetch-offline-bundle.py --verify-only 后重新打包。")
+        }
+        $rtTotal = [math]::Round((Get-ChildItem $rtDst -Recurse -File |
+                                  Measure-Object Length -Sum).Sum / 1MB, 1)
+        Write-Host "  离线组件自检通过：$($mf.components.Count) 个组件，runtime\ 合计 $rtTotal MB"
+        $offlineSummary = @()
+        foreach ($c in $mf.components) { $offlineSummary += "$($c.id) $($c.version)" }
+    } else {
+        Write-Warning "  包内没有 runtime\manifest.json —— 无法校验组件完整性"
+    }
+}
+
 # 3.3 运行期目录
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "logs") | Out-Null
 
@@ -164,6 +239,7 @@ $verObj = @{
     commit   = $gitCommit
     built_at = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     python   = $PyVer          # 打包解释器版本（基线 $PyBaseline，不符时已在开头告警）
+    offline  = ($offlineSummary -join "; ")   # 随包离线组件（空串表示瘦包）
 }
 # 注意：必须 UTF-8 无 BOM（Python json.load 遇 BOM 会报错）
 [System.IO.File]::WriteAllText(
@@ -189,8 +265,12 @@ Set-Content -Path (Join-Path $AppDir "start.bat") -Value $startBat -Encoding Def
 if (Test-Path (Join-Path $AppDir "JZToolsHub.exe")) {
     $zip = Join-Path $Deploy "JZToolsHub-v$Version.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
-    Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $zip
-    Write-Host "==> 已生成安装包：$zip"
+    # 离线组件约 500MB（MSI 本身已是压缩格式），用 Fastest 换时间：体积影响极小、
+    # 打包时长从数分钟降到可接受范围。解压兼容性不受影响。
+    Write-Host "==> 压缩安装包（含离线组件，体积较大请耐心等待）..."
+    Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $zip -CompressionLevel Fastest
+    $zipMB = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+    Write-Host "==> 已生成安装包：$zip（$zipMB MB）"
 }
 
 Write-Host ""

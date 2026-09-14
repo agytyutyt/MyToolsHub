@@ -18,15 +18,18 @@ r"""知识库 —— Office(docx/doc/xlsx/xls) → 只读 HTML 预览渲染（xh
 --------
 - 引擎包不在包上下文内（dhr 顶层 `from xhr.core import ...`），因此把
   `vendor/` 插到 `sys.path` 后按顶层包导入（上游 demo 同款做法）；
-- soffice 路径：读插件 `config.json` 的 `office.soffice_path`（新）或
-  `pdf.soffice_path`（兼容旧配置），写入环境变量 `XHR_SOFFICE`
-  （两引擎的 find_soffice 均在调用时读取该变量）；
+- soffice 路径（三档优先级）：插件 `config.json` 的 `office.soffice_path`（新）或
+  `pdf.soffice_path`（兼容旧配置）→ 进程环境变量 `XHR_SOFFICE` →
+  随包分发的便携副本 `<程序目录>/runtime/libreoffice/program/soffice.exe`。
+  最终写入环境变量 `XHR_SOFFICE`（两引擎的 find_soffice 均在调用时读取该变量）；
+  第三档使离线部署包**无需目标机安装 LibreOffice、无需改配置**即可启用高保真通道；
 - 渲染亚秒级（50 页 Word 实测约 0.25s），**按需同步渲染**，不再走
   pdf_status/html_status 异步状态机；模块级锁串行防大文件并发挤内存；
 - 失败抛 `OfficeRenderError`（文案可直接展示给用户），调用方（routes.py）
   让前端回退 mammoth / SheetJS 降级渲染，上传/阅读/下载不受影响（B-4）。
 """
 
+import glob
 import json
 import os
 import sys
@@ -106,17 +109,69 @@ def _configured_soffice():
     return None
 
 
+def _program_dir():
+    """部署根目录（程序目录）：打包运行时为 exe 同层，源码运行时为仓库根。
+
+    与 app.py::BASE_DIR 口径一致，用于定位随包分发的 runtime/ 目录。
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    # 源码运行：<仓库根>/plugins/knowledge-base/backend/office_render.py
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(here, os.pardir, os.pardir, os.pardir))
+
+
+#: 随包分发的便携 LibreOffice 候选路径（相对部署根目录）。
+#: 离线部署包把 LibreOffice MSI 以「管理安装」方式解包到 runtime/libreoffice/
+#: （不写注册表、无需管理员），应用在此自动探测 soffice.exe，实现**零配置**可用。
+#: 多列几个候选是为了兼容 msiexec /a 与 7z 两种解包方式、以及人工放在别处的场景。
+_BUNDLED_SOFFICE_CANDIDATES = (
+    ("runtime", "libreoffice", "program", "soffice.exe"),
+    ("runtime", "libreoffice", "LibreOffice", "program", "soffice.exe"),
+    ("libreoffice", "program", "soffice.exe"),
+)
+
+
+def _bundled_soffice():
+    """随包分发的便携 soffice 路径；不存在返回 None。"""
+    base = _program_dir()
+    for parts in _BUNDLED_SOFFICE_CANDIDATES:
+        p = os.path.join(base, *parts)
+        if os.path.isfile(p):
+            return p
+    # 兜底：不同解包方式（msiexec /a、7z）与不同版本会多套一层目录，
+    # 在 runtime/libreoffice 下有限深度搜索 program/soffice.exe。
+    root = os.path.join(base, "runtime", "libreoffice")
+    if os.path.isdir(root):
+        for depth in range(1, 3):
+            for hit in sorted(glob.glob(os.path.join(root, *(["*"] * depth),
+                                                     "program", "soffice.exe"))):
+                if os.path.isfile(hit):
+                    return hit
+    return None
+
+
 def _apply_soffice_env():
-    """把配置里的 soffice 路径注入 XHR_SOFFICE（引擎每次调用都读环境变量，
-    改配置无需重启）。返回生效路径或 None。"""
+    """把 soffice 路径注入 XHR_SOFFICE（引擎每次调用都读环境变量，
+    改配置无需重启）。返回生效路径或 None。
+
+    优先级：配置显式指定 > 进程环境变量 > 随包分发的便携 LibreOffice。
+    最后一级是离线部署的关键：目标机没装 LibreOffice 时，直接使用运行时
+    目录里解包好的便携副本，无需改配置、无需注册表。
+    """
     explicit = _configured_soffice()
     if explicit and os.path.isfile(explicit):
-        os.environ.setdefault("XHR_SOFFICE", explicit)
-        # setdefault 可能被进程环境里的旧值占位：显式配置优先级应最高
-        if os.environ.get("XHR_SOFFICE") != explicit:
-            os.environ["XHR_SOFFICE"] = explicit
+        # 显式配置优先级最高（setdefault 可能被进程环境里的旧值占位）
+        os.environ["XHR_SOFFICE"] = explicit
         return explicit
-    return os.environ.get("XHR_SOFFICE") or None
+    env = os.environ.get("XHR_SOFFICE") or None
+    if env:
+        return env
+    bundled = _bundled_soffice()
+    if bundled:
+        os.environ["XHR_SOFFICE"] = bundled
+        return bundled
+    return None
 
 
 def soffice_available():
