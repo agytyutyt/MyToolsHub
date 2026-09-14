@@ -233,6 +233,14 @@ foreach ($f in @("install.ps1", "一键安装.bat", "一键卸载.bat")) {
 $gitCommit = ""
 try { $gitCommit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1) } catch {}
 if (-not $gitCommit) { $gitCommit = "unknown" }
+# 工作区有未提交改动时标 -dirty：否则 version.json 的 commit 会指向一个
+# **并不包含包内代码**的提交，事后无法据此定位"这个包到底是哪份源码打出来的"。
+$gitDirty = ""
+try {
+    $porcelain = (& git -C $Root status --porcelain 2>$null)
+    if ($porcelain) { $gitDirty = "-dirty" }
+} catch {}
+$gitCommit = "$gitCommit$gitDirty"
 $verObj = @{
     app      = $Version
     schema   = 1

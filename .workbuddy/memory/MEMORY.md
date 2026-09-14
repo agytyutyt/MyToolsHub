@@ -25,6 +25,9 @@
   出瘦包用 `-SkipOfflineRuntime`。
 - **发版前校准组件**：Chrome 用的是固定 URL `stable`，内容会随 Google 更新，
   冻结的 sha256 会失配 → 重跑 `fetch-offline-bundle.py --pin`。
+- **先 commit 再打包**：`version.json.commit` 记的是构建那一刻的 HEAD；
+  工作区脏时包内代码来自"HEAD + 改动"，事后对不上源码。2026-09-14 起脚本会记 `<sha>-dirty`。
+  已用脏工作区打了包 → 要么重打，要么手工校正 `version.json.commit`（v1.7 首版就是后者）。
 - 未验证：Chrome 静默安装（需提权，开发会话没有）、真断网机器的完整链路走查。
 
 ## 本机（开发机）工具坑速记（2026-09-14 实测新增）
