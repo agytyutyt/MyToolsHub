@@ -3,9 +3,9 @@
 
 为什么自带 SVG
 --------------
-插件页面**不使用 emoji 字符**作为图标：Windows 7（无彩色 emoji 字体）会把 emoji
-渲染成方框。这里为每个语义绘制一个线性 SVG，页面通过 fetch 注入内联 SVG
-（因此可用 currentColor 跟随主题色），彻底摆脱系统字体依赖。
+插件页面**不使用 emoji 字符**作为图标：缺少彩色 emoji 字体的环境（Windows Server、
+精简版系统）与旧浏览器会把 emoji 渲染成方框。这里为每个语义绘制一个线性 SVG，
+页面通过 fetch 注入内联 SVG（因此可用 currentColor 跟随主题色），彻底摆脱系统字体依赖。
 
 用法::
 

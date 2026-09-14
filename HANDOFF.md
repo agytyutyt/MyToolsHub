@@ -1,11 +1,12 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（第二轮：**P0 六项已全部修复并实测通过**——模板与运行时配置命名分离
-> `config.template.json`、`file-filter` 路由统一 `ff_*` 前缀、插件加载失败隔离、数据目录指针
-> 移出版本库、打包版本号防呆；文档全面重写见第一轮）。
+> 最后更新：2026-09-14（第三轮：**取消 Windows 7 兼容** + **修 vendor 引擎 `Optional` 未导入** +
+> **zfec 预编译 wheel 落库** + **明确 OS/浏览器双基线** + 打包脚本记录解释器版本与依赖自检。
+> 第二轮为 P0 六项修复；第一轮为文档全面重写）。
 > 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
-> `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（本轮修复的方案与实测）。
+> `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（P0 修复方案与实测）、
+> `docs/Python版本选型评估.md`（版本基线的完整实测依据）、`wheels/README.md`（zfec wheel 的来源与重建）。
 
 ---
 
@@ -34,7 +35,18 @@
 - 管理后台（`admin`）是**核心基础设施插件**：登录鉴权、会话超时、组织架构、权限、Fernet 加密、批量导入导出，始终加载、不随 `enabled` 启停；
 - 移动端 `android-app/InfoParse/`（Kotlin）是 `info-transfer` 插件的 Android 离线接收端，协议权威定义在仓库根目录《移动端APP.md》。
 
-### 1.1 启动时序
+### 1.1 目标环境基线（部署前必须与甲方对齐）
+
+| 维度 | 基线 | 备注 |
+| --- | --- | --- |
+| 操作系统 | **Windows 10 及以上（x64）** | **不支持 Windows 7**（2026-09-14 起取消，3.8 打包支线已删除） |
+| Python | **3.14**（打包与生产唯一基线） | 开发机最低 3.12；3.15 发布后不急于跟进（见 `docs/Python版本选型评估.md` §6） |
+| 浏览器 | **Chrome ≥ 72**（Edge ≥ 79、同内核国产浏览器） | 与 OS 基线**互相独立**：§7.3 的旧浏览器兼容措施不能删 |
+
+> ⚠️ **最容易犯的错：把"取消 Win7"理解成"可以删掉旧浏览器兼容代码"**。两者触发条件不同——
+> 前者是操作系统，后者是浏览器版本 / 缺少彩色 emoji 字体。详见 §7.3 第 17 条。
+
+### 1.2 启动时序
 
 ```
 python app.py
@@ -44,7 +56,7 @@ python app.py
   → 监听 0.0.0.0:5000             源码=Flask debug 服务器；打包=waitress 8 线程
 ```
 
-### 1.2 请求拦截管线（admin 注册的 4 个 before_request，按序）
+### 1.3 请求拦截管线（admin 注册的 4 个 before_request，按序）
 
 1. `make_session_guard`：空闲 30 分钟 / 绝对 12 小时超时登出，活跃滑动续期；
 2. `_enforce_login`：白名单之外一律要求登录（页面 302 → `/login`，`/api/*` 401）；
@@ -52,7 +64,7 @@ python app.py
 3. `_protect_admin_ops`：首页布局写操作需登录；
 4. `_enforce_tool_access`：非超管按权限点拦 `/tool/<id>`、`/plugin/<id>/...`、`/api/<插件id>/...`。
 
-### 1.3 关键单例与全局
+### 1.4 关键单例与全局
 
 | 位置 | 内容 |
 | --- | --- |
@@ -60,7 +72,7 @@ python app.py
 | `jztools_data.py` | `get_data_root()` 双指针解析、`_TEMPLATE_SYNC` 模板同步清单、`_LEGACY_MAP` 旧数据迁移映射 |
 | `plugins/admin/backend/routes.py` | `ADMIN_CONFIG_PATH`（数据根 `config/admin.json`）、`_fernet`（懒加载）、`_registered_tool_ids()` / `_grant_all_tool_ids()` |
 
-### 1.4 环境变量
+### 1.5 环境变量
 
 `JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 5000，解析失败回落 5000）。
 
@@ -73,11 +85,12 @@ python app.py
 | 项 | 值 |
 | --- | --- |
 | 当前分支 | `main` |
-| HEAD | 本提交（P0 修复三连之三：`chore(repo)` 仓库卫生 + 文档同步） |
-| 前两次提交 | `03137d7` 插件路由统一前缀 + 后端加载失败隔离 / `8d0301d` 模板与运行时配置命名分离 + 打包版本号防呆 |
+| HEAD | 本提交（第三轮：取消 Win7 + vendor 补丁 + zfec wheel + 版本基线固化） |
+| 第二轮（P0 修复三连） | `e907b5e` 日志补记 / `05cc6ea` 仓库卫生与文档 / `03137d7` 路由前缀与加载隔离 / `8d0301d` 模板命名分离与打包防呆 |
+| 第一轮（文档重写） | `7d2d3dc` README/HANDOFF 全面重写 + 新增 20260914 评估报告 |
 | 此前基线 | `ca69141`（2026-09-14）知识库阅读页背景卡片贴合预览内容宽度 + 长 token 撑破版心的横向滚动条修复 |
 | 工作区 | **干净**（无未提交改动，无未跟踪文件） |
-| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`；**本轮三连提交尚未 push**，`origin/main` 仍在 `ca69141` |
+| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`；**上述提交均未 push**，`origin/main` 仍在 `ca69141` |
 | 其他分支 | `G2改造`、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造`（均为历史功能分支，未合并） |
 
 > 早前版本文档记录的"大量未提交改动"与"最新提交 7269cb8"已过时：相关改动已随后续提交入库。
@@ -96,7 +109,7 @@ python app.py
 3. 公告板 / 共享文档 / 战果录入等前端功能多靠 `node --check` + test client 回归，浏览器走查较少。
 4. 一键安装/卸载脚本已在开发机通过语法检查与 exe 冒烟，**尚未在目标机做完整「全新安装 → 更新 → 卸载」三段式实测**。
 5. `info-transfer` 的 `fmt=file` 端到端（桌面封装 → APP 扫码 → 导出 → 与原文件逐字节比对）尚未真机验证，是移动端首要待办。
-6. 打包用 Python 3.14 时产物**不支持 Win7**；需兼容 Win7 必须用 Python 3.8 打包。
+6. ~~打包用 Python 3.14 时产物不支持 Win7~~ → **已作废**：2026-09-14 起取消 Win7 兼容，目标机基线为 Windows 10+，不再维护 3.8 打包支线（见 §1.1 与 `docs/Python版本选型评估.md` §4）。
 
 ---
 
@@ -172,6 +185,9 @@ python app.py
 | A9 | **轨迹分析引擎做成零依赖可插拔包** | 算法独立演进、可独立自测，不动路由与前端 | 新增算法版本只需在 `engine/algorithms/` 下加目录并注册 |
 | A10 | **移动端完全离线**（仅 CAMERA 权限，禁止 INTERNET） | 业务数据通过二维码光学传输，不落公网 | 任何联网能力都不应被加入 |
 | A11 | **错误文案作为逐字契约** | 桌面端按文案做 e2e 断言 | 改文案 = 改《移动端APP.md》+ 桌面端 + APP 三处 |
+| A12 | **OS 基线与浏览器基线分开定义**（OS = Windows 10+；浏览器 = Chrome ≥72） | 两者触发不同的兼容措施，混在一起会导致"取消 Win7 顺手删掉旧浏览器兼容代码"的误伤 | 提浏览器基线必须先确认内网浏览器已升级；§7.3 第 15/17 条列明了不可删的 4 处兼容措施 |
+| A13 | **取消 Windows 7 支持，Python 基线冻结 3.14** | 实测项目自身代码 3.8 可用，唯一"必须 3.14"的原因是 vendor 引擎的一行 bug——**修 bug 后版本选择就不再被绑架**；而 3.8 已 EOL、3.10 也将 EOL，维持旧支线只有成本 | 目标机基线收窄到 Windows 10+；不再维护 3.8 打包支线；依据与实测见 `docs/Python版本选型评估.md` |
+| A14 | **无官方 wheel 的 C 扩展由仓库随包提供预编译 wheel**（`wheels/`） | `zfec` 无 3.14 官方 wheel 会导致"换台机器打包就失败"；固化制品后打包可复现 | 需维护制品（升级 Python 小版本时重做）；注意 zfec 为 GPL-2+，再分发需确认合规口径（见 `wheels/README.md`） |
 
 ---
 
@@ -181,20 +197,26 @@ python app.py
 
 | 级别 | 问题 |
 | --- | --- |
-| 中 | `_TEMPLATE_SYNC` 与 `install.ps1` 登记的 `case-report`/`character-graph` 的 `prompt.json` 模板在仓库中不存在，同步时会被跳过并告警；两插件实际使用 `llm_client` 内置默认提示词，无法通过模板同步更新 |
-| 中 | `build-deploy.ps1` 删除插件树内所有 `config.json`，会连带删除作为同步模板的 `trajectory-sketch/backend/config.json`，导致目标机该模板永不生效 |
-| 中 | `config/data_root.json`（含开发机绝对路径）已纳入版本库，新机器克隆后数据根目录可能指向错误路径 |
+> **2026-09-14 状态更新**：本节原列的 P0-1/2/3 与 Python 版本表述问题**均已修复**（详见下方标注与
+> `docs/P0问题修复方案.md` §7 实测）。保留行文便于回溯。
+
+| 级别 | 问题 |
+| --- | --- |
+| ✅ 已修 | ~~`_TEMPLATE_SYNC` 与 `install.ps1` 登记的 `prompt.json` 模板在仓库中不存在~~ → 已从两处清单移除该 2 条登记；提示词改由 `llm_client` 内置默认值提供（用户手写的 `<数据根>/plugins/<id>/prompt.json` 仍优先且不再被版本覆盖）。复测：清单 5 条、源缺失 0、同步成功 5/5 |
+| ✅ 已修 | ~~`build-deploy.ps1` 删除插件树内所有 `config.json`，会连带删除同步模板~~ → 模板统一改名 `config.template.json`（清理规则为精确名匹配，不再命中），打包后自检 `*.template.json` 数量 < 4 即中止 |
+| ✅ 已修 | ~~`config/data_root.json`（含开发机绝对路径）已纳入版本库~~ → 已 `.gitignore` + `git rm --cached`；`git ls-files config` 现只剩 `tools.json` |
+| ✅ 已修 | ~~README 宣称 Python 3.8 为目标环境，而知识库引擎要求 ≥3.10~~ → **两处说法都是错的**。实测：项目自身代码 3.8 可用；引擎在 3.8/3.13 都因 `vendor/xhr/__init__.py` 缺 `from typing import Optional` 而导入即 `NameError`，3.14 靠 PEP 649 侥幸可用。已打补丁 + 统一口径为"最低 3.12 / 打包 3.14" + 取消 Win7（见 `docs/Python版本选型评估.md`） |
 | 低 | `app.py::_EMOJI_ICON_FILES` 提供的 `icon_file` 字段前端无人消费，属冗余维护点；`file-filter` 的 🧹 无任何 SVG 回退 |
 | 低 | `ai` / `design` / `maps` 分类在当前默认配置下无启用工具，首页显示空分类 |
 | 低 | `knowledge-base/backend/` 与 `trajectory-sketch/frontend/icons/`、`map-marker/frontend/` 混入了开发/测试脚本，随包分发 |
-| 低 | README 宣称 Python 3.8 为目标环境，但知识库引擎要求 ≥3.10，**完整功能的最低版本实为 3.10** |
 | 低 | `plugins/info-transfer/backend/requirements.txt` 仍列 python-docx / xlrd / olefile（代码中确为可选依赖，用于"精简传输"模式），与部分文档"已移除该依赖"的表述不一致 |
 
 ### 6.2 兼容性 / 部署类
 
 | 级别 | 问题 |
 | --- | --- |
-| 中 | 打包用 Python 3.14 时产物不支持 Win7；需 Win7 兼容必须 3.8 打包，但 3.8 会导致知识库预览引擎不可用（要求 ≥3.10）——二者不可兼得，需按目标机选择 |
+| 中 | **zfec 无 Python 3.14 官方 wheel**（PyPI 上 1.6.0.0 只到 cp313、最新 1.6.0.1.post0 也只到 cp313），`pip install` 会退化为源码编译，要求构建机装 MSVC。**已缓解**：仓库 `wheels/` 随包提供预编译 wheel，安装时加 `--find-links wheels`；打包脚本已加依赖完整性前置检查。**未彻底解决**：升级 Python 小版本时仍需重做该 wheel（见 `wheels/README.md`） |
+| 中 | `config/data_root.json` 已移出版本库，但**旧克隆**里仍带着开发机路径；若发现数据根指向他人目录，删除该文件即可回落默认 |
 | 低 | 300 并发以上成功率下降（连接排队/拒绝，非应用异常），源于单进程线程模型 |
 | 低 | 工作区构建产物约 1.2GB（`deploy/` 含 3 个历史版本目录与 11 个旧 zip、`dist/` 220MB、`build/` 42MB），均已被 gitignore 但占用磁盘与备份 |
 | 低 | zip 覆盖安装时旧版独有文件不会被删除（若未来删文件需注意残留） |
@@ -243,38 +265,65 @@ python app.py
 12. **改了 JS/CSS 必须递增 `?v=N`**：`/plugin/` 下静态资源 1 天强缓存，`.html` 才是 no-cache。这是最常踩的坑。
 13. **DOMPurify 会整块丢弃 `<style>` 元素**。知识库 xhr/dhr 引擎是 class 型 CSS，`sanitize()` 之后 Excel 全裸、Word 表格无边框。解法：先正则摘取全部 `<style>`（**全局正则**，dhr 的表格内还有第二个 style 块）→ 正文过 DOMPurify → CSS 原样挂回。**改 `reader.js` 时别把这段摘取逻辑当冗余删掉。**
 14. **下载文件名从响应头解析**：Flask `send_file` 的 `download_name` 已处理 RFC 5987（中文名老浏览器可用），前端不要自己拼 `Content-Disposition`；前端走 fetch→blob 时从 `filename*=UTF-8''` 解析，回退 `filename=`。
-15. **旧浏览器 emoji 渲染不稳定**（Chrome 72/78）：新样式优先用纯文本或自绘 SVG，不要依赖 emoji 字体。SVG 回退登记表在 `static/js/jz-icon.js`。
+15. **旧浏览器兼容代码不是"Win7 遗产"，禁止当垃圾清理**（Chrome 72/78 是内网既有环境，OS 基线提到 Win10+ 也照样存在）：
+    - `static/js/main.js` 不用可选链 `?.`（Chrome < 80 会语法报错，整页白屏）；
+    - `static/js/jz-icon.js` + `static/icons/` 共 42 个 Twemoji SVG：emoji 渲染成方框时回退图片（触发条件是"缺彩色 emoji 字体"，Windows Server / 精简版系统同样命中）；
+    - `knowledge-base` 的 pdf.js 用 legacy 构建，避免 `??` 与 CSS `gap`（Chrome < 84）；
+    - 各插件页内图标优先自带 SVG（`plugins/trajectory-sketch/frontend/icons/`）。
+    新样式优先用纯文本或自绘 SVG；新增插件 emoji 图标只需在 `static/js/jz-icon.js` 的 MAP 补一条。
 16. **知识库「已转换」提示用 `sessionStorage` 记忆关闭状态**，不能用 `localStorage`（一个文件被多人先后打开，互不影响）。
+17. **目标机 OS 基线与浏览器基线是两件独立的事**：OS 基线是 Windows 10+，浏览器基线是 Chrome ≥72。**取消 Win7 支持不等于可以放宽浏览器基线**——若要提浏览器基线，必须先确认内网老浏览器确实已升级，否则会出现"在 Win10 机器上照样白屏"的误判（详见 §1.1 与 README §2.1）。
 
 ### 7.4 打包 / 安装脚本与本地环境
 
-17. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
-18. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
-19. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1:264` 有守卫，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（`:276`）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
-20. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
+18. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
+19. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
+20. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1:264` 有守卫，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（`:276`）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
+21. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
     *（2026-09-14 起 `build-deploy.ps1` 已防呆：不传 `-Version` 会自动递增 patch；最终版本号与上一版相同时**直接报错中止**，确需同号重打要显式加 `-Force`。）*
-21. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（< 4 即中止）。
-22. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
-23. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
-24. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
-25. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
+22. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（< 4 即中止）。
+23. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
+24. **打包解释器必须与基线一致，且依赖必须装齐**（2026-09-14 起脚本已加两道前置检查）：
+    - `build-deploy.ps1` 会打印解释器版本，**与基线 3.14 不符时告警**（用 3.8/3.10 打出来的包会缺功能且无人察觉）；
+    - 会逐个 import `JZToolsHub.spec` 里 collect_all 的 14 个库并列出缺失项——**缺库不会让打包失败**，只会产出功能残缺的包，所以必须显式拦截；
+    - `version.json` 现在记录 `{app, schema, commit, built_at, python}`，目标机可据此核对"包是哪个提交、哪个 Python 打的"；
+    - 其中 **`zfec` 需要 `--find-links wheels`**（无 3.14 官方 wheel），详见 `wheels/README.md`。
+24. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
+25. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
+26. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
 
 ### 7.5 第三方库行为
 
-26. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
-27. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
-28. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
-29. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
-30. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
-31. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
+27. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
+28. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
+29. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
+30. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
+31. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
+32. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
+33. **vendor 引擎的 `Optional` 缺失（已修，但历史极隐蔽）**：`vendor/xhr/__init__.py:84`
+    `def convert(data: bytes, options: Optional[ConvertOptions] = None)` 用了 `Optional` 却**既未导入、
+    也未写 `from __future__ import annotations`**，而该注解是**运行时立即求值**的 →
+    **Python ≤3.13 导入引擎即 `NameError`**，Word/Excel 预览整体失效。Python 3.14 因
+    PEP 649 惰性注解**恰好躲过**，所以这个缺陷在 3.14 开发机上完全看不见。
+    影响面隐蔽还有一层：`office_render.py` 用 `except Exception` 兜住导入失败，所以**不会报错**，
+    只是静默回退到 mammoth/SheetJS 降级渲染，只有 `GET /api/knowledge-base/status` 的
+    `office_render.available=false` 能看出来。已补 `from typing import Optional` 并记入
+    `vendor/README.md` 的**升级后必须重打清单**（与 `renderer/table.py` 补丁同级）。
+    **推论：不要用 Python 3.14 的"能跑"去判断第三方代码的正确性**——PEP 649 会掩盖注解类缺陷。
+34. **新增依赖前先分清新旧 wheel 类型**：`cpXX-cpXX`（版本锁定，每个 Python 小版本都要等新 wheel）
+    如 `zfec` / `numpy` / `pillow`；`cp3X-abi3`（稳定 ABI，跨版本可用）如 `opencv-python`（cp37-abi3）
+    与 `cryptography`（cp311-abi3）。
+    验证命令：`python -m pip download <包> --no-deps --only-binary :all: -d <临时目录>`
+    —— 返回 `No matching distribution found` 就说明当前版本只能源码编译。
+    **`zfec` 就是这样卡住的**（PyPI 上最高只到 cp313），处理方式见 `wheels/README.md`。
 
 ### 7.6 工具链
 
-32. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
-33. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
-34. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
-35. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
-36. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
+35. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
+36. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
+37. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
+38. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
+39. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
 
 ---
 
@@ -390,15 +439,23 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
 ```
 
 改信息传输协议时**四端一文档齐改**：桌面插件 `routes.py` + Web 前端 + APP 端 + 《移动端APP.md》（改完记得重启服务）。
+改 vendor 引擎时**必须同步 `vendor/README.md` 的补丁清单**（升级 vendor 整目录替换后要重打两个补丁）。
 
 ### 10.2 快速命令
 
 ```bash
+# 准备依赖（3.14 基线；--find-links wheels 用于 zfec，缺了会退化成源码编译）
+python -m pip install --find-links wheels -r plugins/admin/backend/requirements.txt
+python -m pip install --find-links wheels -r plugins/<id>/backend/requirements.txt
+
 # 启动（源码）
 python app.py
 
-# 打包（必须递增版本号）
+# 打包（-Version 省略会自动递增；写出的 version.json 含 commit/built_at/python）
 powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
+
+# 重建 zfec 预编译 wheel（换 Python 小版本后）
+python tools/build-zfec-wheel.py
 
 # 目标机：解压 zip → 双击 一键安装.bat → start.bat 启动；卸载双击 一键卸载.bat
 ```
@@ -422,6 +479,8 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | `移动端APP.md` | 信息传输协议权威规范（含错误文案逐字契约、判别顺序） |
 | `20260914评估报告.md` | 插件规范符合性分析、开发/更新/移除便利性评估、规范优化建议、项目问题清单（P0 已修，附实测） |
 | `docs/P0问题修复方案.md` | P0 六项的补丁级方案 + 实施清单 + 实测结果（含两处与原方案不同的判断） |
+| `docs/Python版本选型评估.md` | Python 版本基线的完整实测依据：vendor 引擎一行 bug、三版本对照、zfec 无 wheel、升级节奏建议 |
+| `wheels/README.md` | zfec 预编译 wheel 的成因、来源、许可证（GPL-2+）、使用方式与重建步骤 |
 | `docs/` | 登录改造与数据隔离、容器化与插件热插拔、知识库、插件库优化方案、过滤器、轨迹速写、批量导入导出等设计文档 |
 
 ---

@@ -1,5 +1,47 @@
 # JZToolsHub 项目长期记忆
 
+## Python 版本基线（2026-09-14 实测定论）
+
+- **Win7 目标机支持已取消**（2026-09-14），目标机基线 = **Windows 10+**。
+  因此"必须用 3.8 打包"的唯一理由消失，**3.8 支线删除**。
+- **不需要升级 Python 版本**：基线已是 **3.14**（最新稳定版），3.15 要到 2026-10-01 才发布。
+- 文档口径统一为"**最低 3.12 / 推荐与打包 3.14**"。**明确排除 3.10**
+  （2026-10-31 EOL，只差 71 天）。
+- **OS 基线 ≠ 浏览器基线（易误伤）**：`main.js` 的 Chrome 72 规避、`jz-icon.js`+`static/icons/`
+  的 SVG emoji 回退、pdf.js legacy 构建 —— 触发条件是"旧浏览器/缺彩色 emoji 字体"，
+  **不是 Win7，不要随 Win7 一起删**。浏览器基线 = **Chrome ≥72**，与 OS 基线并列写在 README §2.1。
+- **KB 预览引擎的真凶是一行 bug**（不是版本要求）：
+  `plugins/knowledge-base/backend/vendor/xhr/__init__.py` 用了 `Optional` 却既没 import
+  也没 `from __future__ import annotations`，而该注解运行时立即求值 →
+  **3.8 与 3.13 实测都是导入即 `NameError`**；3.14 能用纯属 PEP 649 惰性注解掩盖。
+  **2026-09-14 已修**（补 `from typing import Optional`），实测三版本
+  `office_render.availability()` 均为 `{'available': True, ...}`，渲染产物字节一致。
+  该补丁属「vendor 升级后必须重打」清单，与 `renderer/table.py` 补丁同级，登记在 `vendor/README.md`。
+- **★ zfec 无 cp314 wheel，已用预编译 wheel 缓解**：
+  `wheels/zfec-1.6.0.0-cp314-cp314-win_amd64.whl`（随仓库分发），安装依赖必须
+  `pip install --find-links wheels ...`，否则退化为源码编译（要求 MSVC）。
+  重建用 `python tools/build-zfec-wheel.py`；升级 Python 小版本前先按 `wheels/README.md`
+  的检查项确认新 wheel。**zfec 是 GPL-2+，再分发需确认合规口径。**
+  wheel 类型速记：`zfec`/`numpy`/`pillow` = `cpXX-cpXX`（版本锁定，每个小版本都要新 wheel）；
+  `opencv-python`=cp37-abi3、`cryptography`=cp311-abi3（稳定 ABI，跨版本可用）。
+- 影响隐蔽：`office_render` 用 `except Exception` 兜住导入失败 → 引擎不可用时**静默失去原样式预览**，
+  只在 `/api/knowledge-base/status` 报 `office_render.available=false`。
+
+## 本机构建 C 扩展的沙箱限制（Windows 开发机）
+
+`pip wheel <sdist>` 在本机会失败，三层原因：
+1. setuptools 定位 MSVC 会调 `reg.exe` → **被沙箱程序黑名单拦截**；
+2. `cmd.exe` 也被禁 → 无法用 `vcvarsall.bat` / `VsDevCmd.bat` 建标准编译环境；
+3. 手工拼 `INCLUDE`/`LIB`/`PATH` 并设 `DISTUTILS_USE_SDK=1`+`MSSdk=1` 后 cl.exe 能被找到并执行，
+   但报 `error: [WinError 2]` —— 根因是 **setuptools 在 `DISTUTILS_USE_SDK` 模式下会剔除
+   子进程的 `PATH`**，裸名 `cl.exe` 找不到；设 `CC` 全路径**无效**（新版 setuptools
+   的 C 编译器模块不读 `CC`）。
+
+可行替代：把**已装好的编译产物重打成标准 wheel**（zip 结构 + dist-info/{METADATA,WHEEL,RECORD}
++ `licenses/`，RECORD 用 url-safe b64 无填充 sha256），见 `tools/build-zfec-wheel.py`。
+本机可用的编译器：`C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools`（MSVC 14.51、
+SDK 10.0.26100）。
+
 ## 三条硬约定（2026-09-14 修复 P0 后确立，改代码务必遵守）
 
 1. **配置模板必须命名 `config.template.json`，绝不叫 `config.json`**。

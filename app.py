@@ -499,8 +499,10 @@ def get_aggregated_tools():
                 if card.get("description") is not None
                 else (m.get("description") or manifest.get("description", "")),
             "icon": icon,
-            # 兼容无彩色 emoji 字体的环境（如 Windows 7）：manifest 的 emoji 图标
-            # 无法渲染时，前端可回退到 /static/icons/<icon_file> 的 SVG 图标。
+            # 兼容无彩色 emoji 字体的环境（Windows Server / 精简系统 / 旧浏览器）：
+            # manifest 的 emoji 图标无法渲染时，前端可回退到 /static/icons/<icon_file>
+            # 的 SVG 图标。注意：前端实际生效的回退表在 static/js/jz-icon.js
+            # （本字段目前无前端消费方，属待清理项，见 20260914评估报告 §5.2 P1-1）。
             "icon_file": _icon_svg_file(icon),
             "accent": card.get("accent") or manifest.get("accent", "#4285F4"),
             "entry": manifest.get("entry", "index.html"),
@@ -516,8 +518,10 @@ def get_aggregated_tools():
 
 
 # 已知插件 emoji 图标 → SVG 文件名（static/icons/ 下已内置 Twemoji 图形）。
-# 用于无彩色 emoji 字体的环境（Windows 7 等）回退显示；未知 emoji 返回 None，
-# 前端继续用 emoji 文本渲染。
+# 用于**无彩色 emoji 字体的环境**（Windows Server、精简版系统、旧浏览器）回退显示；
+# 未知 emoji 返回 None，前端继续用 emoji 文本渲染。
+# 注：前端实际使用的是 static/js/jz-icon.js 内的同名映射（本表产物 icon_file 目前
+# 无消费方），新增插件图标时**只需在 jz-icon.js 登记**即可。
 _EMOJI_ICON_FILES = {
     "⚙️": "2699.svg",          # admin 管理后台
     "🔐": "1f510.svg",          # base64

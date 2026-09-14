@@ -6,10 +6,11 @@
 
 | 项目 | 说明 |
 | --- | --- |
-| 后端 | Python 3（源码运行 ≥3.8 可跑主框架，**完整功能建议 ≥3.10**）· Flask |
-| 前端 | 原生 HTML / CSS / JS，无构建步骤 |
+| 后端 | Python **3.14**（打包与生产基线）· Flask |
+| 前端 | 原生 HTML / CSS / JS，无构建步骤（浏览器基线 Chrome ≥ 72） |
 | 插件机制 | 目录扫描 + 配置驱动 + iframe 隔离 + 后端动态加载 |
 | 交付形态 | 源码直跑，或 PyInstaller 打包为 Windows 可执行程序（含一键安装/卸载） |
+| 目标环境 | **Windows 10 及以上**（不支持 Windows 7，见 §2.1） |
 | 移动端 | 配套 Android 离线接收端 `android-app/InfoParse/`（Kotlin） |
 
 ---
@@ -65,17 +66,45 @@
 
 ## 2. 环境搭建
 
-### 2.1 Python 版本
+### 2.1 目标环境基线
 
-| 场景 | 建议版本 | 说明 |
+> **本节是部署前必须与甲方对齐的硬约束**，请在装机前确认目标机与服务端环境符合下表。
+
+| 维度 | 基线 | 说明 |
 | --- | --- | --- |
-| 源码开发（主框架 + 多数插件） | ≥3.8 | 历史目标版本，主框架与多数插件兼容 |
-| 源码开发（**完整功能**） | **≥3.10** | 知识库 Office 预览引擎（vendor xhr/dhr）声明 requires-python ≥3.10 |
-| 打包发布 | 3.14（当前实际使用） | 见 `HANDOFF.md` 打包章节；需兼容 Win7 时必须改用 Python 3.8 打包 |
+| **服务器/目标机操作系统** | **Windows 10 及以上**（x64） | Python 3.14 官方要求 Windows 10+。**不支持 Windows 7**：自 2026-09-14 起正式取消 Win7 兼容，不再维护 Python 3.8 打包支线（原因与影响见 `docs/Python版本选型评估.md` §4） |
+| **服务端 Python** | **3.14**（打包基线，唯一） | 开发机最低 3.12；详见 §2.2 |
+| **浏览器** | **Chrome ≥ 72**（含 Edge ≥ 79、同内核国产浏览器） | 内网既有环境基线。**低于此版本不保证可用**；页面代码因此保留了若干兼容措施（见下方说明） |
+| **服务端其他** | 无 | 纯 Python + 前端源码，无容器/IIS/数据库依赖 |
 
-> 结论：**开发/部署请统一用 ≥3.10 的解释器**。低于 3.10 时知识库 Word/Excel 预览会回退到前端降级渲染（不报错，但样式还原度下降）。
+#### 为什么浏览器基线不能跟着 OS 一起放宽
 
-### 2.2 安装步骤
+取消 Win7 后，仓库里这几处"兼容旧浏览器"的代码**必须保留**，它们的触发条件是
+"浏览器版本低 / 缺彩色 emoji 字体"，与操作系统无关：
+
+| 位置 | 兼容措施 | 触发条件 |
+| --- | --- | --- |
+| `static/js/main.js` | 不用可选链 `?.`，改显式判空 | Chrome < 80 |
+| `static/js/jz-icon.js` + `static/icons/` | emoji 渲染不出来时回退 Twemoji SVG | 缺彩色 emoji 字体的系统（Windows Server、精简版镜像）/ 旧浏览器字形退化 |
+| `plugins/knowledge-base/frontend/vendor/` | pdf.js 用 legacy 构建；避免 `??`、CSS `gap` 等 | Chrome < 84 / 老内核 |
+| `plugins/trajectory-sketch/frontend/icons/` | 页内图标一律自带内联 SVG，不用 emoji 字符 | 同第二行 |
+
+> 简单说：**"支持 Win10+" 和 "支持 Chrome ≥72" 是两个独立承诺**。要提浏览器基线，
+> 必须另外确认内网老浏览器已升级，否则会出现"在 Win10 机器上照样白屏"的误判。
+
+### 2.2 Python 版本
+
+| 场景 | 版本 | 说明 |
+| --- | --- | --- |
+| **打包 / 生产运行** | **3.14** | 唯一基线。现有部署产物均为 `python314.dll`（跨 v1.3.5~v1.6 实践） |
+| 源码开发 | 最低 3.12，推荐 3.14 | 3.12 起主流依赖仍与开发同步；与打包版本一致最省心 |
+| ~~3.8 / 3.10~~ | **不推荐** | 3.8 随 Win7 一并取消（已 EOL 2024-10）；3.10 于 2026-10-31 EOL。详见 `docs/Python版本选型评估.md` |
+
+> **不需要"升级"到更高版本**：3.14 已经是当前最新稳定版（3.15 预计 2026-10-01 发布，
+> 待第三方 wheel 齐备后再评估）。核实过的真实约束只有两条：目标机 Windows 10+，
+> 以及 `zfec` 需要预编译 wheel（见 §2.3）。
+
+### 2.3 安装步骤
 
 ```bash
 # ① 主框架依赖（Flask + cryptography，管理后台加密存储必需）
@@ -86,26 +115,30 @@ pip install "Flask>=3.0,<3.1" "cryptography>=41.0"
 pip install -r plugins/admin/backend/requirements.txt
 
 # ③ 按需安装其他插件依赖（缺依赖的插件会优雅降级并在页面提示，不会拖垮主进程）
-pip install -r plugins/knowledge-base/backend/requirements.txt
-pip install -r plugins/shared-docs/backend/requirements.txt
-pip install -r plugins/character-graph/backend/requirements.txt
-pip install -r plugins/case-report/backend/requirements.txt
-pip install -r plugins/file-filter/backend/requirements.txt
-pip install -r plugins/trajectory-sketch/backend/requirements.txt
-pip install -r plugins/trajectory-convert/backend/requirements.txt
-pip install -r plugins/qr-video-decode/backend/requirements.txt
-pip install -r plugins/info-transfer/backend/requirements.txt
+#    ★ 加 --find-links wheels：zfec 没有 Python 3.14 的官方 wheel，
+#      不加会退化成源码编译（要求本机装 MSVC Build Tools）
+pip install --find-links wheels -r plugins/knowledge-base/backend/requirements.txt
+pip install --find-links wheels -r plugins/shared-docs/backend/requirements.txt
+pip install --find-links wheels -r plugins/character-graph/backend/requirements.txt
+pip install --find-links wheels -r plugins/case-report/backend/requirements.txt
+pip install --find-links wheels -r plugins/file-filter/backend/requirements.txt
+pip install --find-links wheels -r plugins/trajectory-sketch/backend/requirements.txt
+pip install --find-links wheels -r plugins/trajectory-convert/backend/requirements.txt
+pip install --find-links wheels -r plugins/qr-video-decode/backend/requirements.txt
+pip install --find-links wheels -r plugins/info-transfer/backend/requirements.txt
 ```
 
-Windows 下若本机默认是 Python 3.8：
+> `--find-links wheels` 只在**名称与版本匹配**时才使用 `wheels/` 里的制品，其余包照常走
+> 正常索引。离线内网机器可再加 `--no-index` 完全离线安装。
+> **依赖按插件粒度声明**，仓库根目录没有统一的 `requirements.txt`——避免"为了用一个工具
+> 装齐全部依赖"。部署机只需装启用的插件的依赖。
 
-```bash
-C:\Users\<你>\AppData\Local\Programs\Python\Python38\python.exe -m pip install Flask cryptography
-```
+**关于 `wheels/` 目录**：目前仅有 `zfec`（轨迹转换 / QR 解码 / 信息传输的核心纠错依赖）。
+它是**版本锁定型 C 扩展**，而 PyPI 上的 win_amd64 wheel 最高只到 cp313，Python 3.14
+只能源码编译。仓库随包提供一份已构建并验证过的 wheel，使无编译器的机器也能安装。
+来源、许可证（**GPL-2+**）与重建方法见 `wheels/README.md`。
 
-> 仓库根目录**没有**统一的 `requirements.txt`——依赖按插件粒度声明，避免"为了用一个工具装齐全部依赖"。部署机只需装启用的插件的依赖。
-
-### 2.3 外部可选依赖
+### 2.4 外部可选依赖
 
 | 依赖 | 类型 | 缺失影响 |
 | --- | --- | --- |
@@ -138,8 +171,10 @@ python app.py
 powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
 
 # 可选参数
-#   -Python "C:\...\Python38\python.exe"   指定打包解释器（产物需兼容 Win7 时用 3.8）
-#   -DeployName "JZToolsHub-py38"          输出目录名（多版本部署目录共存）
+#   -Python "C:\Python314\python.exe"   指定打包解释器（基线 3.14；不传则取 PATH 上的 python，
+#                                        脚本会校验并在与基线不符时告警）
+#   -DeployName "JZToolsHub-py38"       输出目录名（多版本部署目录共存）
+#   -Force                              允许版本号与上一版相同（默认会报错中止）
 ```
 
 产物：`deploy\JZToolsHub\`（可直接运行的部署目录）+ `deploy\JZToolsHub-v<版本>.zip`（分发包）。
@@ -150,16 +185,25 @@ deploy\JZToolsHub\
 ├─ _internal\          # Python 运行时 + Flask + 全部第三方依赖
 ├─ static\             # 首页前端源码（可修改，重启生效）
 ├─ plugins\            # 插件：frontend/ 可改；backend/ 随包源码
+├─ wheels\             # zfec 预编译 wheel（随包，便于离线补装/重建）
+├─ tools\              # build-zfec-wheel.py（重建 zfec wheel）
 ├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录）
-├─ docs\  README.md  HANDOFF.md
+├─ docs\  README.md  HANDOFF.md  插件设计规范.md  移动端APP.md
 ├─ start.bat           # 一键启动
 ├─ 一键安装.bat         # 安装 / 更新（自动判断）
 ├─ 一键卸载.bat         # 卸载（含用户数据，需确认）
 ├─ install.ps1         # 安装 / 更新 / 卸载核心逻辑
-└─ version.json        # 版本号（模板同步触发依据）
+└─ version.json        # {app, schema, commit, built_at, python}（模板同步触发依据）
 ```
 
-打包脚本依次完成：PyInstaller 按 `JZToolsHub.spec` 打包后端 → 组装部署目录（复制 `static/`、`plugins/`、`docs/`、`config/tools.json`）→ 清理插件运行时数据（`data/`、`.task_cache/`、`__pycache__/`、`out/`、`*.pyc`、`config.json`）→ 复制安装/卸载脚本并写 `version.json` → 生成 `start.bat` → 压缩为 zip。
+打包脚本依次完成：**校验打包解释器版本与依赖完整性** → PyInstaller 按 `JZToolsHub.spec` 打包后端 →
+组装部署目录（复制 `static/`、`plugins/`、`docs/`、契约文档、`wheels/`、`tools/`、`config/tools.json`）
+→ 清理插件运行时数据（`data/`、`.task_cache/`、`__pycache__/`、`out/`、`*.pyc`、**仅精确名 `config.json`**）
+→ **自检同步模板 `*.template.json` 数量** → 复制安装/卸载脚本并写 `version.json` → 生成 `start.bat` → 压缩为 zip。
+
+> 打包脚本会在开工前检查两件事：① `-Python` 指定的解释器版本是否为基线 **3.14**（不符则告警）；
+> ② 该解释器是否已装齐 spec 里 collect_all 的 14 个第三方库（缺库不会让打包失败，只会打出
+> 功能残缺的包，所以显式拦截；其中 `zfec` 需 `--find-links wheels` 才能装上）。
 
 > **改了安装/卸载逻辑，必须改仓库根目录的源文件再重新打包**：部署包里的是副本，下次打包会被覆盖。
 
@@ -208,6 +252,8 @@ JZToolsHub/
 │   ├── icons/                 # Twemoji SVG（无彩色 emoji 字体环境的回退）
 │   └── js/  main.js  tool.js  jz-icon.js
 ├── android-app/InfoParse/     # 移动端 APP（Kotlin，信息传输的 Android 离线接收端）
+├── wheels/                    # ★ 第三方预编译 wheel（zfec，见 §2.3 与 wheels/README.md）
+├── tools/                     # 开发辅助脚本（build-zfec-wheel.py：重建 zfec wheel）
 ├── docs/                      # 设计文档（按功能/插件归档）
 ├── 插件设计规范.md             # ★ 插件开发铁律（开发插件前必读）
 ├── 移动端APP.md                # ★ 信息传输协议权威规范
@@ -655,7 +701,8 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 卡片点击显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 指向的文件是否存在于 `frontend/` |
 | 登录后接口全部 401 | 会话超时（默认空闲 30 分钟 / 登录满 12 小时）；重新登录 |
 | 轨迹速写提示「过滤器插件不可用」 | 确认 `file-filter` 的 `enabled: true` 并重启服务，再看 `/api/trajectory-sketch/status` 的 `filter_plugin.reason` |
-| 知识库 Word/Excel 预览样式不对 | 确认 Python ≥3.10（引擎要求）；改了引擎或升级 vendor 后需删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` 缓存 |
+| 知识库 Word/Excel 预览样式不对 | 先看 `GET /api/knowledge-base/status` 的 `office_render`：引擎不可用时会**静默回退**到降级渲染。常见原因：`vendor/` 缺失，或 vendor 的 `xhr/__init__.py` 少了一行 `from typing import Optional`（Python ≤3.13 上会导致引擎导入即 `NameError`，详见 `vendor/README.md`）。改了引擎或升级 vendor 后需删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` 缓存 |
+| 装依赖时 zfec 编译失败（`error: [WinError 2]` / 找不到编译器） | `zfec` 没有 Python 3.14 的官方 wheel，不加 `--find-links wheels` 会退化成源码编译。用 `pip install --find-links wheels ...`，或参考 `wheels/README.md` 重建 wheel |
 | 地图标点空白 | 在插件页「⚙️ 配置」中填写有效的高德 Web 服务 Key |
 | 端口被占用 | 设 `JZTOOLS_PORT` 换端口，或先停旧进程 |
 | 升级后数据不见了 | 确认数据根目录未被误删；旧程序目录里的数据会在新版首启自动迁移，升级前勿删旧目录 |
@@ -686,6 +733,8 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 9. **敏感配置外置**：API Key 写 `backend/config.json`（gitignore）或由用户在页面录入，禁止硬编码入库。
 10. **前端资源用相对路径**；`data/` 与含密钥的 `config.json` 必须 gitignore；**随版本下发的配置模板必须命名 `config.template.json`**（不得叫 `config.json`，否则会被打包清理规则删掉）。
 11. **自包含验收**：把插件目录 + 一段 `tools.json` 注册片段复制到全新部署即可完整工作。
+12. **别删"旧浏览器兼容"代码**：目标机基线与浏览器基线是两件事（§2.1）。`main.js` 的 `?.` 规避、`jz-icon.js` + `static/icons/` 的 SVG emoji 回退、knowledge-base 的 pdf.js legacy 构建、插件自带 SVG 图标——触发条件都是"浏览器版本低 / 缺彩色 emoji 字体"，与 Windows 版本无关，**取消 Win7 支持之后仍然必须保留**。
+13. **新增 C 扩展依赖前先查 wheel**：`zfec` / `numpy` / `pillow` 是版本锁定型（`cpXX-cpXX`），每个 Python 小版本都要等新 wheel；`opencv-python`（`cp37-abi3`）与 `cryptography`（`cp311-abi3`）是稳定 ABI，跨版本可用。新增锁定型依赖时用 `pip download <包> --only-binary :all:` 先验证，必要时补进 `wheels/`（见 `wheels/README.md`）。
 12. **卸载顺序**：先删 `tools.json` 条目 → 备份数据 → 再删目录（顺序反了会留下悬空引用）。
 
 > 完整条款（B-1~B-21、SEC-1~SEC-11、F-1~F-7、S-1~S-8、M-1~M-3、V-1~V-7）见 **《插件设计规范.md》**。

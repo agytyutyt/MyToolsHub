@@ -1,10 +1,15 @@
 /* JZIcon — 跨浏览器 emoji / SVG 图标兼容层
  *
- * 背景：Windows 7 及部分旧浏览器缺少彩色 emoji 字体（Segoe UI Emoji 是 Win8+ 才有），
- * 直接把 emoji 写进页面会渲染成「方框」。本工具在运行时检测当前环境是否能正常渲染
- * 彩色 emoji：
+ * 背景：部分环境的**浏览器/系统缺少彩色 emoji 字体**——Windows Server 与精简版
+ * 系统不自带 Segoe UI Emoji（该字体自 Win8 起随系统提供），内网既有的老浏览器
+ * （Chrome 72/78）字形回退也可能退化成单色或「方框」。直接把 emoji 写进页面会
+ * 渲染成 tofu。本工具在运行时检测当前环境是否能正常渲染彩色 emoji：
  *   - 支持（现代浏览器/系统）→ 继续用 emoji 文本，保持原生观感；
- *   - 不支持（Win7 等）→ 自动替换为 static/icons/ 下的 Twemoji SVG 图片。
+ *   - 不支持 → 自动替换为 static/icons/ 下的 Twemoji SVG 图片。
+ *
+ * ⚠ 本兼容层**不是历史包袱，请勿删除**：触发条件是"缺彩色 emoji 字体 / 旧浏览器"，
+ * 与操作系统版本无关（项目的 OS 基线已是 Windows 10+，浏览器基线为 Chrome ≥72，
+ * 见 README「目标环境基线」）。新增插件图标时在此处的 MAP 补一条即可。
  *
  * 用法：
  *   1. 页面引入 <script src="/static/js/jz-icon.js"></script>；
@@ -81,8 +86,9 @@
   }
 
   // 检测是否能渲染彩色 emoji：在画布上画出 😀，统计字形像素的「色相多样性」。
-  // 彩色 emoji 字体（Segoe UI Emoji 等，Win8+）会渲染出多种颜色（黄脸/红嘴/黑眼）；
-  // 而 Win7 等缺少彩色 emoji 字体时，字形回退为单色「方框」（tofu）或单色字形，
+  // 彩色 emoji 字体（Segoe UI Emoji 等，Win8+ 随系统提供）会渲染出多种颜色
+  // （黄脸/红嘴/黑眼）；而缺少彩色 emoji 字体时（Windows Server、精简版系统、
+  // 旧浏览器字形回退），字形退化为单色「方框」（tofu）或单色字形，
   // 无论画布 fillStyle 设成什么颜色，字形始终只有一种色相 → 判定不支持，改用 SVG。
   function supportsColorEmoji() {
     if (_supported !== null) return _supported;

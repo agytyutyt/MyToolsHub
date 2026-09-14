@@ -1,6 +1,6 @@
 /* 轨迹速写插件前端
  * - 图标：启动时 fetch 自带 SVG（frontend/icons/*.svg）并注入内联 SVG，可用 currentColor 跟随主题色，
- *         不依赖系统 emoji 字体（Win7 兼容）。
+ *         不依赖系统 emoji 字体（缺彩色 emoji 字体的环境同样可用）。
  * - 安全：所有动态内容一律用 textContent / createElement 渲染，不使用 innerHTML 拼接用户数据（F-3）。
  * - 接口：/api/trajectory-sketch/{status,config,upload,analyze,result,download}
  */
