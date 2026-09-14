@@ -1,10 +1,13 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（第四轮：**打通离线部署** —— 部署包内置 Chrome 与 LibreOffice 安装包
-> 并自动安装/解包，目标机无外网即可完整部署；新增 `tools/fetch-offline-bundle.py` 组件获取器、
-> `docs/离线部署包说明.md`。第三轮为取消 Win7 + vendor `Optional` 补丁 + zfec wheel 落库；
-> 第二轮为 P0 六项修复；第一轮为文档全面重写）。
+> 最后更新：2026-09-14（第五轮：**LibreOffice 改随包分发"裁剪核心包"** —— 只保留
+> `.doc→.docx` / `.xls→.xlsx` 需要的那套，包内占用 357.5 MB → 164.5 MB（省 193 MB），
+> 目标机安装从 `msiexec /a` 的 95~130 秒降到约 24 秒解压；新增
+> `tools/build-libreoffice-core.py`。第四轮为**打通离线部署** —— 部署包内置 Chrome 与
+> LibreOffice 并自动安装/解包，目标机无外网即可完整部署；新增
+> `tools/fetch-offline-bundle.py` 组件获取器、`docs/离线部署包说明.md`。第三轮为取消 Win7 +
+> vendor `Optional` 补丁 + zfec wheel 落库；第二轮为 P0 六项修复；第一轮为文档全面重写）。
 > 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
 > `docs/离线部署包说明.md`（离线包的组成、安装与适用场景）、
 > `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（P0 修复方案与实测）、
@@ -315,8 +318,12 @@ python app.py
 25. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
 26. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
 27. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
-28. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95s、解出 1.5GB，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
-29. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。
+28. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95~130s、解出 1522.6 MB / 19418 文件，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
+    * **`msiexec /a` 会忽略 `ADDLOCAL` 功能选择**：按官方功能表只保留 378 个功能后，仍解出全量 19418 个文件（2026-09-14 实测）。所以"只装核心"只能**先全量解包再裁剪**。该 MSI 的功能划分本身是干净的（`gm_Langpack_*` 356.7 MB、`gm_r_ex_Dictionary_*` 455.2 MB、`gm_r_Files_Images` 71.7 MB），但 `/a` 不认。
+    * **裁剪时 `presets\` 绝不能删**：删掉后 soffice 在**全新 user profile** 下报 `Fatal Error: … 安装无法完成`（退出码 77）。极其隐蔽——复用已初始化好的 profile 时裁剪树看起来完全正常，而**应用每次转换用的都是唯一临时 profile**（`xhr`/`dhr` 里都是 `tempfile.mkdtemp`），等于每次都是首次启动，**线上必崩**。`help\` / `readmes\` 反之是安全的（已逐项实测），别和 `presets\` 归成一类一起删。**测裁剪安全性必须每次用全新 profile**，否则结论是假阳性。
+    * 落地方案：`tools/build-libreoffice-core.py` 在打包机解包 + 裁剪 + **构建期冒烟测试**（全新 profile 跑一次 CSV→XLSX）→ 产出 `runtime/libreoffice/libreoffice-core.zip`（357.5 MB → 164.5 MB、解包 557.9 MB / 2824 文件），打包时替代原始 MSI（`-KeepFullLibreOffice` 可保留完整版）。详见 `docs/离线部署包说明.md` §3.1。
+29. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。Python 侧用 `subprocess.run()` 则天然等待（`build-libreoffice-core.py` 就是这么调的）。
+    * **`.NET Framework` 的 `ZipFile.ExtractToDirectory` 没有 `bool` 覆盖重载**：只有 `(源,目标)` 与 `(源,目标,Encoding)` 两个。传第三个参数 `$true` 会被 PowerShell 绑到 `entryNameEncoding` 上并抛"无法将值 True 转换为类型 System.Text.Encoding"。需要覆盖解压时用逐条 `[IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $path, $true)`。
 30. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
 31. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
 32. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。

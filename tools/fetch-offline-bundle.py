@@ -23,12 +23,15 @@
     python tools/fetch-offline-bundle.py --only chrome   # 只下载指定组件
     python tools/fetch-offline-bundle.py --verify-only   # 只校验已有文件
     python tools/fetch-offline-bundle.py --pin           # 把实测 sha256 回写进清单
+    python tools/fetch-offline-bundle.py --core          # 下载后顺带生成 LibreOffice 裁剪核心包
+                                                         #（等价于再跑 tools/build-libreoffice-core.py）
 """
 
 import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -151,6 +154,8 @@ def main():
     ap.add_argument("--verify-only", action="store_true", help="只校验，不下载")
     ap.add_argument("--pin", action="store_true",
                     help="把实测 sha256 回写进组件清单（形成冻结值）")
+    ap.add_argument("--core", action="store_true",
+                    help="下载完成后顺带生成 LibreOffice 裁剪核心包（调 tools/build-libreoffice-core.py）")
     args = ap.parse_args()
 
     with open(args.components, "r", encoding="utf-8") as f:
@@ -240,6 +245,20 @@ def main():
             json.dump(raw, f, ensure_ascii=False, indent=2)
             f.write("\n")
         print("已回写冻结值到：%s" % args.components)
+
+    # 顺带生成 LibreOffice 裁剪核心包（打包时用它替代原始 MSI，包内体积省约 193 MB）
+    if args.core and not args.verify_only and not failed:
+        core_tool = os.path.join(REPO, "tools", "build-libreoffice-core.py")
+        print("")
+        print("==> 生成 LibreOffice 裁剪核心包（%s）" % os.path.relpath(core_tool, REPO))
+        rc = subprocess.call([sys.executable, core_tool])
+        core_zip = os.path.join(dest_root, "libreoffice", "libreoffice-core.zip")
+        if rc != 0:
+            failed.append(("libreoffice-core", "裁剪核心包生成失败（退出码 %s）" % rc))
+        elif not os.path.isfile(core_zip):
+            failed.append(("libreoffice-core", "未产出 libreoffice-core.zip"))
+        else:
+            print("    %s（%s）" % (os.path.relpath(core_zip, REPO), human(os.path.getsize(core_zip))))
 
     total = sum(x["size"] for x in manifest["components"])
     print("")

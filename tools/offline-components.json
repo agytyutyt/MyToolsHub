@@ -12,10 +12,28 @@
     "install 取值：",
     "  msi-silent       —— msiexec /i <msi> /qn（需管理员，全机安装）",
     "  msi-admin-unpack —— msiexec /a <msi> /qn TARGETDIR=<dir>（无需管理员，解出可直接运行的便携目录）",
-    "  manual           —— 随包分发，由人工双击安装"
+    "  zip-unpack       —— 解压随包 zip（无需管理员；裁剪核心包走这条）",
+    "  manual           —— 随包分发，由人工双击安装",
+    "",
+    "derived 段描述「由已下载组件再加工出来的产物」——它没有 url，不进下载循环，",
+    "由各自的 tool 在打包前生成。见 tools/build-libreoffice-core.py。"
   ],
   "schema": 1,
   "dest_dir": "runtime",
+  "derived": [
+    {
+      "id": "libreoffice-core",
+      "name": "LibreOffice 裁剪核心包（便携目录，部署包内的实际形态）",
+      "from": "libreoffice",
+      "tool": "tools/build-libreoffice-core.py",
+      "file": "libreoffice-core.zip",
+      "subdir": "libreoffice",
+      "meta": "libreoffice-core.json",
+      "install": "zip-unpack",
+      "why": "应用只用到 soffice 的两条转换（.doc→.docx 与 .xls→.xlsx），不需要 UI/帮助/词典/语言包/图标主题。裁掉这些死重后：包内占比 357.5 MB → 约 164 MB，解包 1522.6 MB → 约 558 MB。",
+      "note": "改裁剪清单（工具内 PRUNE_VERSION）或换 MSI 后必须重建，否则 build-deploy.ps1 会因溯源 sha256 不符而中止。"
+    }
+  ],
   "components": [
     {
       "id": "chrome",
@@ -33,7 +51,7 @@
     },
     {
       "id": "libreoffice",
-      "name": "LibreOffice 完整版（Windows x86-64 MSI）",
+      "name": "LibreOffice 完整版（Windows x86-64 MSI，裁剪核心包的原料）",
       "version": "26.8.0",
       "url": "https://download.documentfoundation.org/libreoffice/stable/26.8.0/win/x86_64/LibreOffice_26.8.0_Win_x86-64.msi",
       "file": "LibreOffice_26.8.0_Win_x86-64.msi",
@@ -41,7 +59,7 @@
       "install": "msi-admin-unpack",
       "required": false,
       "license": "MPL-2.0（另有 LGPL-3.0 部分）。可自由再分发。",
-      "why": "知识库插件的 .doc 归一化与 .xls 高保真渲染依赖 soffice.exe；缺失时仅这两条窄路径降级，其余功能不受影响。",
+      "why": "知识库插件的 .doc 归一化与 .xls 高保真渲染依赖 soffice.exe；缺失时仅这两条窄路径降级，其余功能不受影响。打包时默认改用其裁剪核心包（见 derived 段），本 MSI 本身不必进包（-KeepFullLibreOffice 可强制保留）。",
       "sha256": "4aa6c6e1895f4055104effcb556bd3362d20c6ad707c149543304f395ef9db95",
       "size": 374906880
     }

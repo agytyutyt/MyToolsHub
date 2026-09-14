@@ -16,10 +16,19 @@
 | 组件 | 版本 | 体积 | 安装方式 | 是否必需 |
 | --- | --- | --- | --- | --- |
 | Google Chrome（企业版 MSI，x64） | stable | ≈160 MB | `msiexec /i` 静默全机安装（**需管理员**） | 否（仅浏览器体验） |
-| LibreOffice（Windows x86-64 MSI） | 26.8.0 | ≈340 MB | `msiexec /a` 管理安装 → 便携目录（**免管理员**） | 否（仅知识库旧格式高保真） |
+| LibreOffice **裁剪核心包** `libreoffice-core.zip` | 26.8.0 | ≈164 MB | 直接解压到本目录（**免管理员**，约 24 秒） | 否（仅知识库旧格式高保真） |
+
+> LibreOffice 的**源**是官方完整 MSI（357.5 MB），但打包时用它的裁剪版：
+> 官方 MSI 管理安装解包后有 1522.6 MB / 19418 个文件，其中词典（471 MB）、界面语言包
+> （356 MB）、图标主题（72 MB）、字体（51 MB）等与格式转换无关。裁剪后 557.9 MB /
+> 2824 个文件，包内占用从 357.5 MB 降到 164.5 MB。
+> 生成工具：`tools/build-libreoffice-core.py`；裁剪清单与避坑说明见
+> `docs/离线部署包说明.md` §3.1。
 
 各文件的 `sha256`、来源 URL、许可证记录在**同目录的 `manifest.json`** 中
 （由获取脚本在下载时生成，打包前应与 `tools/offline-components.json` 的冻结值一致）。
+LibreOffice 裁剪核心包的元数据另见 `libreoffice\libreoffice-core.json`（含源 MSI 的
+sha256 与解包体积，便于溯源）。
 
 ## 2. 为什么需要它们
 
@@ -56,8 +65,12 @@ powershell -ExecutionPolicy Bypass -File runtime\setup-offline-runtime.ps1
 
 * Chrome 是**全机安装**，必须管理员权限。没有提权时脚本**不报错**，只打印
   手动安装指引 —— 因为 Chrome 不是应用运行的必要条件。
-* LibreOffice 走 `msiexec /a`（管理安装）：**不写注册表、不需要管理员**，
-  解出的目录可直接运行。解包目标固定为 `<本目录>\libreoffice\`。
+* LibreOffice **优先解压随包的裁剪核心包** `libreoffice\libreoffice-core.zip`
+  （**不写注册表、不需要管理员**，约 24 秒解出 557.9 MB）；包内只有原始完整 MSI 时
+  回退 `msiexec /a`（管理安装，解全量 1.52 GB、95~130 秒）。两条路解出的目录
+  都固定落在 `<本目录>\libreoffice\`，可直接运行。
+* 解压完成后可删除 `libreoffice\libreoffice-core.zip`（164 MB）释放磁盘 ——
+  部署包里仍有它，随时可重解。
 
 ## 4. 应用如何找到 LibreOffice（零配置）
 

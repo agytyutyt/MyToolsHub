@@ -148,8 +148,9 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 | 大模型 API（OpenAI 兼容） | 前端配置 | 影响战果录入、人物关系星图、过滤器/轨迹速写的"大模型模式" |
 
 > **离线（无外网）部署时**，前两项随部署包分发：`runtime/` 目录内含 Chrome 企业版 MSI 与
-> LibreOffice MSI，由 `runtime\setup-offline-runtime.ps1` 在目标机就地安装/解包（LibreOffice
-> 免管理员解包为便携目录，应用自动探测，零配置）。详见 `docs/离线部署包说明.md`。
+> LibreOffice **裁剪核心包**（`libreoffice-core.zip` —— 只保留 `.doc→.docx` / `.xls→.xlsx`
+> 需要的那套，357.5 MB → 164.5 MB），由 `runtime\setup-offline-runtime.ps1` 在目标机就地
+> 安装/解压（**免管理员**，应用自动探测，零配置）。详见 `docs/离线部署包说明.md` §3。
 
 ---
 
@@ -181,9 +182,11 @@ powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
 #   -DeployName "JZToolsHub-py38"       输出目录名（多版本部署目录共存）
 #   -Force                              允许版本号与上一版相同（默认会报错中止）
 #   -SkipOfflineRuntime                 不打包 runtime\ 离线组件，产出瘦包
+#   -KeepFullLibreOffice                随包带完整的 LibreOffice MSI（默认改用裁剪核心包）
 
 # 离线包：先把第三方组件拉到 runtime\（在有网机器上执行一次；约 517MB，支持断点续传）
-python tools\fetch-offline-bundle.py
+#         --core 会顺带生成 LibreOffice 裁剪核心包（打包用它替代原始 MSI，包内省 193MB）
+python tools\fetch-offline-bundle.py --core
 ```
 
 产物：`deploy\JZToolsHub\`（可直接运行的部署目录）+ `deploy\JZToolsHub-v<版本>.zip`（分发包）。
@@ -196,7 +199,7 @@ deploy\JZToolsHub\
 ├─ plugins\            # 插件：frontend/ 可改；backend/ 随包源码
 ├─ wheels\             # zfec 预编译 wheel（随包，便于离线补装/重建）
 ├─ tools\              # build-zfec-wheel.py（重建 zfec wheel）
-├─ runtime\            # ★ 离线运行组件（Chrome / LibreOffice 安装包 + 安装脚本 + manifest.json）
+├─ runtime\            # ★ 离线运行组件（Chrome MSI + LibreOffice 裁剪核心包 + 脚本 + manifest.json）
 ├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录）
 ├─ docs\  README.md  HANDOFF.md  插件设计规范.md  移动端APP.md
 ├─ start.bat           # 一键启动
@@ -210,6 +213,7 @@ deploy\JZToolsHub\
 组装部署目录（复制 `static/`、`plugins/`、`docs/`、契约文档、`wheels/`、`tools/`、`config/tools.json`）
 → 清理插件运行时数据（`data/`、`.task_cache/`、`__pycache__/`、`out/`、`*.pyc`、**仅精确名 `config.json`**）
 → **自检同步模板 `*.template.json` 数量** → **组装 `runtime/` 离线组件并按 `manifest.json` 校验完整性**
+（LibreOffice 的 MSI 默认被裁剪核心包替代，包内清单会如实改写为 `core_pruned` + 核心包体积）
 → 复制安装/卸载脚本并写 `version.json` → 生成 `start.bat` → 压缩为 zip。
 
 > 打包脚本会在开工前检查三件事：① `-Python` 指定的解释器版本是否为基线 **3.14**（不符则告警）；
@@ -270,13 +274,14 @@ JZToolsHub/
 │   └── js/  main.js  tool.js  jz-icon.js
 ├── android-app/InfoParse/     # 移动端 APP（Kotlin，信息传输的 Android 离线接收端）
 ├── wheels/                    # ★ 第三方预编译 wheel（zfec，见 §2.3 与 wheels/README.md）
-├── runtime/                   # 离线运行组件下载目录（Chrome / LibreOffice 安装包，已 gitignore，约 517MB）
+├── runtime/                   # 离线运行组件下载目录（Chrome MSI + LibreOffice MSI/裁剪核心包，已 gitignore，约 517MB）
 ├── tools/                     # 开发/构建辅助脚本
 │   ├── build-zfec-wheel.py    #   重建 zfec wheel（本机编译产物重打为标准 wheel）
+│   ├── build-libreoffice-core.py # ★ 把 LibreOffice MSI 裁剪成便携核心包（357.5MB → 164.5MB）
 │   ├── fetch-offline-bundle.py#   ★ 下载离线运行组件到 runtime/（断点续传 + sha256 校验）
 │   ├── offline-components.json#   ★ 组件清单：URL / 版本 / 冻结 sha256 / 许可证（入库，可评审）
 │   └── offline-runtime/       #   ★ 随包分发的安装脚本与说明（会被复制进部署包的 runtime/）
-│       ├── setup-offline-runtime.ps1   # 安装 Chrome（MSI 静默）/ 解包 LibreOffice（免管理员）
+│       ├── setup-offline-runtime.ps1   # 装 Chrome（MSI 静默）/ 解压 LibreOffice 核心包（免管理员）
 │       ├── 安装离线组件.bat             # 双击入口（装 Chrome 需管理员）
 │       └── README.md                   # 组件清单、安装与校验说明
 ├── docs/                      # 设计文档（按功能/插件归档；含《离线部署包说明》）

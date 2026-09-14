@@ -14,12 +14,16 @@
 #       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
 #       默认会把仓库 runtime\ 下的离线运行组件（Chrome / LibreOffice 安装包）一并打进包，
 #       供无外网目标机部署；只想做瘦包时加 -SkipOfflineRuntime。
+#       LibreOffice 若已生成裁剪核心包（runtime\libreoffice\libreoffice-core.zip，
+#       用 tools\build-libreoffice-core.py 生成），打包时默认「用它替代原始 MSI」，
+#       包内体积由 357.5 MB 降到约 166 MB；仍要随包带完整 MSI 时加 -KeepFullLibreOffice。
 param(
     [string]$Python = "python",
     [string]$DeployName = "JZToolsHub",
     [string]$Version = "",
     [switch]$Force,
     [switch]$SkipOfflineRuntime,   # 不打包 runtime\ 离线运行组件（产出瘦包）
+    [switch]$KeepFullLibreOffice,  # 保留原始 LibreOffice MSI（不用裁剪核心包替代）
     [switch]$ZipOnly               # 跳过 PyInstaller 与目录组装，仅用既有部署目录重生成 zip
 )
 $ErrorActionPreference = "Stop"
@@ -172,9 +176,10 @@ Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留"
 
 # 3.2.2 离线运行组件（Chrome / LibreOffice 安装包 + 随包安装脚本）
 #   源 A：<仓库>\runtime\           —— 由 tools/fetch-offline-bundle.py 从官方源下载（已 gitignore）
+#        其中 libreoffice\libreoffice-core.zip 由 tools\build-libreoffice-core.py 生成（裁剪核心包）
 #   源 B：tools\offline-runtime\    —— 随包脚本与说明（入库，随每版一起更新）
-#   组装后：<AppDir>\runtime\{ manifest.json, README.md, 安装离线组件.bat,
-#                              setup-offline-runtime.ps1, chrome\*.msi, libreoffice\*.msi }
+#   组装后：<AppDir>\runtime\{ manifest.json, README.md, 安装离线组件.bat, setup-offline-runtime.ps1,
+#                              chrome\*.msi, libreoffice\{libreoffice-core.zip,.json} 或 libreoffice\*.msi }
 if ($SkipOfflineRuntime) {
     Write-Host "==> 跳过离线运行组件（-SkipOfflineRuntime）"
 } else {
@@ -192,11 +197,58 @@ if ($SkipOfflineRuntime) {
     }
     if (Test-Path $rtTools) { Copy-Item -Recurse -Force (Join-Path $rtTools "*") $rtDst }
 
+    $rtMf   = Join-Path $rtDst "manifest.json"
+    $coreZm = $null
+
+    # --- LibreOffice：默认用「裁剪核心包」替代原始 MSI（357.5 MB → 约 166 MB）---
+    #     核心包由 tools\build-libreoffice-core.py 生成：官方 MSI 管理安装解包后裁掉
+    #     词典/语言包/图标主题/字体等死重，只留 .doc→.docx 与 .xls→.xlsx 需要的那套。
+    $loDstDir = Join-Path $rtDst "libreoffice"
+    $coreZip  = Join-Path $loDstDir "libreoffice-core.zip"
+    $coreMeta = Join-Path $loDstDir "libreoffice-core.json"
+    if ((Test-Path $coreZip) -and (-not $KeepFullLibreOffice)) {
+        if (-not (Test-Path $coreMeta)) {
+            throw "包内有 libreoffice-core.zip 但缺 libreoffice-core.json，无法校验溯源。请重跑：python tools\build-libreoffice-core.py --force"
+        }
+        $cm = Get-Content $coreMeta -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ((Get-Item $coreZip).Length -ne [int64]$cm.artifact.size) {
+            throw ("libreoffice-core.zip 体积与元数据不符（{0} vs {1}）；请重跑：python tools\build-libreoffice-core.py --force" -f (Get-Item $coreZip).Length, [int64]$cm.artifact.size)
+        }
+        if ((Get-FileHash -LiteralPath $coreZip -Algorithm SHA256).Hash.ToLower() -ne ([string]$cm.artifact.sha256).ToLower()) {
+            throw "libreoffice-core.zip 的 sha256 与元数据不符；请重跑：python tools\build-libreoffice-core.py --force"
+        }
+        $srcMsiPath = Join-Path $loDstDir ([string]$cm.source.file)
+        if ((Test-Path $srcMsiPath) -and
+            ((Get-FileHash -LiteralPath $srcMsiPath -Algorithm SHA256).Hash.ToLower() -ne ([string]$cm.source.sha256).ToLower())) {
+            throw "runtime\libreoffice\$($cm.source.file) 与核心包的溯源 sha256 不符（换了 MSI 却没重建核心包）；请重跑：python tools\build-libreoffice-core.py --force"
+        }
+        Get-ChildItem -LiteralPath $loDstDir -Filter *.msi -File | Remove-Item -Force
+        $coreZm = $cm
+        $coreMb = [math]::Round($cm.artifact.size / 1MB, 1)
+        $unpMb  = [math]::Round($cm.artifact.unpacked_bytes / 1MB, 1)
+        Write-Host "  LibreOffice 改用裁剪核心包：libreoffice-core.zip（$coreMb MB，解包 $unpMb MB / $($cm.artifact.unpacked_files) 文件）"
+        Write-Host "    原始 MSI 已移出包外（要随包带完整版：-KeepFullLibreOffice）"
+    }
+
     # 清单自检：manifest.json 声明了什么，包里就必须有什么、且体积一致。
     # （缺文件不打自招是好事；怕的是「清单说有两个组件、实际只有一个」而无人察觉）
-    $rtMf = Join-Path $rtDst "manifest.json"
     if (Test-Path $rtMf) {
         $mf = Get-Content $rtMf -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($coreZm) {
+            # 包内清单必须如实反映「MSI 已被核心包替代」，否则校验必然误报
+            foreach ($c in $mf.components) {
+                if ($c.id -eq "libreoffice") {
+                    $c | Add-Member -NotePropertyName "core_pruned"    -NotePropertyValue $true -Force
+                    $c | Add-Member -NotePropertyName "source_msi"     -NotePropertyValue ([string]$coreZm.source.file) -Force
+                    $c | Add-Member -NotePropertyName "unpacked_bytes" -NotePropertyValue ([int64]$coreZm.artifact.unpacked_bytes) -Force
+                    $c.file    = "libreoffice-core.zip"
+                    $c.size    = [int64]$coreZm.artifact.size
+                    $c.sha256  = [string]$coreZm.artifact.sha256
+                    $c.install = "zip-unpack"
+                }
+            }
+            $mf | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $rtMf -Encoding UTF8
+        }
         $miss = @()
         $bad  = @()
         foreach ($c in $mf.components) {
@@ -215,7 +267,13 @@ if ($SkipOfflineRuntime) {
                                   Measure-Object Length -Sum).Sum / 1MB, 1)
         Write-Host "  离线组件自检通过：$($mf.components.Count) 个组件，runtime\ 合计 $rtTotal MB"
         $offlineSummary = @()
-        foreach ($c in $mf.components) { $offlineSummary += "$($c.id) $($c.version)" }
+        foreach ($c in $mf.components) {
+            if ($coreZm -and $c.id -eq "libreoffice") {
+                $offlineSummary += "libreoffice $($c.version)-core"
+            } else {
+                $offlineSummary += "$($c.id) $($c.version)"
+            }
+        }
     } else {
         Write-Warning "  包内没有 runtime\manifest.json —— 无法校验组件完整性"
     }

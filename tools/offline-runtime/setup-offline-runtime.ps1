@@ -17,9 +17,12 @@
 #   * Chrome      —— 全机安装，**需要管理员权限**。无管理员时脚本不报错，
 #                    而是打印手动安装指引（Chrome 不是应用运行的必要条件，
 #                    仅影响目标机的浏览体验/浏览器基线）。
-#   * LibreOffice —— 用 msiexec /a（管理安装）解包到 runtime\libreoffice\，
-#                    **不需要管理员、不写注册表**，解出的目录可直接运行；
-#                    应用会自动探测该目录下的 soffice.exe（零配置）。
+#   * LibreOffice —— 优先解压随包的「裁剪核心包」libreoffice-core.zip（约 166 MB，
+#                    解出约 558 MB）：只保留 .doc→.docx 与 .xls→.xlsx 需要的那套，
+#                    裁掉了词典/界面语言包/图标主题/字体等死重。
+#                    包内只有原始 MSI 时回退 msiexec /a（管理安装，解全量约 1.5 GB）。
+#                    两条路都**不需要管理员、不写注册表**，解出的目录可直接运行；
+#                    应用会自动探测其中的 soffice.exe（零配置）。
 #
 # 退出码：0 = 无硬失败；1 = 有组件尝试安装但失败（需人工处理）。
 # ============================================================================
@@ -131,35 +134,117 @@ function Find-SofficeUnder {
     return $null
 }
 
-function Install-LibreOfficeComponent {
-    $msi = Get-ComponentMsi "libreoffice"
-    if (-not $msi) {
-        Say "  [跳过] 未找到 libreoffice\*.msi（组件可能未被下载，见 runtime\README.md）"
-        return "missing"
+# 解压随包 zip（三级策略；.NET Framework 上 ZipFile.ExtractToDirectory 只有
+# (源,目标) 与 (源,目标,Encoding) 两个重载，**没有** bool 覆盖重载，别传 $true）
+function Expand-PayloadZip {
+    param([string]$ZipPath, [string]$DestDir)
+    try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch { }
+
+    # ① 最快：整包解压（要求目标文件都不存在 —— 正常的首次安装即是如此）
+    try {
+        [IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $DestDir)
+        return $true
+    } catch {
+        Say "  [提示] 整包解压不可用（$($_.Exception.Message)），改用逐条解压"
     }
-    $dest = Join-Path $RuntimeDir "libreoffice"
-    $found = Find-SofficeUnder $dest
+
+    # ② 逐条解压：可覆盖已存在文件
+    try {
+        $zip = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+        try {
+            foreach ($e in $zip.Entries) {
+                if ([string]::IsNullOrEmpty($e.Name)) { continue }   # 目录项，跳过
+                $target = Join-Path $DestDir ($e.FullName -replace '/', '\')
+                $parent = Split-Path -Parent $target
+                if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $target, $true)
+            }
+        } finally {
+            $zip.Dispose()
+        }
+        return $true
+    } catch {
+        Say "  [提示] 逐条解压不可用（$($_.Exception.Message)），回退 Expand-Archive"
+    }
+
+    # ③ 兜底：Expand-Archive（慢，但兼容性最好）
+    try {
+        Expand-Archive -LiteralPath $ZipPath -DestinationPath $DestDir -Force
+        return $true
+    } catch {
+        Say "  [失败] 解压失败：$($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Install-LibreOfficeComponent {
+    $loDir    = Join-Path $RuntimeDir "libreoffice"
+    $coreZip  = Join-Path $loDir "libreoffice-core.zip"
+    $coreMeta = Join-Path $loDir "libreoffice-core.json"
+
+    $found = Find-SofficeUnder $loDir
     if ($found -and -not $Force) {
         Say "  [跳过] 便携 LibreOffice 已就绪：$found"
         return "present"
     }
+
+    # ---- 路径 A（优先）：随包的裁剪核心包 ----
+    if (Test-Path $coreZip) {
+        $zipMb = [math]::Round((Get-Item $coreZip).Length / 1MB, 1)
+        if (Test-Path $coreMeta) {
+            try {
+                $m = Get-Content $coreMeta -Raw -Encoding UTF8 | ConvertFrom-Json
+                $unpMb = [math]::Round($m.artifact.unpacked_bytes / 1MB, 1)
+                Say "  [核心包] $($m.source.file) 的裁剪版：$zipMb MB → 解出 $unpMb MB / $($m.artifact.unpacked_files) 文件"
+            } catch {
+                Say "  [核心包] $zipMb MB（元数据解析失败，不阻断安装）"
+            }
+        } else {
+            Say "  [核心包] $zipMb MB"
+        }
+        if ($DryRun) {
+            Say "  [DryRun] 将解压 $coreZip 到 $RuntimeDir（包内路径以 libreoffice\ 打头）"
+            return "dryrun"
+        }
+        Say "  正在解压到：$RuntimeDir"
+        # 核心包内路径以 libreoffice\ 打头 → 解到 RuntimeDir 即得 runtime\libreoffice\program\soffice.exe
+        if (-not (Expand-PayloadZip -ZipPath $coreZip -DestDir $RuntimeDir)) {
+            return "failed"
+        }
+        $found = Find-SofficeUnder $loDir
+        if (-not $found) {
+            Say "  [失败] 解压完成但未找到 soffice.exe，请人工检查 $loDir"
+            return "failed"
+        }
+        Say "  [完成] 便携 LibreOffice 就绪：$found"
+        Say "         应用会自动探测该路径，无需在插件配置里指定 soffice_path。"
+        Say "         确认可用后可删除 $coreZip 释放约 $zipMb MB（部署包内仍有它，可随时重解）。"
+        return "installed"
+    }
+
+    # ---- 路径 B（回退）：只有原始 MSI 时走管理安装，解全量约 1.5 GB ----
+    $msi = Get-ComponentMsi "libreoffice"
+    if (-not $msi) {
+        Say "  [跳过] 未找到 libreoffice\*.msi / libreoffice-core.zip（组件可能未被下载，见 runtime\README.md）"
+        return "missing"
+    }
     if ($DryRun) {
-        Say "  [DryRun] 将执行：msiexec /a `"$msi`" /qn /norestart TARGETDIR=`"$dest`""
+        Say "  [DryRun] 将执行：msiexec /a `"$msi`" /qn /norestart TARGETDIR=`"$loDir`""
         return "dryrun"
     }
 
-    Say "  正在解包 LibreOffice 到：$dest"
+    Say "  正在解包 LibreOffice 到：$loDir"
     Say "  （管理安装模式：不写注册表、不需要管理员，解出的目录可直接运行）"
-    New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    $rc = Invoke-Msi -Arguments @("/a", $msi, "/qn", "/norestart", "TARGETDIR=$dest")
+    New-Item -ItemType Directory -Force -Path $loDir | Out-Null
+    $rc = Invoke-Msi -Arguments @("/a", $msi, "/qn", "/norestart", "TARGETDIR=$loDir")
     if ($rc -ne 0 -and $rc -ne 3010) {
         Say "  [失败] msiexec 退出码 $rc"
         return "failed"
     }
 
-    $found = Find-SofficeUnder $dest
+    $found = Find-SofficeUnder $loDir
     if (-not $found) {
-        Say "  [失败] 解包完成但未找到 soffice.exe，请人工检查 $dest"
+        Say "  [失败] 解包完成但未找到 soffice.exe，请人工检查 $loDir"
         return "failed"
     }
     Say "  [完成] 便携 LibreOffice 就绪：$found"
