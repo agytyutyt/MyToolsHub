@@ -1,10 +1,16 @@
 {
   "id": "info-transfer",
+  "name": "信息传输",
   "version": "1.0.0",
   "author": "JZToolsHub 团队",
   "icon": "📨",
   "accent": "#00897b",
   "entry": "index.html",
-  "features": ["信息封装", "信息解析", "静态/动态二维码", "文档提取"],
+  "features": [
+    "信息封装",
+    "信息解析",
+    "静态/动态二维码",
+    "文档提取"
+  ],
   "form": "source"
 }

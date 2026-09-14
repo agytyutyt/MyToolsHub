@@ -260,12 +260,30 @@ class Base(unittest.TestCase):
         rows = pa.list_plugins(self.base, self.root)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["id"], "demo")
+        # 展示名：tools.json 权威（规范 M-2）——沙箱里注册条目 name=演示，manifest 无 name
+        self.assertEqual(rows[0]["name"], "演示")
         self.assertEqual(rows[0]["code_version"], "1.0.0")
         self.assertTrue(rows[0]["registered"])
         self.assertFalse(rows[0]["enabled"])
         self.assertTrue(pa.set_plugin_enabled(self.root, "demo", True))
         self.assertTrue(pa.list_plugins(self.base, self.root)[0]["enabled"])
         self.assertFalse(pa.set_plugin_enabled(self.root, "no-such", True))
+
+    def test_display_name_priority(self):
+        """展示名优先级：tools.json（权威）→ manifest.name → id（规范 M-2 / §5.1）。"""
+        # 去掉 tools.json 里的 name → 回退 manifest.name
+        cfg_path = os.path.join(self.root, "config", "tools.json")
+        cfg = self.read_json(cfg_path)
+        for item in cfg["tools"]:
+            item.pop("name", None)
+        self.write_json(cfg_path, cfg)
+        self.write_json(os.path.join(self.pdir, "manifest.json"),
+                        {"id": "demo", "name": "演示插件", "version": "1.0.0", "entry": "index.html"})
+        self.assertEqual(pa.list_plugins(self.base, self.root)[0]["name"], "演示插件")
+        # 两者都没有 → 回退 id
+        self.write_json(os.path.join(self.pdir, "manifest.json"),
+                        {"id": "demo", "version": "1.0.0", "entry": "index.html"})
+        self.assertEqual(pa.list_plugins(self.base, self.root)[0]["name"], "demo")
 
     # ---- 阶段三：索引 / 检查更新 / 批量升级 ----
     def make_index(self, specs):

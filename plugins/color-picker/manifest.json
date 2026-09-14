@@ -1,15 +1,16 @@
 {
-    "id":  "color-picker",
-    "icon":  "🎨",
-    "accent":  "#EA4335",
-    "entry":  "index.html",
-    "features":  [
-                     "HEX",
-                     "RGB",
-                     "HSL",
-                     "一键复制"
-                 ],
-    "version":  "1.0.0",
-    "author":  "JZToolsHub 团队",
-    "form":  "source"
+  "id": "color-picker",
+  "name": "取色器",
+  "icon": "🎨",
+  "accent": "#EA4335",
+  "entry": "index.html",
+  "features": [
+    "HEX",
+    "RGB",
+    "HSL",
+    "一键复制"
+  ],
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "form": "source"
 }

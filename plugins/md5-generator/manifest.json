@@ -1,15 +1,16 @@
 {
-    "id":  "md5-generator",
-    "icon":  "#️⃣",
-    "accent":  "#FBBC05",
-    "entry":  "index.html",
-    "features":  [
-                     "计算",
-                     "校验",
-                     "HMAC",
-                     "文件"
-                 ],
-    "version":  "1.0.0",
-    "author":  "JZToolsHub 团队",
-    "form":  "source"
+  "id": "md5-generator",
+  "name": "MD5 生成器",
+  "icon": "#️⃣",
+  "accent": "#FBBC05",
+  "entry": "index.html",
+  "features": [
+    "计算",
+    "校验",
+    "HMAC",
+    "文件"
+  ],
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "form": "source"
 }

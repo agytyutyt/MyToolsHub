@@ -13,7 +13,10 @@
 (function () {
   const { api, showToast, getSession, renderUserMenu, esc, confirmDialog } = window.AdminCommon;
   let lastUpload = '';      // 最近一次上传成功的包文件名（应用时回传给服务端）
+  let lastUploadId = '';    // 最近一次上传成功的插件 id（提示语里显示中文名用）
   let indexRows = [];       // 最近一次"检查更新"的结果
+  let nameMap = {};         // 插件 id → 中文展示名（后端按 tools.json 权威来源给出）
+  const nm = (id, fallback) => nameMap[id] || fallback || id;
 
   function fmtSize(bytes) {
     if (!bytes && bytes !== 0) return '-';
@@ -66,7 +69,7 @@
     const banner = document.getElementById('restart-banner');
     if (!pending || !pending.length) { banner.hidden = true; return; }
     banner.hidden = false;
-    const names = pending.join('、');
+    const names = pending.map(id => nm(id)).join('、');
     document.getElementById('restart-banner-text').textContent =
       `${names} 的代码已更新，需重启服务后生效。`;
     document.getElementById('btn-restart').hidden = false;
@@ -76,6 +79,8 @@
   async function load() {
     try {
       const data = await api('/api/admin/plugins');
+      nameMap = {};
+      (data.plugins || []).forEach(p => { nameMap[p.id] = p.name; });
       renderRows(data.plugins || []);
       renderBanner(data.restart_pending, data.frozen);
       document.getElementById('app-version-note').textContent =
@@ -97,7 +102,8 @@
     return `
       <div class="plugin-plan">
         <div class="plugin-plan-head">
-          <b>${esc(res.id)}</b> ${esc(res.from_version || '（未安装）')} → <b>${esc(res.version)}</b>
+          <b>${esc(nm(res.id, res.name))}</b><span class="plugin-id">${esc(res.id)}</span>
+          ${esc(res.from_version || '（未安装）')} → <b>${esc(res.version)}</b>
           ${res.requires_restart ? '<span class="plugin-chip warn">需重启</span>'
                                  : '<span class="plugin-chip ok">前端更新，无需重启</span>'}
         </div>
@@ -110,7 +116,7 @@
           ? `<div class="plugin-plan-line warn">提示：${res.warnings.map(esc).join('；')}</div>` : ''}
         <div class="plugin-plan-actions">
           <button type="button" class="admin-btn primary" id="btn-apply">
-            确认应用到 ${esc(res.id)}</button>
+            确认应用到 ${esc(nm(res.id, res.name))}</button>
           <span class="plugin-muted">应用前会自动备份旧版到数据根 backups 目录</span>
         </div>
       </div>`;
@@ -128,6 +134,7 @@
     try {
       const res = await api('/api/admin/plugins/upload', { method: 'POST', body: fd });
       lastUpload = res.file;
+      lastUploadId = res.id;
       box.innerHTML = planHtml(res);
       const btn = document.getElementById('btn-apply');
       if (btn) btn.addEventListener('click', applyPackage);
@@ -141,13 +148,14 @@
 
   function applyPackage() {
     if (!lastUpload) { showToast('请先上传并校验插件包', true); return; }
+    const targetName = nm(lastUploadId);
     const body = {
       file: lastUpload,
       force: document.getElementById('opt-force').checked,
       purge_unknown: document.getElementById('opt-purge').checked,
       update_entry: document.getElementById('opt-update-entry').checked,
     };
-    confirmDialog('确认应用该插件包？应用会先备份旧版，再替换插件代码（用户数据不受影响）。', async () => {
+    confirmDialog(`确认将该插件包应用到「${targetName}」？应用会先备份旧版，再替换插件代码（用户数据不受影响）。`, async () => {
       const box = document.getElementById('inspect-result');
       box.innerHTML = '<div class="plugin-plan-line">应用中…</div>';
       try {
@@ -155,7 +163,8 @@
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
         });
         box.innerHTML = `<div class="plugin-plan">
-          <div class="plugin-plan-head">已应用：<b>${esc(res.id)}</b>
+          <div class="plugin-plan-head">已应用：<b>${esc(nm(res.id, res.name))}</b>
+            <span class="plugin-id">${esc(res.id)}</span>
             ${esc(res.from_version || '（未安装）')} → <b>${esc(res.to_version)}</b></div>
           <div class="plugin-plan-line">写入 ${res.written} 个文件，删除 ${res.deleted} 个，
             保留未知 ${res.kept_unknown} 个</div>
@@ -166,6 +175,7 @@
         </div>`;
         showToast('已应用');
         lastUpload = '';
+        lastUploadId = '';
         document.getElementById('pkg-file').value = '';
         await load();
       } catch (err) {
@@ -188,7 +198,7 @@
         if (!items.length) { showToast('该插件没有备份', true); return; }
         const opts = items.map((b, i) =>
           `<option value="${esc(b.name)}">${esc(b.name)}（${fmtSize(b.size)}）${i === 0 ? ' ← 最近' : ''}</option>`).join('');
-        const wrap = window.AdminCommon.openModal('回滚插件 ' + id, `
+        const wrap = window.AdminCommon.openModal('回滚插件：' + nm(id), `
           <div class="settings-form">
             <label for="rb-select">选择要恢复的备份</label>
             <select id="rb-select" class="admin-input">${opts}</select>
@@ -207,7 +217,7 @@
               method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ id, backup: name }),
             });
-            showToast(`已回滚 ${id}：${res.from_version} → ${res.to_version}`);
+            showToast(`已回滚 ${nm(id, res.name)}：${res.from_version} → ${res.to_version}`);
             if (res.dropped && res.dropped.length) {
               showToast(`注意：有 ${res.dropped.length} 个文件未包含在备份中，已丢弃`, true);
             }
@@ -239,7 +249,8 @@
       <tr>
         <td><input type="checkbox" data-id="${esc(r.id)}"
              ${r.upgrade_available ? 'checked' : 'disabled'}></td>
-        <td>${esc(r.id)}${r.requires_restart ? ' <span class="plugin-chip warn">需重启</span>' : ''}</td>
+        <td>${esc(nm(r.id, r.name))}<span class="plugin-id">${esc(r.id)}</span>
+          ${r.requires_restart ? '<span class="plugin-chip warn">需重启</span>' : ''}</td>
         <td>${esc(r.current || '（未安装）')} → <b>${esc(r.available)}</b></td>
         <td>${fmtSize(r.size)}</td>
         <td>${r.upgrade_available ? '<span class="plugin-chip ok">可升级</span>'
@@ -286,8 +297,8 @@
     const ids = Array.from(document.querySelectorAll('#index-result input[type=checkbox]:checked'))
       .map(c => c.getAttribute('data-id'));
     if (!ids.length) { showToast('请勾选要升级的插件', true); return; }
-    const needRestart = indexRows.filter(r => ids.includes(r.id) && r.requires_restart).map(r => r.id);
-    confirmDialog(`将升级 ${ids.length} 个插件：${ids.join('、')}。`
+    const needRestart = indexRows.filter(r => ids.includes(r.id) && r.requires_restart).map(r => nm(r.id, r.name));
+    confirmDialog(`将升级 ${ids.length} 个插件：${ids.map(id => nm(id)).join('、')}。`
       + (needRestart.length ? `其中 ${needRestart.join('、')} 含后端改动，完成后需重启服务。` : ''),
       async () => {
         const box = document.getElementById('index-result');
@@ -298,8 +309,8 @@
             body: JSON.stringify({ ids }),
           });
           const lines = (res.results || []).map(r => r.ok
-            ? `<div class="plugin-plan-line">✅ ${esc(r.id)}：${esc(r.from_version || '（未安装）')} → ${esc(r.to_version)}</div>`
-            : `<div class="plugin-plan-line warn">❌ ${esc(r.id)}：${esc(r.error)}</div>`).join('');
+            ? `<div class="plugin-plan-line">✅ ${esc(nm(r.id, r.name))}（${esc(r.id)}）：${esc(r.from_version || '（未安装）')} → ${esc(r.to_version)}</div>`
+            : `<div class="plugin-plan-line warn">❌ ${esc(nm(r.id, r.name))}（${esc(r.id)}）：${esc(r.error)}</div>`).join('');
           box.innerHTML = `<div class="plugin-plan">${lines}
             ${res.restart_needed ? '<div class="plugin-plan-line warn">有后端改动：请点上方「立即重启服务」</div>'
                                  : '<div class="plugin-plan-line">前端已生效（Ctrl+F5 强刷）</div>'}</div>`;

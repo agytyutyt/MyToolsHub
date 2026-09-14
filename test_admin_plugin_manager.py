@@ -198,6 +198,9 @@ class AdminPluginManagerTest(unittest.TestCase):
         self.assertTrue(data["ok"])
         rows = {p["id"]: p for p in data["plugins"]}
         self.assertEqual(rows["knowledge-base"]["code_version"], "0.9.0")
+        # 展示名走 tools.json（权威）：页面/接口显示中文名而不是英文 id
+        self.assertEqual(rows["knowledge-base"]["name"], "知识库")
+        self.assertEqual(rows["case-report"]["name"], "战果录入")
         self.assertEqual(rows["knowledge-base"]["data_bytes"] > 0, True)
         self.assertEqual(data["app_version"], "1.9.0")
 
@@ -213,6 +216,7 @@ class AdminPluginManagerTest(unittest.TestCase):
         self.assertTrue(up["ok"])
         self.assertEqual(up["id"], "knowledge-base")
         self.assertEqual(up["version"], "1.0.1")
+        self.assertEqual(up["name"], "知识库")     # 计划预览也显示中文名
         self.assertTrue(up["requires_restart"])
         self.assertEqual(up["plan"]["new"], 0)         # 沙箱里文件都在 → 都是"修改"
         self.assertGreaterEqual(up["plan"]["changed"], 2)   # routes.py + manifest.json 等

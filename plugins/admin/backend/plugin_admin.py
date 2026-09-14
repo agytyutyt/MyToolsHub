@@ -777,11 +777,33 @@ def set_plugin_enabled(data_root, pid, enabled, tools_cfg_path=None):
 
 # ======================== 总览（list） ========================
 
+def plugin_names(cfg):
+    """从 tools.json 取 id → 展示名 映射（规范 M-2：展示名的权威来源是 config/tools.json）。"""
+    names = {}
+    if isinstance(cfg, dict) and isinstance(cfg.get("tools"), list):
+        for item in cfg["tools"]:
+            if isinstance(item, dict) and item.get("id"):
+                nm = str(item.get("name") or "").strip()
+                if nm:
+                    names[item["id"]] = nm
+    return names
+
+
+def display_name(names, plugin_id, manifest=None, extra=None):
+    """插件展示名取值顺序：tools.json（权威）→ 调用方兜底（如包内 tools_entry）→
+    manifest.json 的 name（跨项目迁移兜底，规范 §5.1）→ id。"""
+    for src in (names.get(plugin_id), (extra or {}).get("name"), (manifest or {}).get("name")):
+        if src and str(src).strip():
+            return str(src).strip()
+    return plugin_id
+
+
 def list_plugins(base_dir, data_root, tools_cfg=None):
-    """列出所有插件的 代码版本 / 登记版本 / 待重启 / 备份 / 数据占用 / 启停状态。"""
+    """列出所有插件的 展示名 / 代码版本 / 登记版本 / 待重启 / 备份 / 数据占用 / 启停状态。"""
     plugins_root = os.path.join(base_dir, "plugins")
     state = read_state(data_root)
     cfg = read_json(tools_cfg) if tools_cfg else read_json(os.path.join(data_root, "config", "tools.json"))
+    names = plugin_names(cfg)
     enabled_map = {}
     hidden_map = {}
     if isinstance(cfg, dict) and isinstance(cfg.get("tools"), list):
@@ -800,7 +822,7 @@ def list_plugins(base_dir, data_root, tools_cfg=None):
         entry = _state_entry(state, pid) or {}
         rows.append({
             "id": pid,
-            "name": (manifest or {}).get("name") or pid,
+            "name": display_name(names, pid, manifest),
             "icon": (manifest or {}).get("icon") or "🧩",
             "code_version": str((manifest or {}).get("version") or ""),
             "state_version": str(entry.get("version") or ""),
@@ -854,17 +876,22 @@ def read_index(index_path, verify_hash=True):
 
 
 def check_updates(base_dir, data_root, index_path, verify_hash=True):
-    """把索引与已装版本比对，返回可升级/受阻清单（每项含原因）。"""
+    """把索引与已装版本比对，返回可升级/受阻清单（每项含中文展示名与原因）。"""
     idx = read_index(index_path, verify_hash=verify_hash)
     rows = []
     if not idx["ok"]:
         return {"ok": False, "error": idx["error"], "rows": []}
     state = read_state(data_root)
+    cfg = read_json(os.path.join(data_root, "config", "tools.json"))
+    names = plugin_names(cfg)
     for pkg in idx["packages"]:
         pid = pkg["id"]
         cur = installed_version(base_dir, pid)
+        manifest = read_json(plugin_manifest(base_dir, pid))
         row = {
-            "id": pid, "name": pid, "current": cur or "",
+            "id": pid,
+            "name": display_name(names, pid, manifest, extra=pkg),
+            "current": cur or "",
             "available": str(pkg.get("version") or ""),
             "requires_restart": bool(pkg.get("requires_restart")),
             "min_app_version": str(pkg.get("min_app_version") or ""),
@@ -902,27 +929,30 @@ def check_updates(base_dir, data_root, index_path, verify_hash=True):
 
 
 def batch_apply(base_dir, data_root, index_path, ids, verify_hash=True):
-    """按索引顺序应用多个插件包；返回逐项结果 + 是否需要重启。"""
+    """按索引顺序应用多个插件包；返回逐项结果（含中文展示名）+ 是否需要重启。"""
     idx = read_index(index_path, verify_hash=verify_hash)
     if not idx["ok"]:
         return {"ok": False, "error": idx["error"], "results": [], "restart_needed": False}
     by_id = {p["id"]: p for p in idx["packages"]}
+    names = plugin_names(read_json(os.path.join(data_root, "config", "tools.json")))
     results = []
     restart_needed = False
     for pid in ids:
         pkg = by_id.get(pid)
+        shown = display_name(names, pid, read_json(plugin_manifest(base_dir, pid)), extra=pkg or {})
         if not pkg or not pkg.get("exists"):
-            results.append({"id": pid, "ok": False, "error": "索引中找不到该插件的包（或文件不存在）"})
+            results.append({"id": pid, "name": shown, "ok": False,
+                            "error": "索引中找不到该插件的包（或文件不存在）"})
             continue
         inspected = inspect_package(pkg["path"], base_dir, data_root)
         if not inspected.get("ok"):
-            results.append({"id": pid, "ok": False,
+            results.append({"id": pid, "name": shown, "ok": False,
                             "error": "；".join(inspected.get("errors") or ["校验失败"])})
             continue
         report = apply_package(base_dir, data_root, inspected)
         if report.get("ok"):
             restart_needed = restart_needed or bool(report.get("restart_needed"))
-        results.append(dict(report, id=pid))
+        results.append(dict(report, id=pid, name=shown))
     return {
         "ok": all(r.get("ok") for r in results) if results else False,
         "results": results,

@@ -1371,6 +1371,25 @@ def register(app):
         info = get_session_user()
         return bool(info and info.get("super_admin"))
 
+    def _plugin_display_name(pid, extra_entry=None):
+        """插件中文展示名：数据根 tools.json（权威，规范 M-2）→ 包内/注册条目 → manifest.name → id。
+
+        后台页面与所有接口统一走这里，避免出现"表格是中文、计划预览是英文 id"的不一致。
+        """
+        if not pid:
+            return ""
+        try:
+            reg = load_registry()
+        except Exception:
+            reg = {}
+        names = plugin_admin.plugin_names(reg if isinstance(reg, dict) else {})
+        try:
+            manifest = plugin_admin.read_json(
+                os.path.join(PROJECT_DIR, "plugins", str(pid), "manifest.json")) or {}
+        except Exception:
+            manifest = {}
+        return plugin_admin.display_name(names, str(pid), manifest, extra=extra_entry or {})
+
     def _staging_uploads_dir():
         path = os.path.join(jztools_data.get_data_root(), ".staging", "uploads")
         os.makedirs(path, exist_ok=True)
@@ -1445,6 +1464,7 @@ def register(app):
         plan = inspected["plan"]
         return jsonify({
             "ok": True, "file": name, "id": meta.get("id"), "version": meta.get("version"),
+            "name": _plugin_display_name(str(meta.get("id") or ""), meta.get("tools_entry")),
             "from_version": inspected["from_version"],
             "requires_restart": inspected["restart_needed"],
             "restart_reason": inspected["restart_reason"],
@@ -1489,6 +1509,8 @@ def register(app):
                 pass
         report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(base, root)
                                      if r["restart_pending"]]
+        report["name"] = _plugin_display_name(str(inspected["meta"].get("id") or ""),
+                                               inspected["meta"].get("tools_entry"))
         return jsonify(report), (200 if report.get("ok") else 500)
 
     @app.get("/api/admin/plugins/backups")
@@ -1528,6 +1550,7 @@ def register(app):
         report = plugin_admin.rollback_plugin(PROJECT_DIR, jztools_data.get_data_root(), pid, backup)
         report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
                                      if r["restart_pending"]]
+        report["name"] = _plugin_display_name(pid)
         return jsonify(report), (200 if report.get("ok") else 500)
 
     @app.post("/api/admin/plugins/enable")
