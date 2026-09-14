@@ -266,8 +266,12 @@ def _run_filter_task(task_id, in_path, in_ext, out_path, out_ext, mode, keep, po
 # ===================== 路由注册 =====================
 
 def register(app):
+    # ★ 路由函数命名纪律：一律带插件前缀 ff_*。
+    # Flask 以 view_func.__name__ 作为 endpoint，若本插件定义 def status() 而其他插件
+    # 也定义同名函数，会在启动阶段抛 AssertionError 导致注册失败（历史缺陷：本插件
+    # 曾是全项目唯一不带前缀的路由集合）。详见 docs/P0问题修复方案.md FIX-4。
     @app.get(f"{API_PREFIX}/status")
-    def status():
+    def ff_status():
         cfg = load_config()
         return jsonify({
             "ok": True,
@@ -280,7 +284,7 @@ def register(app):
         })
 
     @app.get(f"{API_PREFIX}/config")
-    def get_config():
+    def ff_config_get():
         cfg = load_config()
         cfg = json.loads(json.dumps(cfg))  # 深拷贝
         llm_key = cfg["llm"]["api_key"]
@@ -290,7 +294,7 @@ def register(app):
         return jsonify(cfg)
 
     @app.post(f"{API_PREFIX}/config")
-    def post_config():
+    def ff_config_post():
         user = _viewer()
         if not _can_manage(user):
             return jsonify({"error": "仅管理员可修改过滤配置"}), 403
@@ -317,7 +321,7 @@ def register(app):
         return jsonify({"ok": True})
 
     @app.post(f"{API_PREFIX}/config/test")
-    def test_config():
+    def ff_config_test():
         if not _can_manage(_viewer()):
             return jsonify({"error": "仅管理员可测试大模型配置"}), 403
         data = request.get_json(silent=True) or {}
@@ -331,7 +335,7 @@ def register(app):
         return jsonify({"ok": ok, "detail": detail})
 
     @app.post(f"{API_PREFIX}/filter")
-    def filter_upload():
+    def ff_filter():
         user = _viewer()
         f = request.files.get("file")
         if f is None or not f.filename:
@@ -374,7 +378,7 @@ def register(app):
         return jsonify({"task_id": task_id, "mode": mode, "output_ext": out_ext})
 
     @app.get(f"{API_PREFIX}/result/<task_id>")
-    def filter_result(task_id):
+    def ff_result(task_id):
         if not TASK_ID_RE.match(task_id or ""):
             return jsonify({"error": "非法任务 ID"}), 400
         task = get_task(task_id)
@@ -400,7 +404,7 @@ def register(app):
         return jsonify(payload)
 
     @app.get(f"{API_PREFIX}/download/<task_id>")
-    def filter_download(task_id):
+    def ff_download(task_id):
         if not TASK_ID_RE.match(task_id or ""):
             return jsonify({"error": "非法任务 ID"}), 400
         task = get_task(task_id)
@@ -419,7 +423,7 @@ def register(app):
         return send_file(path, as_attachment=True, download_name=download_name)
 
     @app.post(f"{API_PREFIX}/apply")
-    def apply_filter():
+    def ff_apply():
         """程序化调用接口（供其他插件调用）：JSON in / JSON out，同步，不落盘。
 
         请求体：{

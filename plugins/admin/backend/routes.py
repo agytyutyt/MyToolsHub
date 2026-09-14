@@ -716,7 +716,7 @@ def register(app):
 
     @app.post("/api/account/password")
     @login_required
-    def account_change_password():
+    def admin_account_password():
         """自助修改密码：校验旧密码 → 新密码 ≥6 位且不得与旧密码相同。
 
         修改后保持当前会话有效（session 只存 username，不存密码指纹），不强制重登。

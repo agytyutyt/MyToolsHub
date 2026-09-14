@@ -75,6 +75,13 @@ _tool_meta_cache_ts = 0.0
 # 优先级高于 config/tools.json：声明了则用之，未声明则回退读取 tools.json。
 _plugin_home_card_hooks = {}
 
+# 插件后端加载失败记录 {插件id: "异常类型: 摘要"}。
+# 单个插件加载失败只影响它自己，绝不允许拖垮整站启动（规范 B-4 的同一精神）：
+# 典型场景是两个插件各写了 def status()，Flask 的 endpoint 重名会在注册阶段抛
+# AssertionError。任何异常都在 register_plugin_backends() 内被隔离并记录于此，
+# 供启动日志与故障排查使用；每次 register_plugin_backends() 执行时清空。
+_plugin_load_errors = {}
+
 # 打包运行（PyInstaller）时 Flask 内置 /static 默认指向 _internal/static，
 # 前端源码保留在 exe 同层，故显式指定 static_folder 指向部署根目录下的 static。
 if getattr(sys, "frozen", False):
@@ -572,30 +579,58 @@ def register_plugin_backends(app):
 
     admin（管理后台）为核心基础设施插件：不随 enabled 启停，始终加载，
     保证登录鉴权 / 后台接口 / 工具访问控制一直可用。
+
+    加载失败隔离：每个插件的后端加载（模块导入 + register(app)）整体包在
+    try/except 内。任一插件因 endpoint 冲突、依赖缺失、语法错误等原因失败时，
+    只记录到 _plugin_load_errors 并打日志告警，其余插件与整站启动不受影响。
     """
     global _plugin_home_card_hooks
     _plugin_home_card_hooks = {}  # 每次启动重新收集，避免跨重启残留旧钩子
+    _plugin_load_errors.clear()
 
     registry = load_registry()
     tools = list(registry.get("tools", []))
 
     def load_routes(plugin_id):
-        routes = _load_backend_module(plugin_id)
-        if routes is None:
-            return False
-        register = getattr(routes, "register", None)
-        if callable(register):
-            register(app)
-            app.logger.info(f"已注册后端插件：{plugin_id}")
-            # 方式一：登记插件首页卡片内容声明钩子（每次请求实时求值，失败不阻断加载）
-            hook = getattr(routes, "home_card", None)
-            if callable(hook):
-                _plugin_home_card_hooks[plugin_id] = hook
-                app.logger.info(
-                    f"插件 {plugin_id} 提供 home_card() 首页卡片内容声明钩子"
+        """加载单个插件后端；任何异常都被隔离，不影响其他插件与整站启动。
+
+        注意两个已知边界（不要在排查时误判为"万无一失"）：
+        1. register(app) 中途抛错时，它之前已注册的路由会残留在 Flask 上（无法
+           回滚）。隔离保证的是「整站能起来 + 错误可诊断」，不是「失败插件不留
+           半个后端」——根治仍靠路由函数命名纪律（带插件前缀）。
+        2. _load_backend_module 用 importlib.import_module 取 `.routes`，已缓存
+           的模块不会刷新；同进程内重复调用会拿到旧代码。插件后端改动必须重启
+           进程才生效。
+        """
+        try:
+            routes = _load_backend_module(plugin_id)
+            if routes is None:
+                return False
+            register = getattr(routes, "register", None)
+            if not callable(register):
+                _plugin_load_errors[plugin_id] = "未导出可调用的 register(app)"
+                app.logger.error(
+                    "插件 %s 的后端未导出 register(app)，已跳过", plugin_id
                 )
-            return True
-        return False
+                return False
+            register(app)
+        except Exception as exc:
+            _plugin_load_errors[plugin_id] = f"{type(exc).__name__}: {exc}"
+            app.logger.exception(
+                "插件 %s 的后端加载失败，已隔离：其他插件与整站启动不受影响",
+                plugin_id,
+            )
+            return False
+
+        app.logger.info(f"已注册后端插件：{plugin_id}")
+        # 方式一：登记插件首页卡片内容声明钩子（每次请求实时求值，失败不阻断加载）
+        hook = getattr(routes, "home_card", None)
+        if callable(hook):
+            _plugin_home_card_hooks[plugin_id] = hook
+            app.logger.info(
+                f"插件 {plugin_id} 提供 home_card() 首页卡片内容声明钩子"
+            )
+        return True
 
     # 管理后台：始终加载（即使 tools.json 中未注册或 enabled=false）
     if not load_routes("admin"):
