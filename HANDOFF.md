@@ -1,9 +1,11 @@
 # HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-14（文档全面重写：同步 git 实际状态、合并移动端章节、重排踩坑清单）。
+> 最后更新：2026-09-14（第二轮：**P0 六项已全部修复并实测通过**——模板与运行时配置命名分离
+> `config.template.json`、`file-filter` 路由统一 `ff_*` 前缀、插件加载失败隔离、数据目录指针
+> 移出版本库、打包版本号防呆；文档全面重写见第一轮）。
 > 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律）、
-> `20260914评估报告.md`（插件规范符合性与项目问题清单）。
+> `20260914评估报告.md`（插件规范符合性与项目问题清单）、`docs/P0问题修复方案.md`（本轮修复的方案与实测）。
 
 ---
 
@@ -71,9 +73,11 @@ python app.py
 | 项 | 值 |
 | --- | --- |
 | 当前分支 | `main` |
-| HEAD | `ca69141`（2026-09-14）知识库阅读页背景卡片贴合预览内容宽度 + 长 token 撑破版心的横向滚动条修复 |
+| HEAD | 本提交（P0 修复三连之三：`chore(repo)` 仓库卫生 + 文档同步） |
+| 前两次提交 | `03137d7` 插件路由统一前缀 + 后端加载失败隔离 / `8d0301d` 模板与运行时配置命名分离 + 打包版本号防呆 |
+| 此前基线 | `ca69141`（2026-09-14）知识库阅读页背景卡片贴合预览内容宽度 + 长 token 撑破版心的横向滚动条修复 |
 | 工作区 | **干净**（无未提交改动，无未跟踪文件） |
-| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`，`origin/main` 与本地一致 |
+| 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git`；**本轮三连提交尚未 push**，`origin/main` 仍在 `ca69141` |
 | 其他分支 | `G2改造`、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造`（均为历史功能分支，未合并） |
 
 > 早前版本文档记录的"大量未提交改动"与"最新提交 7269cb8"已过时：相关改动已随后续提交入库。
@@ -117,30 +121,35 @@ python app.py
 
 ### P0（建议下次发版前处理）
 
-| # | 事项 | 说明 |
+> **2026-09-14 更新：1~6 项已全部修复并实测通过**（方案见 `docs/P0问题修复方案.md`，实测结果见评估报告 §5.1）。
+> 仅剩第 1 项的发版动作待执行（代码已就绪，需重新打包并递增 `-Version`）。
+
+| # | 事项 | 状态 |
 | --- | --- | --- |
-| 1 | 重新打包并发版 | 2026-09-13 之后的知识库引擎改造尚未进入任何 zip；发版需递增 `-Version` |
-| 2 | 补齐 `prompt.json` 模板或清理同步清单 | `_TEMPLATE_SYNC` 与 `install.ps1` 仍登记两个 `prompt.json`，但仓库中文件已不存在，每次版本升级都会打印「缺少模板」告警；要么补回模板，要么从清单移除（详见评估报告 §5.2） |
-| 3 | 修复 `trajectory-sketch` 模板被打包脚本删除 | `build-deploy.ps1` 会删除插件树内所有 `config.json`，包括作为同步模板的 `trajectory-sketch/backend/config.json`（详见评估报告 §5.3） |
-| 4 | `config/data_root.json` 移出版本库 | 该文件被跟踪且含开发机绝对路径，克隆到新机器会指向错误数据目录；应加入 `.gitignore` |
-| 5 | 验证 `fmt=file` 端到端 | 桌面封装 → APP 扫码 → 导出 → 逐字节哈希比对 |
+| 1 | 重新打包并发版 | ⏳ **待执行**：2026-09-13 起（知识库引擎改造 + 本轮修复）尚未进入任何 zip；发版需递增 `-Version`（不传会自动递增，与上一版相同会直接报错中止） |
+| 2 | 清理/补齐模板同步清单 | ✅ 已修：模板统一改名 `config.template.json`，移除 2 条失效的 `prompt.json` 登记，补齐 case-report / character-graph / file-filter 三个模板。实测同步 **5 / 5 全绿**，4 个运行时 config.json 正确初始化 |
+| 3 | 模板被打包脚本删除 | ✅ 已修：模板改名后不再命中"删 `config.json`"规则（规则为精确名匹配）；`build-deploy.ps1` 新增打包后自检（`*.template.json` 少于 4 个即中止） |
+| 4 | `config/data_root.json` 移出版本库 | ✅ 已修：`.gitignore` + `git rm --cached`；`git ls-files config` 现只剩 `tools.json` |
+| 5 | 验证 `fmt=file` 端到端 | ⏳ **待真机**：桌面封装 → APP 扫码 → 导出 → 逐字节哈希比对 |
+| 6 | 单插件加载失败隔离 | ✅ 已修：`register_plugin_backends` 内 per-plugin try/except，失败记入 `app._plugin_load_errors` 并告警。实测"两个插件各定义 `def status()`"不再抛异常，仅 plug-b 被隔离，整站正常启动 |
 
 ### P1（功能与质量）
 
 | # | 事项 |
 | --- | --- |
-| 6 | `file-filter/backend/routes.py` 的 `def status()` 改为带前缀（如 `ff_status`），消除 endpoint 冲突隐患（当前唯一不带前缀的路由函数） |
-| 7 | 统一前端资源版本号起点与步长（现 case-report 用序号 v34、character-graph 用日期戳、admin 各页同一份 CSS 引用了 v1/v2/v5 三个版本） |
-| 8 | 清理随包分发的开发期文件：`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}`、`trajectory-sketch/frontend/icons/_generate.py`、`map-marker/frontend/*.py` |
-| 9 | 为 `file-filter`（🧹）补 SVG 回退图标，或统一 SVG 回退为按 codepoint 自动推导（不再维护硬编码映射表） |
-| 10 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
-| 11 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
+| 7 | ~~`file-filter` 的 `def status()` 改为带前缀~~ ✅ **2026-09-14 已修**：8 个路由函数统一 `ff_*` 前缀，`admin` 的 `account_change_password` → `admin_account_password`；实测 11 个插件 136 个 endpoint 全部注册成功 |
+| 8 | 统一前端资源版本号起点与步长（现 case-report 用序号 v34、character-graph 用日期戳、admin 各页同一份 CSS 引用了 v1/v2/v5 三个版本） |
+| 9 | 清理随包分发的开发期文件：`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}`、`trajectory-sketch/frontend/icons/_generate.py`、`map-marker/frontend/*.py` |
+| 10 | 为 `file-filter`（🧹）补 SVG 回退图标，或统一 SVG 回退为按 codepoint 自动推导（不再维护硬编码映射表） |
+| 11 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
+| 12 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
+| 13 | 在 `/api/tools` 暴露 `plugin_errors`（默认空 dict），首页对加载失败的插件显示"暂不可用"（本轮只做了日志与 `_plugin_load_errors` 记录） |
 
 ### P2（体验与规范）
 
 | # | 事项 |
 | --- | --- |
-| 12 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
+| 14 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
 | 13 | 在目标机做一次「全新安装 → 更新 → 卸载」三段式实测 |
 | 14 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 合计约 1.2GB（含 3 个历史版本目录与 11 个旧 zip） |
 | 15 | 生产部署评估：当前上限约 300 并发（Flask/waitress 单进程线程模型），高负载建议 Gunicorn 多进程 + Nginx 反代 |
@@ -210,7 +219,8 @@ python app.py
 
 ### 7.2 插件后端
 
-5. **Flask 视图函数名全局唯一 —— 路由函数必须带插件前缀**。两个插件各写一个 `def status()` 会在启动时抛 `AssertionError: View function mapping is overwriting an existing endpoint function`，导致插件整体加载失败（轨迹速写与过滤器曾因此撞车）。新增插件后务必重启并确认日志出现「已注册后端插件：\<id\>」。
+5. **Flask 视图函数名全局唯一 —— 路由函数必须带插件前缀**。两个插件各写一个 `def status()` 会在启动时抛 `AssertionError: View function mapping is overwriting an existing endpoint function`，导致注册中断（轨迹速写与过滤器曾因此撞车）。新增插件后务必重启并确认日志出现「已注册后端插件：\<id\>」。
+   *（2026-09-14 起框架已加 per-plugin 隔离：失败插件只记入 `app._plugin_load_errors` 并告警，不再拖垮整站。但隔离**无法回滚**已注册了一半的路由，命名纪律仍需遵守。）*
 6. **插件 backend 内跨模块 import 必须两步式兜底**：
    ```python
    try:
@@ -236,30 +246,35 @@ python app.py
 15. **旧浏览器 emoji 渲染不稳定**（Chrome 72/78）：新样式优先用纯文本或自绘 SVG，不要依赖 emoji 字体。SVG 回退登记表在 `static/js/jz-icon.js`。
 16. **知识库「已转换」提示用 `sessionStorage` 记忆关闭状态**，不能用 `localStorage`（一个文件被多人先后打开，互不影响）。
 
-### 7.4 打包 / 安装脚本
+### 7.4 打包 / 安装脚本与本地环境
 
 17. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
 18. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
-19. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**：在仓库根目录跑时，`config/data_root.json` 备份指针会让脚本误判为"既有安装 → 就地更新"，最后报"安装目录缺少 JZToolsHub.exe"。
+19. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1:264` 有守卫，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（`:276`）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
 20. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
-21. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
+    *（2026-09-14 起 `build-deploy.ps1` 已防呆：不传 `-Version` 会自动递增 patch；最终版本号与上一版相同时**直接报错中止**，确需同号重打要显式加 `-Force`。）*
+21. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（< 4 即中止）。
+22. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
+23. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
+24. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
+25. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
 
 ### 7.5 第三方库行为
 
-22. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
-23. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
-24. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
-25. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
-26. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
-27. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
+26. **openpyxl 四个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）。
+27. **Word 二进制 `.doc` 解析五个易错点**：① FIB 在 `WordDocument` 流 0x1A2 处的 `fcClx/lcbClx` 指向 `0Table`/`1Table` 的 CLX 分片；② PlcPcd 用可变长度 CPs；③ `\x07\x07` 是行结束（单 `\x07` 是单元格结束，`\r` 是段落结束）；④ 闭包捕获 `buf=[]` 后函数内 `buf=[]` 会重绑定，要用 `del buf[:]`；⑤ `close_row()` 不得给空缓冲区补单元格，否则凭空多出空列。
+28. **跨项目移植算法必须对齐计量口径**：地球半径取 6378137 且结果 `round()` 取整；地点簇建在"清洗后未去重的行"上；"采样间隔中位"含 0 间隔而阈值推导用有效间隔（Δt>0），两者不可混用。差一个采样点对拍就不一致。
+29. **xhr 渲染器的 `style_table[0]` 不是"默认样式"**而是"最先出现的样式"；缺格取 `[0]` 会把空白区染色（已在 vendor 副本打补丁，见 `backend/vendor/README.md`）。
+30. **LibreOffice 解包版 `soffice --version` 会挂起**；超时压到 10s 并吞异常（版本仅展示用）。固定 profile 复用（`<数据根>/.lo-profile`）可把冷启动从 37~40s 降到 15~18s；失败时重置 profile 再试一次。
+31. **给外部转换程序做测试夹具用 `.bat` 转调 Python**：`subprocess.run` 能直接跑 .bat 但不能跑 .py。
 
 ### 7.6 工具链
 
-28. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
-29. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
-30. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
-31. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
-32. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
+32. **Bash 工具 PATH 损坏**（`ls`/`wc`/`dirname` 可能 command not found），**PowerShell 的 stdout 可能被吞**——探测类命令写临时文件再用 Read 读取；`Read`/`Glob`/`Grep`/`Write`/`Edit` 工具不受影响，优先用它们。
+33. **Bash heredoc 会吃反斜杠**（`"\t"`/`"\n"` 落盘成真实制表符/换行导致 JS 语法错误）。含转义序列的补丁一律用 Write 工具写脚本文件再执行。
+34. **PowerShell 里跑含引号/花括号的 `python -c "..."` 极易翻车**；复杂断言先写临时 .py 再执行。
+35. **中文输出乱码大多是 PowerShell 管道显示问题**，数据本身是 UTF-8；断言写在 Python 代码里（`assert ... , dict`），别靠肉眼读控制台。
+36. **浏览器自动化（agent-browser）**：插件前端跑在 iframe 里，`click <css>` 默认作用于父文档会 "Element not found"，登录后直接开 `/plugin/<id>/index.html` 最省事；**每次 CLI 调用都是新会话**，登录与后续操作必须放进同一次 `batch`；默认视口约 1080×480，模态框高于视口时真实点击会落到遮罩上关掉浮窗，实测前先 `set viewport 1440 1000`；本机有 `http_proxy` 时要设 `no_proxy=127.0.0.1,localhost`。
 
 ---
 
@@ -405,7 +420,8 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | `HANDOFF.md`（本文件） | 开发状态、已完成/待办、架构决策、已知问题、踩坑清单、移动端 |
 | `插件设计规范.md` | 插件开发铁律（B-1~B-21、SEC-1~SEC-11、F-1~F-7、S-1~S-8、M-1~M-3、V-1~V-7） |
 | `移动端APP.md` | 信息传输协议权威规范（含错误文案逐字契约、判别顺序） |
-| `20260914评估报告.md` | 插件规范符合性分析、开发/更新/移除便利性评估、规范优化建议、项目问题清单 |
+| `20260914评估报告.md` | 插件规范符合性分析、开发/更新/移除便利性评估、规范优化建议、项目问题清单（P0 已修，附实测） |
+| `docs/P0问题修复方案.md` | P0 六项的补丁级方案 + 实施清单 + 实测结果（含两处与原方案不同的判断） |
 | `docs/` | 登录改造与数据隔离、容器化与插件热插拔、知识库、插件库优化方案、过滤器、轨迹速写、批量导入导出等设计文档 |
 
 ---

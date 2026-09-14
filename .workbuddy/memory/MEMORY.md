@@ -1,5 +1,29 @@
 # JZToolsHub 项目长期记忆
 
+## 三条硬约定（2026-09-14 修复 P0 后确立，改代码务必遵守）
+
+1. **配置模板必须命名 `config.template.json`，绝不叫 `config.json`**。
+   打包脚本按精确名删插件树内所有 `config.json`（清本机含 API Key 的运行时配置），
+   模板同名会被一起删掉，导致部署形态下模板同步**静默失效**（曾使 6 条登记项只剩
+   `tools.json` 有效）。新增带模板的插件要在 `jztools_data._TEMPLATE_SYNC` 与
+   `install.ps1` 的 `Sync-ConfigTemplates` **两处同时登记**；打包后脚本会自检
+   `*.template.json` 数量（< 4 即中止）。
+2. **插件后端路由函数名必须带插件前缀**（`kb_*` / `ts_*` / `ff_*` / `cr_*` / `admin_*` …）。
+   Flask 用 `view_func.__name__` 作 endpoint，两个插件各写 `def status()` 会抛
+   `AssertionError: View function mapping is overwriting an existing endpoint function`。
+   框架已加 per-plugin 隔离（失败记入 `app._plugin_load_errors`，不再拖垮整站），
+   但**隔离无法回滚已注册一半的路由**，纪律不能松。
+3. **发版打包不传 `-Version` 也会自动递增 patch**；版本号与上一版相同时
+   `build-deploy.ps1` **直接报错中止**（除非 `-Force`）。原因：版本号不变 →
+   目标机 `sync_templates()` 判定未升级 → 全部模板同步被跳过（"重打包了但配置没变"的真因）。
+
+## 数据根目录指针（易踩）
+
+`config/data_root.json` 是 `get_data_root()` 的**备份指针**（不是垃圾文件）：
+新机器克隆且主指针 `~/.jztoolshub.json` 缺失时，数据根会被解析成该文件里的路径。
+已 `.gitignore` + `git rm --cached`。别再加回版本库。
+`install.ps1` 的"既有安装判定"也读它，但 `:264` 有"必须含 exe"守卫，**别拆**。
+
 ## 文档体系（2026-09-14 重写后的结构，改文档按此走）
 
 - `README.md`：项目简介 → 环境搭建 → 运行与构建 → 目录结构 → 核心模块解析 →

@@ -599,10 +599,21 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 | 模板（程序目录 → 数据根目录） | 模式 | 含义 |
 | --- | --- | --- |
-| `plugins/case-report/backend/prompt.json` | overwrite | 覆盖，旧文件备份 `.bak-old` |
-| `plugins/character-graph/backend/prompt.json` | overwrite | 同上 |
 | `config/tools.json` | merge-tools | 新分类/新工具追加，保留用户启停与排序 |
-| `plugins/*/backend/config.json` | ensure-keys | 只补模板新增键，保留用户 LLM 配置等 |
+| `plugins/case-report/backend/config.template.json` | ensure-keys | 只补模板新增键，保留用户 LLM 配置 |
+| `plugins/character-graph/backend/config.template.json` | ensure-keys | 同上（含 `ui.api_source`） |
+| `plugins/trajectory-sketch/backend/config.template.json` | ensure-keys | 保留管理员自定义的保留字段名单 / 列映射 / 阈值 / 报告文案 |
+| `plugins/file-filter/backend/config.template.json` | ensure-keys | 保留管理员配置（保留字段名单 / 后处理规则 / LLM） |
+
+> **模板命名纪律：配置模板一律命名 `config.template.json`，与运行时 `config.json` 分离。**
+> 打包脚本会删除插件树内所有 `config.json`（清掉本机含 API Key 的运行时配置），模板若沿用
+> `config.json` 命名会被一并删除，导致同步链路静默失效。新增带模板配置的插件时，必须在
+> `jztools_data._TEMPLATE_SYNC` 与 `install.ps1` 的 `Sync-ConfigTemplates` **两处同时登记**且保持一致
+> （`build-deploy.ps1` 打包后会自检 `*.template.json` 数量，防止误删）。
+>
+> **提示词（`prompt.json`）不再随版本下发**：模板已删除，提示词由插件内 `llm_client` 的内置默认值
+> 提供（代码即唯一来源）。如需在目标机调整，直接手写 `<数据根>/plugins/<id>/prompt.json` 即可，
+> 插件的 `load_prompt()` 存在即优先读取，且从此不会被版本升级覆盖。
 
 双保险：`install.ps1` 的 `Sync-ConfigTemplates` 在安装时也做等价合并；即使手动替换程序文件夹，app 启动时也会自动同步。
 
@@ -652,7 +663,9 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 升级后大模型解析效果没变 | 版本号未递增，模板同步未触发 |
 | 图标显示为方块 | 前端 emoji 依赖系统 emoji 字体；框架内置 SVG 回退（`static/icons/` + `jz-icon.js`），新增插件图标请在该文件登记 |
 
-> **仓库中的 `config/data_root.json` 是开发机产物**（含开发机绝对路径）。克隆到新机器后如发现数据根目录指向他人路径，删除该文件即可回落到默认 `~/.jztoolshub`。
+> **`config/data_root.json` 已移出版本库**（含机器相关的绝对路径，且是 `get_data_root()` 的备份指针）。
+> 若在旧克隆里发现数据根目录指向他人路径，删除该文件即可回落到默认 `~/.jztoolshub`；
+> 程序首启或管理员改数据目录时会自动重写它。
 
 ---
 
@@ -660,14 +673,18 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 1. **ID 三处一致**：目录名 = `manifest.id` = `tools.json` 的 `id`，仅允许 `[A-Za-z0-9_-]`。
 2. **改了 JS/CSS 必须递增 `?v=N`**：`/plugin/` 下静态资源 1 天强缓存，这是本项目最常踩的坑。
-3. **后端路由统一挂 `/api/<id>/`**，路由函数带插件前缀，避免 endpoint 冲突。
+3. **后端路由统一挂 `/api/<id>/`**，且**路由函数名必须带插件前缀**（如 `kb_status`、`ff_filter`）。
+   Flask 以 `view_func.__name__` 作为 endpoint，两个插件各写一个 `def status()` 会在启动阶段抛
+   `AssertionError` 导致注册失败。框架已对单个插件的加载失败做隔离（只记录到
+   `app._plugin_load_errors` 并告警，不再拖垮整站），但仍应遵守命名纪律——隔离不能回滚
+   已经注册了一半的路由。
 4. **长耗时必须异步化**（>3 秒）：提交即返回 `task_id` + 轮询；有界线程池 + TTL 30 分钟 + 归属校验。
 5. **数据只写数据根目录**：用 `jztools_data.get_data_root_dir/file()`，禁止拼绝对路径或写别的插件目录。
 6. **归属四字段取自会话**：`created_by` / `created_by_name` / `unit_id` / `department_id`，**禁止**从请求体接收；列表接口必须按可见性过滤（越权读 404、越权写 403）。
 7. **禁止 import 其他插件后端模块**（B-7）；需要复用能力就提供程序化 HTTP 接口（参考 `file-filter` 的 `/apply`）。
 8. **禁止插件自行落盘访问日志**（B-8）；用 `set_operation("描述")` 标记具体操作。
 9. **敏感配置外置**：API Key 写 `backend/config.json`（gitignore）或由用户在页面录入，禁止硬编码入库。
-10. **前端资源用相对路径**；`data/` 与含密钥的 `config.json` 必须 gitignore。
+10. **前端资源用相对路径**；`data/` 与含密钥的 `config.json` 必须 gitignore；**随版本下发的配置模板必须命名 `config.template.json`**（不得叫 `config.json`，否则会被打包清理规则删掉）。
 11. **自包含验收**：把插件目录 + 一段 `tools.json` 注册片段复制到全新部署即可完整工作。
 12. **卸载顺序**：先删 `tools.json` 条目 → 备份数据 → 再删目录（顺序反了会留下悬空引用）。
 

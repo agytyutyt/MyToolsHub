@@ -20,6 +20,11 @@ logs/
 config/admin.json
 config/.admin_key
 
+# 数据根目录备份指针（机器相关：含本机绝对路径，且是 get_data_root() 的兜底来源。
+# 一旦入库，新机器克隆后会把数据根解析到原作者的用户目录，可能静默读写他人数据。
+# 首启/改数据目录时程序会自动重写本文件。）
+config/data_root.json
+
 # 插件本地运行配置（含密钥，勿提交；无密钥的纯字段配置可按需跟踪）
 plugins/character-graph/backend/config.json
 plugins/case-report/backend/config.json
