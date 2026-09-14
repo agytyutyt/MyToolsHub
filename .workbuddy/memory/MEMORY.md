@@ -16,10 +16,10 @@
 
 ## B 分发物：主包（默认瘦身）+ 独立离线组件包
 
-- **主包 `deploy/JZToolsHub-v<版本>.zip` 默认不含 Chrome / LibreOffice**（第六轮定，约 **122MB**；
-  部署目录约 260MB / 2888 文件，**无 `runtime/` 目录**）。`-WithOfflineRuntime` 才回退到胖包
-  （约 437MB，含 `runtime/`）；`-SkipOfflineRuntime` 是旧开关，已等价于默认。
-  原因：v1.8 的 437.5MB 里 324MB 是组件，而组件只服务部分目标机。
+- **主包 `deploy/JZToolsHub-v<版本>.zip` 默认不含 Chrome / LibreOffice**（第六轮定，实测
+  v1.9.0 = zip **122.0MB**；部署目录 **260.5MB / 2889 文件**，**无 `runtime/` 目录**）。
+  `-WithOfflineRuntime` 才回退到胖包（v1.8 为 437.5MB，含 `runtime/`）；`-SkipOfflineRuntime`
+  是旧开关，已等价于默认。原因：v1.8 的 437.5MB 里 324MB 是组件，而组件只服务部分目标机。
 - **组件包（`tools/build-offline-component.ps1` 产出，与主包并列分发）**：
   `JZToolsHub-离线组件-LibreOffice核心-<v>.zip` ≈163MB（**免管理员**）/
   `JZToolsHub-离线组件-Chrome-<v>.zip` ≈160MB（**需管理员**）。
@@ -94,6 +94,13 @@
   报 `[SandboxError] … CreateProcessW 失败 (win32_err=5, ERROR_ACCESS_DENIED) [target=…powershell.EXE]`
   ——**不是真的权限问题，是命令规模触发的沙箱限制**。短命令正常，长命令必挂；`Set-ExecutionPolicy`
   本身也会触发。对策：长逻辑写进 `.ps1`，命令只留 `powershell.exe … -File <脚本> -短参数`；或拆成多条短命令。
+- **★ 跑构建脚本不要加 `2>&1 | Out-File`**：PyInstaller 写到 stderr 的普通 INFO 在 `2>&1` 合并后会被
+  PowerShell 渲染成 `NativeCommandError` → 外层管道中止 → **内层 powershell.exe 被连带杀掉**。
+  现象误导性极强：日志停在 `Building COLLECT`（像 COLLECT 失败），实际 `dist/` 已产出、只是还没组装
+  `deploy/` 就被杀，且清理脚本已删掉旧 `deploy/JZToolsHub/` → 看着像"从头失败"。
+  **正解：直接 `powershell … -File build-deploy.ps1 -Version "x.y.z"`，不加任何重定向**；
+  成败看 `deploy/*.zip` 与 `deploy/JZToolsHub/version.json`，别只看日志尾部。
+  （`Compress-Archive` 刷数万行进度条导致工具输出被截断是正常的。）
 - **Bash 工具 PATH 损坏**（ls/wc/dirname 找不到）；**PowerShell 正常但 stdout 会被吞** →
   探测类命令写临时文件再 Read，用完删。Read/Glob/Grep/Write/Edit 不受影响，优先用它们。
 - **沙箱会误报，以脚本自身日志为准**：命令含 `C:\Windows\System32\...` 路径、用 `Start-Process`、

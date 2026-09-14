@@ -117,10 +117,11 @@ python app.py
 
 | 项 | 值 |
 | --- | --- |
-| 部署目录 | `deploy/JZToolsHub/` — 约 **260 MB / 2888 个文件**（**无 `runtime/` 目录**） |
-| 分发包 | `deploy/JZToolsHub-v1.9.zip` — 约 **122 MB** |
-| 版本 | `1.9`（上一版 1.8） |
-| 打包解释器 | Python **3.14.7**（基线 3.14，符合） |
+| 部署目录 | `deploy/JZToolsHub/` — **260.5 MB / 2889 个文件**（**无 `runtime/` 目录**） |
+| 分发包 | `deploy/JZToolsHub-v1.9.0.zip` — **122.0 MB** |
+| 版本 | `1.9.0`（上一版 1.8） |
+| 打包解释器 | Python **3.14.7**（基线 3.14，符合；依赖完整性检查 14/14） |
+| 构建提交 | `aea8894`（写入 `version.json.commit`；构建时工作区干净，**无 `-dirty`**） |
 | 离线组件 | **主包不含**（`version.json.offline` 为空串）；Chrome/LibreOffice 由组件包单独分发 |
 | 体积构成 | `_internal/` 224.4 MB、`JZToolsHub.exe` 19.0 MB、`plugins/` 16.1 MB，其余不足 1 MB |
 
@@ -409,6 +410,15 @@ python app.py
     ——**这不是真的权限问题，而是命令规模触发的沙箱限制**。短命令正常，长命令必挂；`Set-ExecutionPolicy` 本身也会触发。
     对策：把长逻辑写进 `.ps1` 文件，命令只留 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <脚本> -短参数`；
     或把命令拆成多条短命令。**别据此断定"沙箱禁止了 PowerShell"**。偶尔连短命令也失败是环境瞬时不稳，重试即可。
+50. **跑打包/构建脚本时不要加 `2>&1 |` 重定向**（2026-09-14 实测，会静默杀掉构建）：
+    `powershell … -File build-deploy.ps1 … 2>&1 | Out-File build.log` 会把 PyInstaller 写到 stderr 的
+    普通 INFO 日志在合并后渲染成 `NativeCommandError`（`RemoteException`），外层管道据此中止，
+    **内层 `powershell.exe` 被连带杀掉**。现象极具误导性：日志停在 `Building COLLECT`（像 COLLECT 失败），
+    而实际 `dist/JZToolsHub/` 已完整产出、只是**还没走到组装 `deploy/` 就被杀**，且清理脚本已把
+    `deploy/JZToolsHub/` 删掉 → 现场像"从头失败"。
+    **正解：直接 `powershell -NoProfile -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "x.y.z"`，
+    不加任何重定向**；判断成败看 `deploy/*.zip` 与 `deploy/JZToolsHub/version.json`，不要只看日志尾部。
+    另注：`Compress-Archive` 会往 stdout 刷数万行进度条导致工具输出被截断，属正常现象。
 
 ---
 
