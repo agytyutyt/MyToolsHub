@@ -20,6 +20,10 @@
   `routes.py:_maybe_auto_restart()`（`/apply`、`/rollback`、`/batch-apply`：批量有失败项则跳过重启）；
   响应回 `restarting` / `restart_message`，前端 `waitAndReload()` 轮询到服务恢复再刷新。
   **顺序是"先替换、后停服"**（替换失败时服务仍活着可回滚），不是先停服。
+- **后端用 `errors[]` 给原因的接口，400 响应必须同时给 `error` 摘要**（admin ≥1.3.1）：
+  前端通用 `api()` 抛错只取 `data.error`，否则管理员只看到"HTTP 400"（现场无法自助）。
+  插件包校验被拒的四大类：同版本重装 / 主程序版本过低或程序目录缺 `version.json` /
+  包损坏哈希不符 / 全新安装缺 `tools_entry`。
 - **插件依赖白名单的真源 = `JZToolsHub.spec` 的 `PACKAGES`**（出包工具 C-4 校验读它）。
   插件后端 import 了第三方库却报"框架未打包"时，**先往 PACKAGES 登记，不要 `-SkipChecks`**
   （flask / werkzeug 就是这么补进去的）。
@@ -84,6 +88,10 @@
 - venv：`C:\Users\yfjz\.workbuddy\binaries\python\envs\default\Scripts\python.exe`（flask/openpyxl/python-docx 全）。
 - 编码约定：.ps1 = UTF-8 BOM + CRLF；.bat = GBK + CRLF（不要 chcp 65001）；JSON = UTF-8 无 BOM。
 - 沙箱会误报（System32 路径、Start-Process、长任务收尾都可能触发 SandboxError）——以脚本自身日志/产物为准。
+- **沙箱 safe-delete 会拦"一次删 >50 项"**：上传 25 文件的插件包时，服务端清理 staging 会命中
+  → 进程被中断、浏览器只看到 `Failed to fetch`。**验证插件包一律用 3 文件的小包**
+  （`test_admin_plugin_manager.make_package` 造），别拿真包打本地服务。
+- 服务端进程崩时看日志：输出重定向到 **Windows 路径**再读（Bash 的 `/tmp/x.log` 与 python 不通）。
 
 ## E 测试隔离（保护真实数据 `~/.jztoolshub`）
 
