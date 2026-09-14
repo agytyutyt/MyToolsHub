@@ -238,6 +238,8 @@ if ($SkipOfflineRuntime) {
             # 包内清单必须如实反映「MSI 已被核心包替代」，否则校验必然误报
             foreach ($c in $mf.components) {
                 if ($c.id -eq "libreoffice") {
+                    # 名称也要跟着改：清单里仍写「完整版 MSI」会与包内实际形态（裁剪核心包）自相矛盾
+                    $c.name    = "LibreOffice $($c.version) 裁剪核心包（.doc→.docx / .xls→.xlsx 所需子集，源 MSI 派生）"
                     $c | Add-Member -NotePropertyName "core_pruned"    -NotePropertyValue $true -Force
                     $c | Add-Member -NotePropertyName "source_msi"     -NotePropertyValue ([string]$coreZm.source.file) -Force
                     $c | Add-Member -NotePropertyName "unpacked_bytes" -NotePropertyValue ([int64]$coreZm.artifact.unpacked_bytes) -Force

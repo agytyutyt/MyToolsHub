@@ -92,7 +92,9 @@ python app.py
 | 项 | 值 |
 | --- | --- |
 | 当前分支 | `main` |
-| HEAD | 本提交（第三轮：取消 Win7 + vendor 补丁 + zfec wheel + 版本基线固化） |
+| HEAD | `6ad5a6b`（第四轮：LibreOffice 随包裁剪核心包 + v1.8 出包） |
+| 第四轮（核心包瘦身） | `6ad5a6b` LibreOffice 核心包替代 MSI（分发包 618.4 → **437.5 MB**，并改写包内 manifest）；`9c8b0af` 打包标注脏工作区 + `-ZipOnly` |
+| 第三轮（离线部署） | `fd06e32` 离线部署包随包分发 Chrome / LibreOffice；`9bc0d53` 取消 Win7 兼容 + OS/浏览器双基线 |
 | 第二轮（P0 修复三连） | `e907b5e` 日志补记 / `05cc6ea` 仓库卫生与文档 / `03137d7` 路由前缀与加载隔离 / `8d0301d` 模板命名分离与打包防呆 |
 | 第一轮（文档重写） | `7d2d3dc` README/HANDOFF 全面重写 + 新增 20260914 评估报告 |
 | 此前基线 | `ca69141`（2026-09-14）知识库阅读页背景卡片贴合预览内容宽度 + 长 token 撑破版心的横向滚动条修复 |
@@ -105,25 +107,30 @@ python app.py
 
 ### 2.2 产物状态
 
-**最新产物：v1.7 离线部署包（2026-09-14）**
+**最新产物：v1.8 离线部署包（2026-09-14）**
 
 | 项 | 值 |
 | --- | --- |
-| 部署目录 | `deploy/JZToolsHub/` — **777.5 MB / 2886 个文件** |
-| 分发包 | `deploy/JZToolsHub-v1.7.zip` — **618.4 MB** |
-| 版本 | `1.7`（上一版 1.6，脚本自动递增） |
+| 部署目录 | `deploy/JZToolsHub/` — **584.6 MB / 2891 个文件** |
+| 分发包 | `deploy/JZToolsHub-v1.8.zip` — **437.5 MB** |
+| 版本 | `1.8`（上一版 1.7，脚本自动递增） |
 | 打包解释器 | Python **3.14.7**（基线 3.14，符合） |
-| 构建提交 | `fd06e32`（写入 `version.json.commit`；构建时工作区有未提交改动，已按提交后内容校正） |
-| 离线组件 | Chrome 企业版 MSI 159.6 MB + LibreOffice 26.8.0 MSI 357.5 MB（`runtime/` 合计 517.2 MB） |
-| 包内新改动 | 知识库 Office 预览引擎改造（09-13）+ P0 六项修复 + 离线部署能力 |
+| 构建提交 | `6ad5a6b`（写入 `version.json.commit`；构建时工作区干净，**无 `-dirty`**） |
+| 离线组件 | Chrome 企业版 MSI 159.6 MB + LibreOffice 26.8.0 **裁剪核心包** 164.5 MB（`runtime/` 合计 324.1 MB） |
+| 包内新改动 | LibreOffice 裁剪核心包随包（省约 181 MB）+ 知识库 Office 预览引擎改造 + P0 六项修复 + 离线部署能力 |
 
-体积构成：`_internal/` 224.4 MB（Python 运行时与依赖）、`runtime/` 517.2 MB（离线组件）、
+体积构成：`_internal/` 224.4 MB（Python 运行时与依赖）、`runtime/` 324.1 MB（离线组件）、
 `JZToolsHub.exe` 19.0 MB、`plugins/` 16.1 MB，其余不足 1 MB。
 
-> 相对 v1.6（约 102 MB）体积增长 6 倍，全部来自随包分发的两个第三方安装包。
-> 不想带它们：`build-deploy.ps1 -SkipOfflineRuntime` 出瘦包。
+> LibreOffice 由**完整版 MSI（357.5 MB）改为裁剪核心包（164.5 MB）**：应用只用到
+> `.doc→.docx`（dhr）与 `.xls→.xlsx`（xhr）两条 soffice 转换，UI / 帮助 / 词典 / 语言包 /
+> 图标主题都是死重。打包时自动替代并**改写包内 `manifest.json`**（`install=zip-unpack`、
+> `core_pruned=true`、`source_msi`、`unpacked_bytes`）；仍要随包带完整版加 `-KeepFullLibreOffice`
+> （体积回到约 630 MB）。核心包重建用 `tools/build-libreoffice-core.py`，裁剪理由与清单见
+> `docs/离线部署包说明.md` §3。
+> 不想带离线组件：`build-deploy.ps1 -SkipOfflineRuntime` 出瘦包。
 > 只改了文档要重出 zip：`build-deploy.ps1 -ZipOnly`（跳过 PyInstaller 与组装，实测约 2 分钟，
-> 但**要先把新文件复制进 `deploy/JZToolsHub/`**）。全量打包约 16 分钟。
+> 但**要先把新文件复制进 `deploy/JZToolsHub/`**）。全量打包实测在 10 分钟内跑完。
 
 ### 2.3 无硬性阻塞，但以下事项未充分验证
 
@@ -140,6 +147,7 @@ python app.py
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-14 | **LibreOffice 裁剪核心包 + v1.8 发版** | 应用只需 `.doc→.docx` / `.xls→.xlsx` 两条 soffice 转换，故不再随包分发完整版 MSI：新增 `tools/build-libreoffice-core.py`（`msiexec /a` 解包 → 裁剪 → **构建期全新 profile 冒烟测试** → zip + 溯源元数据），1522.6MB / 19418 文件 → **557.9MB / 2824 文件**、zip 164.5MB；`build-deploy.ps1` 默认用核心包替代 MSI 并改写包内 `manifest.json`（`-KeepFullLibreOffice` 可保留完整版，且校验核心包与源 MSI 的 sha256）；`setup-offline-runtime.ps1` 优先解压核心包（三级回退）→ 安装从 95~130s 降到约 24s；`fetch-offline-bundle.py` 加 `--core`。产出 `JZToolsHub-v1.8.zip`（**437.5MB**，较 v1.7 少约 181MB）。**关键坑：`presets\` 不能删（全新 profile 下 rc=77），且测裁剪安全性必须每次用全新 profile；`msiexec /a` 忽略 `ADDLOCAL`** |
 | 2026-09-14 | **离线部署包打通 + v1.7 发版** | `runtime/` 随包分发 Chrome 企业版 MSI（159.6MB）与 LibreOffice 26.8.0 MSI（357.5MB）；新增 `tools/fetch-offline-bundle.py`（断点续传 + sha256 冻结校验，清单入 `tools/offline-components.json`）与 `tools/offline-runtime/setup-offline-runtime.ps1`（Chrome 静默安装 / **LibreOffice `msiexec /a` 免管理员解包**）；`office_render` 新增便携 soffice 三级探测（**零配置**）；`install.ps1` 安装末尾自动处理离线组件且**失败不阻断**，并修掉覆盖 `version.json` 溯源字段的缺陷；打包脚本新增**离线组件完整性自检**与 `-SkipOfflineRuntime` / `-ZipOnly`；产出 `JZToolsHub-v1.7.zip`（618.4MB）。文档见 `docs/离线部署包说明.md`。实测：`.xls→.xlsx` 归一化、应用自动探测、`render_sheet` 真实渲染全绿 |
 | 2026-09-14 | 知识库阅读体验收尾 | `.reader-frame` 改 `width: fit-content` 贴合预览内容宽度；Word 超版心固定宽表格在卡片内横向滚动；长 token 断词修复横向滚动条（style.css v24） |
 | 2026-09-13 | 知识库 Office 预览引擎替换 | 引入 `backend/vendor/{xhr,dhr}` 双引擎（纯标准库，零新增 pip 依赖），**舍弃** LibreOffice 转 PDF 与 openpyxl 手绘 HTML 两套旧方案；新增适配层 `office_render.py`；`/preview` 改为按需同步渲染 + 磁盘缓存 `<id>.preview.json`，失败 404 前端回退 mammoth/SheetJS |

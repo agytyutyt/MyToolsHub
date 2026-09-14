@@ -16,8 +16,9 @@
 
 ## B 离线部署包 `deploy/JZToolsHub-v<版本>.zip`
 
-- v1.8 ≈ **0.42GB** / 部署 ≈ 584MB & 2888 文件。大头：Chrome 企业版 MSI 159.6MB +
-  LibreOffice **裁剪核心包** 164.5MB（`runtime/` 合计 ≈ 324MB）。
+- v1.8 **实测**：zip **437.5MB**、部署 **584.6MB / 2891 文件**、`runtime/` **324.1MB / 7 文件**
+  （v1.7 为 zip 618.4MB / 部署 777.5MB）。大头：Chrome 企业版 MSI 159.6MB +
+  LibreOffice **裁剪核心包** 164.5MB（用核心包时原始 MSI **已移出包外**）。
 - **五件套（改一个看另外四个）**：`tools/offline-components.json`（清单含 `derived` 段，入库）→
   `tools/fetch-offline-bundle.py`（下载/校验，`--core` 顺带出核心包）→
   `tools/build-libreoffice-core.py`（MSI→裁剪→zip）→ `tools/offline-runtime/*`（随包脚本）→
@@ -36,7 +37,8 @@
 - Chrome 是全机 MSI 需管理员、LibreOffice 不需。`setup-offline-runtime.ps1` 对 Chrome 提权失败
   **只打印指引不报错**（离线组件失败绝不能阻断安装）；`install.ps1` 调它必须走**子进程**
   （该脚本以 `exit` 结尾，dot-source 会终止安装流程）。
-- 打包耗时：全量 ≈16min；只重出 zip 用 `-ZipOnly` ≈2min（**先把新文件复制进 `deploy/JZToolsHub/`**）；
+- 打包耗时：v1.8 全量实测**在 10min 前台窗口内一次跑完**（PyInstaller 约 4.3min；瘦身后比
+  777MB 时代的 ≈16min 快很多）；只重出 zip 用 `-ZipOnly` ≈2min（**先把新文件复制进 `deploy/JZToolsHub/`**）；
   瘦包用 `-SkipOfflineRuntime`。**先 commit 再打包**（否则 `version.json.commit` 记 `<sha>-dirty`）；
   发版前 `fetch-offline-bundle.py --pin` 校准（Chrome 用固定 URL `stable`，内容随 Google 变）。
 - **未实测**：Chrome 静默安装（需提权）、真断网机器完整链路。
@@ -63,10 +65,17 @@
   setuptools 会剔除子进程 PATH，裸名 `cl.exe` 找不到（设 `CC` 全路径无效）。**替代：把已装好的编译
   产物重打成标准 wheel**，见 `tools/build-zfec-wheel.py`；本机 MSVC 14.51 / SDK 10.0.26100 在
   `C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools`。
+- **★ PowerShell 执行策略 = `Restricted`**：任何 `.ps1` 在**加载阶段**即抛 `PSSecurityException`，
+  症状是**退出码 1 + stdout 全空 + 连重定向的日志文件都不生成**（极易误判为"沙箱拦截"）。
+  正解：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <脚本> ...`；
+  `Start-Process` 与 Bash→PowerShell 均被安全策略**直接拒绝**；
+  后台模式（`run_in_background`）**默认 120s 就被杀** —— 长构建必须走**前台 + `timeout: 600000`**
+  （前台超时只转后台、不杀进程）。脚本里 `*>` 的重定向是 **UTF-16LE**，读日志要 `decode('utf-16')`。
 - **Bash 工具 PATH 损坏**（ls/wc/tail/dirname 找不到）；**PowerShell 正常但 stdout 会被吞** →
   探测类命令写临时文件再 Read，用完删。Read/Glob/Grep/Write/Edit 不受影响，优先用它们。
 - **沙箱会误报，以脚本自身日志为准**：命令含 `C:\Windows\System32\...` 路径、用 `Start-Process`、
   长任务收尾的文件访问都可能触发 `SandboxError`（曾把一次成功的打包判成 failed）。**别当事实结论。**
+  （注意：2026-09-14 那次"构建失败"的真因是**执行策略 + 后台 120s 超时**，不是沙箱 —— 先查这两项。）
 - HTTP 走代理 `http://127.0.0.1:49237`（`http_proxy`/`https_proxy`，`urllib.getproxies()` 即可）；
   大文件下载用 Python urllib + Range 续传比 PowerShell 稳，输出前 `sys.stdout.reconfigure(encoding="utf-8")`。
 - **venv**（跑源码调试与测试，勿污染系统 Python）：
