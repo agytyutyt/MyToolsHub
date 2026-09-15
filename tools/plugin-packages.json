@@ -1,170 +1,6 @@
 {
     "schema":  1,
     "packages":  {
-                     "knowledge-base":  {
-                                            "version":  "1.1.0",
-                                            "file":  "JZToolsHub-插件-knowledge-base-v1.1.0.zip",
-                                            "sha256":  "891a304f50fd036e7f8bc003c95f736ad13610062bae1d98cf19899b33ad2cb2",
-                                            "size":  1275608,
-                                            "built_at":  "2026-09-14T22:45:21+08:00",
-                                            "code_sha256":  "95beca5529223bfcd84989664f54ad6f2ed5f8e426b1baabe92116e49405b79f",
-                                            "file_count":  80,
-                                            "requires_restart":  true,
-                                            "file_hashes":  {
-                                                                "plugins/knowledge-base/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                "plugins/knowledge-base/backend/_build_phase8.py":  "6a7b4fe617760e37",
-                                                                "plugins/knowledge-base/backend/doc_convert.py":  "903c1e8522d3f875",
-                                                                "plugins/knowledge-base/backend/office_render.py":  "bcf3aa1ccfebe597",
-                                                                "plugins/knowledge-base/backend/requirements.txt":  "bc14e3c63acaf7ea",
-                                                                "plugins/knowledge-base/backend/routes.py":  "86b0fd014c260aec",
-                                                                "plugins/knowledge-base/backend/test_dhr_indent_numid.py":  "cacc01c3e6c71022",
-                                                                "plugins/knowledge-base/backend/test_routes_preview.py":  "401837073f7e4dc1",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/__init__.py":  "fc1b8b2e7f60435f",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/cli.py":  "9fd715af7da4464a",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/ingest.py":  "16c7b25409f0ea84",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/model.py":  "53b1625805951373",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/normalize.py":  "2100737e07484cd5",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/numbering.py":  "b380624dfffe666d",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/paginate.py":  "087a627b2750d899",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/parser.py":  "698dde5b48961264",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/renderer/__init__.py":  "a6198fc543731f45",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/renderer/css.py":  "7bd983406aa3f958",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/styles.py":  "b3906275f6d84d2c",
-                                                                "plugins/knowledge-base/backend/vendor/dhr/units.py":  "9dbe44ea150fe0f0",
-                                                                "plugins/knowledge-base/backend/vendor/README.md":  "7bc563959f2edebc",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/__init__.py":  "1a59a2ef8c950066",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/cli.py":  "142f38c4f9443756",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/__init__.py":  "ed72c4240d9701fa",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/a1.py":  "ce8b2a1f9ab00a78",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/errors.py":  "325e95e07eec81d4",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/escape.py":  "821851ce5cdce95a",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/limits.py":  "21fc7d101094b270",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/model.py":  "a3c16ff20ec49aab",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/core/units.py":  "58ad4dc18cf3bea6",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/ingest/__init__.py":  "4417a8d25cead1f8",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/ingest/safety.py":  "0badfdd01abb26c2",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/ingest/sniff.py":  "7e68cbf46e69d4a5",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/__init__.py":  "6e203457ad28b973",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/freeze.py":  "0b825c6fb7dc4939",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/merge.py":  "2c68559dde19f896",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/sizes.py":  "d4d8aa33b2a5eefd",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/normalize/__init__.py":  "f84e5e98a6f7fb86",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/normalize/fallback.py":  "0cee76add8f415cc",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/normalize/libreoffice.py":  "91f7af0fdc1ce109",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/__init__.py":  "fdcf012241f9cb54",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/advanced.py":  "e5653f192a14b8cb",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/parser.py":  "a132be7a1b9d6c64",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/raw.py":  "28d45c2edce85940",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/sheet_parser.py":  "96932172a791fbd1",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/styles_parser.py":  "8a5f274e7f285679",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/xmlutil.py":  "2f59430f8e77b2ad",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/__init__.py":  "d761edf43b048483",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/css.py":  "9ef349bd0b98e579",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/runtime.py":  "f4d0cdca0a5a3ad3",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/table.py":  "5d88cecd6d4a0b41",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/templates.py":  "0b86647f1c34bf2a",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/__init__.py":  "f37e1148c5e86c4c",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/cf.py":  "99e519b1cc241ded",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/color.py":  "c7e736d949b4a9bf",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/date.py":  "892c3aa62940731c",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/default_theme.py":  "6f2e5c4dbb97ba5f",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/expr.py":  "101f0d1de4a8f3ea",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/indexed_palette.py":  "bd8400c433ecbbdd",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/numfmt.py":  "ff106f3bb4100034",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/style_dedup.py":  "c79520b78053f0bd",
-                                                                "plugins/knowledge-base/backend/vendor/xhr/style/style_resolver.py":  "ea7376211810aefc",
-                                                                "plugins/knowledge-base/frontend/app.js":  "b25d944aaa5f2900",
-                                                                "plugins/knowledge-base/frontend/index.html":  "cf71e995c21dd002",
-                                                                "plugins/knowledge-base/frontend/reader.js":  "691960977f7440e7",
-                                                                "plugins/knowledge-base/frontend/style.css":  "8cc71fe66a3f9fab",
-                                                                "plugins/knowledge-base/frontend/vendor/mammoth/mammoth.browser.min.js":  "f61888233169f48e",
-                                                                "plugins/knowledge-base/frontend/vendor/marked/marked.min.js":  "597e8b9e3a1643f8",
-                                                                "plugins/knowledge-base/frontend/vendor/ofd/easyofd.js":  "a40e46888cc61866",
-                                                                "plugins/knowledge-base/frontend/vendor/ofd/eaysjbig2.js":  "bfb89b99f03c8a01",
-                                                                "plugins/knowledge-base/frontend/vendor/ofd/jszip.min.js":  "7e66f61e0fb4ce9b",
-                                                                "plugins/knowledge-base/frontend/vendor/ofd/opentype.min.js":  "200c763b027ddb8f",
-                                                                "plugins/knowledge-base/frontend/vendor/ofd/x2js.js":  "77fa87e148e19277",
-                                                                "plugins/knowledge-base/frontend/vendor/pdf/pdf.min.js":  "870c713d1d17ed1f",
-                                                                "plugins/knowledge-base/frontend/vendor/pdf/pdf.worker.min.js":  "38795efc045e81d2",
-                                                                "plugins/knowledge-base/frontend/vendor/purify/purify.min.js":  "9f659d5d2b847b83",
-                                                                "plugins/knowledge-base/frontend/vendor/VENDOR.md":  "973a2ebcc5544b0e",
-                                                                "plugins/knowledge-base/frontend/vendor/xlsx/xlsx.full.min.js":  "0c77a2658dfe38d9",
-                                                                "plugins/knowledge-base/manifest.json":  "d7f899f6a4f06071",
-                                                                "plugins/knowledge-base/README.md":  "cd0a5931b1d9cf03"
-                                                            },
-                                            "assets":  {
-                                                           "frontend/app.js":  {
-                                                                                   "h":  "b25d944aaa5f2900",
-                                                                                   "v":  17,
-                                                                                   "referenced":  true
-                                                                               },
-                                                           "frontend/reader.js":  {
-                                                                                      "h":  "691960977f7440e7",
-                                                                                      "v":  7,
-                                                                                      "referenced":  true
-                                                                                  },
-                                                           "frontend/style.css":  {
-                                                                                      "h":  "8cc71fe66a3f9fab",
-                                                                                      "v":  25,
-                                                                                      "referenced":  true
-                                                                                  },
-                                                           "frontend/vendor/mammoth/mammoth.browser.min.js":  {
-                                                                                                                  "h":  "f61888233169f48e",
-                                                                                                                  "v":  null,
-                                                                                                                  "referenced":  false
-                                                                                                              },
-                                                           "frontend/vendor/marked/marked.min.js":  {
-                                                                                                        "h":  "597e8b9e3a1643f8",
-                                                                                                        "v":  null,
-                                                                                                        "referenced":  false
-                                                                                                    },
-                                                           "frontend/vendor/ofd/easyofd.js":  {
-                                                                                                  "h":  "a40e46888cc61866",
-                                                                                                  "v":  null,
-                                                                                                  "referenced":  false
-                                                                                              },
-                                                           "frontend/vendor/ofd/eaysjbig2.js":  {
-                                                                                                    "h":  "bfb89b99f03c8a01",
-                                                                                                    "v":  null,
-                                                                                                    "referenced":  false
-                                                                                                },
-                                                           "frontend/vendor/ofd/jszip.min.js":  {
-                                                                                                    "h":  "7e66f61e0fb4ce9b",
-                                                                                                    "v":  null,
-                                                                                                    "referenced":  false
-                                                                                                },
-                                                           "frontend/vendor/ofd/opentype.min.js":  {
-                                                                                                       "h":  "200c763b027ddb8f",
-                                                                                                       "v":  null,
-                                                                                                       "referenced":  false
-                                                                                                   },
-                                                           "frontend/vendor/ofd/x2js.js":  {
-                                                                                               "h":  "77fa87e148e19277",
-                                                                                               "v":  null,
-                                                                                               "referenced":  false
-                                                                                           },
-                                                           "frontend/vendor/pdf/pdf.min.js":  {
-                                                                                                  "h":  "870c713d1d17ed1f",
-                                                                                                  "v":  null,
-                                                                                                  "referenced":  false
-                                                                                              },
-                                                           "frontend/vendor/pdf/pdf.worker.min.js":  {
-                                                                                                         "h":  "38795efc045e81d2",
-                                                                                                         "v":  null,
-                                                                                                         "referenced":  false
-                                                                                                     },
-                                                           "frontend/vendor/purify/purify.min.js":  {
-                                                                                                        "h":  "9f659d5d2b847b83",
-                                                                                                        "v":  null,
-                                                                                                        "referenced":  false
-                                                                                                    },
-                                                           "frontend/vendor/xlsx/xlsx.full.min.js":  {
-                                                                                                         "h":  "0c77a2658dfe38d9",
-                                                                                                         "v":  null,
-                                                                                                         "referenced":  false
-                                                                                                     }
-                                                       }
-                                        },
                      "admin":  {
                                    "version":  "1.3.1",
                                    "file":  "JZToolsHub-插件-admin-v1.3.1.zip",
@@ -254,6 +90,170 @@
                                                                            }
                                               },
                                    "min_app_version":  "1.9.0"
-                               }
+                               },
+                     "knowledge-base":  {
+                                            "version":  "1.2.0",
+                                            "file":  "JZToolsHub-插件-knowledge-base-v1.2.0.zip",
+                                            "sha256":  "a408727b1ff94d3eb5dc64cebd58ed9dc94e776534efb8d58ac86f8731597ad5",
+                                            "size":  1277699,
+                                            "built_at":  "2026-09-15T08:01:05+08:00",
+                                            "code_sha256":  "54a7ecd463ea010010d58e583eef7d20b224afa7416e51772deccb93f3adabef",
+                                            "file_count":  80,
+                                            "requires_restart":  false,
+                                            "file_hashes":  {
+                                                                "plugins/knowledge-base/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                "plugins/knowledge-base/backend/_build_phase8.py":  "6a7b4fe617760e37",
+                                                                "plugins/knowledge-base/backend/doc_convert.py":  "903c1e8522d3f875",
+                                                                "plugins/knowledge-base/backend/office_render.py":  "bcf3aa1ccfebe597",
+                                                                "plugins/knowledge-base/backend/requirements.txt":  "bc14e3c63acaf7ea",
+                                                                "plugins/knowledge-base/backend/routes.py":  "86b0fd014c260aec",
+                                                                "plugins/knowledge-base/backend/test_dhr_indent_numid.py":  "cacc01c3e6c71022",
+                                                                "plugins/knowledge-base/backend/test_routes_preview.py":  "401837073f7e4dc1",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/__init__.py":  "fc1b8b2e7f60435f",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/cli.py":  "9fd715af7da4464a",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/ingest.py":  "16c7b25409f0ea84",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/model.py":  "53b1625805951373",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/normalize.py":  "2100737e07484cd5",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/numbering.py":  "b380624dfffe666d",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/paginate.py":  "087a627b2750d899",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/parser.py":  "698dde5b48961264",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/renderer/__init__.py":  "a6198fc543731f45",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/renderer/css.py":  "7bd983406aa3f958",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/styles.py":  "b3906275f6d84d2c",
+                                                                "plugins/knowledge-base/backend/vendor/dhr/units.py":  "9dbe44ea150fe0f0",
+                                                                "plugins/knowledge-base/backend/vendor/README.md":  "7bc563959f2edebc",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/__init__.py":  "1a59a2ef8c950066",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/cli.py":  "142f38c4f9443756",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/__init__.py":  "ed72c4240d9701fa",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/a1.py":  "ce8b2a1f9ab00a78",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/errors.py":  "325e95e07eec81d4",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/escape.py":  "821851ce5cdce95a",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/limits.py":  "21fc7d101094b270",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/model.py":  "a3c16ff20ec49aab",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/core/units.py":  "58ad4dc18cf3bea6",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/ingest/__init__.py":  "4417a8d25cead1f8",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/ingest/safety.py":  "0badfdd01abb26c2",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/ingest/sniff.py":  "7e68cbf46e69d4a5",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/__init__.py":  "6e203457ad28b973",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/freeze.py":  "0b825c6fb7dc4939",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/merge.py":  "2c68559dde19f896",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/layout/sizes.py":  "d4d8aa33b2a5eefd",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/normalize/__init__.py":  "f84e5e98a6f7fb86",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/normalize/fallback.py":  "0cee76add8f415cc",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/normalize/libreoffice.py":  "91f7af0fdc1ce109",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/__init__.py":  "fdcf012241f9cb54",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/advanced.py":  "e5653f192a14b8cb",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/parser.py":  "a132be7a1b9d6c64",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/raw.py":  "28d45c2edce85940",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/sheet_parser.py":  "96932172a791fbd1",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/styles_parser.py":  "8a5f274e7f285679",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/parser_xlsx/xmlutil.py":  "2f59430f8e77b2ad",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/__init__.py":  "d761edf43b048483",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/css.py":  "9ef349bd0b98e579",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/runtime.py":  "f4d0cdca0a5a3ad3",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/table.py":  "5d88cecd6d4a0b41",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/renderer/templates.py":  "0b86647f1c34bf2a",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/__init__.py":  "f37e1148c5e86c4c",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/cf.py":  "99e519b1cc241ded",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/color.py":  "c7e736d949b4a9bf",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/date.py":  "892c3aa62940731c",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/default_theme.py":  "6f2e5c4dbb97ba5f",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/expr.py":  "101f0d1de4a8f3ea",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/indexed_palette.py":  "bd8400c433ecbbdd",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/numfmt.py":  "ff106f3bb4100034",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/style_dedup.py":  "c79520b78053f0bd",
+                                                                "plugins/knowledge-base/backend/vendor/xhr/style/style_resolver.py":  "ea7376211810aefc",
+                                                                "plugins/knowledge-base/frontend/app.js":  "10ebc135edd55590",
+                                                                "plugins/knowledge-base/frontend/index.html":  "0840c2c1c6170554",
+                                                                "plugins/knowledge-base/frontend/reader.js":  "94eaed7463627e98",
+                                                                "plugins/knowledge-base/frontend/style.css":  "57843c2d6b02681e",
+                                                                "plugins/knowledge-base/frontend/vendor/mammoth/mammoth.browser.min.js":  "f61888233169f48e",
+                                                                "plugins/knowledge-base/frontend/vendor/marked/marked.min.js":  "597e8b9e3a1643f8",
+                                                                "plugins/knowledge-base/frontend/vendor/ofd/easyofd.js":  "a40e46888cc61866",
+                                                                "plugins/knowledge-base/frontend/vendor/ofd/eaysjbig2.js":  "bfb89b99f03c8a01",
+                                                                "plugins/knowledge-base/frontend/vendor/ofd/jszip.min.js":  "7e66f61e0fb4ce9b",
+                                                                "plugins/knowledge-base/frontend/vendor/ofd/opentype.min.js":  "200c763b027ddb8f",
+                                                                "plugins/knowledge-base/frontend/vendor/ofd/x2js.js":  "77fa87e148e19277",
+                                                                "plugins/knowledge-base/frontend/vendor/pdf/pdf.min.js":  "870c713d1d17ed1f",
+                                                                "plugins/knowledge-base/frontend/vendor/pdf/pdf.worker.min.js":  "38795efc045e81d2",
+                                                                "plugins/knowledge-base/frontend/vendor/purify/purify.min.js":  "9f659d5d2b847b83",
+                                                                "plugins/knowledge-base/frontend/vendor/VENDOR.md":  "973a2ebcc5544b0e",
+                                                                "plugins/knowledge-base/frontend/vendor/xlsx/xlsx.full.min.js":  "0c77a2658dfe38d9",
+                                                                "plugins/knowledge-base/manifest.json":  "3dc731e808ed0d48",
+                                                                "plugins/knowledge-base/README.md":  "f9e1c17bb62d3c39"
+                                                            },
+                                            "assets":  {
+                                                           "frontend/app.js":  {
+                                                                                   "h":  "10ebc135edd55590",
+                                                                                   "v":  18,
+                                                                                   "referenced":  true
+                                                                               },
+                                                           "frontend/reader.js":  {
+                                                                                      "h":  "94eaed7463627e98",
+                                                                                      "v":  8,
+                                                                                      "referenced":  true
+                                                                                  },
+                                                           "frontend/style.css":  {
+                                                                                      "h":  "57843c2d6b02681e",
+                                                                                      "v":  26,
+                                                                                      "referenced":  true
+                                                                                  },
+                                                           "frontend/vendor/mammoth/mammoth.browser.min.js":  {
+                                                                                                                  "h":  "f61888233169f48e",
+                                                                                                                  "v":  null,
+                                                                                                                  "referenced":  false
+                                                                                                              },
+                                                           "frontend/vendor/marked/marked.min.js":  {
+                                                                                                        "h":  "597e8b9e3a1643f8",
+                                                                                                        "v":  null,
+                                                                                                        "referenced":  false
+                                                                                                    },
+                                                           "frontend/vendor/ofd/easyofd.js":  {
+                                                                                                  "h":  "a40e46888cc61866",
+                                                                                                  "v":  null,
+                                                                                                  "referenced":  false
+                                                                                              },
+                                                           "frontend/vendor/ofd/eaysjbig2.js":  {
+                                                                                                    "h":  "bfb89b99f03c8a01",
+                                                                                                    "v":  null,
+                                                                                                    "referenced":  false
+                                                                                                },
+                                                           "frontend/vendor/ofd/jszip.min.js":  {
+                                                                                                    "h":  "7e66f61e0fb4ce9b",
+                                                                                                    "v":  null,
+                                                                                                    "referenced":  false
+                                                                                                },
+                                                           "frontend/vendor/ofd/opentype.min.js":  {
+                                                                                                       "h":  "200c763b027ddb8f",
+                                                                                                       "v":  null,
+                                                                                                       "referenced":  false
+                                                                                                   },
+                                                           "frontend/vendor/ofd/x2js.js":  {
+                                                                                               "h":  "77fa87e148e19277",
+                                                                                               "v":  null,
+                                                                                               "referenced":  false
+                                                                                           },
+                                                           "frontend/vendor/pdf/pdf.min.js":  {
+                                                                                                  "h":  "870c713d1d17ed1f",
+                                                                                                  "v":  null,
+                                                                                                  "referenced":  false
+                                                                                              },
+                                                           "frontend/vendor/pdf/pdf.worker.min.js":  {
+                                                                                                         "h":  "38795efc045e81d2",
+                                                                                                         "v":  null,
+                                                                                                         "referenced":  false
+                                                                                                     },
+                                                           "frontend/vendor/purify/purify.min.js":  {
+                                                                                                        "h":  "9f659d5d2b847b83",
+                                                                                                        "v":  null,
+                                                                                                        "referenced":  false
+                                                                                                    },
+                                                           "frontend/vendor/xlsx/xlsx.full.min.js":  {
+                                                                                                         "h":  "0c77a2658dfe38d9",
+                                                                                                         "v":  null,
+                                                                                                         "referenced":  false
+                                                                                                     }
+                                                       }
+                                        }
                  }
 }

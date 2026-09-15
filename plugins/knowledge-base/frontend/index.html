@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>知识库</title>
   <!-- 版本号用于绕过框架对 /plugin/ 静态资源的一整天缓存，改动前端资源时递增 -->
-  <link rel="stylesheet" href="./style.css?v=25">
+  <link rel="stylesheet" href="./style.css?v=26">
 
 </head>
 <body>
@@ -85,10 +85,12 @@
       <span class="badge" id="dock-ext"></span>
       <span class="dock-title" id="dock-title"></span>
       <span class="pager-sep"></span>
-      <!-- 缩放（常驻）：所有格式均可缩放预览内容（不改浏览器页面缩放） -->
+      <!-- 缩放（常驻）：所有格式均可缩放预览内容（不改浏览器页面缩放）；
+           百分比可直接输入修改（回车/失焦生效，范围 50%~300%） -->
       <span id="reader-zoom" class="zoom">
         <button id="btn-zoom-out" class="icon-btn" title="缩小">－</button>
-        <span class="zoom-indicator" id="zoom-indicator">100%</span>
+        <input type="text" id="zoom-input" class="zoom-input" value="100%" inputmode="decimal"
+               autocomplete="off" spellcheck="false" title="缩放百分比：可直接输入（50~300），回车生效">
         <button id="btn-zoom-in" class="icon-btn" title="放大">＋</button>
       </span>
       <span class="pager-sep"></span>
@@ -126,7 +128,7 @@
 
   <div id="snackbar" class="snackbar"></div>
 
-  <script src="./reader.js?v=7"></script>
-  <script src="./app.js?v=17"></script>
+  <script src="./reader.js?v=8"></script>
+  <script src="./app.js?v=18"></script>
 </body>
 </html>

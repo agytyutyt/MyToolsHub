@@ -325,6 +325,25 @@ body {
 .pager > * + * { margin-left: 6px; }
 .pager-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
 .page-indicator, .zoom-indicator { font-size: 13px; color: var(--text-2); min-width: 52px; text-align: center; }
+/* 缩放百分比输入框（替代只读指示）：可直接输入 50~300，回车/失焦生效 */
+.zoom-input {
+  width: 58px;
+  text-align: center;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 2px;
+}
+.zoom-input:hover { border-color: var(--border); }
+.zoom-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--card);
+  color: var(--text);
+}
 
 /* 底部悬浮胶囊工具条：固定居中、宽度适应内容（徽标+标题+按键） */
 .reader-dock {
@@ -368,6 +387,12 @@ body {
   min-height: 60vh;
   padding: 16px 16px 90px; /* 底部留出胶囊工具条空间 */
 }
+/* 内容缩放作用在卡片本身（reader.js 的 zoom target = .reader-frame）：
+   放大后卡片比视口宽 → 取消居中改左对齐（margin:0 auto 在滚动容器里
+   会把左侧裁到不可达），配合 #view-reader 的横向滚动保证内容可达 */
+.reader-frame.zoomed { margin: 0; }
+/* 卡片放大后可能超出视口宽：阅读视图允许横向滚动（dock 为 fixed 悬浮，不受影响） */
+#view-reader { overflow-x: auto; }
 /* 桌面端兜底最小宽：极窄内容（一两列的表格、加载/错误提示）不出现细条卡片 */
 @media (min-width: 600px) {
   .reader-frame { min-width: 520px; }

@@ -108,30 +108,63 @@
   }
 
   // ==================== 通用 HTML 内容缩放（Word/Excel/MD/文本等） ====================
-  // 仅缩放预览内容元素（CSS zoom：随内容重排、滚动条正确），不改浏览器页面缩放。
-  // PDF/OFD 走各自引擎的原生缩放，不经此路径。
+  // 仅缩放预览内容（CSS zoom：随内容重排、滚动条正确），不改浏览器页面缩放。
+  // 缩放作用目标是**背景卡片 .reader-frame** 而不是内容元素：卡片承载白底/圆角/
+  // 阴影/内边距，只缩内容会让表格放大后溢出卡片（xls 等宽内容尤其明显）——
+  // 连卡片一起缩放，观感与 PDF（画布带动卡片变宽）一致。PDF/OFD 走各自引擎的
+  // 原生缩放，不经此路径。
   var htmlZoom = { el: null, scale: 1 };
   var HTML_ZOOM_MIN = 0.5, HTML_ZOOM_MAX = 3.0, HTML_ZOOM_STEP = 0.1;
 
+  function zoomFrame() { return document.querySelector(".reader-frame"); }
+
   function htmlZoomApply() {
-    if (htmlZoom.el) htmlZoom.el.style.zoom = String(htmlZoom.scale);
+    if (htmlZoom.el) {
+      htmlZoom.el.style.zoom = String(htmlZoom.scale);
+      // 放大后卡片比视口宽：取消居中改为左对齐，避免滚动容器里左侧内容不可达
+      if (htmlZoom.el.classList) {
+        if (htmlZoom.scale > 1) htmlZoom.el.classList.add("zoomed");
+        else htmlZoom.el.classList.remove("zoomed");
+      }
+    }
     if (callbacks && callbacks.onZoom) callbacks.onZoom(htmlZoom.scale);
   }
 
+  function clampHtmlZoom(s) {
+    return Math.min(HTML_ZOOM_MAX, Math.max(HTML_ZOOM_MIN, Math.round(s * 100) / 100));
+  }
+
   function htmlZoomIn() {
-    htmlZoom.scale = Math.min(HTML_ZOOM_MAX, Math.round((htmlZoom.scale + HTML_ZOOM_STEP) * 10) / 10);
+    htmlZoom.scale = clampHtmlZoom(htmlZoom.scale + HTML_ZOOM_STEP);
     htmlZoomApply();
   }
 
   function htmlZoomOut() {
-    htmlZoom.scale = Math.max(HTML_ZOOM_MIN, Math.round((htmlZoom.scale - HTML_ZOOM_STEP) * 10) / 10);
+    htmlZoom.scale = clampHtmlZoom(htmlZoom.scale - HTML_ZOOM_STEP);
     htmlZoomApply();
   }
 
-  // 渲染器注册缩放目标（渲染完内容后调用）；scale 每次渲染重置为 1
+  function htmlZoomSet(scale) {
+    var s = Number(scale);
+    if (!isFinite(s)) return;
+    htmlZoom.scale = clampHtmlZoom(s);
+    htmlZoomApply();
+  }
+
+  // 渲染器注册缩放目标（渲染完内容后调用）；scale 每次渲染重置为 1。
+  // el 参数是内容元素，仅在拿不到背景卡片时兜底（结构变化时缩放不失效）。
   function setZoomTarget(el) {
-    htmlZoom.el = el;
+    htmlZoom.el = zoomFrame() || el;
     htmlZoom.scale = 1;
+  }
+
+  // 渲染前/销毁时清掉卡片上的缩放残留（卡片是静态 DOM，不随渲染重建）
+  function resetFrameZoom() {
+    var frame = zoomFrame();
+    if (frame) {
+      frame.style.zoom = "";
+      if (frame.classList) frame.classList.remove("zoomed");
+    }
   }
 
   // ==================== 渲染器：Office 预览（服务端 xhr/dhr 双引擎） ====================
@@ -567,6 +600,14 @@
             nextPage: function () { scrollToPage(current + 1); },
             zoomIn: function () { if (scale < 3) applyScale(Math.min(3, scale + 0.2)); },
             zoomOut: function () { if (scale > 0.4) applyScale(Math.max(0.4, scale - 0.2)); },
+            // 绝对缩放（百分比输入框用）：与 ± 按钮同一套 clamp 与重渲染管线
+            setZoom: function (s) {
+              s = Number(s);
+              if (!isFinite(s)) return;
+              s = Math.min(3, Math.max(0.4, s));
+              if (Math.abs(s - scale) > 0.001) applyScale(s);
+            },
+            getZoom: function () { return scale; },
             copy: function () { return pageText(current); },
             onPageChange: function () { if (callbacks.onPage) callbacks.onPage(current, total, scale); }
           };
@@ -644,6 +685,24 @@
         nextPage: function () { inst.NextPage(); afterNav(); },
         zoomIn: function () { inst.ZoomIn(); afterNav(); },
         zoomOut: function () { inst.ZoomOut(); afterNav(); },
+        // EasyOFD 只有步进缩放（ZoomIn/ZoomOut），没有绝对设置接口：
+        // 用步进逼近目标比例（有上限防死循环；到边界或步长不再变化即停）
+        setZoom: function (target) {
+          target = Number(target);
+          if (!isFinite(target)) return;
+          target = Math.min(3, Math.max(0.4, target));
+          var cur = Number(inst.zoomSize) || 1;
+          var tries = 0;
+          while (Math.abs(cur - target) > 0.02 && tries < 24) {
+            if (cur < target) inst.ZoomIn(); else inst.ZoomOut();
+            var now = Number(inst.zoomSize);
+            if (!isFinite(now) || now === cur) break;   // 已到引擎边界
+            cur = now;
+            tries++;
+          }
+          afterNav();
+        },
+        getZoom: function () { return Number(inst.zoomSize) || 1; },
         copy: function () {
           try {
             return String(inst.GetPageText(inst.view.pageNow - 1) || "");
@@ -684,6 +743,7 @@
     current = file;
     htmlZoom.el = null;
     htmlZoom.scale = 1;
+    resetFrameZoom();   // 上一份文档的卡片缩放不带到新文档
     // ★预览分派（阶段 8）：Word/Excel → 服务端 xhr/dhr 引擎按需渲染的 HTML
     //   预览（样式还原、连续单页），失败自动回退降级渲染器（mammoth / SheetJS）；
     //   其余格式按扩展名分派（原生 PDF 仍走 PDF.js）。
@@ -733,12 +793,13 @@
     current = null;
     pdfState = null;
     ofdState = null;
+    resetFrameZoom();
     window.KBReader.copy = function () { return Promise.resolve(); };
   }
 
   // ==================== 对外接口（app.js 调用） ====================
   // 缩放分派：PDF/OFD 用引擎原生缩放（重渲染/自带 API），
-  // 其余格式走通用 HTML 内容缩放（CSS zoom，不改浏览器页面缩放）。
+  // 其余格式走通用内容缩放（CSS zoom 作用在背景卡片上，不改浏览器页面缩放）。
   window.KBReader = {
     render: render,
     destroy: destroy,
@@ -753,6 +814,17 @@
       if (pdfState) return pdfState.zoomOut();
       if (ofdState) return ofdState.zoomOut();
       htmlZoomOut();
+    },
+    // 绝对缩放（0.4~3.0；HTML 内容为 0.5~3.0，各自 clamp）——百分比输入框用
+    setZoom: function (scale) {
+      if (pdfState) return pdfState.setZoom(scale);
+      if (ofdState) return ofdState.setZoom(scale);
+      htmlZoomSet(scale);
+    },
+    getZoom: function () {
+      if (pdfState) return pdfState.getZoom();
+      if (ofdState) return ofdState.getZoom();
+      return htmlZoom.scale;
     },
     copy: function () { return Promise.resolve(); },
     onResize: function () { /* EasyOFD 容器自适应，无需处理 */ }

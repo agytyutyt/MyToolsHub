@@ -642,6 +642,20 @@
   }
 
   // 阅读器回调（打开时与 PDF 就绪自动重渲染时共用）
+  // 缩放百分比输入框的显示同步与应用（reader.js 暴露 getZoom/setZoom）
+  function syncZoomInput() {
+    if (!(window.KBReader && KBReader.getZoom)) return;
+    var z = KBReader.getZoom();
+    if (isFinite(z)) $("zoom-input").value = Math.round(z * 100) + "%";
+  }
+  function applyZoomInput() {
+    var raw = ($("zoom-input").value || "").replace(/%/g, "").trim();
+    var v = parseFloat(raw);
+    if (!isFinite(v) || !window.KBReader || !KBReader.setZoom) { syncZoomInput(); return; }
+    KBReader.setZoom(v / 100);
+    syncZoomInput();   // 兜底回显规范值（如 OFD 已到引擎缩放边界）
+  }
+
   function readerCbs() {
     return {
       onReady: function (cap) {
@@ -654,13 +668,13 @@
       },
       onPage: function (page, total, zoom) {
         $("page-indicator").textContent = page + " / " + total;
-        if (zoom != null) $("zoom-indicator").textContent = Math.round(zoom * 100) + "%";
+        if (zoom != null) $("zoom-input").value = Math.round(zoom * 100) + "%";
         $("btn-prev-page").disabled = page <= 1;
         $("btn-next-page").disabled = page >= total;
       },
       // 通用内容缩放指示（Word/Excel/MD/文本等非翻页格式）
       onZoom: function (zoom) {
-        $("zoom-indicator").textContent = Math.round(zoom * 100) + "%";
+        $("zoom-input").value = Math.round(zoom * 100) + "%";
       },
       onFail: function (msg) {
         $("reader-status").textContent = msg;
@@ -685,7 +699,7 @@
     showReaderNotice(f);
     $("btn-copy").disabled = true;
     $("reader-pager").className = "pager hidden";
-    $("zoom-indicator").textContent = "100%";   // 每次打开重置内容缩放
+    $("zoom-input").value = "100%";   // 每次打开重置内容缩放（PDF 就绪后回调会刷新为实际比例）
     window.KBReader.render(f, readerCbs());
     // 仍在生成 PDF：轮询等待，就绪后自动重渲染切到 PDF 视图
     window.scrollTo(0, 0);
@@ -703,7 +717,7 @@
     $("reader-container").innerHTML = "";
     $("btn-copy").title = "复制";
     $("reader-pager").className = "pager hidden";
-    $("zoom-indicator").textContent = "100%";
+    $("zoom-input").value = "100%";
     window.scrollTo(0, state.listScroll || 0);
   }
 
@@ -737,6 +751,13 @@
     $("btn-next-page").onclick = function () { if (window.KBReader) KBReader.nextPage(); };
     $("btn-zoom-in").onclick = function () { if (window.KBReader) KBReader.zoomIn(); };
     $("btn-zoom-out").onclick = function () { if (window.KBReader) KBReader.zoomOut(); };
+
+    // 缩放百分比可直接输入（50~300，回车/失焦生效；非法值回显当前比例）
+    $("zoom-input").onclick = function () { this.select(); };
+    $("zoom-input").onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); applyZoomInput(); this.blur(); }
+    };
+    $("zoom-input").onblur = syncZoomInput;
 
     // 搜索（输入停顿 300ms 触发）
     var searchTimer = null;
