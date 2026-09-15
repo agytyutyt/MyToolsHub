@@ -266,7 +266,9 @@
   async function openPermModal(user) {
     let tools;
     try {
-      const data = await api('/api/tools/visibility');
+      // 全量权限点走 admin 专属接口（/api/tools/visibility 按当前用户权限过滤，
+      // 未授权插件不可见，不能用于权限分配）
+      const data = await api('/api/admin/permission-points');
       tools = (data.tools || []).slice();
     } catch (e) {
       showToast('加载功能模块失败：' + e.message, true);

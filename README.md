@@ -666,14 +666,15 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | `GET /api/tools` | 聚合工具列表（站点信息 + 分类 + 工具清单，按权限过滤） |
 | `GET /api/tools/<id>` | 单个工具信息，不存在返回 404 |
 | `POST /api/tools/reorder` | 保存首页布局 `{categories: [分类id…], tools: {分类id: [工具id…]}}` |
-| `GET /api/tools/visibility` | 全部分类与工具及其启用状态（含已隐藏项） |
-| `POST /api/tools/visibility` | 切换启用 `{type: 'tool'\|'category', id, enabled}` |
+| `GET /api/tools/visibility` | 全部分类与工具及其启用状态（含已隐藏项），**按当前登录用户权限点过滤**（未授权插件不可见，分类仅返回仍含可见工具者） |
+| `POST /api/tools/visibility` | 切换启用 `{type: 'tool'\|'category', id, enabled}`（仅可操作当前用户有权可见的工具 / 分类，无权限返回 403） |
 
 ### 7.2 登录 / 管理后台（admin 插件）
 
 | 接口 | 说明 |
 | --- | --- |
 | `GET /login`、`POST /api/login`、`POST /api/logout`、`GET /api/session` | 登录闭环（`logout` 是 **POST**） |
+| `GET /api/admin/permission-points` | 全量已注册工具清单（含停用），供人员「权限设置」弹窗勾选权限点；与 `/api/tools/visibility` 解耦，不受当前用户权限点过滤（需人员管理模块权限） |
 | `POST /api/account/password` | 自助改密 `{old_password, new_password}`（新密码 ≥6 位） |
 | `GET /admin`、`GET /admin/<module>` | 后台页面（`unit` / `department` / `user`；`/admin/settings` 与 `/admin/plugins` 仅超管） |
 | `GET /api/admin/summary` | 后台总览（各模块记录数 + 当前账号可访问性） |

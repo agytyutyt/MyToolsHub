@@ -685,19 +685,33 @@ def api_tool(tool_id):
     return jsonify({"error": "tool not found"}), 404
 
 
+def _current_user_allowlist():
+    """当前登录用户可见工具 ID 集合；None 表示不限制。
+
+    权限点的唯一读取入口：来自 admin 插件 get_session_user() 的
+    permissions 字段（逐人授权 + grant_all 全站开放工具；超级管理员
+    授予全部）。admin 插件未加载或读取失败时返回 None（不限制），
+    与既有降级策略一致。所有需要按权限过滤工具清单的接口都应经过
+    本函数，避免各处自行读取造成口径不一。
+    """
+    try:
+        from jztools_admin.routes import get_session_user
+    except Exception:
+        return None
+    info = get_session_user()
+    if info is None or info.get("super_admin"):
+        return None
+    return set(info.get("permissions") or [])
+
+
 def _filter_visible_tools(tools):
     """按当前登录用户的权限点过滤可见工具；匿名或超级管理员不限制。
 
     get_session_user 由 admin 插件（jztools_admin）提供，未加载时不做过滤。
     """
-    try:
-        from jztools_admin.routes import get_session_user
-    except Exception:
+    allowed = _current_user_allowlist()
+    if allowed is None:
         return tools
-    info = get_session_user()
-    if info is None or info.get("super_admin"):
-        return tools
-    allowed = set(info.get("permissions") or [])
     return [t for t in tools if t["id"] in allowed]
 
 
@@ -749,23 +763,40 @@ def api_tools_reorder():
 
 @app.get("/api/tools/visibility")
 def api_tools_visibility():
-    """返回全部分类与工具及其启用状态，供「隐藏工具」浮窗使用（含已隐藏项）。"""
+    """返回分类与工具及其启用状态，供「隐藏工具」浮窗使用（含已隐藏项）。
+
+    与首页 /api/tools 走同一套权限口径（_current_user_allowlist）：
+    未被授权的工具不出现在列表中——用户对其全流程不可见；
+    分类仅返回仍含有可见工具者。匿名请求已被强制登录拦截，
+    超级管理员不限制。权限设置弹窗所需的全量工具清单走
+    /api/admin/permission-points（admin 插件）。
+    """
     registry = load_registry()
+    allowed = _current_user_allowlist()
+    tools = registry.get("tools", [])
+    if allowed is not None:
+        tools = [t for t in tools if t["id"] in allowed]
+    visible_cat_ids = {t.get("category") for t in tools if t.get("category")}
     return jsonify({
         "categories": [
             {"id": c["id"], "name": c["name"], "enabled": c.get("enabled", True)}
             for c in registry.get("categories", [])
+            if c["id"] in visible_cat_ids
         ],
         "tools": [
             {"id": t["id"], "name": t.get("name") or t["id"], "enabled": t.get("enabled", True)}
-            for t in registry.get("tools", [])
+            for t in tools
         ],
     })
 
 
 @app.post("/api/tools/visibility")
 def api_tools_visibility_save():
-    """切换分类 / 工具是否启用：{type: 'tool'|'category', id, enabled}。"""
+    """切换分类 / 工具是否启用：{type: 'tool'|'category', id, enabled}。
+
+    与读取接口同口径：仅允许操作当前用户可见的工具 / 分类
+    （无权限时返回 403，防止绕过前端直接改写未授权插件的可见性）。
+    """
     data = request.get_json(silent=True) or {}
     typ = data.get("type")
     tid = data.get("id")
@@ -774,9 +805,12 @@ def api_tools_visibility_save():
     enabled = bool(data.get("enabled"))
 
     registry = load_registry()
+    allowed = _current_user_allowlist()
     if typ == "tool":
         for t in registry.get("tools", []):
             if t["id"] == tid:
+                if allowed is not None and tid not in allowed:
+                    return jsonify({"error": "无该工具的操作权限"}), 403
                 t["enabled"] = enabled
                 save_registry(registry)
                 return jsonify({"ok": True})
@@ -784,6 +818,11 @@ def api_tools_visibility_save():
     else:
         for c in registry.get("categories", []):
             if c["id"] == tid:
+                if allowed is not None and not any(
+                    t.get("category") == tid and t["id"] in allowed
+                    for t in registry.get("tools", [])
+                ):
+                    return jsonify({"error": "无该分类的操作权限"}), 403
                 c["enabled"] = enabled
                 save_registry(registry)
                 return jsonify({"ok": True})

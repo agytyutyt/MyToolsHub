@@ -1257,6 +1257,23 @@ def register(app):
 
     # ---------------- 权限（角色）管理（已并入人员管理，gate 用 user 模块） ----------------
 
+    @app.get("/api/admin/permission-points")
+    @permission_required("user")
+    def admin_api_permission_points():
+        """返回全部已注册工具（含停用），供人员「权限设置」弹窗勾选权限点。
+
+        与首页「隐藏工具」浮窗的 /api/tools/visibility 解耦：后者按当前
+        登录用户的权限点过滤（未授权插件全流程不可见）；本接口面向拥有
+        人员管理模块权限的管理者，始终返回全量工具清单。
+        """
+        set_operation("查询权限点清单")
+        registry = load_registry()
+        tools = [
+            {"id": t["id"], "name": t.get("name") or t["id"], "enabled": t.get("enabled", True)}
+            for t in registry.get("tools", [])
+        ]
+        return jsonify({"tools": tools})
+
     @app.get("/api/admin/permissions")
     @permission_required("user")
     def admin_api_permissions():
