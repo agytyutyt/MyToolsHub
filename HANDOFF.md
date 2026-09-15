@@ -234,7 +234,7 @@ python app.py
 | 插件 | 包 | 体积 | sha256（前 16 位） | 说明 |
 | --- | --- | --- | --- | --- |
 | admin | `deploy/插件包/JZToolsHub-插件-admin-v1.3.1.zip` | 0.11 MB / 25 文件 | `a719fd33739b9529` | 含"上传即自动重启" + **校验失败逐条提示**；`min_app_version=1.9.0`、`requires_restart=true` |
-| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.2.1.zip` | 1.28 MB / 80 文件 | `da3521617c70b6f2` | 缩放修复（卡片同步放大、**放大后保持居中**）+ **缩放百分比可输入**；`requires_restart=false` |
+| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.2.2.zip` | 1.28 MB / 80 文件 | `9dd54458116e14a3` | **PDF 预览清晰度：画布校到设备像素网格**（居中/A4 小数位置曾致整页重采样，同位置截图锐度 +72%）；含 1.2.1 缩放保持居中 + 百分比可输入；`requires_restart=false`，`built_from=89d10c6`（干净戳） |
 
 发布登记（入库、sha256 冻结值、逐文件哈希）：`tools/plugin-packages.json`；
 随介质分发的索引：`deploy/插件包/index.json`（共享盘批量更新读它）。

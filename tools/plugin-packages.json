@@ -92,12 +92,12 @@
                                    "min_app_version":  "1.9.0"
                                },
                      "knowledge-base":  {
-                                            "version":  "1.2.1",
-                                            "file":  "JZToolsHub-插件-knowledge-base-v1.2.1.zip",
-                                            "sha256":  "da3521617c70b6f2ea926a1f3deaab238a8941b8e656b4e975842c862df9d082",
-                                            "size":  1277846,
-                                            "built_at":  "2026-09-15T08:47:47+08:00",
-                                            "code_sha256":  "2b708c4c3c67f4218239e736e40d24d79d6cf28587f1a969ff2fe3d46ff67d03",
+                                            "version":  "1.2.2",
+                                            "file":  "JZToolsHub-插件-knowledge-base-v1.2.2.zip",
+                                            "sha256":  "9dd54458116e14a3646971128ea8eb58cd0fa61efe7c0c04c6cf4a40f6fa7a04",
+                                            "size":  1279442,
+                                            "built_at":  "2026-09-15T13:14:48+08:00",
+                                            "code_sha256":  "218d133110fca68364c99ab75ff056918953c046ad4ad56d2ff68936f11dd807",
                                             "file_count":  80,
                                             "requires_restart":  false,
                                             "file_hashes":  {
@@ -164,8 +164,8 @@
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/style_dedup.py":  "c79520b78053f0bd",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/style_resolver.py":  "ea7376211810aefc",
                                                                 "plugins/knowledge-base/frontend/app.js":  "10ebc135edd55590",
-                                                                "plugins/knowledge-base/frontend/index.html":  "2add344a58dd8805",
-                                                                "plugins/knowledge-base/frontend/reader.js":  "038b3c7f9ef520ef",
+                                                                "plugins/knowledge-base/frontend/index.html":  "27e36d6a62344a5a",
+                                                                "plugins/knowledge-base/frontend/reader.js":  "a1c3f04804f54ce0",
                                                                 "plugins/knowledge-base/frontend/style.css":  "e69a8c5b314b1ec0",
                                                                 "plugins/knowledge-base/frontend/vendor/mammoth/mammoth.browser.min.js":  "f61888233169f48e",
                                                                 "plugins/knowledge-base/frontend/vendor/marked/marked.min.js":  "597e8b9e3a1643f8",
@@ -179,8 +179,8 @@
                                                                 "plugins/knowledge-base/frontend/vendor/purify/purify.min.js":  "9f659d5d2b847b83",
                                                                 "plugins/knowledge-base/frontend/vendor/VENDOR.md":  "973a2ebcc5544b0e",
                                                                 "plugins/knowledge-base/frontend/vendor/xlsx/xlsx.full.min.js":  "0c77a2658dfe38d9",
-                                                                "plugins/knowledge-base/manifest.json":  "f0178a7000778dc2",
-                                                                "plugins/knowledge-base/README.md":  "6747f3f747cec7cd"
+                                                                "plugins/knowledge-base/manifest.json":  "ff873ddc2d111f8d",
+                                                                "plugins/knowledge-base/README.md":  "cc0b7db743f628ed"
                                                             },
                                             "assets":  {
                                                            "frontend/app.js":  {
@@ -189,8 +189,8 @@
                                                                                    "referenced":  true
                                                                                },
                                                            "frontend/reader.js":  {
-                                                                                      "h":  "038b3c7f9ef520ef",
-                                                                                      "v":  9,
+                                                                                      "h":  "a1c3f04804f54ce0",
+                                                                                      "v":  10,
                                                                                       "referenced":  true
                                                                                   },
                                                            "frontend/style.css":  {
