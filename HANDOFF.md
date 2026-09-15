@@ -1,13 +1,14 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-15（**主程序 v2.0 发布**）—— 主体更新：**未授权插件全流程不可见**。
+> 最后更新：2026-09-15（**主程序 v2.0.0 发布并上线**）—— 主体更新：**未授权插件全流程不可见**。
 > 原「隐藏工具」浮窗（`GET /api/tools/visibility`）返回全量清单，未授权用户可在此发现并
 > 切换无权限插件。本次把权限点读取收口为 app.py 的 `_current_user_allowlist()` 唯一入口，
 > visibility 读/写与首页 `/api/tools` 同口径：未授权工具不出现、不含可见工具的分类不出现、
 > 未授权写操作 403；admin 新增 `GET /api/admin/permission-points`（需人员管理模块权限）
 > 供人员「权限设置」弹窗取全量工具清单，与首页隐藏浮窗彻底解耦（admin-user.js 已切换）。
-> 打包：`build-deploy.ps1 -Version 2.0`。
+> 打包：`build-deploy.ps1 -Version 2.0.0`（产物 `deploy/JZToolsHub-v2.0.0.zip`，122.5 MB /
+> 3016 项；构建提交 = **本 v2.0.0 发布提交**（干净戳）；**本机已上线**，见 §2.2）。
 > 早前同日：知识库 **1.2.1**：修 1.2.0 引入的缩放左对齐回归 —— zoom>1 时
 > 强制给卡片去居中（`.reader-frame.zoomed{margin:0}`），卡片仍小于视口时被错误推到左边。
 > 正解：**居中始终交给 `margin:0 auto`**（窄于视口→居中；宽于视口→auto 边距自动收窄 +
@@ -155,19 +156,26 @@ python app.py
 
 ### 2.2 产物状态
 
-**最新产物：v1.9 主包（默认瘦身）+ 独立离线组件包（2026-09-14 第六轮）**
+**最新产物：v2.0.0 主包（默认瘦身）+ 独立离线组件包（2026-09-15）**
 
-主包 `deploy/JZToolsHub-v1.9.zip`：
+主包 `deploy/JZToolsHub-v2.0.0.zip`：
 
 | 项 | 值 |
 | --- | --- |
-| 部署目录 | `deploy/JZToolsHub/` — **260.5 MB / 2889 个文件**（**无 `runtime/` 目录**） |
-| 分发包 | `deploy/JZToolsHub-v1.9.0.zip` — **122.0 MB** |
-| 版本 | `1.9.0`（上一版 1.8） |
+| 部署目录 | `deploy/JZToolsHub/` — **262.0 MB / 2989 个文件**（**无 `runtime/` 目录**） |
+| 分发包 | `deploy/JZToolsHub-v2.0.0.zip` — **122.5 MB / 3016 项**（zip CRC 全量校验通过，无顶层目录前缀） |
+| 版本 | `2.0.0`（上一版 `1.9.0`；同日曾试打 `2.0`，正式发布统一为三段式 `2.0.0`） |
 | 打包解释器 | Python **3.14.7**（基线 3.14，符合；依赖完整性检查 14/14） |
-| 构建提交 | `aea8894`（写入 `version.json.commit`；构建时工作区干净，**无 `-dirty`**） |
+| 构建提交 | **= 本 v2.0.0 发布提交**（即本文件所在的这次提交，写入 `version.json.commit`；构建时工作区干净，**无 `-dirty`**） |
 | 离线组件 | **主包不含**（`version.json.offline` 为空串）；Chrome/LibreOffice 由组件包单独分发 |
-| 体积构成 | `_internal/` 224.4 MB、`JZToolsHub.exe` 19.0 MB、`plugins/` 16.1 MB，其余不足 1 MB |
+| 体积构成 | `_internal/` 225.5 MB、`JZToolsHub.exe` 19.1 MB、`plugins/` 16.3 MB，其余不足 1 MB |
+| 包内既有修复 | v2.0 主体（权限全流程不可见）+ 知识库 1.2.1（缩放保持居中）+ admin 1.3.1（校验失败逐条提示） |
+| 上线验收 | 解压冒烟：隔离数据根启动 4s 内 `/` 200、匿名 `/api/*` 401；本机 `%LOCALAPPDATA%\JZToolsHub` 已由 1.5 更新到 2.0.0 并在 5000 端口运行（已装 exe sha256 与包内一致） |
+
+> **本机打包走两段式**（工具的 safe-delete 会拦批量删除、整包构建 >10 min 撞命令超时）：
+> ① 保证 `dist\JZToolsHub`（PyInstaller 产物）完整；② 用 Python 复刻 `build-deploy.ps1` §3.1–§4
+> 组装 `deploy\JZToolsHub`（**增量合并**而非删库重建）；③ `build-deploy.ps1 -ZipOnly` 出 zip（≈2 min）。
+> 复刻脚本与过程见 `.workbuddy/memory/2026-09-15.md`「v2.0.0 打包与上线」节。
 
 离线组件包（`tools/build-offline-component.ps1` 产出，与主包**并列分发**）：
 

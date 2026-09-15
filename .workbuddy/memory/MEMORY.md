@@ -42,6 +42,13 @@
   `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时有限深度 glob）。
 - 打包耗时全量 5~10min；`-ZipOnly` ≈2min（**先把新文件复制进 `deploy/JZToolsHub/`**）；
    **先 commit 再打包**（否则 version.json.commit 记 `<sha>-dirty`）。
+- **主包版本号一律三段式 `X.Y.Z`**（`1.9.0` / `2.0.0`）：`semver_cmp()` 只认 `\d+\.\d+\.\d+`，
+  两段式 `2.0` 会让插件包 `min_app_version` 校验退化成"版本号无法比较 → 跳过该项"。
+- **本机打包走「两段式 + 增量合并」（2026-09-15 起）**：① 复用完整的 `dist\JZToolsHub`
+  （源码没变就不重跑 PyInstaller）；② 用 Python 复刻 `build-deploy.ps1` §3.1–§4 **增量合并**组装
+  （**别删库重建** —— 工具会话 safe-delete 拦批量删除）；③ `build-deploy.ps1 -ZipOnly` 出包。
+  出包压缩与解压冒烟都放**后台**跑、日志写**仓库外**（porcelain 必须干净）。
+  详见 `.workbuddy/memory/2026-09-15.md`「v2.0.0 打包与上线」节。
 - **PyInstaller 多入口可共享 `_internal`（2026-09-15 实测）**：两个 `Analysis` → 两个 `EXE`
   → **同一个 `COLLECT`**，两个 exe 的 `sys._MEIPASS` 相同，依赖二进制只有一份；
   多一个入口的增量 **3.00 MB / +9.7% 且为一次性**（`_internal` 不增大，增量就是第二个
