@@ -124,6 +124,7 @@
       // 自动归 0 + #view-reader 横向滚动，内容全部可达），JS 不干预对齐。
       htmlZoom.el.style.zoom = String(htmlZoom.scale);
     }
+    if (activeToc) activeToc.layout();   // 卡片放大/缩小会改变左侧留白，目录跟着重算显隐
     if (callbacks && callbacks.onZoom) callbacks.onZoom(htmlZoom.scale);
   }
 
@@ -264,6 +265,169 @@
     });
   }
 
+  // ==================== Markdown 目录（悬浮窗，卡片左侧留白处） ====================
+  // 自动识别正文里的 h1~h6 生成目录，固定在**内容卡片之外**的左侧留白处（因此不受
+  // 卡片内容缩放影响）；留白不足（窄屏 / 卡片被放大到贴边）时自动隐藏，不压正文。
+  var TOC_MIN_GUTTER = 158;   // 卡片左侧留白小于此值不出目录（放不下：留白 - 16 < 142）
+  var TOC_MAX_WIDTH = 260;
+  var activeToc = null;       // { layout, destroy }：当前目录面板（切文档/销毁时清理）
+
+  function destroyToc() {
+    if (!activeToc) return;
+    activeToc.destroy();
+    activeToc = null;
+  }
+
+  function buildToc(box) {
+    destroyToc();
+    var host = $("view-reader");
+    var frame = zoomFrame();
+    if (!host || !frame) return;
+
+    var hs = box.querySelectorAll("h1, h2, h3, h4, h5, h6");
+    var items = [];
+    for (var i = 0; i < hs.length; i++) {
+      var text = (hs[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (!text) continue;                       // 空标题（如纯锚点）不进目录
+      var id = "kb-md-h" + (items.length + 1);
+      hs[i].id = id;
+      items.push({ id: id, level: Number(String(hs[i].tagName).charAt(1)), text: text });
+    }
+    if (items.length < 2) return;                // 标题太少不值得出目录
+
+    var panel = document.createElement("aside");
+    panel.className = "md-toc";
+    panel.setAttribute("aria-label", "文档目录");
+    var head = document.createElement("div");
+    head.className = "md-toc-head";
+    head.textContent = "目录";
+    var nav = document.createElement("nav");
+    nav.className = "md-toc-list";
+    var links = [];
+    items.forEach(function (it) {
+      var a = document.createElement("a");
+      a.className = "md-toc-item md-toc-l" + Math.min(it.level, 4);
+      a.href = "#" + it.id;
+      a.title = it.text;
+      a.textContent = it.text;
+      a.setAttribute("data-id", it.id);
+      nav.appendChild(a);
+      links.push(a);
+    });
+    panel.appendChild(head);
+    panel.appendChild(nav);
+    host.appendChild(panel);
+
+    // 留白实测决定显隐与宽度：卡片 fit-content 居中，放大/缩放/全屏都会改变留白
+    var lastState = "";
+    function layout() {
+      var r = frame.getBoundingClientRect();
+      var gutter = r.left - 16;
+      var want = (gutter >= TOC_MIN_GUTTER)
+        ? ("show:" + Math.round(Math.min(TOC_MAX_WIDTH, gutter - 8)))
+        : "hidden";
+      if (want === lastState) return;
+      lastState = want;
+      if (want === "hidden") {
+        panel.className = "md-toc hidden";
+      } else {
+        panel.className = "md-toc";
+        panel.style.width = want.slice(5) + "px";
+      }
+    }
+
+    var activeId = null;
+    function setActive(id) {
+      if (id === activeId) return;
+      activeId = id;
+      for (var i = 0; i < links.length; i++) {
+        var on = items[i].id === id;
+        links[i].className = "md-toc-item md-toc-l" + Math.min(items[i].level, 4)
+          + (on ? " active" : "");
+        if (on) keepVisible(links[i]);
+      }
+    }
+
+    // 当前项滚出面板可视区时，把面板内容滚到它（不动页面滚动）
+    function keepVisible(link) {
+      var lr = link.getBoundingClientRect();
+      var nr = nav.getBoundingClientRect();
+      if (lr.top < nr.top) nav.scrollTop -= (nr.top - lr.top) + 8;
+      else if (lr.bottom > nr.bottom) nav.scrollTop += (lr.bottom - nr.bottom) + 8;
+    }
+
+    // 滚动高亮：视口上方 32px 画一条判定线，取线以上最后一个标题。
+    // 线要贴近顶部（不要用 96px 这类大值）：点目录跳转后标题落在 24px 处，
+    // 线过高会让紧随其后的子标题"抢走"高亮（点"三、异常处置"却高亮"3.1"）。
+    // 另：点选后**用户自己滚动之前**不让高亮跟走——末章在页尾，点了也滚不到顶部，
+    // 否则会出现"点'四、记录与归档'却高亮'3.2 严重缺陷'"。
+    var userScrolled = true;
+    var SCROLL_KEYS = {
+      PageUp: 1, PageDown: 1, ArrowUp: 1, ArrowDown: 1, Home: 1, End: 1, " ": 1
+    };
+    function markUserScroll(ev) {
+      if (ev && ev.type === "keydown" && !SCROLL_KEYS[ev.key]) return;
+      userScrolled = true;
+    }
+    function spy() {
+      if (!userScrolled) return;
+      var ref = window.pageYOffset + 32;
+      var idx = 0;
+      for (var i = 0; i < items.length; i++) {
+        var el = document.getElementById(items[i].id);
+        if (!el) continue;
+        if (el.getBoundingClientRect().top + window.pageYOffset <= ref) idx = i;
+        else break;
+      }
+      setActive(items[idx].id);
+    }
+
+    nav.addEventListener("click", function (ev) {
+      var t = ev.target;
+      var a = (t && t.closest) ? t.closest(".md-toc-item") : null;
+      if (!a) return;
+      ev.preventDefault();                       // 自己滚（带缓动 + 顶部留白），不走 hash 跳转
+      var el = document.getElementById(a.getAttribute("data-id"));
+      if (!el) return;
+      userScrolled = false;                      // 锁住高亮，直到用户自己滚动
+      setActive(a.getAttribute("data-id"));
+      window.scrollTo({
+        top: el.getBoundingClientRect().top + window.pageYOffset - 24,
+        behavior: "smooth"
+      });
+    }, false);
+
+    var ticking = false;
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      setTimeout(function () { ticking = false; spy(); layout(); }, 120);
+    }
+    function onResize() { layout(); spy(); }
+    window.addEventListener("scroll", onScroll, false);
+    window.addEventListener("resize", onResize, false);
+    // 「用户主动滚动」的判定：滚轮 / 触摸 / 翻页键
+    window.addEventListener("wheel", markUserScroll, { passive: true });
+    window.addEventListener("touchmove", markUserScroll, { passive: true });
+    window.addEventListener("keydown", markUserScroll, false);
+
+    var destroyed = false;
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      window.removeEventListener("scroll", onScroll, false);
+      window.removeEventListener("resize", onResize, false);
+      window.removeEventListener("wheel", markUserScroll, { passive: true });
+      window.removeEventListener("touchmove", markUserScroll, { passive: true });
+      window.removeEventListener("keydown", markUserScroll, false);
+      if (panel.parentNode) panel.parentNode.removeChild(panel);
+    }
+    onCleanup(destroy);                          // 关阅读器/切文档时随视图销毁
+    activeToc = { layout: layout, destroy: destroy };
+    layout();
+    spy();
+  }
+
   // ==================== 渲染器：Markdown ====================
   function renderMarkdown(file) {
     return Promise.all([fetchRaw(file), loadScript(V + "marked/marked.min.js?v=1"), loadScript(V + "purify/purify.min.js?v=1")])
@@ -277,6 +441,7 @@
         div.innerHTML = clean;
         container().appendChild(div);
         setZoomTarget(div);
+        buildToc(div);
         status(null);
         callbacks.onReady("复制原文");
         return {
@@ -838,6 +1003,7 @@
 
   function destroy() {
     runCleanups();
+    destroyToc();          // 目录面板挂在 .reader-frame 之外，随视图一起收掉
     callbacks = null;
     current = null;
     pdfState = null;
