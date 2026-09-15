@@ -180,6 +180,9 @@ python app.py
 
 ### 3.2 打包构建
 
+> **发版操作只看 `docs/打包部署手册.md`**（一页流程 + 可复制命令 + 坑清单 + 故障处置表）。
+> 本节以下内容是构建脚本的全貌，只在**要改构建口径**时才需要细读。
+
 ```powershell
 # 递增版本号并打包（版本号写入 version.json，是目标机配置模板同步的触发依据）
 powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"

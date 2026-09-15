@@ -53,6 +53,8 @@
 > 第三轮为取消 Win7 + vendor `Optional` 补丁 + zfec wheel 落库；第二轮为 P0 六项修复；
 > 第一轮为文档全面重写）。
 >
+> **要打包发版？只读 `docs/打包部署手册.md` 一页就够**（流程、可复制命令、坑清单、故障处置表、
+> 深读指针）—— 别再从 README/HANDOFF/记忆日志里拼凑步骤。
 > 配套必读：`README.md`（架构 / 环境 / API / 目录 / 使用示例）、`插件设计规范.md`（插件开发铁律，
 > 第 15 章为插件独立升级约束 U-1~U-6）、
 > `docs/离线部署包说明.md`（离线包的组成、安装与适用场景，§11 为插件包）、
@@ -172,10 +174,12 @@ python app.py
 | 包内既有修复 | v2.0 主体（权限全流程不可见）+ 知识库 1.2.1（缩放保持居中）+ admin 1.3.1（校验失败逐条提示） |
 | 上线验收 | 解压冒烟：隔离数据根启动 4s 内 `/` 200、匿名 `/api/*` 401；本机 `%LOCALAPPDATA%\JZToolsHub` 已由 1.5 更新到 2.0.0 并在 5000 端口运行（已装 exe sha256 与包内一致） |
 
-> **本机打包走两段式**（工具的 safe-delete 会拦批量删除、整包构建 >10 min 撞命令超时）：
-> ① 保证 `dist\JZToolsHub`（PyInstaller 产物）完整；② 用 Python 复刻 `build-deploy.ps1` §3.1–§4
-> 组装 `deploy\JZToolsHub`（**增量合并**而非删库重建）；③ `build-deploy.ps1 -ZipOnly` 出 zip（≈2 min）。
-> 复刻脚本与过程见 `.workbuddy/memory/2026-09-15.md`「v2.0.0 打包与上线」节。
+> **打包发版只读 `docs/打包部署手册.md`（一页速查：流程 / 命令 / 坑清单 / 故障处置）**。
+> 本机流程 = 两段式 + 增量合并：① 需要时才重跑 PyInstaller（产物 `dist\JZToolsHub`）；
+> ② `python tools\build-deploy-local.py -Version X.Y.Z` 组装（**增量合并，从不删库** ——
+> 工具会话 safe-delete 拦批量删除）；③ `build-deploy.ps1 -ZipOnly` 出包；
+> ④ `python tools\verify-package.py <zip> --smoke` 校验（CRC + 解压启动冒烟）。
+> 原理与踩坑见手册 §0/§6，实测过程见 `.workbuddy/memory/2026-09-15.md`「v2.0.0 打包与上线」节。
 
 离线组件包（`tools/build-offline-component.ps1` 产出，与主包**并列分发**）：
 
