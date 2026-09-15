@@ -1,13 +1,14 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-15（知识库 **1.2.0**：预览缩放两项改进 —— ① **xls 等转换件放大时
-> 背景卡片不同步放大**：zoom 目标从内容元素改为背景卡片 `.reader-frame`（`setZoomTarget`
-> 优先取卡片），全部格式观感一致，zoom>1 时卡片去居中 + 阅读区横向滚动；
-> ② **缩放百分比可直接输入**：dock 中间显示框改可编辑输入框（50~300 回车生效，
-> 越界按引擎上限钳制、非法输入失焦回显；PDF/OFD 走引擎原生缩放）。
-> 浏览器 E2E 实测通过（agent-browser：±步进 / 200% / 999% 钳 300% / 非法回显），
-> 资源戳 reader.js v8 / app.js v18 / style.css v26，已出包登记）。
+> 最后更新：2026-09-15（知识库 **1.2.1**：修 1.2.0 引入的缩放左对齐回归 —— zoom>1 时
+> 强制给卡片去居中（`.reader-frame.zoomed{margin:0}`），卡片仍小于视口时被错误推到左边。
+> 正解：**居中始终交给 `margin:0 auto`**（窄于视口→居中；宽于视口→auto 边距自动收窄 +
+> `#view-reader` 横向滚动，内容全部可达，Chrome 实测 120% 完美居中、300% 可滚动），
+> 删掉 `.zoomed` 规则与 JS class 逻辑，资源戳 style.css v27 / reader.js v9。
+> 此前 1.2.0：① 预览缩放目标从内容元素改为背景卡片 `.reader-frame`（xls 等转换件
+> 放大时卡片同步放大）；② 缩放百分比可直接输入（50~300 回车生效、越界钳制、非法回显）。
+> 浏览器 E2E 实测通过，已出包登记）。
 > 第十一轮：**插件包校验失败不再只报"HTTP 400"** —— 后端 `upload`/`apply`
 > 的 400 响应补 `error` 摘要，前端 `admin-common.js` 的 `api()` 透传 `errors[]`，插件管理页把
 > 拒绝原因**逐条列出**并按类型给出处置建议（同版本重装→勾「强制」、主程序过低→先升主包、
@@ -200,7 +201,7 @@ python app.py
 | 插件 | 包 | 体积 | sha256（前 16 位） | 说明 |
 | --- | --- | --- | --- | --- |
 | admin | `deploy/插件包/JZToolsHub-插件-admin-v1.3.1.zip` | 0.11 MB / 25 文件 | `a719fd33739b9529` | 含"上传即自动重启" + **校验失败逐条提示**；`min_app_version=1.9.0`、`requires_restart=true` |
-| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.1.0.zip` | 1.22 MB / 80 文件 | `891a304f50fd036e` | 预览三项优化（见第九轮） |
+| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.2.1.zip` | 1.28 MB / 80 文件 | `da3521617c70b6f2` | 缩放修复（卡片同步放大、**放大后保持居中**）+ **缩放百分比可输入**；`requires_restart=false` |
 
 发布登记（入库、sha256 冻结值、逐文件哈希）：`tools/plugin-packages.json`；
 随介质分发的索引：`deploy/插件包/index.json`（共享盘批量更新读它）。

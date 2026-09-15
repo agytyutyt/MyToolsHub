@@ -92,12 +92,12 @@
                                    "min_app_version":  "1.9.0"
                                },
                      "knowledge-base":  {
-                                            "version":  "1.2.0",
-                                            "file":  "JZToolsHub-插件-knowledge-base-v1.2.0.zip",
-                                            "sha256":  "a408727b1ff94d3eb5dc64cebd58ed9dc94e776534efb8d58ac86f8731597ad5",
-                                            "size":  1277699,
-                                            "built_at":  "2026-09-15T08:01:05+08:00",
-                                            "code_sha256":  "54a7ecd463ea010010d58e583eef7d20b224afa7416e51772deccb93f3adabef",
+                                            "version":  "1.2.1",
+                                            "file":  "JZToolsHub-插件-knowledge-base-v1.2.1.zip",
+                                            "sha256":  "da3521617c70b6f2ea926a1f3deaab238a8941b8e656b4e975842c862df9d082",
+                                            "size":  1277846,
+                                            "built_at":  "2026-09-15T08:47:47+08:00",
+                                            "code_sha256":  "2b708c4c3c67f4218239e736e40d24d79d6cf28587f1a969ff2fe3d46ff67d03",
                                             "file_count":  80,
                                             "requires_restart":  false,
                                             "file_hashes":  {
@@ -164,9 +164,9 @@
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/style_dedup.py":  "c79520b78053f0bd",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/style_resolver.py":  "ea7376211810aefc",
                                                                 "plugins/knowledge-base/frontend/app.js":  "10ebc135edd55590",
-                                                                "plugins/knowledge-base/frontend/index.html":  "0840c2c1c6170554",
-                                                                "plugins/knowledge-base/frontend/reader.js":  "94eaed7463627e98",
-                                                                "plugins/knowledge-base/frontend/style.css":  "57843c2d6b02681e",
+                                                                "plugins/knowledge-base/frontend/index.html":  "2add344a58dd8805",
+                                                                "plugins/knowledge-base/frontend/reader.js":  "038b3c7f9ef520ef",
+                                                                "plugins/knowledge-base/frontend/style.css":  "e69a8c5b314b1ec0",
                                                                 "plugins/knowledge-base/frontend/vendor/mammoth/mammoth.browser.min.js":  "f61888233169f48e",
                                                                 "plugins/knowledge-base/frontend/vendor/marked/marked.min.js":  "597e8b9e3a1643f8",
                                                                 "plugins/knowledge-base/frontend/vendor/ofd/easyofd.js":  "a40e46888cc61866",
@@ -179,8 +179,8 @@
                                                                 "plugins/knowledge-base/frontend/vendor/purify/purify.min.js":  "9f659d5d2b847b83",
                                                                 "plugins/knowledge-base/frontend/vendor/VENDOR.md":  "973a2ebcc5544b0e",
                                                                 "plugins/knowledge-base/frontend/vendor/xlsx/xlsx.full.min.js":  "0c77a2658dfe38d9",
-                                                                "plugins/knowledge-base/manifest.json":  "3dc731e808ed0d48",
-                                                                "plugins/knowledge-base/README.md":  "f9e1c17bb62d3c39"
+                                                                "plugins/knowledge-base/manifest.json":  "f0178a7000778dc2",
+                                                                "plugins/knowledge-base/README.md":  "6747f3f747cec7cd"
                                                             },
                                             "assets":  {
                                                            "frontend/app.js":  {
@@ -189,13 +189,13 @@
                                                                                    "referenced":  true
                                                                                },
                                                            "frontend/reader.js":  {
-                                                                                      "h":  "94eaed7463627e98",
-                                                                                      "v":  8,
+                                                                                      "h":  "038b3c7f9ef520ef",
+                                                                                      "v":  9,
                                                                                       "referenced":  true
                                                                                   },
                                                            "frontend/style.css":  {
-                                                                                      "h":  "57843c2d6b02681e",
-                                                                                      "v":  26,
+                                                                                      "h":  "e69a8c5b314b1ec0",
+                                                                                      "v":  27,
                                                                                       "referenced":  true
                                                                                   },
                                                            "frontend/vendor/mammoth/mammoth.browser.min.js":  {

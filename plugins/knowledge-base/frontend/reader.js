@@ -120,12 +120,9 @@
 
   function htmlZoomApply() {
     if (htmlZoom.el) {
+      // 居中交给 CSS 的 margin:0 auto（卡片比视口窄→居中；比视口宽→auto 边距
+      // 自动归 0 + #view-reader 横向滚动，内容全部可达），JS 不干预对齐。
       htmlZoom.el.style.zoom = String(htmlZoom.scale);
-      // 放大后卡片比视口宽：取消居中改为左对齐，避免滚动容器里左侧内容不可达
-      if (htmlZoom.el.classList) {
-        if (htmlZoom.scale > 1) htmlZoom.el.classList.add("zoomed");
-        else htmlZoom.el.classList.remove("zoomed");
-      }
     }
     if (callbacks && callbacks.onZoom) callbacks.onZoom(htmlZoom.scale);
   }
@@ -161,10 +158,7 @@
   // 渲染前/销毁时清掉卡片上的缩放残留（卡片是静态 DOM，不随渲染重建）
   function resetFrameZoom() {
     var frame = zoomFrame();
-    if (frame) {
-      frame.style.zoom = "";
-      if (frame.classList) frame.classList.remove("zoomed");
-    }
+    if (frame) frame.style.zoom = "";
   }
 
   // ==================== 渲染器：Office 预览（服务端 xhr/dhr 双引擎） ====================

@@ -387,10 +387,11 @@ body {
   min-height: 60vh;
   padding: 16px 16px 90px; /* 底部留出胶囊工具条空间 */
 }
-/* 内容缩放作用在卡片本身（reader.js 的 zoom target = .reader-frame）：
-   放大后卡片比视口宽 → 取消居中改左对齐（margin:0 auto 在滚动容器里
-   会把左侧裁到不可达），配合 #view-reader 的横向滚动保证内容可达 */
-.reader-frame.zoomed { margin: 0; }
+/* 内容缩放作用在卡片本身（reader.js 的 zoom target = .reader-frame）。
+   居中保持 margin:0 auto 不动：卡片比视口窄时正常居中；比视口宽时
+   auto 边距自动归 0（左上角贴齐容器），配合 #view-reader 的横向滚动
+   内容全部可达——不要在 zoom>1 时强行去掉居中（放大 120% 这种
+   卡片仍小于视口的场景会被错误推到左边）。 */
 /* 卡片放大后可能超出视口宽：阅读视图允许横向滚动（dock 为 fixed 悬浮，不受影响） */
 #view-reader { overflow-x: auto; }
 /* 桌面端兜底最小宽：极窄内容（一两列的表格、加载/错误提示）不出现细条卡片 */
