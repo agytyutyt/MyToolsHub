@@ -71,6 +71,12 @@
 - `office_render` 导入失败被静默兜住 → 引擎不可用只在 `/api/knowledge-base/status` 报
   `office_render.available=false`。
 - openpyxl：read_only 读不到 merged_cells；data_only 对未计算公式返 None；只存 15 位有效数字。
+- **Canvas 画布必须落在整数设备像素上**（相位 `rect.left*dpr % 1` 要为 0）：分数相位会让合成器
+  对整张画布做双线性重采样，观感就是"分辨率低、发糊"。位图尺寸取 `Math.round(视口×scale×dpr)`、
+  CSS 尺寸**由位图反推**（`位图/dpr`），再用 **<1 设备像素的负边距一次性补偿**（不要迭代累积——
+  布局会把小数边距取整，累积会让整页漂出几像素的居中偏差）。页面居中 `margin:0 auto` 与 A4
+  自动高度（841.89pt×1.25 = 1052.36px）都会自然算出小数相位：**dpr 处理对了 ≠ 画面清晰**。
+  定量口径：同内容画布整数定位 vs 半像素定位，合成后边缘能量 100% vs 80%。
 
 ## D 本机限制与工具
 

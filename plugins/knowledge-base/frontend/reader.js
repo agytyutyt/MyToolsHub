@@ -408,6 +408,50 @@
         var io = null;
         var scrollBound = false;
 
+        // 设备像素对齐（清晰度关键）：画布必须落在整数设备像素上，合成器才会 1:1 贴图。
+        // 页面居中（margin:0 auto）与 A4 自动高度（841.89pt × 1.25 = 1052.36px）都会算出
+        // 小数位置，乘 dpr 后相位落回小数，合成器随即对整张画布做双线性重采样——实测
+        // 边缘对比度只剩 64%（整数定位 100%），观感就是"分辨率低、发糊"。
+        // 做法：先清零量出自然相位，再一次性补偿到网格上（位移 <1 个设备像素，肉眼不可见，
+        // 且只向左/上偏移，不会向右下溢出容器）。刻意不做迭代累积——布局会对小数边距取整，
+        // 累积会让画布整体漂移出几像素的居中偏差。
+        function snapCanvasToDevicePixel(canvas) {
+          if (!(dpr > 0)) return;
+          canvas.style.marginLeft = "";
+          canvas.style.marginTop = "";
+          var r = canvas.getBoundingClientRect();
+          if (!r.width) return;                         // 未布局/不可见，跳过
+          var fx = (r.left * dpr) % 1;
+          var fy = (r.top * dpr) % 1;
+          if (fx >= 0.002 && fx <= 0.998) canvas.style.marginLeft = (-fx / dpr) + "px";
+          if (fy >= 0.002 && fy <= 0.998) canvas.style.marginTop = (-fy / dpr) + "px";
+        }
+
+        function snapAll() {
+          for (var i = 1; i <= total; i++) {
+            if (!rendered[i]) continue;
+            var cv = wraps[i].querySelector("canvas");
+            if (cv) snapCanvasToDevicePixel(cv);
+          }
+        }
+
+        // 渲染后布局仍可能异步变化（滚动条出现/消失、状态条收起都会改变居中位置），
+        // 因此除了渲染当次校正，再在布局稳定后补校一次；resize 同理。
+        var snapTimer = null;
+        function scheduleSnap(delay) {
+          if (snapTimer) clearTimeout(snapTimer);
+          snapTimer = setTimeout(snapAll, delay || 150);
+        }
+
+        var resizeBound = false;
+        function onResizeSnap() { scheduleSnap(120); }
+
+        function bindResize() {
+          if (resizeBound) return;
+          resizeBound = true;
+          window.addEventListener("resize", onResizeSnap, false);
+        }
+
         // 先取全部页面的元数据 viewport（不渲染，开销小），据此建占位框
         var metas = [];
         for (var mi = 1; mi <= total; mi++) metas.push(doc.getPage(mi));
@@ -435,11 +479,16 @@
             return doc.getPage(p).then(function (pg) {
               if (g !== gen || rendered[p]) return null;
               var base = pg.getViewport({ scale: scale * dpr });
+              // 位图尺寸取整后再反推显示尺寸：位图与显示尺寸严格 1 设备像素对 1 位图像素。
+              // （直接给 canvas 赋小数会被截断，1000px 宽上会累积出 0.25px 级缩放，
+              //   合成器随即对整页做双线性重采样。）
+              var bw = Math.max(1, Math.round(base.width));
+              var bh = Math.max(1, Math.round(base.height));
               var canvas = document.createElement("canvas");
-              canvas.width = base.width;
-              canvas.height = base.height;
-              canvas.style.width = (base.width / dpr) + "px";
-              canvas.style.height = (base.height / dpr) + "px";
+              canvas.width = bw;
+              canvas.height = bh;
+              canvas.style.width = (bw / dpr) + "px";
+              canvas.style.height = (bh / dpr) + "px";
               var ctx = canvas.getContext("2d");
               var task = pg.render({ canvasContext: ctx, viewport: base });
               tasks[p] = task;
@@ -450,6 +499,8 @@
                 w.innerHTML = "";
                 w.className = "pdf-page-box";
                 w.appendChild(canvas);
+                snapCanvasToDevicePixel(canvas);
+                scheduleSnap(160);
                 rendered[p] = true;
                 if (!firstDone) {
                   firstDone = true;
@@ -554,6 +605,7 @@
             current = p;
             var top = wraps[p].getBoundingClientRect().top + window.pageYOffset - 70;
             window.scrollTo(0, top);
+            scheduleSnap(150);   // 跳页后滚动位置变化，重校一次设备像素相位
             if (callbacks.onPage) callbacks.onPage(current, total, scale);
           }
 
@@ -588,6 +640,7 @@
             for (var ai = 1; ai <= total; ai++) queue.push(ai);
           }
           bindScroll();
+          bindResize();
 
           pdfState = {
             prevPage: function () { scrollToPage(current - 1); },
@@ -609,6 +662,8 @@
             gen++;
             if (io) { try { io.disconnect(); } catch (e) { /* 忽略 */ } }
             if (scrollBound) window.removeEventListener("scroll", onScroll, false);
+            if (resizeBound) window.removeEventListener("resize", onResizeSnap, false);
+            if (snapTimer) clearTimeout(snapTimer);
             for (var tp in tasks) { try { tasks[tp].cancel(); } catch (e) { /* 忽略 */ } }
             try { doc.destroy(); } catch (e) { /* 忽略 */ }
             pdfState = null;
