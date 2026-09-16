@@ -14,6 +14,14 @@
    `view_func.__name__` 作 endpoint，重名直接 AssertionError，且无法回滚已注册一半的路由。
 3. **打包不传 `-Version` 自动递增 patch；版本号与上一版相同 → `build-deploy.ps1` 中止**
    （版本不变 → 目标机 `sync_templates()` 判未升级 → 模板同步全跳过）。
+4. **`bg_image.py` 是刻意双份的共用模块**（file-filter 与 trajectory-sketch 的 `backend/` 各一份，
+   逐字节相同；B-7 禁止插件间 import）：改动必须两处同步（`cp` 覆盖），
+   `test_bg_image.py` 断言两份 sha256 一致——只改一份就是行为漂移。
+5. **插件包出包 = 全仓库干净戳**：`build-plugin-package.ps1` 的 `dirty` 是 `git status --porcelain`
+   **全仓库**计数（含未跟踪文件），有并发会话在写仓库（scratch/评估稿）时会被记 `dirty=true`。
+   处置顺序：把非本工作的东西**如实提交或本地排除**（`.git/info/exclude`，出包后删段），
+   **两次出包之间先提交 `tools/plugin-packages.json`**（否则第二个包看到第一个包的登记）；
+   **别用 `git stash -u` 偷懒**——它会删掉别人正在写的未跟踪文件，收尾极麻烦（见 2026-09-16 日志）。
 
 ## B 分发物
 
@@ -93,6 +101,11 @@
 - 目标机 Win10+；**浏览器基线 Chrome ≥72**（main.js 规避、jz-icon SVG 回退、pdf.js legacy
   的触发条件是"旧浏览器/缺彩色 emoji 字体"，**不是 Win7，别删**）。
   口径：最低 3.12 / 打包 3.14；排除 3.10。
+- **动 xlsx 包结构只能走 zip 级字节手术**（`plugins/*/backend/bg_image.py` 是范例）：
+  openpyxl `load_workbook`+`save` 会**静默丢掉工作表背景图**（`<picture>`），
+  但它重写整个包（样式/宏/透视表全变样）；自己重写 zip 时
+  **`ZipInfo` 不能沿用源条目的 `flag_bits`**（带 data descriptor 标志却又不写 descriptor → 产出损坏 zip），
+  删图片本体前要**全包扫 `.rels` 反查引用**（同一张图可能还被 drawing 引用，误删就毁用户内容）。
 - **zfec 无 cp314 wheel**：必须 `pip install --find-links wheels`（`wheels/zfec-1.6.0.0-cp314-*.whl`，
   重建 `tools/build-zfec-wheel.py`）；GPL-2+ 再分发注意合规。
 - **vendor 升级后必须重打补丁**（`vendor/README.md` 现有 5 条：xhr Optional 导入、xhr 空格样式、
