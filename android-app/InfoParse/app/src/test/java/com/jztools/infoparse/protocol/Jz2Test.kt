@@ -137,7 +137,6 @@ class Jz2Test {
     fun `k-of-m 早停重组 缺 30 帧 仍还原`() {
         val k = 6
         val m = 10
-        val chunkSize = 8
         // 重组产物 = v2 JZ2 信封帧字节（真实 v2 视频流承载形态）
         val data = "hello k-of-m"
         val envelope = jz2Frame(false, 0, 1, envMeta(0, data.length, "k测试", null),
@@ -148,6 +147,9 @@ class Jz2Test {
         joined[2] = ((envelope.size shr 8) and 0xFF).toByte()
         joined[3] = (envelope.size and 0xFF).toByte()
         envelope.copyInto(joined, 4)
+        // chunkSize 动态计算：joined（4B 长度前缀 + 信封）必须 ≤ k×chunkSize，
+        // 否则尾部被静默截断、重组时长度前缀对不上（与 v1 回归用例同款教训）
+        val chunkSize = (joined.size + k - 1) / k
         // 切成 k 块等长（尾部 0 填充）
         val chunks = Array(k) { c ->
             val b = ByteArray(chunkSize)
