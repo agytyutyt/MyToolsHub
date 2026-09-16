@@ -48,7 +48,7 @@
 - HTTP 代理 `http://127.0.0.1:49237`；端口测试避开 5099。
 - venv：`C:\Users\yfjz\.workbuddy\binaries\python\envs\default\Scripts\python.exe`（flask/openpyxl/python-docx 全）。
 - 编码约定：.ps1=UTF-8 BOM+CRLF；.bat=GBK+CRLF；JSON=UTF-8 无 BOM。
-- 沙箱 safe-delete 拦"一次删 >50 项"→ 验证插件包用 3 文件小包，别拿真包打本地服务。
+- 沙箱 safe-delete 拦"一次删 >50 项"→ 验证插件包用 3 文件小包，别拿真包打本地服务；**PyInstaller COLLECT 要重建 dist\JZToolsHub（约 2800 项）必被拦** → 跑打包 ① 时加 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 前缀（仅 dist 构建产物目录可用此旁路）。
 - 服务端进程日志重定向到 Windows 路径再读（Bash 的 /tmp 与 python 不通）。
 
 ## E 测试隔离（保护真实数据 `~/.jztoolshub`）
