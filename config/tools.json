@@ -146,7 +146,7 @@
     {
       "id": "file-filter",
       "name": "过滤器",
-      "description": "对表格文件（xlsx/xls/csv）进行脱敏过滤与合规检查：硬过滤、大模型语义匹配过滤、文本/正则后处理，输出过滤后文件供下载。",
+      "description": "对表格文件（xlsx/xls/csv）进行脱敏过滤与合规检查：先自动删除文档里嵌入的背景图片，再做硬过滤/大模型语义匹配过滤、文本/正则后处理，输出过滤后文件供下载。",
       "category": "office",
       "enabled": true,
       "order": 7
@@ -154,7 +154,7 @@
     {
       "id": "trajectory-sketch",
       "name": "轨迹速写",
-      "description": "上传原始轨迹表（Excel），先调用过滤器插件完成字段过滤（默认硬过滤，可切换大模型辅助），再做轨迹分析并生成速写报告：停留点、出行段、报告正文与数据质量，可下载 Excel。",
+      "description": "上传原始轨迹表（Excel，自动删除文档里的背景图片），先调用过滤器插件完成字段过滤（默认硬过滤，可切换大模型辅助），再做轨迹分析并生成速写报告：停留点、出行段、报告正文与数据质量，可下载 Excel。",
       "category": "office",
       "enabled": true,
       "order": 8

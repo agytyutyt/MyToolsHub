@@ -1,6 +1,7 @@
 """文件过滤器 —— JZToolsHub 后端插件路由。
 
 功能：对上传表格（xlsx/xls/csv，≤20MB）做字段过滤（脱敏）与文本后处理（合规检查）：
+- 预处理：**删除背景图片**（识别文档里嵌入的工作表背景图片并摘除，见 bg_image.py）；
 - 硬过滤：按固定字段名单保留列（规整后精确匹配），其余删除；
 - 大模型过滤：提取全部表头交大模型判断与保留名单的语义关联（「时间」↔「开始时间」），
   匹配保留、其余删除；
@@ -24,7 +25,7 @@ from datetime import datetime
 
 from flask import jsonify, request, send_file
 
-from . import core, llm_client
+from . import bg_image, core, llm_client
 
 try:
     from jztools_admin.routes import get_session_user as _get_session_user
@@ -364,6 +365,8 @@ def register(app):
         task_id = create_task(user)
         cleanup_tasks()
         _clean_task_files()
+        # ① 预处理：删除背景图片（未发现背景图片时原字节返回，不做任何改写）
+        blob, sanitize = bg_image.strip_background_images(blob, ext)
         # SEC-3：落盘文件名用 task_id 重命名，不沿用用户原始文件名
         in_path = os.path.join(TASK_DIR, f"{task_id}_input.{ext}")
         out_ext = "csv" if ext == "csv" else "xlsx"  # .xls 只读，输出转 .xlsx
@@ -371,11 +374,12 @@ def register(app):
         with open(in_path, "wb") as fp:
             fp.write(blob)
         post_rules = cfg["post_rules"]
-        set_task(task_id, output_ext=out_ext, original_name=orig)
+        set_task(task_id, output_ext=out_ext, original_name=orig, sanitize=sanitize)
         _executor.submit(_run_filter_task, task_id, in_path, ext, out_path, out_ext,
                          mode, keep, post_rules, cfg["llm"])
         _set_operation("提交表格过滤任务")
-        return jsonify({"task_id": task_id, "mode": mode, "output_ext": out_ext})
+        return jsonify({"task_id": task_id, "mode": mode, "output_ext": out_ext,
+                        "sanitize": sanitize})
 
     @app.get(f"{API_PREFIX}/result/<task_id>")
     def ff_result(task_id):
@@ -395,6 +399,7 @@ def register(app):
                 "replace_count": task.get("replace_count") or 0,
                 "rows": task.get("rows") or 0,
                 "llm_used": bool(task.get("llm_used")),
+                "sanitize": task.get("sanitize") or {},
                 "download": task.get("download"),
                 "filename": task.get("original_name") or "",
                 "output_ext": task.get("output_ext") or "",

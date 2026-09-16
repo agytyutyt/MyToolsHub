@@ -385,8 +385,15 @@
       ['过滤后数据行 ' + s(up.filter.rows), ''],
       [up.schema.can_analyze ? '必需字段齐备' : '缺少必需字段', up.schema.can_analyze ? 'ok' : 'bad']
     ];
+    var san = up.sanitize || {};
+    var sanPill = san.removed
+      ? ['已删背景图片 ' + san.removed + ' 张', 'ok']
+      : (san.scanned && !san.found ? ['无背景图片', ''] : (san.note ? [san.note, ''] : null));
+    if (sanPill) { sanPill[2] = san.note || ''; pills.push(sanPill); }
     pills.forEach(function (p) {
-      sum.appendChild(el('span', 'pill' + (p[1] ? ' ' + p[1] : ''), p[0]));
+      var pill = el('span', 'pill' + (p[1] ? ' ' + p[1] : ''), p[0]);
+      if (p[2]) { pill.title = p[2]; }
+      sum.appendChild(pill);
     });
 
     var rows = (up.schema.fields || []).map(function (f) {
@@ -614,6 +621,9 @@
       Object.keys(j.schema.matched).forEach(function (k) {
         qrows.push(['列映射 · ' + k, s(j.schema.matched[k])]);
       });
+    }
+    if (j.sanitize && j.sanitize.note) {
+      qrows.push(['源文件预处理', j.sanitize.note]);
     }
     qrows.push(['实际保留字段', (j.filter && (j.filter.kept || []).map(function (x) {
       return x.column + (x.matched && x.matched !== x.column ? '（匹配 ' + x.matched + '）' : '');

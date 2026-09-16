@@ -235,6 +235,9 @@
     addLine(stats, "删除字段：", String((task.removed || []).length) + " 个");
     addLine(stats, "后处理替换：", String(task.replace_count || 0) + " 处");
     if (task.llm_used) addLine(stats, "匹配方式：", "大模型语义匹配");
+    if (task.sanitize && task.sanitize.note) {
+      addLine(stats, "文档预处理：", task.sanitize.note);
+    }
 
     renderChipList($("keptChips"), task.kept || [], true);
     renderChipList($("removedChips"), (task.removed || []).map(function (c) {

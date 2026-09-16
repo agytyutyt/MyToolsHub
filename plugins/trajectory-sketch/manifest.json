@@ -1,12 +1,13 @@
 {
   "id": "trajectory-sketch",
   "name": "轨迹速写",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "JZToolsHub 团队",
   "icon": "✍️",
   "accent": "#5E35B1",
   "entry": "index.html",
   "features": [
+    "删除背景图片",
     "轨迹分析",
     "字段过滤",
     "速写报告",

@@ -3,7 +3,8 @@
 
 流程（详见 ``docs/轨迹速写插件-设计文档.md`` §2）：
 
-    ① /upload   上传轨迹表 → 暂存 → 调用「过滤器」插件（默认硬过滤）→ 字段自检
+     /upload   上传轨迹表 → **删除背景图片**（预处理，见 bg_image.py）→ 暂存
+    ① 字段自检  调「过滤器」插件（默认硬过滤）→ 列映射自检
     ② /analyze  用户确认（可切大模型辅助）→ 异步：过滤 → 轨迹分析引擎 → 报告工作簿
     ③ /result   轮询进度与结果
     ④ /download 下载 5 个 sheet 的速写报告 .xlsx
@@ -21,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from flask import jsonify, request, send_file
 
-from . import config_store, excel_io, filter_bridge, report_store
+from . import bg_image, config_store, excel_io, filter_bridge, report_store
 from .engine import analyze_rows, available_algorithms, normalize_params, resolve_columns
 from .engine.contract import AnalysisError
 
@@ -155,8 +156,9 @@ def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
         result = analyze_rows(filtered, config_store.engine_config(cfg), meta=meta)
 
         report_store.set_task(task_id, status="running", step="生成报告")
+        sanitize = stage.get("sanitize") or {}
         out_path = os.path.join(report_store.cache_dir(), "%s_report.xlsx" % task_id)
-        excel_io.write_report_workbook(out_path, result)
+        excel_io.write_report_workbook(out_path, result, sanitize=sanitize)
         report_store.keep_alive(out_path)
 
         report_store.set_task(
@@ -169,6 +171,7 @@ def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
             clusters=result.get("clusters") or [],
             schema=result.get("schema") or {},
             filter=meta,
+            sanitize=sanitize,
             warnings=result.get("warnings") or [],
             output_path=out_path,
             filename=_report_filename(),
@@ -327,6 +330,9 @@ def register(app):
             return jsonify({"error": "保留字段名单为空，请管理员在「⚙️ 配置」中设置"}), 400
 
         report_store.cleanup()
+        # 预处理：删除背景图片（未发现背景图片时原字节返回，不做任何改写）。
+        # 必须在落盘暂存**之前**做，后续自检 / 分析 / 报告全链路只面对"干净"的文档。
+        blob, sanitize = bg_image.strip_background_images(blob, ext)
         stage = report_store.save_upload(blob, ext, orig, user)
 
         try:
@@ -358,6 +364,7 @@ def register(app):
                                   can_analyze=bool(check["can_analyze"]),
                                   hint=check["hint"],
                                   keep_columns=keep_cols,
+                                  sanitize=sanitize,
                                   llm_configured=_filter_llm_configured())
 
         _set_operation("上传轨迹表并自检")
@@ -372,6 +379,7 @@ def register(app):
             "mode_default": cfg["filter"].get("mode_default") or "hard",
             "filter": _filter_meta(res, "hard"),
             "schema": check,
+            "sanitize": sanitize,
             "preview": filtered[:6],
             "llm_configured": _filter_llm_configured(),
             "algorithm": normalize_params(config_store.engine_config(cfg)).get("algo"),
@@ -438,6 +446,7 @@ def register(app):
                 "clusters": task.get("clusters") or [],
                 "schema": task.get("schema") or {},
                 "filter": task.get("filter") or {},
+                "sanitize": task.get("sanitize") or {},
                 "warnings": task.get("warnings") or [],
                 "filename": task.get("filename") or "",
                 "download": task.get("download") or "",

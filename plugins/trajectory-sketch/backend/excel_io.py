@@ -172,8 +172,13 @@ SHEET_TRIPS = "出行段"
 SHEET_QUALITY = "数据质量"
 
 
-def write_report_workbook(path: str, result: Dict[str, Any]) -> str:
-    """把引擎结果写成 5 个 sheet 的速写报告工作簿，返回落盘路径。"""
+def write_report_workbook(path: str, result: Dict[str, Any],
+                          sanitize: Optional[Dict[str, Any]] = None) -> str:
+    """把引擎结果写成 5 个 sheet 的速写报告工作簿，返回落盘路径。
+
+    ``sanitize`` 为上传阶段的「删除背景图片」结论（``bg_image`` 的报告），
+    有内容时写进「数据质量」sheet，让报告的来源链路可追溯。
+    """
     if not OPENPYXL_AVAILABLE:
         raise TableError("后端缺少 openpyxl，无法生成报告（请执行：pip install openpyxl）")
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -221,7 +226,17 @@ def write_report_workbook(path: str, result: Dict[str, Any]) -> str:
             ws5.append([_label(k), "；".join(_cell(x) for x in v)])
         else:
             ws5.append([_label(k), _cell(v)])
-    # 过滤阶段摘要（谁保留了哪些字段）与引擎警告
+    # 源文件预处理（删除背景图片）与过滤阶段摘要（谁保留了哪些字段）、引擎警告
+    san = sanitize or {}
+    if san.get("note"):
+        ws5.append(["", ""])
+        ws5.append(["源文件预处理", san["note"]])
+        for img in (san.get("images") or []):
+            ws5.append(["· 背景图片", "%s · %s · 工作表 %s%s" % (
+                img.get("part") or "（图片本体不在文件内）",
+                _bytes_text(img.get("bytes")),
+                "、".join(img.get("sheets") or []) or "—",
+                "（本体被其他位置引用，已保留）" if img.get("kept") else "")])
     flt = result.get("filter") or {}
     if flt:
         ws5.append(["", ""])
@@ -289,3 +304,14 @@ _LABELS = {"net_m": "净位移(米)", "cum_m": "累计位移(米)", "kind": "判
 
 def _label(k: str) -> str:
     return _LABELS.get(str(k), str(k))
+
+
+def _bytes_text(n: Any) -> str:
+    """字节数转可读文本（报告里说明删掉了多大的图片）。"""
+    try:
+        n = int(n or 0)
+    except Exception:
+        return "—"
+    if n <= 0:
+        return "—"
+    return "%.1f KB" % (n / 1024.0) if n >= 1024 else "%d B" % n

@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- 轨迹速写插件（前端 + Python 后端）
- * 流程：① 上传轨迹表 → ② 字段自检（调用「过滤器」插件预览）→ ③ 生成速写报告
+ * 流程：① 上传轨迹表（先删除背景图片）→ ② 字段自检（调用「过滤器」插件预览）→ ③ 生成速写报告
  * 图标：全部使用插件自带的 SVG（frontend/icons/），不使用 emoji 字符，兼容 Win7。
  * 后端接口前缀：/api/trajectory-sketch
  -->
@@ -18,7 +18,7 @@
     <span class="head-icon" id="headIcon" data-page-node-id="GchYp8ugrhSkiACJJjS2Kv"></span>
     <div data-page-node-id="S7zH04K2TVpwNZnabg3FSA">
       <h1 data-page-node-id="Ui4QqBlyiv5J7s667XtpS0">轨迹速写</h1>
-      <p class="subtitle" data-page-node-id="FHGwLrkGOYK2Ra2wQlCmLb">上传原始轨迹表（Excel）→ 调用「过滤器」完成字段过滤（默认硬过滤，可切换大模型辅助）
+      <p class="subtitle" data-page-node-id="FHGwLrkGOYK2Ra2wQlCmLb">上传原始轨迹表（Excel，自动删除背景图片）→ 调用「过滤器」完成字段过滤（默认硬过滤，可切换大模型辅助）
         → 轨迹分析 → 速写报告（停留点 / 出行段 / 报告正文 / 数据质量）</p>
     </div>
   </header>
@@ -178,6 +178,6 @@
   </footer>
 </div>
 
-<script src="./app.js?v=1"></script>
+<script src="./app.js?v=2"></script>
 </body>
 </html>
