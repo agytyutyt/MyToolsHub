@@ -17,6 +17,7 @@ object Msg {
     const val FRAME_BAD = "视频帧数据异常"
     const val VIDEO_INCOMPLETE = "视频帧不全，请重新解析或重新传输原始视频文件"
     const val VIDEO_NO_QR = "视频中未识别到二维码帧"
+    const val JZ2_BAD = "二维码数据已损坏（完整性校验失败）"
 
     fun unknownFmt(fmt: String) = "未知的文档格式声明：$fmt"
 
@@ -96,8 +97,8 @@ sealed class ScanResult {
 }
 
 /**
- * 信封解析器（文档 3.1 / 3.2）。
- * 判别顺序不可变：以 "{" 开头 → JSON；否则按 base64 帧头解析（QrFrame）。
+ * 信封解析器（文档 3.1 / 3.2；v2 JZ2 见 Jz2.kt）。
+ * 判别顺序不可变：以 "{" 开头 → JSON；JZ2 魔数 → v2 帧；否则按 base64 帧头解析（QrFrame）。
  */
 object EnvelopeParser {
 
@@ -107,6 +108,20 @@ object EnvelopeParser {
         if (t.startsWith("{")) return handleJson(t, collector)
         // 二期视频帧在 QrFrame.Collector 内处理；此处按一期规则拒绝
         return ScanResult.Invalid(Msg.NOT_ENVELOPE)
+    }
+
+    /**
+     * 字节入口（v2 双协议）：JZ2 信封帧走 v2 解析（单页直接出结果，多页进
+     * EnvCollector）；其余按 UTF-8 文本回落 v1 处理。
+     */
+    fun handleBytes(data: ByteArray, collector: PageCollector, jz2Env: Jz2.EnvCollector): ScanResult {
+        if (Jz2.isJz2(data)) {
+            val f = Jz2.parseFrame(data)
+                ?: return ScanResult.Invalid(Msg.JZ2_BAD)
+            if (f.isFec) return ScanResult.Invalid(Msg.NOT_ENVELOPE) // share 帧走 QrFrame 收集器
+            return jz2Env.offer(f)
+        }
+        return handle(String(data, Charsets.UTF_8), collector)
     }
 
     /** 处理 JSON 形态（形态A / 形态B） */

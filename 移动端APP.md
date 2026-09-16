@@ -147,6 +147,17 @@ app/src/main/java/com/xxx/infoparse/
 
 > 本章是 APP 与桌面端封装功能的全部接口。**实现必须与本章逐字一致**；拿不准时以桌面端插件源码 `plugins/info-transfer/backend/routes.py` 中的 `build_envelope / _build_static_pages / _parse_scanned_texts / reassemble_qrtransfer` 为准。
 
+### 3.0 协议 v2：JZ2 二进制帧（2026-09-16 起，与 v1 双协议并存）
+
+桌面端 `PROTOCOL_V2=True` 后新封装产物改用 JZ2 二进制帧（去双重 base64：静态净载荷 −26%、视频 −45%；内建 CRC32 完整性校验）。APP 以 `Jz2.kt` 承接，与桌面端 `parse_frame_jz2 / parse_envelope_v2` 逐字段对齐：
+
+- **帧结构**：`magic "JZ2"(3B) + ver(1B=2) + flags(1B) + seg_i(3B) + seg_n(3B) + meta_len(2B) + body_len(4B) + crc32(4B)` 后接 meta 与 payload；flags bit0-1=压缩算法（0=none 1=zlib）、bit2=mode、bit3=帧类型（0=信封帧 1=FEC share 帧）。CRC32 覆盖「帧头（除 CRC 字段）+ meta + payload」，任一字节损坏即拒收；
+- **信封帧**（静态码）：`meta = fmt(1B)+orig_len(4B)+name_len(2B)+name+ext_len(1B)+ext`（fmt 编码 text=0/markdown=1/word=2/excel=3/file=4）；payload 为数据原始字节，压缩由 flags 标注。静态多页时 meta 每页重复、payload 为切片，收齐 seg_n 页拼接后统一解压（`Jz2.EnvCollector`，页码 = seg_i+1 映射为 1 基）；
+- **share 帧**（视频流）：`meta = k(1B)+m(1B)`，payload 为 zfec share 原始字节，帧序与 v1 相同（`idx = share×组数 + 组号`）；
+- **还原规则**：解压后 `fmt=file` → payload 直接 base64 字符串（与 v1 data 同形）；`excel` → JSON 二维数组；**`word` 精简载荷是纯文本**（勿按 JSON 解析，与桌面端 `_unpack_data` 语义一致）；其余 → UTF-8 文本。`orig_len` 与解压后长度不符 → 拒收；
+- **双协议判别**：内容以 `JZ2` 魔数开头 → v2；否则转 UTF-8 按 v1 文本判别（3.2）。旧码零影响；
+- **k-of-m 早停**（替代「收齐全部 n 帧」）：每个分块组集齐 ≥k 个 share 即可经 `ZfecCompat` GF 解码重组（丢 ≤ m−k 帧 / 约 30% 仍可还原）；全收齐仍走系统位快路径。`VideoParseHelper` 逐帧循环满足即停。
+
 ### 3.1 信封（envelope）
 
 信封是一段 UTF-8 编码的 JSON 文本，压缩风格（无多余空格）：
@@ -203,20 +214,25 @@ app/src/main/java/com/xxx/infoparse/
 APP 扫到一串文本后，按下面的顺序判别（**顺序不能变**）：
 
 ```
-扫描得到文本 text
+扫描得到字节内容 data（⚠️ v2 起必须用 rawBytes 原始字节，勿经 rawValue 字符串）
    │
-   ├─ text 以 "{" 开头？
-   │     ├─ 是 → 尝试按 JSON 解析
-   │     │     ├─ 解析失败            → 错误「未识别到信息传输封装的二维码内容」
-   │     │     ├─ 有 "pg" 字段        → 【形态B】多页分片 → 交给 PageCollector（3.3）
-   │     │     └─ 无 "pg" 字段        → 【形态A】单张完整信封 → 校验(3.1) → 直出结果
+   ├─ 以 "JZ2" 魔数开头？（双协议判别入口）
+   │     ├─ 是 → 解析 JZ2 帧（3.0；CRC 失败 → 「二维码数据已损坏（完整性校验失败）」）
+   │     │     ├─ share 帧（bit3=1）    → 【形态C】视频帧 → QrFrame.Collector.offerJz2Share
+   │     │     ├─ 信封帧 seg_n == 1    → 【形态A】直出结果（Jz2.parseEnvelope）
+   │     │     └─ 信封帧 seg_n > 1     → 【形态B】Jz2.EnvCollector 多页收集
    │     └─
-   └─ 否 → 按 base64 帧头解析（二期，3.4）
-         ├─ 头部合法（9 字节、第 7 字节为 0）→ 【形态C】QR-transfer 视频帧 → 收集
-         └─ 不合法                          → 错误「未识别到信息传输封装的二维码内容」
+   └─ 否 → 按 UTF-8 文本处理
+         ├─ text 以 "{" 开头？ → 是 → 尝试按 JSON 解析
+         │     ├─ 解析失败            → 错误「未识别到信息传输封装的二维码内容」
+         │     ├─ 有 "pg" 字段        → 【形态B】多页分片 → 交给 PageCollector（3.3）
+         │     └─ 无 "pg" 字段        → 【形态A】单张完整信封 → 校验(3.1) → 直出结果
+         └─ 否 → 按 base64 帧头解析（二期，3.4）
+               ├─ 头部合法（9 字节、第 7 字节为 0）→ 【形态C】QR-transfer 视频帧 → 收集
+               └─ 不合法                          → 错误「未识别到信息传输封装的二维码内容」
 ```
 
-> 判别依据：信封 JSON 以 `{` 开头；而 base64 字母表（`A-Z a-z 0-9 + / =`）不含 `{`，二者天然互斥，不会误判。
+> 判别依据：v1 信封 JSON 以 `{` 开头，而 base64 字母表不含 `{`，二者天然互斥；v2 JZ2 帧以二进制魔数开头，`isJz2` 前缀判别即可与文本流安全区分。
 
 ### 3.3 形态 B：多页分片协议与重组
 
@@ -294,6 +310,7 @@ APP 扫到一串文本后，按下面的顺序判别（**顺序不能变**）：
 | --- | --- |
 | 内容不是信封也不是合法帧 | 未识别到「信息传输」封装的二维码内容 |
 | `jzt` ≠ 1 | 信封协议版本不受支持 |
+| JZ2 帧 CRC / 长度校验失败 | 二维码数据已损坏（完整性校验失败） |
 | `fmt` 不在 4 个取值内 | 未知的文档格式声明：<fmt 原值> |
 | 多页未集齐 | 已收集 x/n 张，还差：第 a、b…张（列出缺失页码，最多列 5 个） |
 | 新页 `pg.n` 与任务 `total` 不一致 | 该二维码页数与当前任务不一致，已忽略 |

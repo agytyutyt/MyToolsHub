@@ -76,6 +76,32 @@ except Exception:  # pragma: no cover
     QR_OVERFLOW = Exception
     QRCODE_AVAILABLE = False
 
+if QRCODE_AVAILABLE:
+    # qrcode 库 RS 多项式实现的边界缺陷：某纠错分块的数据段全为 0x00 时
+    # （v2 二进制载荷 + 等长零填充会真实出现），Polynomial.__mod__ 对零首项
+    # 系数求 glog 直接抛 ValueError(glog(0))。补零守卫：前导零系数的商为 0，
+    # 数学上等价于跳过该次消元；全零数据块的纠错余式恒为全零，与 GF 运算
+    # 结果一致。v1 的 ASCII 载荷不含 0x00 字节，此补丁对其行为零变化。
+    from qrcode import base as _qr_base
+
+    def _safe_poly_mod(self, other):
+        difference = len(self) - len(other)
+        if difference < 0:
+            return self
+        if self[0] == 0:
+            tail = self.num[1:]
+            if not tail:
+                return self  # 余式为 0：create_bytes 对短 modPoly 自动按 0 补齐
+            return _qr_base.Polynomial(tail, 0) % other
+        ratio = _qr_base.glog(self[0]) - _qr_base.glog(other[0])
+        num = [item ^ _qr_base.gexp(_qr_base.glog(other_item) + ratio)
+               for item, other_item in zip(self, other)]
+        if difference:
+            num.extend(self[-difference:])
+        return _qr_base.Polynomial(num, 0) % other
+
+    _qr_base.Polynomial.__mod__ = _safe_poly_mod
+
 try:
     import zfec
     ZFEC_AVAILABLE = True
@@ -96,6 +122,13 @@ try:
 except Exception:  # pragma: no cover
     np = None
     NUMPY_AVAILABLE = False
+
+try:
+    import zxingcpp
+    ZXING_AVAILABLE = True
+except Exception:  # pragma: no cover
+    zxingcpp = None
+    ZXING_AVAILABLE = False
 
 try:
     import openpyxl
@@ -136,6 +169,34 @@ FRAMERATE = 15
 VIDEO_FOURCC = "avc1"   # H.264，浏览器 <video> 可直接播放
 FEC_RATIO = 0.4         # 前向纠错比例：额外生成 1/(1-fec_ratio) 帧（视频有损压缩下取高冗余）
 CAMERA_FRAME_REPEAT = 5  # 相机传输模式：每码连续重复的帧数（5/15s ≈ 333ms，便于手机摄像头捕获）
+PAYLOAD_SAFETY = 0.9    # 单码载荷安全系数：实际载荷 ≤ 容量的 90%（满容量高熵载荷在部分
+                        # 解码器下不稳定——cv2 回读实测可能整码失败甚至截断，见评估报告 §5.3）
+
+# ===================== 协议 v2（JZ2 二进制帧，T07/T08） =====================
+# v1：信封为 JSON 文本（data 经 base64 承载），FEC 帧头 12 字符 base64，全部 QR 内容
+#     为 UTF-8 安全文本（cv2/ML Kit rawValue 直接可读）。
+# v2：信封与 FEC share 帧二进制化（magic "JZ2"），载荷为原始字节（去双重 base64），
+#     帧头自带 CRC32 与长度——损坏/截断载荷 100% 在帧层被拒。
+# 兼容策略：
+#   - 解码端双协议自适应：QR 内容以 b"JZ2" 开头走 v2 帧，否则按 v1 文本解析；
+#     trajectory-convert 等外部插件产的 v1 流不受影响。
+#   - 编码端由 PROTOCOL_V2 开关控制（默认 v2，两端同步发版；APP 未升级的目标机
+#     可置 False 回退 v1 出码）。
+PROTOCOL_V2 = True
+
+JZ2_MAGIC = b"JZ2"
+JZ2_VERSION = 2
+JZ2_HEADER_LEN = 21      # magic3 + ver1 + flags1 + seg_i3 + seg_n3 + meta_len2 + body_len4 + crc32_4
+# flags 位定义
+JZ2_COMP_NONE = 0        # bit0-1：压缩算法
+JZ2_COMP_ZLIB = 1
+JZ2_COMP_XZ = 2          # 预留（T10 LZMA2）
+JZ2_FLAG_REBUILD = 0x04  # bit2：0=exact（字节一致）1=rebuild（内容等价重建）
+JZ2_FLAG_FEC = 0x08      # bit3：0=信封帧 1=FEC share 帧
+# fmt 枚举（meta 内 1 字节）
+JZ2_FMT_CODES = {"text": 0, "markdown": 1, "word": 2, "excel": 3, "file": 4}
+JZ2_FMT_NAMES = {v: k for k, v in JZ2_FMT_CODES.items()}
+ZXING_NOTE = "pip install zxing-cpp"
 
 # 视频编码器候选（cv2 内置 FFmpeg 的 libopenh264 在部分机器缺 DLL 时，
 # 依次尝试 MPEG-4 Part 2 回退；mp4v 浏览器可能无法直接播放但解码端不受影响）
@@ -173,6 +234,9 @@ SUPPORTED_FORMATS = {
     "txt":      {"fmt": "text",     "label": "纯文本",       "extract": "text"},
     "md":       {"fmt": "markdown", "label": "Markdown",     "extract": "text"},
     "markdown": {"fmt": "markdown", "label": "Markdown",     "extract": "text"},
+    "ppt":      {"fmt": "file",     "label": "PPT 演示",     "extract": "none"},
+    "pptx":     {"fmt": "file",     "label": "PPT 演示",     "extract": "none"},
+    "pdf":      {"fmt": "file",     "label": "PDF 文档",     "extract": "none"},
 }
 
 # 上传大小上限（与框架层面独立的前置校验，SEC-3）
@@ -631,7 +695,9 @@ def extract_doc_lean(filename, file_bytes):
     if item is None:
         raise LeanUnsupported(f".{ext}" if ext else "无扩展名文件")
     if item["extract"] == "none":
-        raise LeanUnsupported(f"{item['label']}（.{ext}）为旧版/特殊格式，不支持精简提取")
+        raise LeanUnsupported(
+            f"{item['label']}（.{ext}）不支持精简提取，已按原件传输"
+            "（建议：pdf 可先另存为文本类格式再精简传输以大幅减少二维码数量）")
     fmt, ext_decl = item["fmt"], ext
     extract = item["extract"]
     if extract == "text":
@@ -652,15 +718,21 @@ def extract_doc_lean(filename, file_bytes):
 def _pack_data(fmt, data):
     """把信封 data 序列化并按需 zlib 压缩，返回 (承载值, 是否压缩)。
 
-    - fmt=file：data 为文件字节 base64（高熵），压缩无收益 → 原样承载；
     - str / excel 二维数组：序列化为 UTF-8 字节后 zlib 压缩（level 9），
       仅当 base64(压缩) 确实小于原始字节时才压缩（zip=1 标记）；
       小文本/小表格压缩不划算 → 保持原形态（旧版信封形状，全端兼容）。
+    - fmt=file：data 为文件字节 base64。对 base64 文本同样试压一轮 zlib：
+      OLE 类（doc/ppt/xls）与文本类源文件的 base64 仍有大量冗余
+      （实测 ppt 10.4×、doc 12×、pdf 2.9×，见《信息传输格式开销评估与优化方案》）；
+      已压缩容器（docx/xlsx/jpg）试压不划算自动保持原样。
+      解析端按 zip=1 解压与 fmt 无关（解压结果是 base64 串，照常 b64decode），
+      网页端与 APP（≥v1.7）天然兼容，无需改动。
     """
-    if fmt == "file":
-        return data, False
     if isinstance(data, str):
-        raw = data.encode("utf-8")
+        if fmt == "file":
+            raw = data.encode("ascii")
+        else:
+            raw = data.encode("utf-8")
     elif isinstance(data, list):
         raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     else:
@@ -700,7 +772,12 @@ def build_envelope(fmt, name, data, ext=None):
     精简传输的文本与二维数组经 zlib 压缩（zip=1）后 base64 承载，
     消除 JSON 语法与重复文本冗余——重复度高的表格/文档典型压缩比 5-10 倍；
     fmt=file 与压缩无收益的小数据保持原形态。
+
+    PROTOCOL_V2=True 时返回 JZ2 二进制信封帧（原始字节载荷，去双重 base64 +
+    CRC32 完整性校验）；编码/解析两端按 b"JZ2" 魔数双协议自适应。
     """
+    if PROTOCOL_V2:
+        return build_envelope_v2(fmt, name, data, ext)
     env = {"jzt": 1, "fmt": fmt, "name": name}
     if ext:
         env["ext"] = ext
@@ -732,6 +809,347 @@ def parse_envelope(obj):
     return fmt, str(obj.get("name") or "未命名"), data, ext
 
 
+# ===================== 协议 v2：JZ2 二进制帧（T07 信封 v2 / T08 二进制直载） =====================
+# 帧结构（21B 定长帧头 + meta + payload）：
+#   magic 3B "JZ2" | ver 1B | flags 1B | seg_i 3B | seg_n 3B | meta_len 2B | body_len 4B | crc32 4B
+#   flags bit0-1 = 压缩算法（0=none 1=zlib 2=xz 预留）；bit2 = mode（0=exact 1=rebuild）；
+#   bit3 = 帧类型（0=信封帧 1=FEC share 帧）
+#   CRC32 覆盖「帧头（除 CRC 字段自身）+ meta + payload」——帧头/载荷任何位翻转都会被拒。
+# 两种帧：
+#   信封帧（静态码直接承载）：meta = fmt(1B)+orig_len(4B)+name_len(2B)+name+ext_len(1B)+ext；
+#       payload = 数据原始字节（压缩与否由 flags 标注）。静态多页时 meta 每页重复、
+#       payload 为整份数据的切片，收齐后拼接再解压。
+#   share 帧（视频流）：meta = k(1B)+m(1B)；payload = zfec share 原始字节（不再 base64）。
+# 解码端双协议自适应：内容以 b"JZ2" 开头走 v2，否则按 v1 文本解析（外部插件 v1 流不受影响）。
+
+def _pack_data_v2(fmt, data):
+    """v2 载荷序列化：返回 (payload_bytes, comp, orig_len)——不 base64，直接原始字节。
+
+    - str：fmt=file 先 base64 解码还原文件字节，其余按 UTF-8 编码；
+    - list（word 段落数组 / excel 二维数组）：紧凑 JSON 序列化；
+    - zlib 试压（level 9），更小才启用（flags 标注 JZ2_COMP_ZLIB）。
+    """
+    if isinstance(data, (bytes, bytearray)):
+        raw = bytes(data)
+    elif isinstance(data, str):
+        if fmt == "file":
+            try:
+                raw = base64.b64decode(data, validate=True)
+            except Exception:
+                raw = data.encode("utf-8")
+        else:
+            raw = data.encode("utf-8")
+    elif isinstance(data, list):
+        raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    else:
+        raise ValueError("v2 载荷类型不支持")
+    try:
+        packed = zlib.compress(raw, 9)
+    except Exception:
+        return raw, JZ2_COMP_NONE, len(raw)
+    if len(packed) < len(raw):
+        return packed, JZ2_COMP_ZLIB, len(raw)
+    return raw, JZ2_COMP_NONE, len(raw)
+
+
+def _env_meta_v2(fmt, name, ext, orig_len):
+    """信封帧 meta：fmt(1B) + orig_len(4B) + name_len(2B) + name(utf8) + ext_len(1B) + ext。"""
+    fmt_code = JZ2_FMT_CODES.get(fmt)
+    if fmt_code is None:
+        raise ValueError(f"未知的文档格式声明：{fmt}")
+    name_b = (name or "未命名").encode("utf-8")[:65535]
+    ext_b = (ext or "").lstrip(".").lower().encode("utf-8")[:255]
+    return (bytes([fmt_code])
+            + int(orig_len).to_bytes(4, BYTE_ORDER)
+            + len(name_b).to_bytes(2, BYTE_ORDER) + name_b
+            + bytes([len(ext_b)]) + ext_b)
+
+
+def _jz2_frame(kind, seg_i, seg_n, meta, payload, comp=JZ2_COMP_NONE, mode=0):
+    """构造 JZ2 帧。kind="env" 信封帧 / "fec" share 帧；CRC32 覆盖帧头+meta+payload。"""
+    flags = (comp & 0x03)
+    if mode:
+        flags |= JZ2_FLAG_REBUILD
+    if kind == "fec":
+        flags |= JZ2_FLAG_FEC
+    header_no_crc = (JZ2_MAGIC
+                     + bytes([JZ2_VERSION, flags])
+                     + int(seg_i).to_bytes(3, BYTE_ORDER)
+                     + int(seg_n).to_bytes(3, BYTE_ORDER)
+                     + len(meta).to_bytes(2, BYTE_ORDER)
+                     + len(payload).to_bytes(4, BYTE_ORDER))
+    crc = zlib.crc32(header_no_crc + meta + payload) & 0xFFFFFFFF
+    return header_no_crc + crc.to_bytes(4, BYTE_ORDER) + meta + payload
+
+
+def parse_frame_jz2(frame):
+    """校验并解析 JZ2 帧，返回 dict(comp/mode/is_fec/seg_i/seg_n/meta/payload)。
+
+    长度不足 / magic / 版本 / CRC 任一不符即抛 ValueError（损坏与截断 100% 被拒）。
+    """
+    if not isinstance(frame, (bytes, bytearray)) or len(frame) < JZ2_HEADER_LEN:
+        raise ValueError("JZ2 帧长度不足（数据损坏或被截断）")
+    frame = bytes(frame)
+    if frame[:3] != JZ2_MAGIC:
+        raise ValueError("JZ2 帧标识不符")
+    if frame[3] != JZ2_VERSION:
+        raise ValueError(f"JZ2 协议版本不受支持（{frame[3]}）")
+    flags = frame[4]
+    seg_i = int.from_bytes(frame[5:8], BYTE_ORDER)
+    seg_n = int.from_bytes(frame[8:11], BYTE_ORDER)
+    meta_len = int.from_bytes(frame[11:13], BYTE_ORDER)
+    body_len = int.from_bytes(frame[13:17], BYTE_ORDER)
+    crc = int.from_bytes(frame[17:21], BYTE_ORDER)
+    if len(frame) < JZ2_HEADER_LEN + meta_len + body_len:
+        raise ValueError("JZ2 帧载荷不完整（数据被截断）")
+    if (zlib.crc32(frame[:JZ2_HEADER_LEN - 4] + frame[JZ2_HEADER_LEN:JZ2_HEADER_LEN + meta_len + body_len])
+            & 0xFFFFFFFF) != crc:
+        raise ValueError("JZ2 帧 CRC32 校验失败（数据损坏）")
+    meta = frame[JZ2_HEADER_LEN:JZ2_HEADER_LEN + meta_len]
+    payload = frame[JZ2_HEADER_LEN + meta_len:JZ2_HEADER_LEN + meta_len + body_len]
+    return {
+        "comp": flags & 0x03,
+        "mode": 1 if flags & JZ2_FLAG_REBUILD else 0,
+        "is_fec": bool(flags & JZ2_FLAG_FEC),
+        "seg_i": seg_i, "seg_n": seg_n,
+        "meta": meta, "payload": payload,
+    }
+
+
+def build_envelope_v2(fmt, name, data, ext=None):
+    """构造 v2 JZ2 信封帧字节（单帧不分页；静态多页由分页端对 payload 切片）。"""
+    payload, comp, orig_len = _pack_data_v2(fmt, data)
+    meta = _env_meta_v2(fmt, name, ext, orig_len)
+    return _jz2_frame("env", 0, 1, meta, payload, comp=comp)
+
+
+def parse_envelope_v2(frame_bytes):
+    """解析 v2 JZ2 信封帧 → 规范化为 v1 信封 dict（下游 parse_envelope 零改动）。
+
+    - fmt=file：payload（原始文件字节）转回 base64 字符串；
+    - fmt=excel：payload JSON 还原为二维数组（word 精简载荷是纯文本，原样返回）；
+    - 压缩载荷自动解压；orig_len 长度校验不符时拒收。
+    """
+    f = parse_frame_jz2(frame_bytes)
+    if f["is_fec"]:
+        raise ValueError("JZ2 帧类型不符（FEC 分帧不能直接作为信封）")
+    meta = f["meta"]
+    if len(meta) < 8:
+        raise ValueError("JZ2 信封元数据不完整")
+    fmt = JZ2_FMT_NAMES.get(meta[0])
+    if fmt is None:
+        raise ValueError(f"未知的文档格式声明：{meta[0]}")
+    orig_len = int.from_bytes(meta[1:5], BYTE_ORDER)
+    name_len = int.from_bytes(meta[5:7], BYTE_ORDER)
+    pos = 7
+    name_b = meta[pos:pos + name_len]
+    pos += name_len
+    ext_len = meta[pos] if pos < len(meta) else 0
+    pos += 1
+    ext_b = meta[pos:pos + ext_len]
+    try:
+        name = name_b.decode("utf-8") or "未命名"
+    except Exception:
+        name = "未命名"
+    try:
+        ext = ext_b.decode("utf-8") or None
+    except Exception:
+        ext = None
+    payload = f["payload"]
+    if f["comp"] == JZ2_COMP_ZLIB:
+        try:
+            payload = zlib.decompress(payload)
+        except Exception:
+            raise ValueError("压缩数据解码失败")
+    if orig_len and len(payload) != orig_len:
+        raise ValueError("解压后数据长度不符（数据损坏）")
+    if fmt == "file":
+        data = base64.b64encode(payload).decode("ascii")
+    elif fmt == "excel":
+        # 与 v1 _unpack_data 语义一致：仅 excel 载荷是 JSON 二维数组；
+        # word 精简载荷是纯文本（docx/doc 正文提取），不做 JSON 解析。
+        try:
+            data = json.loads(payload.decode("utf-8"))
+        except Exception:
+            raise ValueError("Excel 数据结构异常（应为二维数组）")
+        if not isinstance(data, list):
+            raise ValueError("Excel 数据结构异常（应为二维数组）")
+    else:
+        try:
+            data = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError("文本解码失败")
+    env = {"jzt": 1, "fmt": fmt, "name": name, "data": data}
+    if ext:
+        env["ext"] = ext
+    return env
+
+
+def _qr_byte_capacity(version, err):
+    """QR byte 模式单码内容字节上限（bit 级扣除模式/计数/终止符开销）。"""
+    maxbits = qrcode.util.BIT_LIMIT_TABLE[err][version]
+    prefix_bits = max(qrcode.util.mode_sizes_for_version(version).values()) + 4
+    return max(0, (maxbits - prefix_bits) // 8)
+
+
+def _max_chunk_size_v2(version, err, meta_len):
+    """v2 单帧载荷上限 = QR 内容上限 − 21B 帧头 − meta 长度，再乘安全系数。"""
+    cap = _qr_byte_capacity(version, err) - JZ2_HEADER_LEN - meta_len
+    cap = int(cap * PAYLOAD_SAFETY)
+    if cap <= 0:
+        raise ValueError(f"二维码版本 {version} 过小，无法承载数据（请调大二维码版本）")
+    return cap
+
+
+def _qrformat_encode_v2(share_list, k, m):
+    """v2 FEC share 帧：JZ2 帧头（kind=fec，meta=k,m）+ share 原始字节（不再 base64）。"""
+    nframes = len(share_list)
+    meta = bytes([k, m])
+    return [_jz2_frame("fec", i, nframes, meta, share)
+            for i, share in enumerate(share_list)]
+
+
+def reassemble_qrtransfer_v2(codes):
+    """按 v2 JZ2 share 帧重组（codes 为解码端输出的原始内容 bytes 列表）。
+
+    - CRC 校验失败的帧按缺失处理（FEC 容忍，缺 ≤ m-k 帧仍可还原）；
+    - 有效帧少于 k 时报错（文案与 v1 一致）；
+    - 返回原始字节（已剥 4B 长度前缀）。
+    """
+    if not ZFEC_AVAILABLE:
+        raise RuntimeError("后端缺少 zfec 依赖，无法纠错重组，请执行：pip install zfec")
+    data_list = None
+    total = k = m = None
+    for code in codes:
+        if not isinstance(code, (bytes, bytearray)) or not bytes(code).startswith(JZ2_MAGIC):
+            continue
+        try:
+            f = parse_frame_jz2(code)
+        except ValueError:
+            continue  # 损坏帧 → 缺失，交由 FEC 容错
+        if not f["is_fec"] or len(f["meta"]) != 2:
+            continue
+        kk, mm = f["meta"][0], f["meta"][1]
+        if total is None:
+            total, k, m = f["seg_n"], kk, mm
+            data_list = [None] * total
+        elif total != f["seg_n"] or k != kk or m != mm:
+            continue
+        if 0 <= f["seg_i"] < total and data_list[f["seg_i"]] is None:
+            data_list[f["seg_i"]] = f["payload"]
+
+    if data_list is None or k is None:
+        raise ValueError("未识别到有效的 JZ2 二维码帧")
+    got = sum(1 for d in data_list if d is not None)
+    if got < k:
+        raise ValueError(
+            f"有效帧不足：收到 {got}/{total} 帧，少于纠错阈值 k={k}，无法恢复（视频可能被截断）"
+        )
+    nblocks = total // m
+    decoder = zfec.Decoder(k, m)
+    recovered_blocks = []
+    for i in range(nblocks):
+        blocks, blocknums = [], []
+        for j in range(m):
+            d = data_list[i + j * nblocks]
+            if d is not None:
+                blocks.append(d)
+                blocknums.append(j)
+        if len(blocks) < k:
+            raise ValueError(
+                f"第 {i + 1}/{nblocks} 组有效分块不足（{len(blocks)} < k={k}），无法纠错"
+            )
+        recovered_blocks.append(decoder.decode(blocks[:k], blocknums[:k]))
+    recovered = []
+    for j in range(k):
+        for i in range(nblocks):
+            recovered.append(recovered_blocks[i][j])
+    joined = b"".join(recovered)
+    data_size = int.from_bytes(joined[:SIZE_DATASIZE], BYTE_ORDER)
+    return joined[SIZE_DATASIZE:SIZE_DATASIZE + data_size]
+
+
+def _build_static_pages_v2(env_frame, version, err, max_pages=200):
+    """把 v2 信封帧按容量拆分为多页 JZ2 帧（meta 每页重复，payload 切片）。
+
+    返回 JZ2 帧 bytes 列表；单帧装得下时返回 [原帧]。
+    每页 CRC 独立校验；收齐 seg_n 页后拼 payload 再统一解压。
+    """
+    f = parse_frame_jz2(env_frame)
+    cap = _max_chunk_size_v2(version, err, len(f["meta"]))
+    payload = f["payload"]
+    if len(payload) <= cap:
+        return [env_frame]
+    n = math.ceil(len(payload) / cap)
+    if n > max_pages:
+        raise ValueError(
+            f"数据量过大，需拆分超过 {max_pages} 张静态二维码，"
+            "请调大二维码版本或改用「二维码视频流」模式"
+        )
+    pages = []
+    for i in range(n):
+        pages.append(_jz2_frame("env", i, n, f["meta"],
+                                payload[i * cap:(i + 1) * cap],
+                                comp=f["comp"], mode=f["mode"]))
+    return pages
+
+
+def _envelope_from_raw(raw):
+    """重组产物 → 信封 dict：v2 JZ2 帧 / v1 JSON 双协议判别。"""
+    if isinstance(raw, (bytes, bytearray)) and bytes(raw).startswith(JZ2_MAGIC):
+        return parse_envelope_v2(raw)
+    try:
+        env = json.loads((raw if isinstance(raw, str) else bytes(raw).decode("utf-8")))
+    except Exception:
+        raise ValueError("重组数据不是「信息传输」封装的信封（可能是其他来源的二维码流）")
+    return env
+
+
+def _parse_scanned_codes(codes):
+    """把扫码内容（原始 bytes 列表）重组为完整信封 dict，返回 (env, page_info)。
+
+    - v2 信封帧：按 seg_i/seg_n 收集，meta 一致性校验，拼 payload 后统一解析；
+    - v1 文本：转 str 后走原 _parse_scanned_texts 逻辑（单张 / pg 多页）。
+    """
+    v2_pages = {}
+    v2_total = None
+    v2_first = None
+    texts = []
+    for c in codes:
+        if isinstance(c, (bytes, bytearray)) and bytes(c).startswith(JZ2_MAGIC):
+            try:
+                f = parse_frame_jz2(c)
+            except ValueError:
+                continue  # 损坏页跳过，按缺页提示
+            if f["is_fec"]:
+                continue
+            if v2_total is None:
+                v2_total = f["seg_n"]
+                v2_first = f
+            elif v2_total != f["seg_n"] or f["meta"] != v2_first["meta"]:
+                continue  # 其他任务的分页流，忽略
+            v2_pages[f["seg_i"]] = f
+            continue
+        try:
+            texts.append(c.decode("utf-8") if isinstance(c, (bytes, bytearray)) else str(c))
+        except Exception:
+            continue
+    if v2_pages:
+        if len(v2_pages) < v2_total:
+            raise ValueError(
+                f"静态二维码页数不全：收到 {len(v2_pages)}/{v2_total} 张，请补齐后再解析"
+            )
+        missing = [i for i in range(v2_total) if i not in v2_pages]
+        if missing:
+            raise ValueError(f"缺少第 {missing[0] + 1}/{v2_total} 张二维码，无法还原完整数据")
+        payload = b"".join(v2_pages[i]["payload"] for i in range(v2_total))
+        full = _jz2_frame("env", 0, 1, v2_first["meta"], payload,
+                          comp=v2_first["comp"], mode=v2_first["mode"])
+        env = parse_envelope_v2(full)
+        return env, {"n": v2_total, "mode": v2_first["mode"]}
+    return _parse_scanned_texts(texts)
+
+
 # ===================== QR-transfer 编码（视频） =====================
 
 def encode_index(n):
@@ -747,8 +1165,12 @@ def encode_data(b):
     return base64.encodebytes(b).replace(b"\n", b"")
 
 
-def _chunk_data(data, version, err):
-    """按 QR 版本容量切块（对齐 qrtransfer.py / trajectory-convert）。"""
+def _max_chunk_size(version, err):
+    """单帧可承载的原始字节数（含 90% 安全系数，向下取 3 的倍数保证 base64 无填充）。
+
+    安全系数用于规避「满容量高熵载荷在部分解码器下不稳定」的实测问题
+    （cv2 回读对满容量高熵载荷可能整码失败甚至截断）。
+    """
     maxchunksize = qrcode.util.BIT_LIMIT_TABLE[err][version]
     chunk_prefix_size = max(qrcode.util.mode_sizes_for_version(version).values()) + 4
     maxchunksize = (maxchunksize - chunk_prefix_size) // 8
@@ -756,6 +1178,19 @@ def _chunk_data(data, version, err):
     maxchunksize = int(maxchunksize / 4) * 3
     if maxchunksize <= 0:
         raise ValueError(f"二维码版本 {version} 过小，无法承载数据（请调大二维码版本）")
+    maxchunksize = int(maxchunksize * PAYLOAD_SAFETY) // 3 * 3
+    return max(3, maxchunksize)
+
+
+def _chunk_data(data, version, err, maxchunk=None):
+    """按 QR 版本容量切块（对齐 qrtransfer.py / trajectory-convert）。
+
+    块尺寸含 PAYLOAD_SAFETY 安全系数；块间以固定长度 + 零填充定界，
+    重组端按序拼接后按 4 字节长度前缀截断，不依赖块尺寸本身 → 缩小块尺寸
+    与旧解析端完全兼容。maxchunk：外部指定块尺寸（v2 二进制帧口径），缺省
+    按 v1 文本口径计算。
+    """
+    maxchunksize = maxchunk or _max_chunk_size(version, err)
     nchunks = max(1, math.ceil(len(data) / maxchunksize))
     chunks = []
     for i in range(nchunks):
@@ -767,17 +1202,22 @@ def _chunk_data(data, version, err):
     return chunks
 
 
+def _fec_plan(size):
+    """按数据块数计算 FEC 分块计划，返回 (blocksize, nblocks, k, m)（不编码）。"""
+    blocksize = math.ceil(size / (1 - FEC_RATIO))
+    nblocks = math.ceil(blocksize / MAX_FEC_M)
+    blocksize = math.ceil(blocksize / nblocks)
+    padded = size + (nblocks - size % nblocks if size % nblocks else 0)
+    return blocksize, nblocks, padded // nblocks, blocksize
+
+
 def _fec_encode(data_list, fec_ratio=FEC_RATIO):
     """zfec 前向纠错，返回 (share_list, k, m)。"""
     size = len(data_list)
     chunksize = len(data_list[0])
-    blocksize = math.ceil(size / (1 - fec_ratio))
-    nblocks = math.ceil(blocksize / MAX_FEC_M)
-    blocksize = math.ceil(blocksize / nblocks)
+    blocksize, nblocks, k, m = _fec_plan(size)
     if size % nblocks:
         data_list = data_list + [b"\0" * chunksize] * (nblocks - size % nblocks)
-    m = blocksize
-    k = len(data_list) // nblocks
     encoder = zfec.Encoder(k, m)
     mapped = []
     for i in range(nblocks):
@@ -834,10 +1274,19 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
                            "，请先安装：pip install qrcode zfec opencv-python numpy")
 
     err = qrcode_constants.ERROR_CORRECT_L
+    is_v2 = raw_bytes.startswith(JZ2_MAGIC)
     payload = len(raw_bytes).to_bytes(SIZE_DATASIZE, BYTE_ORDER) + raw_bytes
-    chunks = _chunk_data(payload, version, err)
+    if is_v2:
+        # v2：share 载荷为原始字节（不再 base64），块尺寸按 JZ2 帧口径计算
+        chunks = _chunk_data(payload, version, err,
+                             maxchunk=_max_chunk_size_v2(version, err, 2))
+    else:
+        chunks = _chunk_data(payload, version, err)
     share_list, k, m = _fec_encode(chunks)
-    codes = _qrformat_encode(share_list, k, m)
+    if is_v2:
+        codes = _qrformat_encode_v2(share_list, k, m)      # list[bytes]
+    else:
+        codes = _qrformat_encode(share_list, k, m)         # list[str]
 
     total = len(codes)
     writer = None
@@ -847,13 +1296,18 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
         for i, code in enumerate(codes):
             if cancel_check and cancel_check():
                 raise TaskCanceled()
-            raw = code.encode("ascii")
-            # 渲染并验证原始图像可解码（cv2 对个别 mask 有缺陷，失败则换 mask）
+            raw = code if is_v2 else code.encode("ascii")
+            # 渲染并验证原始图像可解码（解码器对个别 mask 有缺陷，失败则换 mask）。
+            # 逐字节比对只对默认 mask 做一次（能读出 ≠ 读对，高熵载荷下可能
+            # 截断）；失败即降级宽松档换 mask——视频帧有 FEC 兜底，且高熵帧可能
+            # 所有 mask 都无法逐字节一致（真实接收端 ML Kit/jsQR 更稳），
+            # 不因桌面解码器缺陷阻断生成。v2 二进制载荷只能用 zxing-cpp 验证。
             png = _qr_png_bytes(raw, version, err)
-            if not _cv2_can_decode(png):
+            verify = _zxing_can_decode if is_v2 else _cv2_can_decode
+            if not verify(png, expected=raw) and not verify(png):
                 for mask in range(8):
                     png = _qr_png_bytes(raw, version, err, mask_pattern=mask)
-                    if _cv2_can_decode(png):
+                    if verify(png):
                         break
             if frames_dir:
                 with open(os.path.join(frames_dir, f"frame_{i + 1:04d}.png"), "wb") as f:
@@ -889,8 +1343,12 @@ def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
     return buf.getvalue()
 
 
-def _cv2_can_decode(png_bytes):
-    """用 cv2 验证 PNG 字节中的二维码能否被解码（cv2 对个别 mask 有解码缺陷）。"""
+def _cv2_can_decode(png_bytes, expected=None):
+    """用 cv2 验证 PNG 字节中的二维码能否被解码（cv2 对个别 mask 有解码缺陷）。
+
+    expected 给定时升级为「逐字节比对」：能读出 ≠ 读对（cv2 实测对满容量
+    高熵载荷可能返回截断内容），只有解码结果与期望字节完全一致才算通过。
+    """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         return True  # 无 cv2 时跳过验证（解析端也将缺少 cv2，验证无意义）
     try:
@@ -899,23 +1357,80 @@ def _cv2_can_decode(png_bytes):
         if img is None:
             return False
         detector = cv2.QRCodeDetector()
-        if _decode_multi(detector, img):
-            return True
+
+        def _match(text):
+            if not text:
+                return False
+            if expected is None:
+                return True
+            try:
+                return text.encode("utf-8") == expected
+            except Exception:
+                return False
+
+        for text in _decode_multi(detector, img):
+            if _match(text):
+                return True
         text, _pts, _sq = detector.detectAndDecode(img)
-        return bool(text)
+        return _match(text)
+    except Exception:
+        return False
+
+
+def _zxing_can_decode(png_bytes, expected=None):
+    """用 zxing-cpp 验证 PNG 中的二维码可解码（返回原始 bytes，二进制载荷无损）。
+
+    v2 JZ2 二进制载荷在 cv2 下无法可靠解码（detectAndDecode 输出 str 会破坏
+    非 UTF-8 字节），生成端自检一律走 zxing。zxing 缺失时返回 True 跳过验证
+    （解析端同样缺 zxing，验证无意义）。
+    """
+    if not (ZXING_AVAILABLE and NUMPY_AVAILABLE and CV2_AVAILABLE):
+        return True  # 解码器不可用时跳过验证
+    try:
+        arr = np.frombuffer(png_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return False
+        results = zxingcpp.read_barcodes(img)
+        if not results:
+            return False
+        if expected is None:
+            return True
+        return any(r.bytes == expected for r in results)
     except Exception:
         return False
 
 
 def _render_verified_qr(data_bytes, version, err, out_path):
-    """渲染静态二维码并保证 cv2 可解码：默认 mask 验证失败时逐个换 mask 重试。
+    """渲染静态二维码并保证桌面解码器可解码：默认 mask 验证失败时逐个换 mask 重试。
 
     OpenCV 的 QRCodeDetector 对个别 mask 图案（如 mask 0/2）的特定数据存在
     解码缺陷；qrcode 库按惩罚分自动选中的 mask 可能恰好命中。本函数在生成
-    侧即用 cv2 回读验证，避免「生成正常、自家解析端却读不出」的往返失败。
+    侧即用桌面解码器回读验证，避免「生成正常、自家解析端却读不出」的往返失败。
+
+    验证策略：默认 mask 先做「逐字节比对」（能读出 ≠ 读对，高熵载荷下可能
+    返回截断内容），通过即用；否则降级宽松档（仅要求可解码）并允许换
+    mask——静态页载荷已有 90% 容量余量，且真实接收端 ML Kit / jsQR 更稳，
+    不因桌面解码器的比对缺陷阻断生成。
+    v2 JZ2 二进制载荷（b"JZ2" 开头）用 zxing-cpp 验证（cv2 会破坏非 UTF-8 字节）。
     """
+    if data_bytes.startswith(JZ2_MAGIC):
+        png = _qr_png_bytes(data_bytes, version, err)
+        if _zxing_can_decode(png, expected=data_bytes) or _zxing_can_decode(png):
+            with open(out_path, "wb") as f:
+                f.write(png)
+            return out_path
+        for mask in range(8):
+            png = _qr_png_bytes(data_bytes, version, err, mask_pattern=mask)
+            if _zxing_can_decode(png):
+                with open(out_path, "wb") as f:
+                    f.write(png)
+                return out_path
+        with open(out_path, "wb") as f:
+            f.write(png)
+        return out_path
     png = _qr_png_bytes(data_bytes, version, err)
-    if _cv2_can_decode(png):
+    if _cv2_can_decode(png, expected=data_bytes) or _cv2_can_decode(png):
         with open(out_path, "wb") as f:
             f.write(png)
         return out_path
@@ -1028,14 +1543,25 @@ def _build_static_pages(fmt, name, env_bytes, version, err, max_pages=200):
 def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix, cancel_check=None):
     """生成静态二维码图片文件，返回 (文件路径列表, 页数)。
 
-    单张装得下时输出 1 张完整信封（任何扫码器扫码即可读出 JSON）；
-    装不下时自动拆分为多张，每张是独立可读的 JSON（首页带 fmt/name，
-    续页带页码；解析端按页码重组完整信封）。
+    v1：单张装得下输出 1 张完整信封 JSON；装不下自动拆分多张（首页带 fmt/name，
+    续页带页码），每张独立可读。
+    v2（env_bytes 为 JZ2 帧）：按容量把信封 payload 拆页，每页 = JZ2 帧
+    （meta 每页重复 + payload 切片 + 独立 CRC）。
     cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
     """
     if not QRCODE_AVAILABLE:
         raise RuntimeError("后端缺少 qrcode 依赖，请先安装：pip install qrcode")
     err = qrcode_constants.ERROR_CORRECT_L
+    if env_bytes.startswith(JZ2_MAGIC):
+        pages = _build_static_pages_v2(env_bytes, version, err)
+        paths = []
+        for i, frame in enumerate(pages):
+            if cancel_check and cancel_check():
+                raise TaskCanceled()
+            p = os.path.join(out_dir, f"{prefix}_{i + 1:02d}.png")
+            _render_verified_qr(frame, version, err, p)
+            paths.append(p)
+        return paths, len(pages)
     single = os.path.join(out_dir, f"{prefix}_01.png")
     try:
         if cancel_check and cancel_check():
@@ -1057,6 +1583,43 @@ def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix, cancel_
     return paths, len(pages)
 
 
+def estimate_output(mode, fmt, name, env_bytes, version, frame_repeat):
+    """估算封装产物规模（不渲染码图，纯字符串/整数运算，供前端提前引导）。
+
+    - static：拟合分页得到页数；分页失败（数据量超大 / 版本过小）时
+      pages=None 并带回后端同款错误文案（供前端把错误转成引导）；
+    - video：按 _chunk_data + _fec_plan 口径估算帧数，秒数按
+      每码 frame_repeat/FRAMERATE 折算（相机模式 ≈ 观看一遍的时长）。
+    """
+    err = qrcode_constants.ERROR_CORRECT_L
+    # env_bytes 可能是 bytes（v2 JZ2 帧 / v1 JSON 字节）或 str（旧调用口径），
+    # 魔数判别前不做统一转码——v1 静态分页按字符切片需要 str。
+    is_v2 = (isinstance(env_bytes, (bytes, bytearray))
+             and bytes(env_bytes).startswith(JZ2_MAGIC))
+    if mode == "static":
+        try:
+            if is_v2:
+                pages = len(_build_static_pages_v2(env_bytes, version, err))
+            else:
+                pages = len(_build_static_pages(fmt, name, env_bytes, version, err))
+        except ValueError as e:
+            return {"kind": "static", "pages": None, "codes": 0,
+                    "seconds": 0, "error": str(e)}
+        return {"kind": "static", "pages": pages,
+                "codes": pages, "seconds": 0}
+    payload = SIZE_DATASIZE + len(env_bytes)
+    if is_v2:
+        mc = _max_chunk_size_v2(version, err, 2)      # share 帧 meta = k,m 两字节
+    else:
+        mc = _max_chunk_size(version, err)
+    nchunks = max(1, math.ceil(payload / mc))
+    blocksize, nblocks, k, m = _fec_plan(nchunks)
+    nframes = blocksize * nblocks
+    seconds = round(nframes * max(1, frame_repeat) / FRAMERATE, 1)
+    return {"kind": "video", "pages": 0, "codes": nframes,
+            "seconds": seconds, "k": k, "m": m}
+
+
 # ===================== 二维码解码 =====================
 
 def _decode_multi(detector, img):
@@ -1070,13 +1633,22 @@ def _decode_multi(detector, img):
 
 
 def decode_image_file(file_bytes):
-    """从 PNG/JPG 图片字节中解码二维码文本（cv2，多码图取全部）。"""
+    """从 PNG/JPG 图片字节中解码二维码，返回内容字节列表（多码图取全部）。
+
+    优先 zxing-cpp（返回原始 bytes，v2 二进制载荷无损）；不可用时回退 cv2
+    （仅对 v1 文本载荷可靠——v2 二进制码必须安装 zxing-cpp）。
+    """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         raise RuntimeError("后端缺少 opencv-python / numpy，无法解析图片，请执行：pip install opencv-python numpy")
     arr = np.frombuffer(file_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
         raise ValueError("无法读取图片文件（支持 PNG / JPG）")
+    if ZXING_AVAILABLE:
+        results = zxingcpp.read_barcodes(img)
+        if results:
+            return [r.bytes for r in results]
+        return []
     detector = cv2.QRCodeDetector()
     found = _decode_multi(detector, img)
     if not found:
@@ -1085,11 +1657,15 @@ def decode_image_file(file_bytes):
             found = [text]
     if not found:
         raise ValueError("图片中未识别到二维码")
-    return found
+    return [t.encode("utf-8", "surrogateescape") if isinstance(t, str) else t
+            for t in found]
 
 
 def decode_video_frames(video_path, progress_cb=None):
-    """从二维码视频文件逐帧解码（cv2 QRCodeDetector），返回文本列表（去重保序）。"""
+    """从二维码视频文件逐帧解码，返回内容字节列表（去重保序）。
+
+    优先 zxing-cpp（v2 二进制载荷无损）；不可用时回退 cv2（仅 v1 文本可靠）。
+    """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         raise RuntimeError("后端缺少 opencv-python / numpy，无法解析视频，请执行：pip install opencv-python numpy")
     cap = cv2.VideoCapture(video_path)
@@ -1098,7 +1674,7 @@ def decode_video_frames(video_path, progress_cb=None):
     seen = []
     seen_set = set()
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
-    detector = cv2.QRCodeDetector()
+    detector = None if ZXING_AVAILABLE else cv2.QRCodeDetector()
     fi = 0
     try:
         while True:
@@ -1106,17 +1682,27 @@ def decode_video_frames(video_path, progress_cb=None):
             if not ok:
                 break
             fi += 1
-            try:
-                found = _decode_multi(detector, frame)
-            except Exception:
-                found = []
-            if not found:
+            found = []
+            if ZXING_AVAILABLE:
                 try:
-                    # detectAndDecode 返回 (decoded_str, points, straight_qrcode)
-                    text, _pts, _sq = detector.detectAndDecode(frame)
-                    found = [text] if isinstance(text, str) and text else []
+                    results = zxingcpp.read_barcodes(frame)
+                    found = [r.bytes for r in results]
                 except Exception:
                     found = []
+            else:
+                try:
+                    found = _decode_multi(detector, frame)
+                except Exception:
+                    found = []
+                if not found:
+                    try:
+                        # detectAndDecode 返回 (decoded_str, points, straight_qrcode)
+                        text, _pts, _sq = detector.detectAndDecode(frame)
+                        found = [text] if isinstance(text, str) and text else []
+                    except Exception:
+                        found = []
+                found = [t.encode("utf-8", "surrogateescape") if isinstance(t, str) else t
+                         for t in found]
             for t in found:
                 if t not in seen_set:
                     seen_set.add(t)
@@ -1130,6 +1716,23 @@ def decode_video_frames(video_path, progress_cb=None):
     if not seen:
         raise ValueError("视频中未识别到二维码帧")
     return seen
+
+
+def reassemble_any(codes):
+    """v1/v2 双协议自适应重组：codes 为解码端输出的原始内容 bytes 列表。"""
+    if any(isinstance(c, (bytes, bytearray)) and bytes(c).startswith(JZ2_MAGIC)
+           for c in codes):
+        return reassemble_qrtransfer_v2(codes)
+    texts = []
+    for c in codes:
+        if isinstance(c, (bytes, bytearray)):
+            try:
+                texts.append(c.decode("utf-8"))
+            except Exception:
+                continue
+        else:
+            texts.append(c)
+    return reassemble_qrtransfer(texts)
 
 
 def reassemble_qrtransfer(codes):
@@ -1353,6 +1956,18 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
         if fmt == "file" and "." in base_name:
             base_name = base_name.rsplit(".", 1)[0]
 
+        # 产物规模预估（不渲染码图）：供前端展示「预计码数/耗时」；
+        # 静态模式分页不可行时在此快速失败（发码前引导，而非渲染中途报错）
+        try:
+            estimate = estimate_output(mode, fmt, name, env_bytes, qr_version,
+                                       frame_repeat)
+        except Exception:
+            estimate = None
+        if estimate:
+            set_task(task_id, estimate=estimate)
+        if mode == "static" and estimate and estimate.get("pages") is None:
+            raise ValueError(estimate.get("error") or "数据量过大，无法拆分为静态二维码")
+
         if mode == "static":
             set_task(task_id, progress=0.4, stage="生成静态二维码")
             img_paths, count = encode_static_output(fmt, name, env_bytes, qr_version,
@@ -1363,7 +1978,7 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                 size = os.path.getsize(single) if os.path.exists(single) else 0
                 set_task(task_id, status="done", progress=1.0,
                          output_type="static", fmt=fmt, name=name, ext=ext,
-                         env_size=len(env_bytes),
+                         env_size=len(env_bytes), qr_version=qr_version,
                          image_count=1, image_size=size,
                          image_name=f"{base_name}二维码.png", note=note)
             else:
@@ -1393,7 +2008,7 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
         size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
         set_task(task_id, status="done", progress=1.0,
                  output_type="video", fmt=fmt, name=name, ext=ext,
-                 env_size=len(env_bytes),
+                 env_size=len(env_bytes), qr_version=qr_version,
                  nframes=nframes, k=k, m=m, video_size=size,
                  frame_count=(nframes if fdir else 0),
                  video_name=f"{base_name}二维码流.mp4", note=note)
@@ -1425,12 +2040,9 @@ def _run_decode(task_id, video_path):
 
         codes = decode_video_frames(video_path, progress_cb=progress)
         set_task(task_id, progress=0.75, stage=f"收到 {len(codes)} 帧，纠错重组中")
-        raw = reassemble_qrtransfer(codes)
+        raw = reassemble_any(codes)
         set_task(task_id, progress=0.9, stage="解析信封")
-        try:
-            env = json.loads(raw.decode("utf-8"))
-        except Exception:
-            raise ValueError("重组数据不是「信息传输」封装的信封（可能是其他来源的二维码流）")
+        env = _envelope_from_raw(raw)
         fmt, name, data, ext = parse_envelope(env)
         data_size = len(raw)
         # payload 中 data 已解压还原（parse_envelope），与压缩前形态一致
@@ -1461,6 +2073,8 @@ def register(app) -> None:
             "zfec": ZFEC_AVAILABLE,
             "cv2": CV2_AVAILABLE,
             "numpy": NUMPY_AVAILABLE,
+            "zxing": ZXING_AVAILABLE,
+            "protocol": 2 if PROTOCOL_V2 else 1,
             "openpyxl": OPENPYXL_AVAILABLE,
             "docx": DOCX_AVAILABLE,
         })
@@ -1483,10 +2097,11 @@ def register(app) -> None:
     def it_encode():
         """接收文字 / 文件与参数，后台执行封装，立即返回 task_id。
 
-        文件格式白名单：仅 Word(.docx) / Excel(.xlsx/.xlsm) / Txt / Markdown；
-        多文件由前端逐个提交、每文件一个独立任务（前端聚合多条进度条）。
+        文件格式白名单见 SUPPORTED_FORMATS（Word / Excel / CSV / Txt / Markdown /
+        PPT / PDF；后三类仅原件传输）；多文件由前端逐个提交、每文件一个独立任务。
         raw=1 为原件传输（文件原样封装）；默认 raw=0 精简传输
-        （word/txt/md 提取文本、excel 构建二维数组，声明原始类型与后缀）。
+        （word/txt/md 提取文本、excel 构建二维数组，声明原始类型与后缀；
+        精简不可行时自动回退原件并在任务 note 说明）。
         """
         mode = request.form.get("mode", "static")
         if mode not in ("static", "video"):
@@ -1549,6 +2164,8 @@ def register(app) -> None:
             "progress": task.get("progress", 0.0),
             "stage": task.get("stage", "") or "",
         }
+        if task.get("estimate"):
+            payload["estimate"] = task["estimate"]
         if task.get("status") == "done":
             payload.update({
                 "output_type": task.get("output_type"),
@@ -1557,6 +2174,7 @@ def register(app) -> None:
                 "ext": task.get("ext"),
                 "note": task.get("note", "") or "",
                 "env_size": task.get("env_size", 0),
+                "qr_version": task.get("qr_version"),
             })
             if task.get("output_type") == "static":
                 payload.update({
@@ -1699,7 +2317,7 @@ def register(app) -> None:
         # 图片 / ZIP：同步解析
         try:
             if dtype == "zip":
-                texts = []
+                codes = []
                 bad_pages = 0
                 try:
                     with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
@@ -1707,18 +2325,18 @@ def register(app) -> None:
                             if info.is_dir() or not info.filename.lower().endswith((".png", ".jpg", ".jpeg")):
                                 continue
                             try:
-                                texts.extend(decode_image_file(zf.read(info)))
+                                codes.extend(decode_image_file(zf.read(info)))
                             except (ValueError, RuntimeError):
                                 bad_pages += 1  # 个别页模糊/破损时跳过，后续按缺页提示
                 except zipfile.BadZipFile:
                     raise ValueError("无法读取 ZIP 文件")
                 # ZIP 内按文件名排序保证页序（解码顺序已是文件序）
-                if not texts:
+                if not codes:
                     raise ValueError("ZIP 中未找到可识别的二维码图片"
                                      + (f"（{bad_pages} 张识别失败）" if bad_pages else ""))
             else:
-                texts = decode_image_file(file_bytes)
-            env, page_info = _parse_scanned_texts(texts)
+                codes = decode_image_file(file_bytes)
+            env, page_info = _parse_scanned_codes(codes)
             fmt, name, data, ext = parse_envelope(env)
         except ValueError as e:
             return jsonify({"ok": False, "detail": str(e)}), 400

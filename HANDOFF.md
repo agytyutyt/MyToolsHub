@@ -1,7 +1,17 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-15（**知识库 1.2.2：PDF 预览清晰度——设备像素对齐**）
+> 最后更新：2026-09-16（**信息传输优化批次 2/3：满屏码面舞台 + 协议 v2 JZ2 二进制帧**）
+> T06 满屏码面舞台（前端全屏层 + 整数设备像素 + px/模块提示）；T07-T09 协议 v2 落地：
+> JZ2 二进制帧（21B 帧头 + CRC32 + 原始字节载荷，静态 −26% / 视频 −45%）、解码端换
+> zxing-cpp（cv2 对二进制码不可靠，60/60 vs 29/40 损坏）、APP 侧 rawBytes 直读 + JZ2
+> 双协议解析 + k-of-m 早停（`Jz2.kt` 新增，`QrFrame`/`Envelope`/`CameraScanner`/
+> `ImageDecoder`/`VideoParseHelper` 改造）。修复两个 v2 引入回归：word 精简载荷误按
+> JSON 解析（只 excel 是数组）、`estimate_output` str/bytes 混用。回归：`test_protocol_v2.py`
+> 28/28 + T01 `test_roundtrip.py` 47/47。**遗留**：APP Kotlin 未编译验证（本机无 Gradle，
+> 待 Android Studio 跑 `Jz2Test`）、真机 PoC（二进制码 1KB roundtrip + 200 帧连续解码）
+> 未执行。详见 `docs/信息传输优化TODO清单.md` T06-T09 落地记录。
+> 此前 2026-09-15（**知识库 1.2.2：PDF 预览清晰度——设备像素对齐**）
 > 用户反馈"PDF 预览分辨率低、发糊"。排查结论：**dpr 一直是对的**（位图/显示设备像素比
 > 实测 1.0 / 1.2497 / 1.4993 全对），真正的病根是**画布没有落在设备像素网格上**——
 > 页面居中 `margin:0 auto` 与 A4 自动高度（841.89pt × 1.25 = 1052.36px）算出小数位置，
@@ -618,7 +628,9 @@ export GRADLE_USER_HOME="D:/GradleHome"
 - [ ] 结果页：五种 fmt 徽标与统计；文本 4000 字符 / excel 100 行截断；file 不显示内容
 - [ ] 导出 / 复制（excel 得 TSV）/ 分享（file 显示原文件名）/ 长按出名称气泡
 - [ ] 沉浸式：三页状态栏延伸、底部不压手势条（手势 + 三键两种导航）
-- [ ] **file 端到端：桌面封装 → APP 还原 → 与原文件哈希一致**（当前首要待办）
+- [ ] **file 端到端：桌面封装 → APP 还原 → 与原文件哈希一致**（协议 v2 已落地：桌面端 + APP 代码就绪；待 Android Studio 编译 + 真机 PoC 后关闭）
+- [ ] APP 协议 v2 单测：`gradlew :app:testDebugUnitTest`（含新增 `Jz2Test`：CRC 拒损坏 / 信封解析 / 静态多页乱序收集 / k-of-m 丢 30% 重组）
+- [ ] 真机 PoC：随机 1KB 二进制 v2 码 → 手机扫 → SHA-256 一致；连续 200 帧全解 ≥95%（≥2 台）
 
 ---
 

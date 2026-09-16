@@ -6,6 +6,9 @@ qrcode>=7.4
 zfec>=1.5
 opencv-python>=4.7
 numpy>=1.24
+# zxing-cpp：协议 v2（JZ2 二进制帧）二维码解码（返回原始 bytes，二进制载荷无损；
+# cv2 detectAndDecode 输出 str 会破坏非 UTF-8 字节，v2 必需）
+zxing-cpp>=2.2
 openpyxl>=3.1
 python-docx>=1.1
 xlrd>=2.0

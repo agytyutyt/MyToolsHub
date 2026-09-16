@@ -18,23 +18,23 @@ object ImageDecoder {
     )
 
     /**
-     * 同步解码单张图片，返回二维码文本列表（多码图取全部）。
+     * 同步解码单张图片，返回二维码原始字节列表（多码图取全部）。
+     * T08：rawValue 会破坏 v2 二进制载荷（非 UTF-8 字节替换为 U+FFFD），改取 rawBytes。
      * maxDim ≥ 2048：版本 40 点阵约 177×177 模块，压缩过度会识别失败（FAQ-6）。
      */
-    fun decodeUri(context: Context, uri: Uri, maxDim: Int = 2048): List<String> {
+    fun decodeUri(context: Context, uri: Uri, maxDim: Int = 2048): List<ByteArray> {
         val bitmap = loadScaled(context, uri, maxDim) ?: return emptyList()
         return decodeBitmap(bitmap)
     }
 
-    /** 同步解码 Bitmap（视频帧复用，文档 5.3） */
-    fun decodeBitmap(bitmap: Bitmap): List<String> {
+    /** 同步解码 Bitmap（视频帧复用，文档 5.3）；返回原始字节列表 */
+    fun decodeBitmap(bitmap: Bitmap): List<ByteArray> {
         val image = InputImage.fromBitmap(bitmap, 0)
-        val out = mutableListOf<String>()
+        val out = mutableListOf<ByteArray>()
         return try {
             val codes = Tasks.await(scanner.process(image), 10, TimeUnit.SECONDS)
             for (b in codes) {
-                b.rawValue?.let { out.add(it) }
-                // 如遇中文乱码（FAQ-5），改用 b.rawBytes 与 String(bytes, Charsets.UTF_8)
+                b.rawBytes?.let { out.add(it) }
             }
             out
         } catch (e: Exception) {

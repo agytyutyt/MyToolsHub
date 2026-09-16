@@ -21,10 +21,10 @@ import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/** CameraX + ML Kit 实时扫码封装（文档 4.3） */
+/** CameraX + ML Kit 实时扫码封装（文档 4.3；T08 起回调原始字节 rawBytes，v2 二进制帧无损） */
 class CameraScanner(
     context: Context,
-    private val onQrText: (String) -> Unit,
+    private val onQrBytes: (ByteArray) -> Unit,
     private val onBrightness: ((Int) -> Unit)? = null,
 ) {
     private val appContext = context.applicationContext
@@ -34,7 +34,7 @@ class CameraScanner(
             .build()
     )
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
-    private var lastText: String? = null
+    private var lastBytes: ByteArray? = null
     private var stopped = false
     private var frameCount = 0
     private var camera: Camera? = null
@@ -118,12 +118,14 @@ class CameraScanner(
         val input = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
         scanner.process(input)
             .addOnSuccessListener { codes ->
-                val text = codes.firstOrNull()?.rawValue
-                // 同文本去重（FAQ-4 调整）：静态码面停留只回调一次；视频流码面高速切换逐帧处理。
+                // T08：rawValue 会把非 UTF-8 字节破坏（替换为 U+FFFD），v2 二进制帧
+                // 必须取 rawBytes 原始字节；v1 文本帧 String(bytes, UTF_8) 与原值等价。
+                val bytes = codes.firstOrNull()?.rawBytes
+                // 同内容去重（FAQ-4 调整）：静态码面停留只回调一次；视频流码面高速切换逐帧处理。
                 // 原 500ms 时间节流会把流式捕获率压到 2 次/秒，低于 zfec 重组所需帧比例。
-                if (text != null && text != lastText) {
-                    lastText = text
-                    onQrText(text)
+                if (bytes != null && !bytes.contentEquals(lastBytes)) {
+                    lastBytes = bytes
+                    onQrBytes(bytes)
                 }
             }
             .addOnCompleteListener { proxy.close() }
@@ -131,7 +133,7 @@ class CameraScanner(
 
     /** 生命周期恢复后清除去重状态：重新对准同一码面可再次触发（如返回主页重扫同一信封） */
     fun resetDedupe() {
-        lastText = null
+        lastBytes = null
     }
 
     /** Y 平面抽样均值亮度（0-255）。绝对索引读取，不移动 buffer 位置，不影响 ML Kit 解码 */

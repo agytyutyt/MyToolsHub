@@ -402,6 +402,30 @@
     width: 100%;
   }
   #zoomNav[hidden] { display: none; }   /* hidden 属性优先于 flex 布局 */
+  /* 全屏码面舞台（T06）：码面最大化供手机相机取景，Canvas 位图落整数设备像素 */
+  #stageOverlay {
+    position: fixed; inset: 0; background: #000; z-index: 1200;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #stageOverlay[hidden] { display: none; }
+  #stageCanvas { display: block; background: #fff; }
+  #stageVideo {
+    display: block; width: 96vmin; height: 96vmin;
+    object-fit: contain; background: #000; pointer-events: none;
+  }
+  #stageTop { position: fixed; top: 12px; right: 14px; display: flex; gap: 8px; z-index: 2; }
+  #stageTop button {
+    background: rgba(255, 255, 255, .14); color: #fff;
+    border: 1px solid rgba(255, 255, 255, .4); border-radius: 8px;
+    padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  #stageTop button:hover { background: rgba(255, 255, 255, .26); }
+  #stageCaption {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 10px 16px; text-align: center; pointer-events: none;
+    color: rgba(255, 255, 255, .88); font-size: 13px; line-height: 1.6;
+    background: rgba(0, 0, 0, .55);
+  }
   @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -428,10 +452,10 @@
       <div id="fileZone">
         <div id="dropZone" class="dropzone">
           <p>拖拽文件到此处，或点击选择（可多选）</p>
-          <p id="acceptHint">仅支持 Word 文档(.docx) / Excel 表格(.xlsx / .xlsm / .xls) / CSV 表格(.csv) / 纯文本(.txt) / Markdown(.md)</p>
+          <p id="acceptHint">仅支持 Word 文档(.docx) / Excel 表格(.xlsx / .xlsm / .xls) / CSV 表格(.csv) / 纯文本(.txt) / Markdown(.md) / PPT 演示(.ppt / .pptx) / PDF 文档(.pdf)</p>
         </div>
         <input id="fileInput" type="file" multiple hidden
-               accept=".docx,.doc,.xlsx,.xlsm,.xls,.csv,.txt,.md,.markdown" />
+               accept=".docx,.doc,.xlsx,.xlsm,.xls,.csv,.txt,.md,.markdown,.ppt,.pptx,.pdf" />
         <div id="fileChipList"></div>
       </div>
       <div id="textZone" hidden>
@@ -553,6 +577,18 @@
   </div>
 </div>
 
+<!-- 全屏码面舞台（T06）：流式/静态码面最大化，供手机相机取景扫码 -->
+<div id="stageOverlay" hidden>
+  <div id="stageTop">
+    <button id="stagePrev" hidden>‹ 上一张</button>
+    <button id="stageNext" hidden>下一张 ›</button>
+    <button id="stageClose">退出全屏（Esc）</button>
+  </div>
+  <canvas id="stageCanvas" hidden></canvas>
+  <video id="stageVideo" hidden muted loop playsinline autoplay></video>
+  <div id="stageCaption"></div>
+</div>
+
 <script>
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -563,6 +599,7 @@
     files: [],                    // 多文件选择（每个文件独立封装任务）
     jobs: [],                     // 进行中/已完成的封装任务
     zoomTaskId: "", zoomCount: 0, zoomPage: 0,
+    stage: null,                  // 全屏码面舞台状态（T06）
     decFiles: [], decVideo: null,
     payload: null,
     rawMode: false,
@@ -639,6 +676,20 @@
     if (n >= 1048576) return (n / 1048576).toFixed(2) + " MB";
     if (n >= 1024) return (n / 1024).toFixed(1) + " KB";
     return n + " B";
+  }
+
+  function fmtDuration(sec) {
+    sec = Math.max(1, Math.round(sec));
+    return sec >= 90 ? "约 " + Math.round(sec / 60) + " 分钟" : "约 " + sec + " 秒";
+  }
+
+  function fmtEstimate(est) {
+    if (!est) return "";
+    if (est.kind === "video") {
+      return "预计 " + est.codes + " 帧二维码、" + fmtDuration(est.seconds || 0);
+    }
+    if (est.pages == null) return ""; // 分页不可行：后端将给出引导错误
+    return est.pages > 1 ? "预计拆分 " + est.pages + " 张静态二维码" : "";
   }
 
   /* ---------- 多文件选择与徽标（格式白名单经 GET /formats 动态获取） ---------- */
@@ -804,6 +855,7 @@
           if (s.status === "pending" || s.status === "running") {
             job.status = "running";
             job.progress = s.progress || 0;
+            if (s.estimate && !job.estimate) { job.estimate = s.estimate; dirty = true; }
             if (job.stage !== (s.stage || "处理中…")) { job.stage = s.stage || "处理中…"; dirty = true; }
           } else {
             job.status = s.status;   // done / error / canceled
@@ -877,6 +929,10 @@
         <p class="job-status">${job.status === "done" ? "封装完成" : (job.stage || "")}</p>`;
       row.querySelector(".job-name").textContent = job.name;
       row.querySelector(".job-name").title = job.name;
+      const estText = fmtEstimate(job.estimate || (job.result && job.result.estimate));
+      row.querySelector(".job-status").textContent =
+        (job.status === "done" ? "封装完成" : (job.stage || ""))
+        + (estText ? "（" + estText + "）" : "");
       wrap.appendChild(row);
     }
   }
@@ -931,6 +987,10 @@
     } else {
       fileName = s.video_name || "qrcode.mp4";
       summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}，${fmtBytes(s.video_size)}）`;
+      const est = s.estimate;
+      if (est && est.kind === "video" && est.seconds) {
+        summary += `，扫码全程${fmtDuration(est.seconds)}（APP 凑够纠错阈值即可提前完成）`;
+      }
     }
     job.fileUrl = buildFileUrl(job.taskId, fileName);
     job.dlName = fileName;
@@ -947,6 +1007,7 @@
       <div class="ri-preview"></div>
       <div class="row">
         <button type="button" class="ri-download primary"></button>
+        <button type="button" class="ri-fullscreen secondary"></button>
       </div>`;
     item.querySelector(".ri-name").textContent = s.name || job.name;
     item.querySelector(".ri-fmt").textContent = fmtText;
@@ -957,12 +1018,16 @@
         ? "数据超过单张容量已自动拆分：解析时需上传全部二维码（可打包 ZIP 一次性导入「信息解析」）"
         : "单张二维码可直接打印或发送；用任意扫码工具可读出封装 JSON，用「信息解析」可还原数据")
       : "相机传输模式：画面循环播放、每码停留约 0.33 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；也可下载 MP4 后用「信息解析 - 二维码视频」还原")
-      + (isStatic ? "（点击缩略图可放大查看原尺寸）" : "");
+      + (isStatic ? "（点击缩略图可放大查看原尺寸）" : "")
+      + "；点「" + (isStatic ? "全屏展示" : "全屏播放") + "」可最大化码面，便于手机扫码";
     const dl = item.querySelector(".ri-download");
     dl.textContent = isStatic
       ? (count > 1 ? "下载全部二维码（ZIP）" : "下载二维码图片")
       : "下载二维码视频";
     dl.addEventListener("click", () => downloadJobResult(job));
+    const fs = item.querySelector(".ri-fullscreen");
+    fs.textContent = isStatic ? "全屏展示（手机扫码）" : "全屏播放（手机扫码）";
+    fs.addEventListener("click", () => openStage(job));
 
     const preview = item.querySelector(".ri-preview");
     if (isStatic) {
@@ -1003,6 +1068,9 @@
       const img = document.createElement("img");
       img.className = "ri-stream";
       img.alt = "二维码流";
+      img.title = "点击进入全屏播放";
+      img.style.cursor = "pointer";
+      img.addEventListener("click", () => openStage(job));
       const cap = document.createElement("p");
       cap.className = "ri-cap";
       preview.appendChild(img);
@@ -1135,6 +1203,134 @@
     $("zoomTitle").textContent = "二维码预览";
   }
 
+  /* ---------- 全屏码面舞台（T06） ----------
+     码面最大化（96vmin）供手机相机取景；Canvas 遵守整数设备像素约定：
+     位图 = round(视口 × dpr)，CSS 尺寸由位图反推 + 一次性负边距补偿（不迭代累积）。
+     qr_version 默认保留 15（业务决策 2026-09-16）；px/模块按屏幕像素 ÷ 模块数提示。 */
+  function stageSide() {
+    return Math.min(window.innerWidth, window.innerHeight) * 0.96;
+  }
+  function sizeStageCanvas(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const bitmap = Math.max(64, Math.round(stageSide() * dpr)); // 整数设备像素位图
+    canvas.width = bitmap;
+    canvas.height = bitmap;
+    const css = bitmap / dpr;             // CSS 尺寸由位图反推（可能带小数）
+    canvas.style.width = css + "px";
+    canvas.style.height = css + "px";
+    // 一次性负边距补偿：吃掉布局取整的缝隙、保持居中；只算一次，不迭代累积
+    const over = (Math.ceil(css) - css) / 2;
+    canvas.style.marginLeft = canvas.style.marginRight = -over + "px";
+    canvas.style.marginTop = canvas.style.marginBottom = -over + "px";
+    return css;
+  }
+  function stagePpmHint(job, cssSide) {
+    const v = job.result && job.result.qr_version;
+    if (!v) return "";
+    const ppm = cssSide / (17 + 4 * v);   // 每边模块数 = 17 + 4 × 版本
+    if (ppm >= 4) return `码面 px/模块≈${ppm.toFixed(1)}，识别余量充足`;
+    if (ppm >= 3) return `码面 px/模块≈${ppm.toFixed(1)}，达到底线（建议 ≥4）`;
+    return `码面 px/模块≈${ppm.toFixed(1)}，偏低：请让手机靠近屏幕取景并调高亮度`;
+  }
+  function drawStageImage(im, caption) {
+    const canvas = $("stageCanvas");
+    const ctx = canvas.getContext("2d");
+    const css = sizeStageCanvas(canvas);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(im, 0, 0, canvas.width, canvas.height);
+    const hint = state.stage ? stagePpmHint(state.stage.job, css) : "";
+    $("stageCaption").textContent = hint ? `${caption}　·　${hint}` : caption;
+  }
+  function openStage(job) {
+    const s = job.result;
+    const isStatic = s.output_type === "static";
+    state.stage = {
+      kind: isStatic ? "static" : (s.frame_count > 0 ? "stream" : "video"),
+      job, page: 1, count: isStatic ? (s.image_count || 1) : 0,
+      idx: 0, timer: null,
+    };
+    pauseAllStreams();  // 全屏期间由舞台接管轮播，避免双计时器抢帧
+    $("stageOverlay").hidden = false;
+    // 浏览器真全屏只是增强：失败（无手势/不支持）时覆盖层同样铺满视口
+    if ($("stageOverlay").requestFullscreen) {
+      $("stageOverlay").requestFullscreen().catch(() => {});
+    }
+    updateStage();
+  }
+  function closeStage() {
+    const stg = state.stage;
+    if (stg && stg.timer) clearTimeout(stg.timer);
+    state.stage = null;
+    $("stageOverlay").hidden = true;
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+    const v = $("stageVideo");
+    v.pause(); v.removeAttribute("src"); v.load();
+    resumeAllStreams();
+  }
+  function stageStep(delta) {
+    const stg = state.stage;
+    if (!stg || stg.kind !== "static") return;
+    let p = stg.page + delta;
+    if (p < 1) p = stg.count;   // 循环翻页：扫码时不用手动回头找第一张
+    if (p > stg.count) p = 1;
+    stg.page = p;
+    updateStage();
+  }
+  function updateStage() {
+    const stg = state.stage;
+    if (!stg) return;
+    if (stg.timer) { clearTimeout(stg.timer); stg.timer = null; }
+    const multi = stg.kind === "static" && stg.count > 1;
+    $("stagePrev").hidden = !multi;
+    $("stageNext").hidden = !multi;
+    const canvas = $("stageCanvas"), video = $("stageVideo");
+    if (stg.kind === "static") {
+      canvas.hidden = false; video.hidden = true;
+      const im = new Image();
+      im.onload = () => {
+        if (!state.stage || state.stage.job !== stg.job) return; // 舞台已切走
+        drawStageImage(im, stg.count > 1
+          ? `静态二维码 ${stg.page}/${stg.count}`
+          : "静态二维码（对准屏幕扫码）");
+      };
+      im.src = `/api/info-transfer/image/${stg.job.taskId}/${stg.page}`;
+    } else if (stg.kind === "stream") {
+      canvas.hidden = false; video.hidden = true;
+      stageStreamTick();
+    } else {
+      canvas.hidden = true; video.hidden = false;
+      const v = video;
+      if (!v.src) {
+        v.src = stg.job.fileUrl || buildFileUrl(stg.job.taskId, stg.job.result.video_name);
+        v.playbackRate = 1;
+        v.play().catch(() => {});
+      }
+      const hint = stagePpmHint(stg.job, stageSide());
+      $("stageCaption").textContent = "相机传输视频（循环播放，每码约 0.33 秒）"
+        + (hint ? "　·　" + hint : "");
+    }
+  }
+  /* 全屏流式轮播：复用小窗预览已预载的帧 Image，逐帧绘制到整数像素画布 */
+  function stageStreamTick() {
+    const stg = state.stage;
+    if (!stg || stg.kind !== "stream") return;
+    const st = stg.job.stream;
+    if (!st || !st.imgs || !st.count) return;
+    if (stg.idx >= st.count) stg.idx = 0;
+    const im = st.imgs[stg.idx];
+    const n = stg.idx + 1;
+    stg.idx++;
+    if (im.complete && im.naturalWidth) {
+      drawStageImage(im, `相机传输画面（每码 0.33 秒）：${n}/${st.count}`);
+    }
+    stg.timer = setTimeout(stageStreamTick, STREAM_FRAME_MS);
+  }
+
   function downloadJobResult(job) {
     const a = document.createElement("a");
     a.href = job.fileUrl;
@@ -1147,6 +1343,7 @@
   function resetResult() {
     $("result").hidden = true;
     setCancelVisible(false);
+    closeStage();
     stopAllStreams();
     $("resultList").innerHTML = "";
     $("progressList").innerHTML = "";
@@ -1505,9 +1702,10 @@
     $("encodeBtn").addEventListener("click", startEncode);
     $("cancelBtn").addEventListener("click", cancelEncode);
     // 页面切走/最小化时暂停轮播：浏览器会节流渲染，画面停跳让手机端误判码面切换
+    // 全屏舞台打开时由舞台接管轮播，恢复逻辑交给 closeStage
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) pauseAllStreams();
-      else resumeAllStreams();
+      else if (!state.stage) resumeAllStreams();
     });
     $("zoomPrev").addEventListener("click", () => zoomStep(-1));
     $("zoomNext").addEventListener("click", () => zoomStep(1));
@@ -1550,7 +1748,19 @@
     $("zoomClose").addEventListener("click", closeZoom);
     $("zoomModal").addEventListener("click", (e) => { if (e.target === $("zoomModal")) closeZoom(); });
     window.addEventListener("resize", () => { if (!$("zoomModal").hidden) fitZoom(); });
+    // 全屏码面舞台（T06）
+    $("stageClose").addEventListener("click", closeStage);
+    $("stagePrev").addEventListener("click", () => stageStep(-1));
+    $("stageNext").addEventListener("click", () => stageStep(1));
+    window.addEventListener("resize", () => { if (state.stage) updateStage(); });
+    document.addEventListener("fullscreenchange", () => { if (state.stage) updateStage(); });
     document.addEventListener("keydown", (e) => {
+      if (state.stage) {
+        if (e.key === "Escape") closeStage();
+        else if (e.key === "ArrowLeft") stageStep(-1);
+        else if (e.key === "ArrowRight") stageStep(1);
+        return;
+      }
       if ($("zoomModal").hidden) return;
       if (e.key === "Escape") closeZoom();
       else if (e.key === "ArrowLeft") zoomStep(-1);

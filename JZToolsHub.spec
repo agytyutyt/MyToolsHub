@@ -27,6 +27,7 @@ PACKAGES = [
     "olefile",         # info-transfer(.doc 旧版二进制提取)
     "qrcode",          # trajectory-convert
     "zfec",            # trajectory-convert / qr-video-decode
+    "zxingcpp",        # info-transfer 协议 v2（JZ2 二进制码解码，pip 包名 zxing-cpp）
     "cv2",             # trajectory-convert（opencv）
     "numpy",           # trajectory-convert
     "pypdf",           # character-graph

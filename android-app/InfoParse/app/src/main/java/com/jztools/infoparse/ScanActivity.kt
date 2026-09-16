@@ -24,6 +24,7 @@ import androidx.core.view.updatePadding
 import com.jztools.infoparse.history.HistoryStore
 import com.jztools.infoparse.protocol.Envelope
 import com.jztools.infoparse.protocol.EnvelopeParser
+import com.jztools.infoparse.protocol.Jz2
 import com.jztools.infoparse.protocol.Msg
 import com.jztools.infoparse.protocol.PageCollector
 import com.jztools.infoparse.protocol.QrFrame
@@ -36,7 +37,8 @@ import kotlin.concurrent.thread
 /**
  * 识别页（FR-01 相机实时扫码 / FR-02 图片导入 / FR-03 多页收集 / FR-08 本地暂存）。
  * 同时提供二期「视频解析」入口（FR-09，文档第 5 章）与相机视频流采集（FR-11）。
- * 启动即持续识别：按内容自动分流——单张信封 / 多页拆分码 / QR-transfer 视频流帧。
+ * 启动即持续识别：按内容自动分流——单张信封 / 多页拆分码 / QR-transfer 视频流帧
+ * （v1 文本与 v2 JZ2 二进制双协议自适应，判别见 EnvelopeParser.handleBytes）。
  * 「放弃」（待继续任务框）可清空当前多页收集任务。
  */
 class ScanActivity : AppCompatActivity() {
@@ -48,6 +50,7 @@ class ScanActivity : AppCompatActivity() {
     private lateinit var btnDiscard: Button
 
     private var collector = PageCollector()
+    private var envCollector = Jz2.EnvCollector()      // v2 JZ2 静态多页
     private var frameCollector: QrFrame.Collector? = null
     private var lastInvalidAt = 0L
 
@@ -103,6 +106,7 @@ class ScanActivity : AppCompatActivity() {
         btnResume.setOnClickListener { onResumePending() }
         btnDiscard.setOnClickListener {
             collector.reset()
+            envCollector.reset()
             frameCollector = null
             pendingFile.delete()
             pendingBox.visibility = View.GONE
@@ -117,7 +121,7 @@ class ScanActivity : AppCompatActivity() {
     }
 
     private fun startCamera() {
-        scanner = CameraScanner(this, onQrText = { text -> runOnUiThread { onScanned(text) } })
+        scanner = CameraScanner(this, onQrBytes = { data -> runOnUiThread { onScanned(data) } })
         val previewView = findViewById<androidx.camera.view.PreviewView>(R.id.previewView)
         scanner.start(this, previewView)
         setupPinchZoom(previewView)
@@ -168,9 +172,16 @@ class ScanActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    /** 单次扫码文本 → 按内容自动分流：QR-transfer 帧 → 视频流收集器；JSON 信封 → 单张/多页 */
-    private fun onScanned(text: String) {
-        val t = text.trim()
+    /**
+     * 单次扫码内容（原始字节）→ 双协议自动分流：
+     * JZ2 帧（v2 静态页/视频帧）→ v2 处理；UTF-8 文本 → JSON 信封 / v1 QR-transfer 帧。
+     */
+    private fun onScanned(data: ByteArray) {
+        if (Jz2.isJz2(data)) {
+            onJz2(data)
+            return
+        }
+        val t = String(data, Charsets.UTF_8).trim()
         if (!t.startsWith("{") && QrFrame.parseHead(t) != null) {
             onFrameText(t)
             return
@@ -191,6 +202,29 @@ class ScanActivity : AppCompatActivity() {
         }
     }
 
+    /** v2 JZ2 帧：share 帧 → 视频流收集器；信封帧 → 单页直接出结果 / 多页进 EnvCollector */
+    private fun onJz2(data: ByteArray) {
+        val f = Jz2.parseFrame(data) ?: run {
+            showInvalid(Msg.JZ2_BAD)
+            return
+        }
+        if (f.isFec) {
+            onFrameJz2(f)
+            return
+        }
+        when (val r = envCollector.offer(f)) {
+            is ScanResult.Single -> openResult(r.envelope)
+            is ScanResult.Page -> statusView.text = envCollector.progressText()
+            is ScanResult.Invalid -> {
+                // E-07：拼接还原失败 → 清空收集器重来
+                if (r.reason == Msg.ASSEMBLE_FAILED) envCollector.reset()
+                showInvalid(r.reason)
+                statusView.text = if (envCollector.total > 0) envCollector.progressText() else ""
+            }
+            else -> {}
+        }
+    }
+
     /** 无效码提示限流：高速扫描下模糊/乱码文本频发，同类 Toast 至少间隔 1 秒 */
     private fun showInvalid(reason: String) {
         val now = System.currentTimeMillis()
@@ -200,13 +234,13 @@ class ScanActivity : AppCompatActivity() {
         }
     }
 
-    /** 相机直扫二维码视频流：帧文本 → QrFrame 收集器（自动识别，无需手动开启） */
+    /** 相机直扫二维码视频流（v1）：帧文本 → QrFrame 收集器（自动识别，无需手动开启） */
     private fun onFrameText(text: String) {
         val fc = frameCollector ?: QrFrame.Collector().also { frameCollector = it }
         when (val r = fc.offer(text)) {
             is ScanResult.Frame -> {
                 statusView.text = getString(R.string.stream_progress, r.have, r.n)
-                if (r.have == r.n) completeFrameCollect()
+                if (r.have == r.n || fc.isSatisfied()) completeFrameCollect()
             }
             is ScanResult.Invalid -> {
                 if (r.reason == Msg.FRAME_MISMATCH) {
@@ -225,12 +259,37 @@ class ScanActivity : AppCompatActivity() {
         }
     }
 
+    /** 相机直扫二维码视频流（v2 JZ2 share 帧）：k-of-m 满足即早停出结果 */
+    private fun onFrameJz2(f: Jz2.Frame) {
+        val fc = frameCollector ?: QrFrame.Collector().also { frameCollector = it }
+        when (val r = fc.offerJz2Share(f)) {
+            is ScanResult.Frame -> {
+                statusView.text = getString(R.string.stream_progress, r.have, r.n)
+                if (r.have == r.n || fc.isSatisfied()) completeFrameCollect()
+            }
+            is ScanResult.Invalid -> {
+                if (r.reason == Msg.FRAME_MISMATCH) {
+                    // 与当前任务不一致 → 视为新视频流，重置后吸收当前帧
+                    frameCollector = QrFrame.Collector().also { fresh ->
+                        val r2 = fresh.offerJz2Share(f)
+                        if (r2 is ScanResult.Frame) {
+                            statusView.text = getString(R.string.stream_progress, r2.have, r2.n)
+                        }
+                    }
+                } else {
+                    statusView.text = r.reason
+                }
+            }
+            else -> {}
+        }
+    }
+
     private fun completeFrameCollect() {
-        val envText = frameCollector?.collectToEnvelopeText()
+        val bytes = frameCollector?.assembleBytes()
         frameCollector = null // 完成或失败 → 回到待机，下次扫到帧自动新建收集器
         when {
-            envText == null -> statusView.text = Msg.VIDEO_INCOMPLETE
-            else -> when (val r = EnvelopeParser.handle(envText, PageCollector())) {
+            bytes == null -> statusView.text = Msg.VIDEO_INCOMPLETE
+            else -> when (val r = EnvelopeParser.handleBytes(bytes, PageCollector(), Jz2.EnvCollector())) {
                 is ScanResult.Single -> openResult(r.envelope)
                 is ScanResult.Invalid -> statusView.text = r.reason
                 else -> statusView.text = Msg.VIDEO_INCOMPLETE
@@ -243,28 +302,31 @@ class ScanActivity : AppCompatActivity() {
         statusView.text = "正在解析图片…"
         val gen = generation.get()
         thread {
-            val texts = mutableListOf<String>()
+            val datas = mutableListOf<ByteArray>()
             var noQr = 0
             for (u in uris) {
-                val ts = ImageDecoder.decodeUri(this, u)
-                if (ts.isEmpty()) noQr++ else texts += ts
+                val ds = ImageDecoder.decodeUri(this, u)
+                if (ds.isEmpty()) noQr++ else datas += ds
             }
             runOnUiThread {
                 if (gen != generation.get()) return@runOnUiThread // 已重置 → 作废本次解析
-                if (texts.isEmpty()) {
+                if (datas.isEmpty()) {
                     // E-09：图片里扫不出码
                     statusView.text = Msg.IMAGE_NO_QR
                     return@runOnUiThread
                 }
                 var result: ScanResult? = null
-                for (t in texts) {
-                    result = EnvelopeParser.handle(t, collector)
+                for (d in datas) {
+                    result = EnvelopeParser.handleBytes(d, collector, envCollector)
                     if (result is ScanResult.Single) break
                 }
                 when (val r = result) {
                     is ScanResult.Single -> openResult(r.envelope)
                     is ScanResult.Page -> {
-                        statusView.text = collector.progressText() + "，请补扫缺失页"
+                        // v1 页在 PageCollector、v2 页在 EnvCollector，取有进度的那个展示
+                        statusView.text =
+                            (if (envCollector.have > 0) envCollector.progressText()
+                             else collector.progressText()) + "，请补扫缺失页"
                         savePending()
                     }
                     else -> statusView.text = (r as? ScanResult.Invalid)?.reason ?: ""
@@ -310,20 +372,13 @@ class ScanActivity : AppCompatActivity() {
         statusView.text = "正在解析视频…"
         val gen = generation.get()
         thread {
-            val envText = VideoParseHelper.parse(this, uri)
+            val res = VideoParseHelper.parse(this, uri)
             runOnUiThread {
                 if (gen != generation.get()) return@runOnUiThread // 已重置 → 作废本次解析
-                when {
-                    envText == null -> statusView.text = Msg.VIDEO_NO_QR
-                    envText.startsWith("!") -> statusView.text = envText.removePrefix("!")
-                    else -> {
-                        val collector2 = PageCollector()
-                        when (val r = EnvelopeParser.handle(envText, collector2)) {
-                            is ScanResult.Single -> openResult(r.envelope)
-                            is ScanResult.Invalid -> statusView.text = r.reason
-                            else -> statusView.text = Msg.VIDEO_INCOMPLETE
-                        }
-                    }
+                when (res) {
+                    is VideoParseHelper.Result.Ok -> openResult(res.envelope)
+                    is VideoParseHelper.Result.Fail -> statusView.text = res.message
+                    VideoParseHelper.Result.NoQr -> statusView.text = Msg.VIDEO_NO_QR
                 }
             }
         }
