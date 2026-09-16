@@ -254,6 +254,42 @@
                                                                                                          "referenced":  false
                                                                                                      }
                                                        }
-                                        }
+                                        },
+                     "file-filter":  {
+                                         "version":  "1.1.0",
+                                         "file":  "JZToolsHub-插件-file-filter-v1.1.0.zip",
+                                         "sha256":  "bb1810adf0750c8eba79ccced2b50c427f985542c4a110899c7e1e14f3fcb693",
+                                         "size":  52363,
+                                         "built_at":  "2026-09-16T09:14:53+08:00",
+                                         "code_sha256":  "ef50fb48b8d065ef1f22ee7f3b6d6485caea539c5348d3599796d3bccec690ae",
+                                         "file_count":  12,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
+                                                             "plugins/file-filter/backend/config.template.json":  "c01467e004858bec",
+                                                             "plugins/file-filter/backend/core.py":  "34acb3b06ba58760",
+                                                             "plugins/file-filter/backend/llm_client.py":  "7e6aa4a874e9fbcb",
+                                                             "plugins/file-filter/backend/requirements.txt":  "a306e366dd225242",
+                                                             "plugins/file-filter/backend/routes.py":  "423ef1cc0948af35",
+                                                             "plugins/file-filter/frontend/app.js":  "1bb8da7c767a6e95",
+                                                             "plugins/file-filter/frontend/index.html":  "be64c77e9276eb5e",
+                                                             "plugins/file-filter/frontend/style.css":  "92eabfee75d0d072",
+                                                             "plugins/file-filter/manifest.json":  "ad0c65825f71f43c",
+                                                             "plugins/file-filter/README.md":  "75404cb76de67a81"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "1bb8da7c767a6e95",
+                                                                                "v":  3,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "92eabfee75d0d072",
+                                                                                   "v":  2,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    }
+                                     }
                  }
 }
