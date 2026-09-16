@@ -232,7 +232,7 @@ class Jz2Test {
 
     @Test
     fun `T10 xz 载荷损坏拒收`() {
-        val raw = "损坏注入。"repeat(50).toByteArray(Charsets.UTF_8)
+        val raw = "损坏注入。".repeat(50).toByteArray(Charsets.UTF_8)
         val packed = xzDeflate(raw)
         // 只破坏 payload 中段（绕开 CRC 不可行，因此直接改字节后重算 CRC 模拟"合法但坏流"）
         val bad = packed.copyOf().also { it[packed.size / 2] = (it[packed.size / 2].toInt() xor 0xFF).toByte() }
