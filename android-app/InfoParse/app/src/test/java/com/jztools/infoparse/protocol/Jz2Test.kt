@@ -28,7 +28,8 @@ class Jz2Test {
         out.write(byteArrayOf(((segN shr 16) and 0xFF).toByte(), ((segN shr 8) and 0xFF).toByte(), (segN and 0xFF).toByte()))
         out.write(byteArrayOf(((meta.size shr 8) and 0xFF).toByte(), (meta.size and 0xFF).toByte()))
         val bodyLen = payload.size
-        for (shift in 24 downTo 0) out.write(((bodyLen shr shift) and 0xFF))
+        // 4 字节大端：只取 shift = 24,16,8,0（downTo 0 不带 step 会写成 25 字节！）
+        for (shift in 24 downTo 0 step 8) out.write(((bodyLen shr shift) and 0xFF))
         val crc = CRC32()
         crc.update(out.toByteArray())
         crc.update(meta)
@@ -46,7 +47,7 @@ class Jz2Test {
         val extB = (ext ?: "").toByteArray(Charsets.UTF_8)
         val out = ByteArrayOutputStream()
         out.write(fmt)
-        for (shift in 24 downTo 0) out.write(((origLen shr shift) and 0xFF))
+        for (shift in 24 downTo 0 step 8) out.write(((origLen shr shift) and 0xFF))
         out.write(byteArrayOf(((nameB.size shr 8) and 0xFF).toByte(), (nameB.size and 0xFF).toByte()))
         out.write(nameB)
         out.write(extB.size)
@@ -195,7 +196,9 @@ class Jz2Test {
         val text = "回归"
         val envelope = """{"jzt":1,"fmt":"text","name":"v1","data":"$text"}"""
         val payload = envelope.toByteArray(Charsets.UTF_8)
-        val k = 2; val m = 3; val chunkSize = 6
+        val k = 2; val m = 3
+        // chunkSize 动态计算：joined = 4B 长度前缀 + payload，须 ≤ k×chunkSize
+        val chunkSize = (payload.size + 4 + k - 1) / k
         val joined = ByteArray(4 + k * chunkSize)
         joined[0] = ((payload.size shr 24) and 0xFF).toByte()
         joined[1] = ((payload.size shr 16) and 0xFF).toByte()
