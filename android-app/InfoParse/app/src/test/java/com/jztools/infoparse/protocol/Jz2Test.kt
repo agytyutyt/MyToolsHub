@@ -109,9 +109,9 @@ class Jz2Test {
 
     @Test
     fun `静态多页收集 乱序补扫还原`() {
-        val payload = "（第1段）本项目旨在解决内网环境下跨网闸的数据交换问题。（第2段）通过二维码单向通道实现可靠传输。" +
+        val payload = ("（第1段）本项目旨在解决内网环境下跨网闸的数据交换问题。（第2段）通过二维码单向通道实现可靠传输。" +
             "（第3段）v2 信封帧按容量切片分页，收齐后拼接再统一解析。" +
-            "（第4段）meta 每页重复，首页确定 total，乱序无影响。".toByteArray(Charsets.UTF_8)
+            "（第4段）meta 每页重复，首页确定 total，乱序无影响。").toByteArray(Charsets.UTF_8)
         val meta = envMeta(0, payload.size, "多页", "txt")
         val cap = 12
         val n = (payload.size + cap - 1) / cap
