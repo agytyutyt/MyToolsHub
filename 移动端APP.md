@@ -151,10 +151,11 @@ app/src/main/java/com/xxx/infoparse/
 
 桌面端 `PROTOCOL_V2=True` 后新封装产物改用 JZ2 二进制帧（去双重 base64：静态净载荷 −26%、视频 −45%；内建 CRC32 完整性校验）。APP 以 `Jz2.kt` 承接，与桌面端 `parse_frame_jz2 / parse_envelope_v2` 逐字段对齐：
 
-- **帧结构**：`magic "JZ2"(3B) + ver(1B=2) + flags(1B) + seg_i(3B) + seg_n(3B) + meta_len(2B) + body_len(4B) + crc32(4B)` 后接 meta 与 payload；flags bit0-1=压缩算法（0=none 1=zlib）、bit2=mode、bit3=帧类型（0=信封帧 1=FEC share 帧）。CRC32 覆盖「帧头（除 CRC 字段）+ meta + payload」，任一字节损坏即拒收；
+- **帧结构**：`magic "JZ2"(3B) + ver(1B=2) + flags(1B) + seg_i(3B) + seg_n(3B) + meta_len(2B) + body_len(4B) + crc32(4B)` 后接 meta 与 payload；flags bit0-1=压缩算法（0=none 1=zlib **2=xz，2026-09-16 T10 起桌面端试压可能选用**）、bit2=mode（0=原样 1=重建，T11 起对 fmt=file 生效）、bit3=帧类型（0=信封帧 1=FEC share 帧）。CRC32 覆盖「帧头（除 CRC 字段）+ meta + payload」，任一字节损坏即拒收；
 - **信封帧**（静态码）：`meta = fmt(1B)+orig_len(4B)+name_len(2B)+name+ext_len(1B)+ext`（fmt 编码 text=0/markdown=1/word=2/excel=3/file=4）；payload 为数据原始字节，压缩由 flags 标注。静态多页时 meta 每页重复、payload 为切片，收齐 seg_n 页拼接后统一解压（`Jz2.EnvCollector`，页码 = seg_i+1 映射为 1 基）；
 - **share 帧**（视频流）：`meta = k(1B)+m(1B)`，payload 为 zfec share 原始字节，帧序与 v1 相同（`idx = share×组数 + 组号`）；
-- **还原规则**：解压后 `fmt=file` → payload 直接 base64 字符串（与 v1 data 同形）；`excel` → JSON 二维数组；**`word` 精简载荷是纯文本**（勿按 JSON 解析，与桌面端 `_unpack_data` 语义一致）；其余 → UTF-8 文本。`orig_len` 与解压后长度不符 → 拒收；
+- **还原规则**：解压（zlib 用 Inflater；**xz 用 `org.tukaani:xz:1.10` 的 XZInputStream**，两端算法集必须对齐）后 `fmt=file` → payload 直接 base64 字符串（与 v1 data 同形）；`excel` → JSON 二维数组；**`word` 精简载荷是纯文本**（勿按 JSON 解析，与桌面端 `_unpack_data` 语义一致）；其余 → UTF-8 文本。`orig_len` 与解压后长度不符 → 拒收；
+- **mode=rebuild（T11 拆包重组）**：flags bit2 置位且 fmt=file 时，payload 是 ZIP 容器拼接流 `[条目数 2B] + 每条目 [name_len 2B][name utf8][content_len 4B][content]`——APP 端拆流后用系统 `ZipOutputStream` 重建 zip（内容等价、非字节一致，时间戳固定 1980-01-01），再按普通 file 走 base64 导出；`Envelope.rebuilt=true`，结果页标注「还原方式：重建（内容等价，非字节一致）」。流越界/截断/残留字节一律拒收；
 - **双协议判别**：内容以 `JZ2` 魔数开头 → v2；否则转 UTF-8 按 v1 文本判别（3.2）。旧码零影响；
 - **k-of-m 早停**（替代「收齐全部 n 帧」）：每个分块组集齐 ≥k 个 share 即可经 `ZfecCompat` GF 解码重组（丢 ≤ m−k 帧 / 约 30% 仍可还原）；全收齐仍走系统位快路径。`VideoParseHelper` 逐帧循环满足即停。
 

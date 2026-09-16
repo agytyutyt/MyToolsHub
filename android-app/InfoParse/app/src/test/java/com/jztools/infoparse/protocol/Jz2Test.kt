@@ -19,8 +19,9 @@ class Jz2Test {
 
     private fun jz2Frame(kindFec: Boolean, segI: Int, segN: Int,
                          meta: ByteArray, payload: ByteArray,
-                         comp: Int = 0): ByteArray {
+                         comp: Int = 0, rebuild: Boolean = false): ByteArray {
         var flags = comp and 0x03
+        if (rebuild) flags = flags or Jz2.FLAG_REBUILD
         if (kindFec) flags = flags or Jz2.FLAG_FEC
         val out = ByteArrayOutputStream()
         out.write(byteArrayOf(0x4A, 0x5A, 0x32, Jz2.VERSION.toByte(), flags.toByte()))
@@ -188,6 +189,100 @@ class Jz2Test {
         assertTrue(env is ScanResult.Single)
         assertEquals(data, ((env as ScanResult.Single).envelope).textData)
         assertEquals("k测试", (env.envelope).name)
+    }
+
+    // ---------- T10 xz / T11 rebuild（第 4 批次） ----------
+
+    /** 测试侧 XZ 压缩（镜像桌面端 _xz_compress 的 FORMAT_XZ 流） */
+    private fun xzDeflate(data: ByteArray): ByteArray {
+        val out = ByteArrayOutputStream()
+        org.tukaani.xz.XZOutputStream(out, org.tukaani.xz.LZMA2Options()).use { it.write(data) }
+        return out.toByteArray()
+    }
+
+    /** 测试侧拼接流构造（镜像桌面端 _zip_pack_stream） */
+    private fun zipStream(entries: List<Pair<String, ByteArray>>): ByteArray {
+        val out = ByteArrayOutputStream()
+        out.write(byteArrayOf(((entries.size shr 8) and 0xFF).toByte(), (entries.size and 0xFF).toByte()))
+        for ((name, content) in entries) {
+            val nameB = name.toByteArray(Charsets.UTF_8)
+            out.write(byteArrayOf(((nameB.size shr 8) and 0xFF).toByte(), (nameB.size and 0xFF).toByte()))
+            out.write(nameB)
+            for (shift in 24 downTo 0 step 8) out.write(((content.size shr shift) and 0xFF))
+            out.write(content)
+        }
+        return out.toByteArray()
+    }
+
+    @Test
+    fun `T10 xz 压缩信封解析`() {
+        val text = "LZMA2 压缩还原测试。".repeat(200)
+        val raw = text.toByteArray(Charsets.UTF_8)
+        val packed = xzDeflate(raw)
+        val frame = jz2Frame(false, 0, 1, envMeta(0, raw.size, "xz样例", "txt"),
+            packed, comp = Jz2.COMP_XZ)
+        val f = Jz2.parseFrame(frame)
+        assertNotNull(f)
+        assertEquals(Jz2.COMP_XZ, f!!.comp)
+        val env = Jz2.parseEnvelope(f)
+        assertNotNull(env)
+        assertEquals(text, env!!.textData)
+        assertEquals("xz样例", env.name)
+    }
+
+    @Test
+    fun `T10 xz 载荷损坏拒收`() {
+        val raw = "损坏注入。"repeat(50).toByteArray(Charsets.UTF_8)
+        val packed = xzDeflate(raw)
+        // 只破坏 payload 中段（绕开 CRC 不可行，因此直接改字节后重算 CRC 模拟"合法但坏流"）
+        val bad = packed.copyOf().also { it[packed.size / 2] = (it[packed.size / 2].toInt() xor 0xFF).toByte() }
+        val frame = jz2Frame(false, 0, 1, envMeta(0, raw.size, "坏流", null), bad, comp = Jz2.COMP_XZ)
+        assertNull(Jz2.parseEnvelope(Jz2.parseFrame(frame)!!))
+    }
+
+    @Test
+    fun `T11 rebuild 拼接流重建 zip`() {
+        val stream = zipStream(listOf(
+            "word/document.xml" to "<w:document/>".repeat(100).toByteArray(Charsets.UTF_8),
+            "中文名.txt" to "中文条目内容".toByteArray(Charsets.UTF_8),
+        ))
+        val frame = jz2Frame(false, 0, 1, envMeta(4, stream.size, "r.docx", "docx"),
+            stream, rebuild = true)
+        val f = Jz2.parseFrame(frame)
+        assertNotNull(f)
+        assertEquals(1, f!!.mode)
+        val env = Jz2.parseEnvelope(f)
+        assertNotNull(env)
+        assertTrue(env!!.rebuilt)
+        assertTrue(env.isFile)
+        // 重建产物是合法 zip，条目名与内容一致
+        val zipBytes = env.fileBytes()!!
+        val entries = HashMap<String, String>()
+        java.util.zip.ZipInputStream(zipBytes.inputStream()).use { zis ->
+            var e = zis.nextEntry
+            while (e != null) {
+                entries[e.name] = zis.readBytes().toString(Charsets.UTF_8)
+                e = zis.nextEntry
+            }
+        }
+        assertEquals(setOf("word/document.xml", "中文名.txt"), entries.keys)
+        assertEquals("中文条目内容", entries["中文名.txt"])
+        assertTrue(entries["word/document.xml"]!!.startsWith("<w:document/>"))
+    }
+
+    @Test
+    fun `T11 rebuild 拼接流损坏拒收`() {
+        // 残留字节（流尾多 1 字节）→ 拒收
+        val stream = zipStream(listOf("a.txt" to "内容".toByteArray(Charsets.UTF_8)))
+        val bad = stream + 0x00
+        val frame = jz2Frame(false, 0, 1, envMeta(4, bad.size, "坏流", null), bad, rebuild = true)
+        assertNull(Jz2.parseEnvelope(Jz2.parseFrame(frame)!!))
+        // content_len 越界 → 拒收（流布局：[count 2B][name_len 2B]["a.txt" 5B][content_len 4B]，
+        // content_len 高字节位于偏移 9，置 0x7F 后长度天文数字 → 越界）
+        val evil = zipStream(listOf("a.txt" to "内容".toByteArray(Charsets.UTF_8)))
+        evil[9] = 0x7F
+        val frame2 = jz2Frame(false, 0, 1, envMeta(4, evil.size, "坏流", null), evil, rebuild = true)
+        assertNull(Jz2.parseEnvelope(Jz2.parseFrame(frame2)!!))
     }
 
     @Test

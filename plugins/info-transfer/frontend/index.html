@@ -471,6 +471,16 @@
           <span class="slider"></span>
         </label>
       </div>
+      <div id="rebuildSwitchRow" class="switch-row" hidden>
+        <div class="sw-text">
+          <div class="sw-title">Office 拆包重组</div>
+          <div class="sw-hint">仅对 docx / xlsx / xlsm / pptx / zip 生效：拆开 ZIP 容器只传内部内容，接收端重建为内容等价的文件（条目内容一致，字节与时间戳不保证）。文档更小、二维码更少；需要字节级一致的关闭此开关。</div>
+        </div>
+        <label class="switch">
+          <input id="rebuildMode" type="checkbox" />
+          <span class="slider"></span>
+        </label>
+      </div>
     </div>
 
     <div class="card">
@@ -776,6 +786,9 @@
   function applyRawHint() {
     state.rawMode = $("rawMode").checked;
     $("rawSwitchRow").hidden = state.srcMode !== "file";
+    // T11 拆包重组：仅在「原件传输 + 文件输入」时可选
+    $("rebuildSwitchRow").hidden = !(state.srcMode === "file" && state.rawMode);
+    if ($("rebuildSwitchRow").hidden) $("rebuildMode").checked = false;
   }
 
   /* 全部停止按钮显隐与复位 */
@@ -794,6 +807,7 @@
     const mode = $("mode").value;
     const isFile = state.srcMode === "file";
     const raw = isFile && state.rawMode;
+    const rebuild = raw && $("rebuildMode").checked;
     if (isFile && !state.files.length) { setStatus("请先选择文件", true); return; }
     if (!isFile && !$("pasteText").value.trim()) { setStatus("请先粘贴文字内容", true); return; }
 
@@ -813,15 +827,16 @@
     renderJobRows();
 
     // 并发提交全部任务（逐个 FormData 上传）
-    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw)));
+    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw, rebuild)));
     pollAll();
   }
 
-  async function submitJob(job, mode, version, raw) {
+  async function submitJob(job, mode, version, raw, rebuild) {
     const fd = new FormData();
     fd.append("mode", mode);
     fd.append("qr_version", String(version));
     fd.append("raw", raw ? "1" : "0");
+    if (rebuild) fd.append("rebuild", "1");
     if (job.file) fd.append("file", job.file);
     else fd.append("text", job.text);
     try {
@@ -975,6 +990,7 @@
       ? "原始文件"
       : (fmtLabel(s.fmt) + (s.ext ? `（原 ${s.ext}）` : ""));
     let summary = `传输模式：${s.fmt === "file" ? "原件传输" : "精简传输"} · 封装数据 ${fmtBytes(s.env_size)}，`;
+    if (s.rebuilt) summary += `还原方式：重建（内容等价，非字节一致） · `;
     let fileName;
     if (isStatic) {
       if (count > 1) {

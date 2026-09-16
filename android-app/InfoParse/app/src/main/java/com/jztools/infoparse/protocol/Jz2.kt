@@ -24,6 +24,7 @@ object Jz2 {
 
     const val COMP_NONE = 0
     const val COMP_ZLIB = 1
+    const val COMP_XZ = 2   // T10：LZMA2(XZ)（桌面端试压选优，两端算法集对齐）
 
     const val FLAG_REBUILD = 0x04
     const val FLAG_FEC = 0x08
@@ -82,7 +83,8 @@ object Jz2 {
      * JZ2 信封帧 → Envelope（与桌面端 parse_envelope_v2 语义一致）。
      * - fmt=file：payload（原始文件字节）转回 base64 字符串；
      * - fmt=excel：payload JSON 还原为二维数组（word 精简载荷是纯文本，原样返回）；
-     * - 压缩载荷自动解压；orig_len 长度校验不符时返回 null。
+     * - 压缩载荷自动解压（zlib/xz）；orig_len 长度校验不符时返回 null；
+     * - mode=rebuild（T11）：fmt=file 的拼接流拆包重建为 zip，Envelope.rebuilt=true。
      */
     fun parseEnvelope(f: Frame): Envelope? {
         if (f.isFec || f.meta.size < 8) return null
@@ -111,8 +113,22 @@ object Jz2 {
             } catch (e: Exception) {
                 return null
             }
+        } else if (f.comp == COMP_XZ) {
+            payload = try {
+                xzInflate(payload)
+            } catch (e: Exception) {
+                return null
+            }
         }
         if (origLen > 0 && payload.size != origLen) return null
+        var rebuilt = false
+        if (f.mode == 1 && fmt == Fmt.FILE) {
+            // T11 mode=rebuild：payload 为 ZIP 容器拼接流 → 拆流重建 zip（内容等价，
+            // 条目顺序保留、时间戳不保证），与桌面端 parse_envelope_v2 行为一致；
+            // orig_len 校验对象是拼接流长度。下游导出走普通 file 路径，零改动。
+            payload = rebuildZip(payload) ?: return null
+            rebuilt = true
+        }
         val data: Any = when (fmt) {
             Fmt.FILE -> java.util.Base64.getEncoder().encodeToString(payload)
             Fmt.EXCEL -> {
@@ -125,7 +141,54 @@ object Jz2 {
             }
             else -> String(payload, Charsets.UTF_8)
         }
-        return Envelope(fmt, name, data, ext)
+        return Envelope(fmt, name, data, ext, rebuilt = rebuilt)
+    }
+
+    /** T10：XZ(LZMA2) 解压；损坏流抛异常由调用方归一为还原失败。 */
+    private fun xzInflate(data: ByteArray): ByteArray =
+        org.tukaani.xz.XZInputStream(data.inputStream()).use { it.readBytes() }
+
+    /**
+     * T11：ZIP 容器拼接流 → 重建 ZIP。
+     * 流格式（与桌面端 _zip_pack_stream 一致）：
+     *   [条目数 2B] + 每条目 [name_len 2B][name utf8][content_len 4B][content]
+     * 越界/截断/残留字节 → null（由调用方归一为还原失败）。
+     * 重建产物内容等价、非字节一致（时间戳固定 1980-01-01，与桌面端口径对齐）。
+     */
+    private fun rebuildZip(stream: ByteArray): ByteArray? {
+        if (stream.size < 2) return null
+        try {
+            var pos = 0
+            val n = ((stream[pos].toInt() and 0xFF) shl 8) or (stream[pos + 1].toInt() and 0xFF)
+            pos += 2
+            val out = java.io.ByteArrayOutputStream()
+            val zip = java.util.zip.ZipOutputStream(out)
+            val fixed = java.util.GregorianCalendar(1980, 0, 1).timeInMillis
+            repeat(n) {
+                if (pos + 2 > stream.size) return null
+                val nameLen = ((stream[pos].toInt() and 0xFF) shl 8) or
+                    (stream[pos + 1].toInt() and 0xFF)
+                pos += 2
+                if (pos + nameLen + 4 > stream.size) return null
+                val name = String(stream, pos, nameLen, Charsets.UTF_8)
+                pos += nameLen
+                var clen = 0L
+                repeat(4) { clen = (clen shl 8) or (stream[pos + it].toLong() and 0xFF) }
+                pos += 4
+                if (clen < 0 || pos + clen > stream.size) return null
+                val entry = java.util.zip.ZipEntry(name)
+                entry.time = fixed
+                zip.putNextEntry(entry)
+                zip.write(stream, pos, clen.toInt())
+                zip.closeEntry()
+                pos += clen.toInt()
+            }
+            if (pos != stream.size) return null
+            zip.close()
+            return out.toByteArray()
+        } catch (e: Exception) {
+            return null
+        }
     }
 
     private fun u16(b: ByteArray, off: Int): Int =

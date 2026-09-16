@@ -63,3 +63,9 @@ plugins/map-marker/frontend/simulate_yunfu_5min.py
 
 # 压缩算法评估基准语料与脚本（可随时重建，勿入库）
 .bench_corpus/
+
+# 多码同屏 Demo（评估配套，不入库）
+demo/
+
+# 会话临时产物（信息传输测试基准样例 it_bench 等，可随时重建）
+.workbuddy/tmp/

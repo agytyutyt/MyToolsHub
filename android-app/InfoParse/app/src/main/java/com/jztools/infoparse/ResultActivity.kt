@@ -87,7 +87,9 @@ class ResultActivity : AppCompatActivity() {
             renderTable(table)
             tableScroll.visibility = View.VISIBLE
         } else if (env.isFile) {
-            textPreview.text = "原始文件「${env.name}」已完整还原。\n\n点击内容卡片可调用其他应用（如 WPS）打开阅读。"
+            textPreview.text = "原始文件「${env.name}」已完整还原。" +
+                (if (env.rebuilt) "\n还原方式：重建（内容等价，非字节一致）。" else "") +
+                "\n\n点击内容卡片可调用其他应用（如 WPS）打开阅读。"
             tableScroll.visibility = View.GONE
         } else {
             val text = env.textData ?: ""

@@ -39,6 +39,7 @@ import base64
 import csv as csv_mod
 import io
 import json
+import lzma
 import math
 import mimetypes
 import os
@@ -152,11 +153,18 @@ except Exception:  # pragma: no cover
     XLRD_AVAILABLE = False
 
 try:
-    import olefile  # 读取旧版 .doc（OLE2 复合文档），纯 Python
+    import olefile  # 读取旧版 .doc/.ppt（OLE2 复合文档），纯 Python
     OLEFILE_AVAILABLE = True
 except Exception:  # pragma: no cover
     olefile = None
     OLEFILE_AVAILABLE = False
+
+try:
+    import pypdf  # T12：pdf 逐页文本提取，纯 Python
+    PYPDF_AVAILABLE = True
+except Exception:  # pragma: no cover
+    pypdf = None
+    PYPDF_AVAILABLE = False
 
 # ---- QR-transfer 编码基础量（与 trajectory-convert / qr-video-decode 一致） ----
 MAX_FEC_M = 256
@@ -190,7 +198,7 @@ JZ2_HEADER_LEN = 21      # magic3 + ver1 + flags1 + seg_i3 + seg_n3 + meta_len2 
 # flags 位定义
 JZ2_COMP_NONE = 0        # bit0-1：压缩算法
 JZ2_COMP_ZLIB = 1
-JZ2_COMP_XZ = 2          # 预留（T10 LZMA2）
+JZ2_COMP_XZ = 2          # T10 LZMA2(xz)
 JZ2_FLAG_REBUILD = 0x04  # bit2：0=exact（字节一致）1=rebuild（内容等价重建）
 JZ2_FLAG_FEC = 0x08      # bit3：0=信封帧 1=FEC share 帧
 # fmt 枚举（meta 内 1 字节）
@@ -223,7 +231,8 @@ FMT_EXT = {
 # ===================== 可封装文件格式（内置清单） =====================
 # 支持清单为内置常量（不持久化）；extract 指定精简提取方式：
 #   text=文本解码 | docx=python-docx 提取 | openpyxl=提取二维数组(xlsx/xlsm) |
-#   xlrd=提取二维数组(xls 97-2003) | csv=csv 模块解析 | none=不可精简（仅原件传输）
+#   xlrd=提取二维数组(xls 97-2003) | csv=csv 模块解析 | pypdf=pdf 逐页文本(T12) |
+#   ppt=OLE 记录扫描文本(T12) | none=不可精简（仅原件传输）
 SUPPORTED_FORMATS = {
     "docx":     {"fmt": "word",     "label": "Word 文档",    "extract": "docx"},
     "doc":      {"fmt": "word",     "label": "Word 文档",    "extract": "doc"},
@@ -234,9 +243,9 @@ SUPPORTED_FORMATS = {
     "txt":      {"fmt": "text",     "label": "纯文本",       "extract": "text"},
     "md":       {"fmt": "markdown", "label": "Markdown",     "extract": "text"},
     "markdown": {"fmt": "markdown", "label": "Markdown",     "extract": "text"},
-    "ppt":      {"fmt": "file",     "label": "PPT 演示",     "extract": "none"},
+    "ppt":      {"fmt": "text",     "label": "PPT 演示",     "extract": "ppt"},
     "pptx":     {"fmt": "file",     "label": "PPT 演示",     "extract": "none"},
-    "pdf":      {"fmt": "file",     "label": "PDF 文档",     "extract": "none"},
+    "pdf":      {"fmt": "text",     "label": "PDF 文档",     "extract": "pypdf"},
 }
 
 # 上传大小上限（与框架层面独立的前置校验，SEC-3）
@@ -626,6 +635,100 @@ def _extract_doc_text(file_bytes):
     return _clean_doc_text(text)
 
 
+def _extract_pdf_text(file_bytes):
+    """T12：pdf 逐页提取文本（pypdf，纯 Python）。
+
+    加密 pdf（空密码可解则继续，否则回退）；扫描版/纯图版提取为空 →
+    LeanUnsupported 自动回退原件并提示。
+    """
+    if not PYPDF_AVAILABLE:
+        raise LeanUnsupported("服务器未安装 pypdf，无法精简提取 pdf")
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+        if reader.is_encrypted:
+            try:
+                if not reader.decrypt(""):
+                    raise LeanUnsupported("pdf 已加密，无法精简提取（已按原件传输）")
+            except LeanUnsupported:
+                raise
+            except Exception:
+                raise LeanUnsupported("pdf 已加密，无法精简提取（已按原件传输）")
+        parts = []
+        for page in reader.pages:
+            try:
+                t = page.extract_text() or ""
+            except Exception:
+                t = ""  # 单页解析失败跳过，不整体回退
+            t = t.strip()
+            if t:
+                parts.append(t)
+        text = "\n\n".join(parts).strip()
+    except LeanUnsupported:
+        raise
+    except Exception as e:
+        raise LeanUnsupported("pdf 精简提取失败（文件损坏或格式异常）") from e
+    if not text:
+        raise LeanUnsupported("pdf 无可提取文本（扫描版/纯图版），已按原件传输"
+                              "（建议：另存为文本类格式再精简传输）")
+    return text
+
+
+def _extract_ppt_text(file_bytes):
+    """T12：ppt（PowerPoint 97 二进制）提取文本——扫描 PowerPoint Document 流中的
+    TextCharsAtom(0x0FA0, UTF-16LE) / TextBytesAtom(0x0FA8, 8-bit ANSI) 记录。
+
+    采用顺序滑描（非递归遍历）：非目标记录逐字节滑过，目标记录按 recLen 消费——
+    对嵌套容器结构与未知记录天然鲁棒；加密流解出的垃圾文本经控制字符比例
+    校验拦截（>30% 视为提取失败回退原件）。
+    """
+    if not OLEFILE_AVAILABLE:
+        raise LeanUnsupported("服务器未安装 olefile，无法精简提取 ppt")
+    try:
+        ole = olefile.OleFileIO(io.BytesIO(file_bytes))
+    except Exception as e:
+        raise LeanUnsupported("ppt 精简提取失败（不是有效的 OLE2 文档）") from e
+    try:
+        if not ole.exists("PowerPoint Document"):
+            raise LeanUnsupported("ppt 精简提取失败（缺少 PowerPoint Document 流）")
+        data = ole.openstream("PowerPoint Document").read()
+        parts = []
+        i, n = 0, len(data)
+        while i + 8 <= n:
+            rec_type = struct.unpack_from("<H", data, i + 2)[0]
+            rec_len = struct.unpack_from("<I", data, i + 4)[0]
+            if rec_type in (0x0FA0, 0x0FA8) and i + 8 + rec_len <= n and rec_len <= 0x100000:
+                body = data[i + 8:i + 8 + rec_len]
+                try:
+                    txt = body.decode("utf-16-le") if rec_type == 0x0FA0 else body.decode("gbk")
+                except Exception:
+                    try:
+                        txt = body.decode("cp1252")
+                    except Exception:
+                        txt = ""
+                if txt:
+                    parts.append(txt)
+                i += 8 + rec_len
+            else:
+                i += 1
+        text = _clean_doc_text("".join(parts)).strip()
+        if not text:
+            raise LeanUnsupported("ppt 无可提取文本（加密/纯图版），已按原件传输")
+        # 垃圾文本拦截：控制字符（除换行/制表）占比过高 → 加密流或非文本内容
+        ctrl = sum(1 for ch in text if ord(ch) < 32 and ch not in "\n\t")
+        if len(text) and ctrl / len(text) > 0.3:
+            raise LeanUnsupported("ppt 文本提取异常（可能已加密），已按原件传输")
+        return text
+    except LeanUnsupported:
+        raise
+    except Exception as e:
+        raise LeanUnsupported("ppt 精简提取失败（文件损坏或格式异常）") from e
+    finally:
+        try:
+            ole.close()
+        except Exception:
+            pass
+
+
 def _parse_doc_pieces(clx, wd):
     """解析 CLX → 逐片解码文本（返回拼接字符串；结构异常返回 None）。
 
@@ -706,6 +809,10 @@ def extract_doc_lean(filename, file_bytes):
         return fmt, base, _extract_docx_text(file_bytes), ext_decl
     if extract == "doc":
         return fmt, base, _extract_doc_text(file_bytes), ext_decl
+    if extract == "pypdf":
+        return fmt, base, _extract_pdf_text(file_bytes), ext_decl
+    if extract == "ppt":
+        return fmt, base, _extract_ppt_text(file_bytes), ext_decl
     if extract == "csv":
         return fmt, base, _extract_csv_rows(file_bytes), ext_decl
     if extract == "openpyxl":
@@ -766,7 +873,7 @@ def _unpack_data(fmt, data):
         raise ValueError("文本解码失败")
 
 
-def build_envelope(fmt, name, data, ext=None):
+def build_envelope(fmt, name, data, ext=None, rebuild=False):
     """构造信封 JSON 字节（解析端以此判断文档格式/原始后缀/压缩标记）。
 
     精简传输的文本与二维数组经 zlib 压缩（zip=1）后 base64 承载，
@@ -775,9 +882,11 @@ def build_envelope(fmt, name, data, ext=None):
 
     PROTOCOL_V2=True 时返回 JZ2 二进制信封帧（原始字节载荷，去双重 base64 +
     CRC32 完整性校验）；编码/解析两端按 b"JZ2" 魔数双协议自适应。
+    rebuild=T11 拆包重组开关（仅 v2 生效；fmt=file 且 ZIP 容器时拆包重建，
+    更小才启用，否则回退纯压缩——字节精确诉求不开此开关）。
     """
     if PROTOCOL_V2:
-        return build_envelope_v2(fmt, name, data, ext)
+        return build_envelope_v2(fmt, name, data, ext, rebuild=rebuild)
     env = {"jzt": 1, "fmt": fmt, "name": name}
     if ext:
         env["ext"] = ext
@@ -822,12 +931,115 @@ def parse_envelope(obj):
 #   share 帧（视频流）：meta = k(1B)+m(1B)；payload = zfec share 原始字节（不再 base64）。
 # 解码端双协议自适应：内容以 b"JZ2" 开头走 v2，否则按 v1 文本解析（外部插件 v1 流不受影响）。
 
+def _xz_compress(raw):
+    """LZMA2(XZ) 压缩：preset 9|EXTREME，字典 ≤16MB（T10）。失败返回 None（fail-open 回退 zlib）。"""
+    try:
+        return lzma.compress(
+            raw, format=lzma.FORMAT_XZ,
+            filters=[{"id": lzma.FILTER_LZMA2,
+                      "preset": 9 | lzma.PRESET_EXTREME,
+                      "dict_size": 1 << 24}])
+    except Exception:
+        return None
+
+
+def _xz_decompress(data):
+    """XZ 解压（损坏流抛异常，由调用方归一为信封损坏错误）。"""
+    return lzma.decompress(data, format=lzma.FORMAT_XZ)
+
+
+def _compress_best(raw):
+    """T10 试压：zlib(level 9) → LZMA2(xz, 9|EXTREME, 字典 16MB)，取更小者。
+
+    返回 (packed, comp)；xz 失败 fail-open 回退 zlib/none。
+    """
+    best, best_comp = raw, JZ2_COMP_NONE
+    try:
+        packed = zlib.compress(raw, 9)
+    except Exception:
+        packed = None
+    if packed is not None and len(packed) < len(best):
+        best, best_comp = packed, JZ2_COMP_ZLIB
+    packed_xz = _xz_compress(raw)
+    if packed_xz is not None and len(packed_xz) < len(best):
+        best, best_comp = packed_xz, JZ2_COMP_XZ
+    return best, best_comp
+
+
+# T11 拆包重组适用格式（ZIP 容器：容器级压缩无收益，拆包后内容可再压缩）
+REBUILD_EXTS = {"docx", "xlsx", "xlsm", "pptx", "zip"}
+
+
+def _zip_pack_stream(file_bytes):
+    """T11：ZIP 容器 → 连续流。格式：[条目数 2B] + 每条目
+    [name_len 2B][name utf8][content_len 4B][content]（目录条目跳过；
+    加密/损坏容器返回 None，由调用方回退原件压缩路径）。"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+            infos = [i for i in z.infolist() if not i.is_dir()]
+            if not infos or len(infos) > 0xFFFF:
+                return None
+            out = io.BytesIO()
+            out.write(len(infos).to_bytes(2, "big"))
+            for i in infos:
+                name_b = i.filename.encode("utf-8")
+                if len(name_b) > 0xFFFF:
+                    return None
+                content = z.read(i)
+                out.write(len(name_b).to_bytes(2, "big"))
+                out.write(name_b)
+                out.write(len(content).to_bytes(4, "big"))
+                out.write(content)
+            return out.getvalue()
+    except Exception:
+        return None
+
+
+def _zip_unpack_stream(stream):
+    """T11：连续流 → [(name, content), ...]；越界/截断/残留字节均抛 ValueError。"""
+    if len(stream) < 2:
+        raise ValueError("重建流长度不足")
+    n = int.from_bytes(stream[:2], "big")
+    pos = 2
+    entries = []
+    for _ in range(n):
+        if pos + 2 > len(stream):
+            raise ValueError("重建流条目名长度越界")
+        name_len = int.from_bytes(stream[pos:pos + 2], "big")
+        pos += 2
+        if pos + name_len + 4 > len(stream):
+            raise ValueError("重建流条目头越界")
+        name = stream[pos:pos + name_len].decode("utf-8")
+        pos += name_len
+        clen = int.from_bytes(stream[pos:pos + 4], "big")
+        pos += 4
+        if pos + clen > len(stream):
+            raise ValueError("重建流条目内容越界")
+        entries.append((name, stream[pos:pos + clen]))
+        pos += clen
+    if pos != len(stream):
+        raise ValueError("重建流长度不符（数据损坏）")
+    return entries
+
+
+def _zip_rebuild(entries):
+    """T11：条目列表 → 重建 ZIP（内容等价，条目顺序保留、时间戳不保证）。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in entries:
+            zi = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            z.writestr(zi, content)
+    return buf.getvalue()
+
+
 def _pack_data_v2(fmt, data):
     """v2 载荷序列化：返回 (payload_bytes, comp, orig_len)——不 base64，直接原始字节。
 
     - str：fmt=file 先 base64 解码还原文件字节，其余按 UTF-8 编码；
     - list（word 段落数组 / excel 二维数组）：紧凑 JSON 序列化；
-    - zlib 试压（level 9），更小才启用（flags 标注 JZ2_COMP_ZLIB）。
+    - T10 试压顺序：zlib(level 9) → LZMA2(xz, 9|EXTREME, 字典 16MB)，取更小者；
+      更小才启用对应算法（flags 标注），xz 失败 fail-open 回退 zlib/none。
+      （v1 路径保持 zlib——旧信封无算法字段，解析端仅支持 Inflater。）
     """
     if isinstance(data, (bytes, bytearray)):
         raw = bytes(data)
@@ -843,13 +1055,8 @@ def _pack_data_v2(fmt, data):
         raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     else:
         raise ValueError("v2 载荷类型不支持")
-    try:
-        packed = zlib.compress(raw, 9)
-    except Exception:
-        return raw, JZ2_COMP_NONE, len(raw)
-    if len(packed) < len(raw):
-        return packed, JZ2_COMP_ZLIB, len(raw)
-    return raw, JZ2_COMP_NONE, len(raw)
+    best, comp = _compress_best(raw)
+    return best, comp, len(raw)
 
 
 def _env_meta_v2(fmt, name, ext, orig_len):
@@ -916,11 +1123,31 @@ def parse_frame_jz2(frame):
     }
 
 
-def build_envelope_v2(fmt, name, data, ext=None):
-    """构造 v2 JZ2 信封帧字节（单帧不分页；静态多页由分页端对 payload 切片）。"""
+def build_envelope_v2(fmt, name, data, ext=None, rebuild=False):
+    """构造 v2 JZ2 信封帧字节（单帧不分页；静态多页由分页端对 payload 切片）。
+
+    rebuild=True（T11，仅 fmt=file 且 ext ∈ REBUILD_EXTS）：ZIP 容器拆包为连续流
+    再压缩（flags 置 mode=rebuild）。仅当拆包路径确实比直接压缩更小时启用，
+    否则静默回退纯压缩路径（字节精确）。
+    """
     payload, comp, orig_len = _pack_data_v2(fmt, data)
+    mode = 0
+    if rebuild and fmt == "file":
+        ext_n = (ext or "").lstrip(".").lower()
+        if ext_n in REBUILD_EXTS:
+            try:
+                file_bytes = base64.b64decode(data, validate=True)
+            except Exception:
+                file_bytes = None
+            if file_bytes is not None:
+                stream = _zip_pack_stream(file_bytes)
+                if stream is not None:
+                    packed_s, comp_s = _compress_best(stream)
+                    if len(packed_s) < len(payload):
+                        payload, comp = packed_s, comp_s
+                        orig_len, mode = len(stream), 1   # orig_len=拼接流长度（解析端先校验再拆流）
     meta = _env_meta_v2(fmt, name, ext, orig_len)
-    return _jz2_frame("env", 0, 1, meta, payload, comp=comp)
+    return _jz2_frame("env", 0, 1, meta, payload, comp=comp, mode=mode)
 
 
 def parse_envelope_v2(frame_bytes):
@@ -961,8 +1188,23 @@ def parse_envelope_v2(frame_bytes):
             payload = zlib.decompress(payload)
         except Exception:
             raise ValueError("压缩数据解码失败")
+    elif f["comp"] == JZ2_COMP_XZ:
+        try:
+            payload = _xz_decompress(payload)
+        except Exception:
+            raise ValueError("压缩数据解码失败")
     if orig_len and len(payload) != orig_len:
         raise ValueError("解压后数据长度不符（数据损坏）")
+    if f["mode"] and fmt == "file":
+        # T11 mode=rebuild：payload 为 ZIP 容器拼接流 → 拆流重建 zip（内容等价，
+        # 条目顺序保留、时间戳不保证）。重建在解析层完成，下游 envelope_to_file
+        # 与 APP 导出零改动；orig_len 校验对象是拼接流长度。
+        try:
+            payload = _zip_rebuild(_zip_unpack_stream(payload))
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("重建流解析失败（数据损坏）")
     if fmt == "file":
         data = base64.b64encode(payload).decode("ascii")
     elif fmt == "excel":
@@ -982,6 +1224,8 @@ def parse_envelope_v2(frame_bytes):
     env = {"jzt": 1, "fmt": fmt, "name": name, "data": data}
     if ext:
         env["ext"] = ext
+    if f["mode"]:
+        env["mode"] = 1   # T11 重建标识：UI 标注"还原方式：重建（内容等价，非字节一致）"
     return env
 
 
@@ -1922,7 +2166,7 @@ def envelope_to_file(fmt, name, data, ext=None):
 # ===================== 后台封装任务 =====================
 
 def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
-                frame_repeat=1, raw_mode=False):
+                frame_repeat=1, raw_mode=False, rebuild=False):
     try:
         set_task(task_id, status="running", created_at=time.time())
         note = ""
@@ -1950,7 +2194,14 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
             fmt, name, data, ext = "text", "文字信息", text_input or "", None
             set_task(task_id, progress=0.2, stage="封装文字数据")
 
-        env_bytes = build_envelope(fmt, name, data, ext)
+        env_bytes = build_envelope(fmt, name, data, ext, rebuild=rebuild)
+        # T11：产物是否走了拆包重建路径（供前端标注"还原方式：重建"）
+        rebuilt = False
+        if isinstance(env_bytes, (bytes, bytearray)) and env_bytes.startswith(JZ2_MAGIC):
+            try:
+                rebuilt = bool(parse_frame_jz2(env_bytes)["mode"])
+            except Exception:
+                rebuilt = False
         # 产物命名用显示名：file 格式的 name 含扩展名，产物名去掉扩展名
         base_name = name
         if fmt == "file" and "." in base_name:
@@ -1980,7 +2231,8 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                          output_type="static", fmt=fmt, name=name, ext=ext,
                          env_size=len(env_bytes), qr_version=qr_version,
                          image_count=1, image_size=size,
-                         image_name=f"{base_name}二维码.png", note=note)
+                         image_name=f"{base_name}二维码.png", note=note,
+                         rebuilt=rebuilt)
             else:
                 zip_path = _task_file(task_id, ".zip")
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1991,7 +2243,8 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                          output_type="static", fmt=fmt, name=name, ext=ext,
                          env_size=len(env_bytes),
                          image_count=count, zip_size=size,
-                         zip_name=f"{base_name}二维码（共{count}张）.zip", note=note)
+                         zip_name=f"{base_name}二维码（共{count}张）.zip", note=note,
+                         rebuilt=rebuilt)
             return
 
         def progress(done, total):
@@ -2011,7 +2264,8 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                  env_size=len(env_bytes), qr_version=qr_version,
                  nframes=nframes, k=k, m=m, video_size=size,
                  frame_count=(nframes if fdir else 0),
-                 video_name=f"{base_name}二维码流.mp4", note=note)
+                 video_name=f"{base_name}二维码流.mp4", note=note,
+                 rebuilt=rebuilt)
     except TaskCanceled:
         # 用户停止：清理已写入的部分产物，任务标记为 canceled
         _remove_task_files(task_id)
@@ -2113,6 +2367,8 @@ def register(app) -> None:
         if not 1 <= version <= 40:
             return jsonify({"ok": False, "detail": "二维码版本须在 1-40 之间"}), 400
         raw_mode = request.form.get("raw", "0").strip().lower() in ("1", "true", "on", "yes")
+        # T11 拆包重组开关（默认关：字节精确；开启后 ZIP 容器拆包重建，更小但内容等价）
+        rebuild_mode = request.form.get("rebuild", "0").strip().lower() in ("1", "true", "on", "yes")
 
         # 相机传输模式为视频默认行为：每码连续重复 CAMERA_FRAME_REPEAT 帧（约 0.33s），
         # 配合前端帧序列轮播与 APP 自动识别，手机对准屏幕即可传输
@@ -2148,7 +2404,8 @@ def register(app) -> None:
         set_task(task_id, status="pending", progress=0.0, created_at=time.time(),
                  created_by=(viewer or {}).get("username", ""))
         _executor.submit(_run_encode, task_id, mode, filename,
-                         file_bytes, text_input, version, frame_repeat, raw_mode)
+                         file_bytes, text_input, version, frame_repeat, raw_mode,
+                         rebuild_mode)
         return jsonify({"ok": True, "task_id": task_id})
 
     @app.get(f"{API_PREFIX}/task/<task_id>")
@@ -2166,6 +2423,8 @@ def register(app) -> None:
         }
         if task.get("estimate"):
             payload["estimate"] = task["estimate"]
+        if task.get("rebuilt"):
+            payload["rebuilt"] = True   # T11：还原方式为重建（内容等价，非字节一致）
         if task.get("status") == "done":
             payload.update({
                 "output_type": task.get("output_type"),

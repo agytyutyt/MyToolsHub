@@ -1,16 +1,24 @@
 ﻿# HANDOFF.md — JZToolsHub 交接文档
 
 > 面向没有上下文的接手者：**请先完整读完本文，再动手改代码。**
-> 最后更新：2026-09-16（**信息传输优化批次 2/3：满屏码面舞台 + 协议 v2 JZ2 二进制帧**）
+> 最后更新：2026-09-16（**信息传输优化批次 4：压缩器升级 + 拆包重组 + pdf/ppt 精简提取**）
 > T06 满屏码面舞台（前端全屏层 + 整数设备像素 + px/模块提示）；T07-T09 协议 v2 落地：
 > JZ2 二进制帧（21B 帧头 + CRC32 + 原始字节载荷，静态 −26% / 视频 −45%）、解码端换
 > zxing-cpp（cv2 对二进制码不可靠，60/60 vs 29/40 损坏）、APP 侧 rawBytes 直读 + JZ2
 > 双协议解析 + k-of-m 早停（`Jz2.kt` 新增，`QrFrame`/`Envelope`/`CameraScanner`/
-> `ImageDecoder`/`VideoParseHelper` 改造）。修复两个 v2 引入回归：word 精简载荷误按
-> JSON 解析（只 excel 是数组）、`estimate_output` str/bytes 混用。回归：`test_protocol_v2.py`
-> 28/28 + T01 `test_roundtrip.py` 47/47。**遗留**：APP Kotlin 未编译验证（本机无 Gradle，
-> 待 Android Studio 跑 `Jz2Test`）、真机 PoC（二进制码 1KB roundtrip + 200 帧连续解码）
-> 未执行。详见 `docs/信息传输优化TODO清单.md` T06-T09 落地记录。
+> `ImageDecoder`/`VideoParseHelper` 改造）。**批次 4（T10-T12，桌面端 + APP 代码全部落地）**：
+> T10 压缩器升级——v2 试压 zlib → xz 取更小者（flags comp=2，fail-open 回退），APP 增
+> `org.tukaani:xz:1.10` + XZInputStream 解压；T11 拆包重组——docx/xlsx/xlsm/pptx/zip 解包
+> 连续流再压缩（mode=rebuild），两端拆流重建 zip（内容等价非字节一致），前端「拆包重组」
+> 开关 + 两端「还原方式：重建」标注，APP `Envelope.rebuilt`；T12 pdf/ppt 精简提取
+> （pypdf / olefile Atom 扫描，失败回退原件），依赖登记 PACKAGES + requirements。
+> 修复 v2 引入回归：word 精简载荷误按 JSON 解析（只 excel 是数组）、`estimate_output`
+> str/bytes 混用、Jz2Test 测试帧构造器 25 字节整数（`downTo 0` 漏 `step 8`）。回归：
+> `test_protocol_v2.py` 44/44 + T01 `test_roundtrip.py` 47/47。**遗留**：APP Kotlin 未编译验证
+> （本机无 Gradle，待 Android Studio 跑 `Jz2Test`——2026-09-16 上轮 6 失败已根因为测试
+> 帧构造器 bug 并修复，待重跑确认 66/66）、真机 PoC（二进制码 1KB roundtrip + 200 帧连续
+> 解码）、T11 重建 zip 经 Office/WPS 人工验收未执行。详见 `docs/信息传输优化TODO清单.md`
+> T06-T12 落地记录。
 > 此前 2026-09-15（**知识库 1.2.2：PDF 预览清晰度——设备像素对齐**）
 > 用户反馈"PDF 预览分辨率低、发糊"。排查结论：**dpr 一直是对的**（位图/显示设备像素比
 > 实测 1.0 / 1.2497 / 1.4993 全对），真正的病根是**画布没有落在设备像素网格上**——
@@ -269,6 +277,7 @@ python app.py
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-16 | **信息传输优化批次 4（T10-T12）：压缩器升级 + 拆包重组 + pdf/ppt 精简提取** | T10：`_compress_best`（zlib 9 → LZMA2/xz 9\|EXTREME、字典 16MB，试压取更小，fail-open 回退）接入 v2 载荷，flags `comp=2` 标注；APP 增 `org.tukaani:xz:1.10`，`Jz2.kt` XZInputStream 解压。T11：docx/xlsx/xlsm/pptx/zip 原件拆包为连续流（`[条目数 2B] + [name_len 2B][name][content_len 4B][content]…`）再压缩，JZ2 mode=rebuild；两端拆流重建 zip（内容等价、非字节一致，时间戳固定 1980-01-01），仅拆包后更小才启用；前端「拆包重组」开关（raw+file 显示）、结果摘要与 APP 结果页「还原方式：重建」标注，APP `Envelope.rebuilt` + `Jz2.rebuildZip`。T12：`SUPPORTED_FORMATS` 的 ppt/pdf 改精简口径——pypdf 逐页提取（扫描/加密 LeanUnsupported 自动回退原件）、olefile 扫 TextCharsAtom/TextBytesAtom（>30% 控制字符拒收乱码）；`requirements.txt` + `JZToolsHub.spec` PACKAGES 登记 pypdf。验证：`test_protocol_v2.py` 44/44（T10 试压选优用例须让相同文本相隔 >32KB——zlib 窗口外 xz 才必胜；T11 6 例 roundtrip + 残留/越界拒收；T12 fuzz 1000 轮零崩溃）+ T01 47/47；APP `Jz2Test` 新增 xz 还原/坏流拒收、rebuild 重建/损坏拒收 4 例。**遗留**：APP 编译验证（Android Studio）、T11 重建 zip 经 Office/WPS 人工验收、真机 PoC |
 | 2026-09-16 | **过滤器 / 轨迹速写：文档处理流程前新增「删除背景图片」环节** | 两个插件在上传落盘暂存**之前**统一跑一遍 `backend/bg_image.py`（纯标准库，零框架依赖）：识别 `.xlsx` 里嵌入的**工作表背景图片**（Excel「页面布局 → 背景」，即 `xl/worksheets/sheetN.xml` 的 `<picture r:id>` + 对应 Relationship + `xl/media/*` 本体，常被用来夹带水印/机构标识/来源标记），命中即三件套一起摘掉——除这三处外包内部件**逐字节原样搬运**（不重排/不重压/不改时间戳，样式、批注、宏、数据透视表、非背景图片一概不受影响）；图片本体若仍被别处引用（同一张图既当背景又当浮动 logo）只解除背景引用、保留本体。**零风险姿态**：未发现背景图片则原字节返回（连 zip 都不重写）；畸形包/加密包/解压超 256MB/解析异常一律不改写文件、照原样继续流程，原因写进结论 `note`；`csv`（无图片容器）与 `xls`（BIFF 二进制流）不检测并如实说明——两者在本框架里都是"读成二维表 → 重新生成输出"，产物天然不含背景图片。结论落点：`/filter` 与 `/result` 的 `sanitize` 字段、过滤器页面「文档预处理」一行、速写自检卡片「已删背景图片 N 张」标签（悬浮给完整结论）、速写报告「数据质量」sheet 的「源文件预处理」追溯行。B-7 禁止插件间 import → 两个插件各存一份**逐字节相同**的副本，`test_bg_image.py` 断言两份一致防漂移。验证：`test_bg_image.py` 17 项全绿（真实样本 `D:\SQLRewrite\demoData_real.xlsx` 识别删除 1 张 7.2KB / 数据 455 行逐行一致 / zip 结构有效 / 幂等 / 无背景零改写 / 共享图片本体保留 / 多表共用只删一次 / 外部链接 / 加密与畸形包与 zip 炸弹失败不阻断 / csv-xls 说明 / 两份副本一致）+ 两条端到端（`/api/file-filter/filter`、`/api/trajectory-sketch/upload→analyze→download`，临时数据根，断言落盘输入件已无 `<picture>`、报告数据质量 sheet 含「已删除背景图片 1 张」）+ 真实应用浏览器实测（两处 UI 新元素可见、无 JS 报错）。产物：插件包 v1.1.0 ×2（见 §2.2），前端资源戳 app.js v3 / v2，`config/tools.json` 卡片描述同步 |
 | 2026-09-14 | **插件独立升级（阶段二/三）：管理后台「插件管理」+ 共享盘批量更新** | 管理后台新增「插件管理」页（**仅超级管理员**，卡片在后台首页）：① **插件盘点**——代码版本 / 登记版本 / 状态（已启用·已停用·隐藏·待重启·登记不一致）/ 备份数 / 数据占用 / 回滚 / 启停；② **离线升级包**——选 zip → 只读校验 → **计划预览**（新增/修改/未变/删除/保留未知 + 基线说明 + 警示）→ 确认应用（自动备份旧版 → 替换 → **自动停服重启**，页面自动刷新；页面有「应用后自动重启服务」开关，
 关闭时才需要手工点「立即重启服务」）；③ **共享盘批量更新**——填 `index.json` 路径 → 检查更新（逐项给出可升级/受阻原因）→ 勾选 → 批量升级（顺序应用，最后统一重启一次）。服务端 `plugins/admin/backend/plugin_admin.py` 与目标机 `install-plugin.ps1` **同一套校验规则**（包结构/schema/id/逐文件 SHA256/路径安全/体积与条目数上限/版本窗口/min_app/三分法替换），`apply` 时**服务端重新校验**（不信任前端状态，上传文件限定在数据根 `.staging/uploads/`）。新增"待重启"机制：应用后标记 `restart_pending`，`app.py` 在插件后端加载完成后清除；冻结模式自重启 = 分离的 `cmd` 助手轮询 PID → `cd /d <程序目录>` → `start /min <exe>` → `os._exit`。配套：`JZTOOLS_DATA_ROOT` 环境变量（沙箱/受管环境，显式指定时不读写指针）；出包工具 `-Publish <共享目录>`（投递 zip+sha256+index.json）。**修掉三个实测缺陷**：重启判定误把 `manifest.json` 变化算作"需重启"（两侧同步收口为只看 `backend/**`）；三分法基线在"无登记"时退回备份快照会误删用户文件（改为只清 `backend/*.py` 残留）；出包工具生成的 changelog 乱码（PS 5.1 按 GBK 解码 git 的 UTF-8 输出）。验收：`test_admin_plugin_manager.py`（进程内 HTTP 全链路：登录→盘点→上传→计划→应用→回滚→启停→索引→批量升级→重启接口→仓库未被触碰断言）、`test_plugin_admin.py`（19 例 + 与出包工具交叉验证）、PS 沙箱套件 77 项；界面经浏览器实测（含上传应用、待重启横幅、检查更新、批量升级） |

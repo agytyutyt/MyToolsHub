@@ -23,9 +23,11 @@
   - ppt / pdf / pptx 不支持精简提取（白名单标注 extract=none），仅原件传输。
 - **原件传输（开关开启，raw=1）**：文件不做任何解析，fmt=file，
   文件字节经 base64 封装——样式、宏、图片、表格等与原文件完全一致（还原字节一致）；
-  base64 文本再做一轮 zlib 试压（zip=1）：OLE 类（doc/ppt/xls）与文本类源文件
-  可缩 4–12×，已压缩容器（docx/xlsx/jpg）自动保持原样；
-  解析端按 `zip=1` 解压与 fmt 无关，网页端与 APP（≥v1.7）天然兼容。
+  base64 文本再做一轮压缩试压（v1 zlib；v2 起 zlib 与 LZMA2/xz 试压取更小者，zip=1/flags 标注）：
+  OLE 类（doc/ppt/xls）与文本类源文件可缩 4–12×，已压缩容器（docx/xlsx/jpg）自动保持原样；
+  解析端按 `zip=1` 解压与 fmt 无关，网页端与 APP（≥v1.7）天然兼容；
+  可选「拆包重组」（rebuild，v2 专属）：docx/xlsx/xlsm/pptx/zip 先解包为连续流再压缩
+  （mode=rebuild 标注），还原端重建 zip——**内容等价、非字节一致**，体积更小时才启用。
 - 输出形式（可设定二维码版本 1-40）：
   - **静态二维码**：单张装得下输出 1 张 PNG；装不下自动拆分为多张
     （首页带文档格式/文件名，续页带页码；可单张预览、下载，多张打包 ZIP）；
@@ -125,13 +127,13 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
 ## 依赖
 
 `pip install -r backend/requirements.txt`
-（qrcode、zfec、opencv-python、numpy、openpyxl、python-docx、xlrd、olefile、zxing-cpp）
+（qrcode、zfec、opencv-python、numpy、openpyxl、python-docx、xlrd、olefile、zxing-cpp、pypdf）
 
 ## 已知限制
 
 - 上传格式白名单为内置清单（docx/doc/xlsx/xlsm/xls/csv/txt/md/markdown/ppt/pptx/pdf，
   见 routes.py 的 SUPPORTED_FORMATS），其他格式前后端均拒绝；
-  ppt/pptx/pdf 仅支持原件传输（extract=none）；
+  pptx 仅支持原件传输（extract=none）；ppt/pdf 支持精简提取（T12），失败自动回退原件；
 - 精简传输不保留样式、宏、图片、公式（值取 excel 缓存计算结果）；
   需要完整还原请开启「原件传输」；
 - `.xls`/`.xlsm` 精简传输还原为 `.xlsx`（APP 端重建现代工作簿），

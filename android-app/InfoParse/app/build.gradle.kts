@@ -61,5 +61,8 @@ dependencies {
     // JSON
     implementation("com.google.code.gson:gson:2.11.0")
 
+    // T10：LZMA2(XZ) 解压（桌面端 v2 试压可能选 xz，两端算法集必须对齐）
+    implementation("org.tukaani:xz:1.10")
+
     testImplementation("junit:junit:4.13.2")
 }

@@ -63,6 +63,8 @@ data class Envelope(
     val data: Any,
     /** 精简传输声明的原始文件后缀名（如 docx/xlsx/md/txt，无点号）；旧二维码或粘贴文字为 null */
     val ext: String? = null,
+    /** T11：v2 mode=rebuild 拆包重组还原（fmt=file；内容等价、非字节一致，UI 据此标注） */
+    val rebuilt: Boolean = false,
 ) {
     val isExcel: Boolean get() = fmt == Fmt.EXCEL && data is List<*>
     val isFile: Boolean get() = fmt == Fmt.FILE && data is String

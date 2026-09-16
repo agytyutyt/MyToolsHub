@@ -185,12 +185,14 @@ def run():
         # ---- 原件传输（fmt=file）：导出字节必须与源文件一致 ----
         fmt, rname, data, ext = it.extract_doc_raw(name, fb)
         env = it.build_envelope(fmt, rname, data, ext)
-        # T02 断言：可压缩源文件的原件信封应启用压缩标记（v1 zip=1 / v2 comp=zlib）
+        # T02 断言：可压缩源文件的原件信封应启用压缩标记（v1 zip=1 / v2 comp=zlib|xz，
+        # T10 起试压取更小者，文本类源文件 xz 通常胜出）
         if env.startswith(it.JZ2_MAGIC):
             fr = it.parse_frame_jz2(env)
             env_obj = it.parse_envelope_v2(env)
             expect_zip = len(zlib.compress(fb, 9)) < len(fb)
-            check(f"{short} 原件压缩标记", (fr["comp"] == it.JZ2_COMP_ZLIB) == expect_zip,
+            check(f"{short} 原件压缩标记",
+                  (fr["comp"] in (it.JZ2_COMP_ZLIB, it.JZ2_COMP_XZ)) == expect_zip,
                   f"comp={fr['comp']} expect={expect_zip}")
             check(f"{short} 原件信封不大于原样字节",
                   len(env) <= len(fb) + it.JZ2_HEADER_LEN + 16)

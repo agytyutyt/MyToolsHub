@@ -81,20 +81,23 @@
 
 ## 批次 4：压缩器升级 + 新增提取能力（依赖 T07 的 flags/mode 字段）
 
-### T10 · 压缩器升级 zlib → LZMA2（P2 / DS §3–4） 【状态：未开始】
+### T10 · 压缩器升级 zlib → LZMA2（P2 / DS §3–4） 【状态：已完成（2026-09-16，两端代码落地）】
 
 **实现方案**：`_pack_data` 试压顺序改为 zlib 与 `lzma.compress(format=FORMAT_XZ, preset=9|PRESET_EXTREME)`（字典 ≤16 MB，`dict_size=1<<24`）取更小者，JZ2 flags 标注算法；APP 新增依赖 `org.tukaani:xz:1.10`（纯 Java 168.6 KB，0BSD），按 flags 选 `XZInputStream`/`Inflater`；依赖登记 `JZToolsHub.spec` 的 `PACKAGES` 与插件 requirements；损坏 xz 流 fail-open 回退。
 **预期效果**：473 KB 中文文档 −18%（39.8%→32.7%）；长重复正文最高 −86%（docx 精简正文 45 页 → **7 码**）；PDF 图文 85.5%→68.6%（6.5 MB 少 1.1 MB ≈ 390 码）；APK 体积 +≤170 KB（+1.9%）；解压耗时 6.5 MB 载荷 ≤0.5 s（真机实测）。
+**落地记录（2026-09-16）**：桌面端 `_compress_best`（zlib 9 → xz 9|EXTREME 试压取更小，fail-open 回退）接入 `_pack_data_v2`，flags `comp=2` 标注；`parse_envelope_v2` 增加 xz 解压分支。依赖登记完成（`JZToolsHub.spec` PACKAGES + `requirements.txt` 增加 pypdf 之外同步核对 xz-java 0BSD）。APP 侧 `build.gradle.kts` 增加 `org.tukaani:xz:1.10`，`Jz2.kt` 增加 `COMP_XZ` 常量与 `xzInflate`（XZInputStream），`Jz2Test` 覆盖 xz 信封还原 + 坏流拒收。测试注意：试压选优数据必须让两段相同文本相隔 >32KB（zlib 窗口外），否则小数据下 zlib 反超属正常（`test_protocol_v2.py` 44/44 全绿）。**遗留**：真机解压耗时口径未实测。
 
-### T11 · Office/ZIP 拆包重组（S6，`mode=rebuild`） 【状态：未开始】
+### T11 · Office/ZIP 拆包重组（S6，`mode=rebuild`） 【状态：已完成（2026-09-16，两端代码落地；真实样例人工验收待做）】
 
 **实现方案**：对 `fmt=file` 且扩展名 ∈ {docx,xlsx,xlsm,pptx,zip} 的新预处理：`zipfile` 解包 → 按"条目名\0条目内容"拼接连续流 → LZMA2 压缩；JZ2 mode=rebuild；APP 端按流拆分后用系统 `ZipOutputStream` 重建（条目顺序与时间戳不保证）；UI 导出页标注"重建（内容等价，非字节一致）"；字节精确诉求仍走 T02/T10 纯压缩路线。
 **预期效果**：docx 原件 −75%（151 KB：71 页 → **14 码**）、xlsx −49%（69 → 26 码）、zip −27%（118 → 63 码）；重建文件经 Office/WPS 打开人工验收正常（每类 ≥3 个真实样例）；mode=rebuild 标识正确透传到导出页。
+**落地记录（2026-09-16）**：流格式定为 `[条目数 2B] + 每条目 [name_len 2B][name utf8][content_len 4B][content]`（未采用 `\0` 分隔方案——二进制内容含 \0 且长度前缀已足够）；桌面端 `_zip_pack_stream`/`_zip_unpack_stream`/`_zip_rebuild`，`build_envelope(..., rebuild=True)` 仅当拆包压缩后确实更小才置 mode=1（否则回退纯压缩）；解析端 `parse_envelope_v2` 在解压后拆流重建 zip，下游 `envelope_to_file` 零改动，`env["mode"]=1` 透传；前端 `index.html` 原件模式新增"拆包重组"开关（仅 file+ZIP 容器格式显示），结果摘要显示"还原方式：重建"。APP 侧 `Jz2.rebuildZip`（ZipOutputStream 重建，时间戳固定 1980-01-01 与桌面端对齐），`Envelope.rebuilt` 标识，结果页预览追加"还原方式：重建"。测试：6 用例 roundtrip + 残留字节/长度越界拒收（`test_protocol_v2.py` T11 全绿）。**遗留**：重建 zip 经 Office/WPS 打开的人工验收（每类 ≥3 真实样例）未执行；前端开关的真机联调未做。
 
-### T12 · pdf / ppt 精简提取（P1） 【状态：未开始】
+### T12 · pdf / ppt 精简提取（P1） 【状态：已完成（2026-09-16）】
 
 **实现方案**：① pdf：新增 `pypdf` 依赖（登记 PACKAGES + requirements），逐页 `extract_text()` 按页拼接，提取为空（扫描版）→ 自动回退原件 + note；② ppt：olefile 读 `PowerPoint Document` 流，扫描 `TextCharsAtom`(0x0FA0, UTF-16LE) / `TextBytesAtom`(0x0FA8, ANSI) 记录头提取文本，按出现顺序拼接（复用 `_parse_doc_pieces` 的自研解析与 fail-open 姿态）；③ 信封 `fmt=text + ext=pdf/ppt`（解析端零改动）；④ fuzz 测试：随机字节注入 / 截断 / 加密文件全部不崩溃。
 **预期效果**：pdf 纯内容 ~350× 缩减（718 KB → env ~2 KB，v15 十码内、**秒级**）；ppt 同理；扫描版 PDF 自动回退原件且 note 说明；fuzz 1000 轮零崩溃；T01 回归全绿。
+**落地记录（2026-09-16）**：`SUPPORTED_FORMATS` 中 ppt/pptx/pdf 改为 text 提取口径（pptx 保持原件），`extract_doc_lean` 增加 `pypdf`（PdfReader.extract_text，扫描版/加密抛 LeanUnsupported 自动回退原件）与 `ppt`（olefile 扫 TextCharsAtom/TextBytesAtom，乱码防护 >30% 控制字符拒收）两分支；`requirements.txt` 增加 `pypdf>=4.0`，`JZToolsHub.spec` PACKAGES 登记（本机 venv 已装 pypdf 6.19.0）。fuzz 1000 轮（随机字节/截断/伪结构）零崩溃。样例 pdf/ppt 提取 + 信封 roundtrip 全绿（`test_protocol_v2.py` 44/44）。**遗留**：真实加密/扫描 PDF 的回退路径未用真实样本验证；T01 九格式基线中 ppt/pdf 用例行为随本项变化（精简口径），回归以文本一致断言通过。
 
 ---
 

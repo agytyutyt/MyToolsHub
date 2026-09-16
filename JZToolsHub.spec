@@ -28,6 +28,7 @@ PACKAGES = [
     "qrcode",          # trajectory-convert
     "zfec",            # trajectory-convert / qr-video-decode
     "zxingcpp",        # info-transfer 协议 v2（JZ2 二进制码解码，pip 包名 zxing-cpp）
+    "pypdf",           # info-transfer（T12 pdf 逐页文本提取，pip 包名 pypdf）
     "cv2",             # trajectory-convert（opencv）
     "numpy",           # trajectory-convert
     "pypdf",           # character-graph
