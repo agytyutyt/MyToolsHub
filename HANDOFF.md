@@ -235,7 +235,7 @@ python app.py
 | --- | --- | --- | --- | --- |
 | admin | `deploy/插件包/JZToolsHub-插件-admin-v1.3.1.zip` | 0.11 MB / 25 文件 | `a719fd33739b9529` | 含"上传即自动重启" + **校验失败逐条提示**；`min_app_version=1.9.0`、`requires_restart=true` |
 | file-filter | `deploy/插件包/JZToolsHub-插件-file-filter-v1.1.0.zip` | 0.05 MB / 12 文件 | `bb1810adf0750c8e` | **文档处理流程前新增「删除背景图片」环节**（识别工作表背景图片并摘除引用/关系/本体）；`requires_restart=true`、`built_from=921746b`（干净戳） |
-| trajectory-sketch | `deploy/插件包/JZToolsHub-插件-trajectory-sketch-v1.1.0.zip` | 0.12 MB / 45 文件 | `5eba344a791d50d9` | 同上（与 file-filter 同一份 `bg_image.py` 双份副本）；上传即预处理，自检卡片与报告「数据质量」sheet 记录结论；`requires_restart=true`、`built_from=cd73f16`（干净戳） |
+| trajectory-sketch | `deploy/插件包/JZToolsHub-插件-trajectory-sketch-v1.1.0.zip` | 0.12 MB / 45 文件 | `cd6494efe2a003a5` | 同上（与 file-filter 同一份 `bg_image.py` 双份副本）；上传即预处理，自检卡片与报告「数据质量」sheet 记录结论；`requires_restart=true`、`built_from=cd73f16`（干净戳） |
 | knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.2.2.zip` | 1.28 MB / 80 文件 | `9dd54458116e14a3` | **PDF 预览清晰度：画布校到设备像素网格**（居中/A4 小数位置曾致整页重采样，同位置截图锐度 +72%）；含 1.2.1 缩放保持居中 + 百分比可输入；`requires_restart=false`，`built_from=89d10c6`（干净戳） |
 
 发布登记（入库、sha256 冻结值、逐文件哈希）：`tools/plugin-packages.json`；
