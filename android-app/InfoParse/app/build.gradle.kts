@@ -11,8 +11,8 @@ android {
         applicationId = "com.jztools.infoparse"
         minSdk = 29
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.4"
+        versionCode = 3
+        versionName = "2.0.0"
     }
 
     // 正式签名（内部离线分发，密钥随仓库管理；丢失可用 keytool 重新生成但旧包将无法覆盖安装）
