@@ -1023,11 +1023,17 @@ def _zip_unpack_stream(stream):
 
 
 def _zip_rebuild(entries):
-    """T11：条目列表 → 重建 ZIP（内容等价，条目顺序保留、时间戳不保证）。"""
+    """T11：条目列表 → 重建 ZIP（内容等价，条目顺序保留、时间戳不保证）。
+
+    注意 compress_type 必须显式置 DEFLATED：writestr 传入 ZipInfo 时按其自带
+    compress_type（默认 STORED）处理，不继承归档级压缩设置——漏置会导致
+    重建产物不压缩、体积膨胀 10-20 倍（2026-09-16 生成验收素材时实测发现）。
+    """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         for name, content in entries:
             zi = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(zi, content)
     return buf.getvalue()
 

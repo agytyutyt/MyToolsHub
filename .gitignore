@@ -69,3 +69,6 @@ demo/
 
 # 会话临时产物（信息传输测试基准样例 it_bench 等，可随时重建）
 .workbuddy/tmp/
+
+# 真机验收测试数据（信息传输清单项 2/3/4/5，可随时重建，见 .workbuddy/tmp/gen_test_materials_2345.py）
+.workbuddy/test-materials/

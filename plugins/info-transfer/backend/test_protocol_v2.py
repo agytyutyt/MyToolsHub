@@ -225,6 +225,8 @@ rebuilt = _b64.b64decode(env_obj["data"])
 check("T11 重建 zip 合法且条目一致", env_obj.get("mode") == 1 and
       set(_zf.ZipFile(_io.BytesIO(rebuilt)).namelist()) ==
       set(_zf.ZipFile(_io.BytesIO(docx_bytes)).namelist()))
+check("T11 重建产物已压缩（≈原件尺寸）", len(rebuilt) <= len(docx_bytes) * 1.2,
+      f"rebuilt={len(rebuilt)} raw={len(docx_bytes)}")
 env_d = it.build_envelope_v2("file", "r.docx", _b64.b64encode(docx_bytes).decode(), "docx")
 check("T11 默认 exact 路径不置位", it.parse_frame_jz2(env_d)["mode"] == 0)
 env_bad = it.build_envelope_v2("file", "bad.docx",
