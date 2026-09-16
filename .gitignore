@@ -60,3 +60,6 @@ plugins/map-marker/frontend/simulate_yunfu_5min.py
 
 # ZCode 会话工作目录（交接文档约定：不入库）
 .zcode/
+
+# 压缩算法评估基准语料与脚本（可随时重建，勿入库）
+.bench_corpus/
