@@ -14,11 +14,14 @@
 > （pypdf / olefile Atom 扫描，失败回退原件），依赖登记 PACKAGES + requirements。
 > 修复 v2 引入回归：word 精简载荷误按 JSON 解析（只 excel 是数组）、`estimate_output`
 > str/bytes 混用、Jz2Test 测试帧构造器 25 字节整数（`downTo 0` 漏 `step 8`）。回归：
-> `test_protocol_v2.py` 44/44 + T01 `test_roundtrip.py` 47/47。**遗留**：APP Kotlin 未编译验证
-> （本机无 Gradle，待 Android Studio 跑 `Jz2Test`——2026-09-16 上轮 6 失败已根因为测试
-> 帧构造器 bug 并修复，待重跑确认 66/66）、真机 PoC（二进制码 1KB roundtrip + 200 帧连续
-> 解码）、T11 重建 zip 经 Office/WPS 人工验收未执行。详见 `docs/信息传输优化TODO清单.md`
-> T06-T12 落地记录。
+> `test_protocol_v2.py` 45/45（T11 修复后加"重建产物 ≈原件尺寸"断言）+ T01
+> `test_roundtrip.py` 49/49。**APP 侧 Kotlin 已于 2026-09-17 经 Android Studio 全量编译
+> 并跑通 `Jz2Test` 70/70**（期间修掉 3 处测试自身缺陷：字符串拼接括号、构造器 25 字节
+> 整数、chunkSize 硬编码截断）。**遗留（均为真机/人工项）**：真机 PoC（1KB 二进制码
+> roundtrip + 200 帧连续解码 ≥95%）、T11 重建 zip 经 Office/WPS 人工验收、拆包重组真机
+> 联调、200KB/q=0.8 蒙特卡洛复测、真机 xz 解压耗时——**验收素材已全部生成**至
+> `.workbuddy/test-materials/`（编号 2a/2b/3/4/5，附期望哈希与步骤，见其 README.md）。
+> 详见 `docs/信息传输优化TODO清单.md` T06-T12 落地记录。
 > 此前 2026-09-15（**知识库 1.2.2：PDF 预览清晰度——设备像素对齐**）
 > 用户反馈"PDF 预览分辨率低、发糊"。排查结论：**dpr 一直是对的**（位图/显示设备像素比
 > 实测 1.0 / 1.2497 / 1.4993 全对），真正的病根是**画布没有落在设备像素网格上**——
