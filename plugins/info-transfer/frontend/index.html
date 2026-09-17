@@ -163,6 +163,8 @@
     border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600;
   }
   .result-item .ri-summary { font-size: 13px; color: var(--text); margin-top: 6px; }
+  .result-item .ri-vstatus { font-size: 12px; color: var(--primary-dark); margin-top: 4px; font-weight: 600; }
+  .result-item .ri-vstatus.error { color: var(--error); }
   .result-item .ri-hint { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
   .result-item .ri-preview video {
     display: block; width: min(420px, 100%, 48vh);
@@ -495,8 +497,18 @@
         <label class="field">二维码版本（1-40，越大单码容量越大）
           <input id="qrVersion" type="number" min="1" max="40" step="1" value="15" />
         </label>
-        <label class="field" id="displayField" hidden>每码重复帧数（3-30，越大越易扫、总耗时越长；5 帧 ≈ 0.33 秒/码）
-          <input id="qrRepeat" type="number" min="3" max="30" step="1" value="5" />
+        <label class="field" id="displayField" hidden>每码重复帧数（1-30，越大越易扫、总耗时越长；5 帧 ≈ 0.33 秒/码）
+          <input id="qrRepeat" type="number" min="1" max="30" step="1" value="5" />
+        </label>
+      </div>
+      <div id="videoFileRow" class="switch-row" hidden>
+        <div class="sw-text">
+          <div class="sw-title">同时生成视频文件（MP4）</div>
+          <div class="sw-hint">默认只生成帧序列（体积约为视频的 1/18，供屏幕轮播播放）；需要把文件发给手机、或用「信息解析 - 二维码视频」离线还原时勾选，也可稍后在结果区按需生成。</div>
+        </div>
+        <label class="switch">
+          <input id="videoFile" type="checkbox" />
+          <span class="slider"></span>
         </label>
       </div>
       <div class="row">
@@ -794,6 +806,9 @@
     if ($("rebuildSwitchRow").hidden) $("rebuildMode").checked = false;
     // 每码重复帧数仅视频流模式可设（默认 5 帧 ≈ 0.33 秒/码，与旧固定行为一致）
     $("displayField").hidden = $("mode").value !== "video";
+    // 视频文件按需生成：仅视频流模式可选（默认关，只产帧序列）
+    $("videoFileRow").hidden = $("mode").value !== "video";
+    if ($("videoFileRow").hidden) $("videoFile").checked = false;
   }
 
   /* 全部停止按钮显隐与复位 */
@@ -817,8 +832,8 @@
     let repeat = null;
     if (mode === "video") {
       repeat = Math.round(Number($("qrRepeat").value));
-      if (!isFinite(repeat) || repeat < 3 || repeat > 30) {
-        setStatus("每码重复帧数须在 3-30 之间", true);
+      if (!isFinite(repeat) || repeat < 1 || repeat > 30) {
+        setStatus("每码重复帧数须在 1-30 之间", true);
         return;
       }
     }
@@ -852,6 +867,8 @@
     fd.append("raw", raw ? "1" : "0");
     if (rebuild) fd.append("rebuild", "1");
     if (mode === "video" && repeat != null) fd.append("frame_repeat", String(repeat));
+    // 视频文件默认按需生成（不提交该字段）；勾选「同时生成视频文件」才当场编码
+    if (mode === "video" && $("videoFile").checked) fd.append("video_file", "1");
     if (job.file) fd.append("file", job.file);
     else fd.append("text", job.text);
     try {
@@ -1004,24 +1021,12 @@
     const fmtText = s.fmt === "file"
       ? "原始文件"
       : (fmtLabel(s.fmt) + (s.ext ? `（原 ${s.ext}）` : ""));
-    let summary = `传输模式：${s.fmt === "file" ? "原件传输" : "精简传输"} · 封装数据 ${fmtBytes(s.env_size)}，`;
-    if (s.rebuilt) summary += `还原方式：重建（内容等价，非字节一致） · `;
+    const summary = jobSummaryOf(job);
     let fileName;
     if (isStatic) {
-      if (count > 1) {
-        fileName = s.zip_name || "qrcode.zip";
-        summary += `已拆分为 ${count} 张静态二维码（ZIP ${fmtBytes(s.zip_size)}）`;
-      } else {
-        fileName = s.image_name || "qrcode.png";
-        summary += `生成单张静态二维码（${fmtBytes(s.image_size)}）`;
-      }
+      fileName = count > 1 ? (s.zip_name || "qrcode.zip") : (s.image_name || "qrcode.png");
     } else {
       fileName = s.video_name || "qrcode.mp4";
-      summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}，每码 ${displaySecOf(job)} 秒，${fmtBytes(s.video_size)}）`;
-      const est = s.estimate;
-      if (est && est.kind === "video" && est.seconds) {
-        summary += `，扫码全程${fmtDuration(est.seconds)}（APP 凑够纠错阈值即可提前完成）`;
-      }
     }
     job.fileUrl = buildFileUrl(job.taskId, fileName);
     job.dlName = fileName;
@@ -1034,12 +1039,14 @@
         <span class="ri-fmt"></span>
       </div>
       <div class="ri-summary"></div>
+      <div class="ri-vstatus" hidden></div>
       <div class="ri-hint"></div>
       <div class="ri-preview"></div>
       <div class="row">
         <button type="button" class="ri-download primary"></button>
         <button type="button" class="ri-fullscreen secondary"></button>
       </div>`;
+    job.el = item;
     item.querySelector(".ri-name").textContent = s.name || job.name;
     item.querySelector(".ri-fmt").textContent = fmtText;
     item.querySelector(".ri-summary").textContent = summary;
@@ -1048,13 +1055,13 @@
       ? (count > 1
         ? "数据超过单张容量已自动拆分：解析时需上传全部二维码（可打包 ZIP 一次性导入「信息解析」）"
         : "单张二维码可直接打印或发送；用任意扫码工具可读出封装 JSON，用「信息解析」可还原数据")
-      : "相机传输模式：画面循环播放、每码停留约 " + displaySecOf(job) + " 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；也可下载 MP4 后用「信息解析 - 二维码视频」还原")
+      : "帧序列轮播：画面循环播放、每码停留约 " + displaySecOf(job) + " 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；需要把文件发给手机离线还原（「信息解析 - 二维码视频」）时点下载，会按需生成 MP4")
       + (isStatic ? "（点击缩略图可放大查看原尺寸）" : "")
       + "；点「" + (isStatic ? "全屏展示" : "全屏播放") + "」可最大化码面，便于手机扫码";
     const dl = item.querySelector(".ri-download");
     dl.textContent = isStatic
       ? (count > 1 ? "下载全部二维码（ZIP）" : "下载二维码图片")
-      : "下载二维码视频";
+      : downloadLabelOf(job);
     dl.addEventListener("click", () => downloadJobResult(job));
     const fs = item.querySelector(".ri-fullscreen");
     fs.textContent = isStatic ? "全屏展示（手机扫码）" : "全屏播放（手机扫码）";
@@ -1101,9 +1108,13 @@
       img.alt = "二维码流";
       img.title = "点击进入全屏播放";
       img.style.cursor = "pointer";
+      // 预载完成前不给 src：<img> 无 src 即「broken」状态，Chrome 会渲染裂图图标，
+      // 所以先隐藏，首帧就绪再显示（此前整段预载期是一个带边框的破图占位）
+      img.hidden = true;
       img.addEventListener("click", () => openStage(job));
       const cap = document.createElement("p");
       cap.className = "ri-cap";
+      cap.textContent = "正在准备帧序列…";
       preview.appendChild(img);
       preview.appendChild(cap);
       startJobStream(job, img, cap, frameCount);
@@ -1135,10 +1146,19 @@
     v.play().catch(() => {}); // muted 下无需手势
   }
 
-  /* 帧序列轮播：后端落盘逐帧 PNG + 前端 setTimeout 固定步进，
+  /* 帧序列轮播（T31 滑动窗口）：后端落盘逐帧 PNG + 前端 setTimeout 固定步进，
      每 tick 恰好推进一张，卡顿只会整体变慢、绝不跳码。
-     步进时长按任务实际显示时长（display 秒/码）走，旧结果缺 display 回退 0.333s。 */
+     窗口化预载：只常驻「当前帧 + 后 4 帧」的解码位图，窗口外主动释放
+     （`removeAttribute("src")`）——旧实现一次性预载全部 N 帧，v25 下 1000 帧 ≈ 5.1 GB
+     位图常驻、标签页必现 OOM；滑动窗口把常驻位图压到 5 张（≈26 MB）。
+     步进时长按任务实际显示时长（display 秒/码）走，旧结果缺 display 回退 0.333s。
+     首帧就绪即开播；目标帧未就绪时**等它就绪**再推进（旧实现直接跳下一张，
+     网络抖动时会漏码），单帧超时上限后才跳过该码交由 FEC 冗余兜底。 */
   const STREAM_FRAME_MS_DEFAULT = 333; // 与后端默认 frame_repeat=5（15fps × 5）一致
+  const STREAM_WINDOW = 5;             // 预载窗口：当前帧 + 后 4 帧
+  const STREAM_RETRY_MS = 40;          // 目标帧未就绪时的等待步长（防空转打满 CPU）
+  const STREAM_WAIT_LIMIT = 8;         // 单码最多等待次数（≈320ms）后跳过
+  const STREAM_PRELOAD_RETRY_MS = 300; // 开播前整窗取不到时的重试间隔
   function frameMsOf(job) {
     const d = job && job.result && job.result.display;
     return d > 0 ? Math.round(d * 1000) : STREAM_FRAME_MS_DEFAULT;
@@ -1147,52 +1167,148 @@
     const d = job && job.result && job.result.display;
     return d > 0 ? (Math.round(d * 100) / 100) : 0.33;
   }
+  function frameUrlOf(job, i) {
+    return `/api/info-transfer/frame/${job.taskId}/${i}`;
+  }
   function startJobStream(job, img, cap, count) {
-    const st = { count, idx: 0, timer: null, imgs: [], img, cap };
+    const st = { count, idx: 0, timer: null, preTimer: null, cache: new Map(), img, cap,
+                 started: false, dead: false, shown: 0, waits: 0, fails: 0, missStreak: 0 };
     job.stream = st;
-    let loaded = 0;
-    for (let i = 1; i <= count; i++) {
+    ensureStreamWindow(job);
+  }
+  /* 把当前帧与后 STREAM_WINDOW-1 帧拉进缓存，并释放窗口外的位图 */
+  function ensureStreamWindow(job) {
+    const st = job.stream;
+    if (!st || st.dead || !st.count) return;
+    const span = Math.min(STREAM_WINDOW, st.count);
+    const want = new Set();
+    for (let k = 0; k < span; k++) {
+      const i = ((st.idx + k) % st.count) + 1;
+      want.add(i);
+      if (st.cache.has(i)) continue;
       const im = new Image();
-      im.onload = im.onerror = () => {
-        loaded++;
-        if (loaded === count) showNextJobFrame(job);
+      im.onload = () => {
+        // 首帧（窗口内任意一帧）就绪即开播：不再等全部帧载入
+        if (!st.dead) maybeStartStream(job);
       };
-      im.src = `/api/info-transfer/frame/${job.taskId}/${i}`;
-      st.imgs.push(im);
+      im.onerror = () => {
+        if (st.dead) return;
+        st.cache.delete(i);         // 移出缓存，下一轮 pump 重新请求
+        st.fails++;
+        // 开播前整窗都取不到（文件被清理/任务过期）：重试 3 轮后停用轮播
+        if (!st.shown && st.fails >= span * 3) {
+          killStream(job, "帧序列已不可用（文件被清理或任务过期），请重新封装");
+        } else if (!st.started && !st.preTimer) {
+          st.preTimer = setTimeout(() => {
+            st.preTimer = null;
+            if (!st.dead && !st.started) ensureStreamWindow(job);
+          }, STREAM_PRELOAD_RETRY_MS);
+        }
+      };
+      im.src = frameUrlOf(job, i);
+      st.cache.set(i, im);
     }
+    for (const [i, im] of [...st.cache]) {
+      if (want.has(i)) continue;
+      dropFrameBitmap(im);          // 主动释放窗口外的解码位图（浏览器可回收）
+      st.cache.delete(i);
+    }
+  }
+  /* 释放单张帧位图：必须 removeAttribute("src")——赋值 im.src = "" 会被解析为
+     文档基地址（属性为 "" 但 src 取值为页面 URL，位图不释放且可能多发一次请求） */
+  function dropFrameBitmap(im) {
+    im.onload = im.onerror = null;
+    im.removeAttribute("src");
+  }
+  function releaseStreamFrames(st) {
+    for (const [, im] of st.cache) dropFrameBitmap(im);
+    st.cache.clear();
+  }
+  /* 当前目标帧已就绪但尚未开播时起播（首帧 onload / 从隐藏态恢复共用） */
+  function maybeStartStream(job) {
+    const st = job.stream;
+    if (!st || st.dead || st.started || !st.count) return;
+    const im = st.cache.get((st.idx % st.count) + 1);
+    if (im && im.complete && im.naturalWidth) {
+      st.started = true;
+      showNextJobFrame(job);
+    }
+  }
+  function killStream(job, msg) {
+    const st = job.stream;
+    if (!st || st.dead) return;
+    st.dead = true;
+    if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+    if (st.preTimer) { clearTimeout(st.preTimer); st.preTimer = null; }
+    releaseStreamFrames(st);
+    if (st.img) st.img.hidden = true;
+    if (st.cap) st.cap.textContent = msg;
   }
   function showNextJobFrame(job) {
     const st = job.stream;
-    if (!st || st.count <= 0) return;
-    if (st.idx >= st.count) st.idx = 0; // 循环
-    const im = st.imgs[st.idx];
-    if (!im.complete || !im.naturalWidth) {
-      // 个别帧加载失败：跳到下一张（采集端靠 FEC 冗余容忍个别缺失码）
-      st.idx++;
-      st.timer = setTimeout(() => showNextJobFrame(job), 0);
+    if (!st || st.count <= 0 || st.dead) return;
+    st.timer = null;
+    if (st.idx >= st.count) st.idx = 0;   // 循环
+    ensureStreamWindow(job);
+    const n = st.idx + 1;
+    const im = st.cache.get(n);
+    if (!im || !im.complete || !im.naturalWidth) {
+      if (st.waits < STREAM_WAIT_LIMIT) {
+        // 未就绪：等它就绪再推进（不跳码，网络慢只表现为整体变慢）
+        st.waits++;
+        st.cap.textContent = `相机传输画面（等待第 ${n}/${st.count} 码就绪…）`;
+        st.timer = setTimeout(() => showNextJobFrame(job), STREAM_RETRY_MS);
+        return;
+      }
+      // 超时仍取不到：跳过该码（采集端靠 FEC 冗余容忍缺帧）
+      st.waits = 0;
+      st.missStreak++;
+      st.idx = n % st.count;
+      if (st.missStreak >= Math.min(STREAM_WINDOW, st.count)) {
+        // 连续一整窗的码都取不到：帧源已失效（文件被清理/任务过期），停用轮播
+        killStream(job, "帧序列已不可用（文件被清理或任务过期），请重新封装");
+        return;
+      }
+      st.timer = setTimeout(() => showNextJobFrame(job), STREAM_RETRY_MS);
       return;
     }
+    st.waits = 0;
+    st.missStreak = 0;
+    st.shown++;
+    st.img.hidden = false;
     st.img.src = im.src;
-    st.cap.textContent = `相机传输画面（循环播放，每码 ${displaySecOf(job)} 秒）：${st.idx + 1}/${st.count}`;
-    st.idx++;
+    st.cap.textContent = `相机传输画面（循环播放，每码 ${displaySecOf(job)} 秒）：${n}/${st.count}`;
+    st.idx = n % st.count;
     st.timer = setTimeout(() => showNextJobFrame(job), frameMsOf(job));
   }
   function pauseAllStreams() {
     for (const job of state.jobs) {
-      if (job.stream && job.stream.timer) {
-        clearTimeout(job.stream.timer);
-        job.stream.timer = null;
-      }
+      const st = job.stream;
+      if (!st) continue;
+      if (st.timer) { clearTimeout(st.timer); st.timer = null; }
+      if (st.preTimer) { clearTimeout(st.preTimer); st.preTimer = null; }
     }
   }
   function resumeAllStreams() {
     for (const job of state.jobs) {
-      if (job.stream && !job.stream.timer) showNextJobFrame(job);
+      const st = job.stream;
+      if (!st || st.dead || st.timer) continue;
+      if (st.started) {
+        showNextJobFrame(job);
+      } else {
+        // 尚未开播就恢复（全屏切走/页面隐藏期间预载失败）：重拉窗口并尝试起播
+        ensureStreamWindow(job);
+        maybeStartStream(job);
+      }
     }
   }
+  /* 关闭结果 / 换任务：停播并释放全部帧位图（内存归零） */
   function stopAllStreams() {
     pauseAllStreams();
-    for (const job of state.jobs) job.stream = null;
+    for (const job of state.jobs) {
+      if (job.stream) releaseStreamFrames(job.stream);
+      job.stream = null;
+    }
   }
 
   function zoomSrc(taskId, n) {
@@ -1290,9 +1406,9 @@
     state.stage = {
       kind: isStatic ? "static" : (s.frame_count > 0 ? "stream" : "video"),
       job, page: 1, count: isStatic ? (s.image_count || 1) : 0,
-      idx: 0, timer: null,
+      timer: null,
     };
-    pauseAllStreams();  // 全屏期间由舞台接管轮播，避免双计时器抢帧
+    pauseAllStreams();  // 全屏期间由舞台接管轮播，避免双计时器抢帧（帧缓存保留复用）
     $("stageOverlay").hidden = false;
     // 浏览器真全屏只是增强：失败（无手势/不支持）时覆盖层同样铺满视口
     if ($("stageOverlay").requestFullscreen) {
@@ -1355,23 +1471,145 @@
         + (hint ? "　·　" + hint : "");
     }
   }
-  /* 全屏流式轮播：复用小窗预览已预载的帧 Image，逐帧绘制到整数像素画布 */
+  /* 全屏流式轮播：与预览共用同一份滑动窗口缓存（同 idx / 同 cache），
+     切全屏不重复下载；窗口外帧同样被释放（内存与预览口径一致） */
   function stageStreamTick() {
     const stg = state.stage;
     if (!stg || stg.kind !== "stream") return;
+    stg.timer = null;
     const st = stg.job.stream;
-    if (!st || !st.imgs || !st.count) return;
-    if (stg.idx >= st.count) stg.idx = 0;
-    const im = st.imgs[stg.idx];
-    const n = stg.idx + 1;
-    stg.idx++;
-    if (im.complete && im.naturalWidth) {
-      drawStageImage(im, `相机传输画面（每码 ${displaySecOf(stg.job)} 秒）：${n}/${st.count}`);
+    if (!st || !st.count) return;
+    if (st.dead) {
+      $("stageCaption").textContent = "帧序列已不可用（文件被清理或任务过期），请重新封装";
+      return;
     }
-    stg.timer = setTimeout(stageStreamTick, frameMsOf(stg.job));
+    ensureStreamWindow(stg.job);
+    if (st.idx >= st.count) st.idx = 0;
+    const n = st.idx + 1;
+    const im = st.cache.get(n);
+    if (im && im.complete && im.naturalWidth) {
+      drawStageImage(im, `相机传输画面（每码 ${displaySecOf(stg.job)} 秒）：${n}/${st.count}`);
+      st.shown++;
+      st.missStreak = 0;
+      st.idx = n % st.count;
+      stg.timer = setTimeout(stageStreamTick, frameMsOf(stg.job));
+      return;
+    }
+    // 目标帧未就绪：等它就绪（与预览同一口径，不跳码）
+    $("stageCaption").textContent = `相机传输画面（等待第 ${n}/${st.count} 码就绪…）`;
+    stg.timer = setTimeout(stageStreamTick, STREAM_RETRY_MS);
+  }
+
+  /* 视频流结果摘要与视频文件状态（mp4 默认按需生成，只产帧序列） */
+  function streamSummaryOf(job) {
+    const s = job.result;
+    const n = s.frame_count || s.nframes || 0;
+    return `生成二维码流 ${n} 码（ZFEC k=${s.k}/m=${s.m}，每码 ${displaySecOf(job)} 秒）`
+      + (s.video_size > 0 ? `，视频文件 ${fmtBytes(s.video_size)}` : "，视频文件未生成");
+  }
+  /* 结果摘要（视频文件生成后由 syncJobSummary 重算并覆盖） */
+  function jobSummaryOf(job) {
+    const s = job.result;
+    const isStatic = s.output_type === "static";
+    const count = isStatic ? (s.image_count || 1) : 0;
+    let summary = `传输模式：${s.fmt === "file" ? "原件传输" : "精简传输"} · 封装数据 ${fmtBytes(s.env_size)}，`;
+    if (s.rebuilt) summary += `还原方式：重建（内容等价，非字节一致） · `;
+    if (isStatic) {
+      summary += count > 1
+        ? `已拆分为 ${count} 张静态二维码（ZIP ${fmtBytes(s.zip_size)}）`
+        : `生成单张静态二维码（${fmtBytes(s.image_size)}）`;
+    } else {
+      summary += streamSummaryOf(job);
+      const est = s.estimate;
+      if (est && est.kind === "video" && est.seconds) {
+        summary += `，扫码全程${fmtDuration(est.seconds)}（APP 凑够纠错阈值即可提前完成）`;
+      }
+    }
+    return summary;
+  }
+  function syncJobSummary(job) {
+    const el = job.el && job.el.querySelector(".ri-summary");
+    if (el) el.textContent = jobSummaryOf(job);
+  }
+  function hasJobVideo(job) {
+    return !!(job.result && job.result.video_size > 0);
+  }
+  function downloadLabelOf(job) {
+    return hasJobVideo(job) ? "下载二维码视频（MP4）" : "生成视频文件并下载（MP4）";
+  }
+  function setJobVideoStatus(job, text, isError) {
+    const el = job.el && job.el.querySelector(".ri-vstatus");
+    if (!el) return;
+    el.hidden = !text;
+    el.textContent = text || "";
+    el.classList.toggle("error", !!isError);
+  }
+  /* 按需生成视频文件：POST 触发 → 轮询 video_status → 完成后自动下载并刷新卡片 */
+  async function ensureJobVideo(job) {
+    const s = job.result;
+    if (!s || s.video_status === "building") return;
+    if (hasJobVideo(job)) { downloadJobResult(job); return; }
+    const btn = job.el && job.el.querySelector(".ri-download");
+    if (btn) btn.disabled = true;
+    setJobVideoStatus(job, "正在生成视频文件… 0%");
+    try {
+      const r = await fetchJson(`/api/info-transfer/encode/${job.taskId}/video`, { method: "POST" });
+      if (!r.ok) throw new Error(r.detail || "生成失败");
+      s.video_status = r.video_status || "building";
+    } catch (e) {
+      setJobVideoStatus(job, "视频生成失败：" + e.message, true);
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const t0 = performance.now();
+    for (;;) {
+      await new Promise((res) => setTimeout(res, 500));
+      let d;
+      try {
+        d = await fetchJson(`/api/info-transfer/task/${job.taskId}`);
+      } catch (e) {
+        setJobVideoStatus(job, "视频生成中断：" + e.message, true);
+        if (btn) btn.disabled = false;
+        return;
+      }
+      if (!d.ok) {
+        setJobVideoStatus(job, d.detail || "视频生成失败", true);
+        if (btn) btn.disabled = false;
+        return;
+      }
+      const vs = d.video_status || "none";
+      if (vs === "building") {
+        setJobVideoStatus(job, `正在生成视频文件… ${Math.round((d.video_progress || 0) * 100)}%`);
+        if (performance.now() - t0 > 1800000) {   // 30 分钟兜底（超大文档）
+          setJobVideoStatus(job, "视频生成超时，请重新点下载重试", true);
+          if (btn) btn.disabled = false;
+          return;
+        }
+        continue;
+      }
+      s.video_status = vs;
+      s.video_size = d.video_size || 0;
+      if (vs === "done") {
+        s.video_name = d.video_name || s.video_name;
+        setJobVideoStatus(job, `视频文件已生成（${fmtBytes(s.video_size)}）`);
+        if (btn) { btn.disabled = false; btn.textContent = downloadLabelOf(job); }
+        syncJobSummary(job);
+        downloadJobResult(job);   // 生成完成即触发下载（用户点下载就是为了拿文件）
+      } else {
+        setJobVideoStatus(job, d.video_detail
+          || (vs === "canceled" ? "已停止生成视频" : "视频生成失败"), true);
+        if (btn) btn.disabled = false;
+      }
+      return;
+    }
   }
 
   function downloadJobResult(job) {
+    // 视频流且未生成视频文件：先按需生成，生成完自动下载
+    if (job.result && job.result.output_type === "video" && !hasJobVideo(job)) {
+      ensureJobVideo(job);
+      return;
+    }
     const a = document.createElement("a");
     a.href = job.fileUrl;
     a.download = job.dlName || "qrcode.png";

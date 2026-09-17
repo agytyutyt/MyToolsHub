@@ -178,12 +178,13 @@ VIDEO_FOURCC = "avc1"   # H.264，浏览器 <video> 可直接播放
 FEC_RATIO = 0.4         # 前向纠错比例：额外生成 1/(1-fec_ratio) 帧（视频有损压缩下取高冗余）
 # 相机传输模式（视频流）：每张二维码连续重复的帧数。
 #   - 显示口径：每码停留时间 = repeat / FRAMERATE 秒（帧率恒为 FRAMERATE，帧头协议不变）；
-#   - 默认 5 帧 ≈ 0.33 秒/码（原固定行为）；前端可设 3-30 帧：
+#   - 默认 5 帧 ≈ 0.33 秒/码（原固定行为）；前端可设 1-30 帧：
 #     帧数越多码面停留越久越易扫，视频总时长线性变长；
-#   - 下限 3 帧（0.2s）——低于此值手机摄像头（~30fps）每码仅能采到个位数分析帧，
-#     识别率显著下降；上限 30 帧（2s）兼顾传输效率。
+#   - 下限 1 帧（0.067s）极限速度，仅适合高帧率抓拍/视频回放解码，摄像头实拍
+#     每码仅能采到 1~2 个分析帧，识别率显著下降，日常建议 ≥3；
+#     上限 30 帧（2s）兼顾传输效率。
 CAMERA_FRAME_REPEAT = 5
-REPEAT_MIN = 3
+REPEAT_MIN = 1
 REPEAT_MAX = 30
 PAYLOAD_SAFETY = 0.9    # 单码载荷安全系数：实际载荷 ≤ 容量的 90%（满容量高熵载荷在部分
                         # 解码器下不稳定——cv2 回读实测可能整码失败甚至截断，见评估报告 §5.3）
@@ -1512,13 +1513,18 @@ def _open_video_writer(out_path, size):
 
 def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat=1,
                     frames_dir=None, cancel_check=None):
-    """把字节数据按 QR-transfer 编码为二维码视频文件。返回 (nframes, k, m)。
+    """把字节数据按 QR-transfer 编码为二维码帧序列 / 视频文件。返回 (nframes, k, m)。
 
+    out_path：mp4 输出路径；为 None 时**不编码视频**，只把每张二维码 PNG 落盘到
+    frames_dir。视频体积为帧序列的 ~18 倍（实测 v25/1250px：mp4 120KB/码 vs
+    PNG 6.7KB/码），且前端播放走 JS 定时轮播，故默认只产帧、视频按需生成
+    （见 build_video_from_frames）。
     frame_repeat：每张二维码连续写入的帧数（fps 恒为 FRAMERATE 不变，
     仅延长单码停留时间，便于手机摄像头捕获；帧头协议与解析端均不受影响）。
-    frames_dir：可选。同时把每张二维码 PNG 落盘到该目录（frame_0001.png 起，
-    0 填充保证字典序 == 播放序），供前端相机传输模式做 JS 定时轮播——
-    绕开浏览器视频管线，避免其丢帧"追赶"破坏每码停留时长的一致性。
+    仅编码视频时生效；只产帧时该值由前端按同样秒数驱动轮播定时器。
+    frames_dir：把每张二维码 PNG 落盘到该目录（frame_0001.png 起，0 填充保证
+    字典序 == 播放序），供前端相机传输模式做 JS 定时轮播——绕开浏览器视频管线，
+    避免其丢帧"追赶"破坏每码停留时长的一致性。
     cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
     """
     if not (QRCODE_AVAILABLE and ZFEC_AVAILABLE and CV2_AVAILABLE and NUMPY_AVAILABLE):
@@ -1570,19 +1576,55 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
             if frames_dir:
                 with open(os.path.join(frames_dir, f"frame_{i + 1:04d}.png"), "wb") as f:
                     f.write(png)
-            gray = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
-            if writer is None:
-                h, w = img.shape[:2]
-                writer, _ = _open_video_writer(out_path, (w, h))
-            for _ in range(max(1, frame_repeat)):
-                writer.write(img)
+            if out_path is not None:
+                gray = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+                img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
+                if writer is None:
+                    h, w = img.shape[:2]
+                    writer, _ = _open_video_writer(out_path, (w, h))
+                for _ in range(max(1, frame_repeat)):
+                    writer.write(img)
             if progress_cb and (i % 4 == 0 or i == total - 1):
                 progress_cb(i + 1, total)
     finally:
         if writer is not None:
             writer.release()
     return total, k, m
+
+
+def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
+                            progress_cb=None, cancel_check=None):
+    """把已落盘的帧 PNG 序列编码为 mp4（按需生成视频文件用），返回写入的帧数。
+
+    与 encode_to_video 的视频口径逐项一致（同帧图、同重复帧数、同帧率与编码器），
+    差别只在于像素来自磁盘上的既有帧文件：不重新渲染、不走 mask 回读自检，
+    因此耗时 ≈ 11 ms/帧（v25/1250px 实测），远低于重新封装一遍。
+    """
+    if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
+        raise RuntimeError("后端缺少视频编码依赖（opencv-python / numpy）")
+    writer = None
+    written = 0
+    try:
+        for i in range(1, count + 1):
+            if cancel_check and cancel_check():
+                raise TaskCanceled()
+            png_path = os.path.join(frames_dir, f"frame_{i:04d}.png")
+            gray = cv2.imread(png_path, cv2.IMREAD_GRAYSCALE)
+            if gray is None:
+                raise RuntimeError(f"帧文件缺失或损坏：frame_{i:04d}.png")
+            img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            if writer is None:
+                h, w = img.shape[:2]
+                writer, _ = _open_video_writer(out_path, (w, h))
+            for _ in range(max(1, frame_repeat)):
+                writer.write(img)
+                written += 1
+            if progress_cb and (i % 4 == 0 or i == count):
+                progress_cb(i, count)
+    finally:
+        if writer is not None:
+            writer.release()
+    return written
 
 
 # ===================== 静态二维码 =====================
@@ -2180,7 +2222,7 @@ def envelope_to_file(fmt, name, data, ext=None):
 # ===================== 后台封装任务 =====================
 
 def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
-                frame_repeat=1, raw_mode=False, rebuild=False):
+                frame_repeat=1, raw_mode=False, rebuild=False, want_video=False):
     try:
         set_task(task_id, status="running", created_at=time.time())
         note = ""
@@ -2265,19 +2307,24 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
             set_task(task_id, progress=round(0.2 + 0.8 * done / max(total, 1), 4),
                      stage=f"QR 编码 {done}/{total} 帧")
 
-        set_task(task_id, progress=0.25, stage="编码二维码视频")
-        out_path = _task_file(task_id, ".mp4")
-        fdir = _frames_dir(task_id) if frame_repeat > 1 else None
+        set_task(task_id, progress=0.25, stage="编码二维码帧序列")
+        # 帧序列是播放（JS 定时轮播）与按需出视频的共同底座，恒落盘；
+        # mp4 只产位图流，体积约为帧序列的 18 倍，默认留待用户按需生成
+        # （want_video=True 时当场编码，供「发手机 / 给其他插件」的一次性交付）。
+        out_path = _task_file(task_id, ".mp4") if want_video else None
+        fdir = _frames_dir(task_id)
         nframes, k, m = encode_to_video(env_bytes, qr_version, out_path,
                                         progress_cb=progress, frame_repeat=frame_repeat,
                                         frames_dir=fdir,
                                         cancel_check=lambda: _canceled(task_id))
-        size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+        size = os.path.getsize(out_path) if (out_path and os.path.exists(out_path)) else 0
         set_task(task_id, status="done", progress=1.0,
                  output_type="video", fmt=fmt, name=name, ext=ext,
                  env_size=len(env_bytes), qr_version=qr_version,
                  nframes=nframes, k=k, m=m, video_size=size,
-                 frame_count=(nframes if fdir else 0),
+                 video_status=("done" if want_video else "none"),
+                 video_progress=(1.0 if want_video else 0.0),
+                 frame_count=nframes, frame_repeat=frame_repeat,
                  display=round(frame_repeat / FRAMERATE, 3),  # 实际每码显示秒数（前端轮播节奏用）
                  video_name=f"{base_name}二维码流.mp4", note=note,
                  rebuilt=rebuilt)
@@ -2293,6 +2340,56 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
     except Exception as e:
         # SEC-5：非预期异常不向前端透出内部细节
         set_task(task_id, status="error", detail=f"封装失败（{type(e).__name__}）")
+
+
+def _remove_video_file(task_id):
+    """删除任务的 mp4 产物（按需生成失败/取消时清理半成品）。"""
+    try:
+        path = _task_file(task_id, ".mp4")
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+def _run_build_video(task_id):
+    """按需把已完成任务的帧序列编码为 mp4（用户点「生成视频文件」时触发）。
+
+    不重新渲染、不重新校验：像素直接取自 frames_dir 里已通过验证的帧 PNG，
+    所以调用方可安全跳过 mp4 的常备生成。任务主状态保持 done（视频只是附加
+    交付物），进度与结果记在 video_status / video_progress / video_size。
+    """
+    task = get_task(task_id) or {}
+    count = task.get("frame_count", 0)
+    repeat = task.get("frame_repeat", CAMERA_FRAME_REPEAT)
+    frames_dir = _frames_dir(task_id)
+    out_path = _task_file(task_id, ".mp4")
+    set_task(task_id, cancel=False, video_status="building", video_progress=0.0,
+             video_detail="")
+
+    def progress(done, total):
+        set_task(task_id, video_progress=round(done / max(total, 1), 4))
+
+    try:
+        if not count or not os.path.isdir(frames_dir):
+            raise RuntimeError("帧序列不存在或已被清理，请重新封装")
+        build_video_from_frames(frames_dir, out_path, count, frame_repeat=repeat,
+                                progress_cb=progress,
+                                cancel_check=lambda: _canceled(task_id))
+        size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
+        set_task(task_id, video_status="done", video_progress=1.0, video_size=size)
+    except TaskCanceled:
+        _remove_video_file(task_id)
+        set_task(task_id, video_status="canceled", video_progress=0.0,
+                 video_detail="已停止生成视频")
+    except (ValueError, RuntimeError) as e:
+        _remove_video_file(task_id)
+        set_task(task_id, video_status="error", video_progress=0.0,
+                 video_detail=str(e))
+    except Exception as e:
+        _remove_video_file(task_id)
+        set_task(task_id, video_status="error", video_progress=0.0,
+                 video_detail=f"视频生成失败（{type(e).__name__}）")
 
 
 # ===================== 后台解析任务 =====================
@@ -2396,6 +2493,9 @@ def register(app) -> None:
         if mode == "video" and not REPEAT_MIN <= frame_repeat <= REPEAT_MAX:
             return jsonify({"ok": False, "detail":
                             f"每码重复帧数须在 {REPEAT_MIN}-{REPEAT_MAX} 之间"}), 400
+        # 是否当场编码 mp4（默认关：帧序列已够播放，视频体积约为帧序列的 18 倍，
+        # 改由用户在结果卡点「生成视频文件」按需触发生成）
+        want_video = request.form.get("video_file", "0").strip().lower() in ("1", "true", "on", "yes")
 
         f = request.files.get("file")
         text_input = request.form.get("text")
@@ -2428,8 +2528,34 @@ def register(app) -> None:
                  created_by=(viewer or {}).get("username", ""))
         _executor.submit(_run_encode, task_id, mode, filename,
                          file_bytes, text_input, version, frame_repeat, raw_mode,
-                         rebuild_mode)
+                         rebuild_mode, want_video)
         return jsonify({"ok": True, "task_id": task_id})
+
+    @app.post(f"{API_PREFIX}/encode/<task_id>/video")
+    def it_encode_build_video(task_id):
+        """按需把已完成任务的帧序列编码为 mp4（结果卡「生成视频文件」触发）。
+
+        幂等：已在生成中或已生成时直接回显当前状态，不重复占用队列。
+        生成期间任务主状态保持 done，进度见 /task 的 video_status / video_progress。
+        """
+        task = get_task(task_id)
+        if (not task or task.get("status") != "done"
+                or task.get("output_type") != "video"):
+            return jsonify({"ok": False, "detail": "任务不存在或不是视频流任务"}), 404
+        if not _task_owned_by(task, _viewer()):
+            return jsonify({"ok": False, "detail": "任务不存在或不是视频流任务"}), 404
+        vstatus = task.get("video_status") or ("done" if task.get("video_size") else "none")
+        if vstatus == "done" and os.path.isfile(_task_file(task_id, ".mp4")):
+            return jsonify({"ok": True, "video_status": "done"})
+        if vstatus == "building":
+            return jsonify({"ok": True, "video_status": "building"})
+        if not task.get("frame_count") or not os.path.isdir(_frames_dir(task_id)):
+            return jsonify({"ok": False, "detail": "帧序列已被清理，请重新封装"}), 409
+        if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
+            return jsonify({"ok": False, "detail": "后端缺少视频编码依赖（opencv-python / numpy）"}), 503
+        set_task(task_id, video_status="building", video_progress=0.0, video_detail="")
+        _executor.submit(_run_build_video, task_id)
+        return jsonify({"ok": True, "video_status": "building"})
 
     @app.get(f"{API_PREFIX}/task/<task_id>")
     def it_task_status(task_id):
@@ -2474,6 +2600,12 @@ def register(app) -> None:
                     "video_size": task.get("video_size", 0),
                     "video_name": task.get("video_name", ""),
                     "frame_count": task.get("frame_count", 0),
+                    "frame_repeat": task.get("frame_repeat"),
+                    # 按需视频：none（未生成）/ building / done / error / canceled
+                    "video_status": task.get("video_status")
+                                    or ("done" if task.get("video_size") else "none"),
+                    "video_progress": task.get("video_progress", 0.0),
+                    "video_detail": task.get("video_detail", "") or "",
                     "display": task.get("display", round(CAMERA_FRAME_REPEAT / FRAMERATE, 3)),
                 })
         if task.get("status") == "error":
@@ -2493,7 +2625,8 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
         if not _task_owned_by(task, _viewer()):
             return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
-        if task.get("status") not in ("pending", "running"):
+        if (task.get("status") not in ("pending", "running")
+                and task.get("video_status") != "building"):
             return jsonify({"ok": False, "detail": "任务已结束，无需停止"}), 409
         set_task(task_id, cancel=True)
         return jsonify({"ok": True})
@@ -2525,6 +2658,10 @@ def register(app) -> None:
                              download_name=task.get("image_name", "二维码.png"))
         path = _task_file(task_id, ".mp4")
         if not os.path.isfile(path):
+            # 帧序列还在 = 视频尚未按需生成（前端据此引导点「生成视频文件」）
+            if task.get("frame_count") and os.path.isdir(_frames_dir(task_id)):
+                return jsonify({"ok": False,
+                                "detail": "视频文件尚未生成，请先点「生成视频文件」"}), 409
             return jsonify({"ok": False, "detail": "视频文件已被清理"}), 404
         return send_file(path, mimetype="video/mp4", as_attachment=True,
                          download_name=task.get("video_name", "二维码流.mp4"))
@@ -2562,7 +2699,9 @@ def register(app) -> None:
         path = os.path.join(_frames_dir(task_id), f"frame_{index:04d}.png")
         if not os.path.isfile(path):
             return jsonify({"ok": False, "detail": "帧文件已被清理"}), 404
-        return send_file(path, mimetype="image/png")
+        # 帧内容对同一任务不可变：允许浏览器缓存复用，避免轮播每 tick 的
+        # img.src 赋值都回源一次条件请求（1000 帧长轮播下是 1000 次/轮）
+        return send_file(path, mimetype="image/png", max_age=3600)
 
     # ---------- 信息解析 ----------
 
