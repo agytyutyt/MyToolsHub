@@ -495,6 +495,9 @@
         <label class="field">二维码版本（1-40，越大单码容量越大）
           <input id="qrVersion" type="number" min="1" max="40" step="1" value="15" />
         </label>
+        <label class="field" id="displayField" hidden>每码显示时长（秒，0.2-2，越长越易扫、总耗时越长）
+          <input id="qrDisplay" type="number" min="0.2" max="2" step="0.01" value="0.33" />
+        </label>
       </div>
       <div class="row">
         <button id="encodeBtn" class="primary">开始封装</button>
@@ -782,13 +785,15 @@
     setStatus("");
   }
 
-  /* ---------- 原件传输开关 ---------- */
+  /* ---------- 原件传输开关 / 视频流每码显示时长 ---------- */
   function applyRawHint() {
     state.rawMode = $("rawMode").checked;
     $("rawSwitchRow").hidden = state.srcMode !== "file";
     // T11 拆包重组：仅在「原件传输 + 文件输入」时可选
     $("rebuildSwitchRow").hidden = !(state.srcMode === "file" && state.rawMode);
     if ($("rebuildSwitchRow").hidden) $("rebuildMode").checked = false;
+    // 每码显示时长仅视频流模式可设（默认 0.33s，与旧固定行为一致）
+    $("displayField").hidden = $("mode").value !== "video";
   }
 
   /* 全部停止按钮显隐与复位 */
@@ -808,6 +813,15 @@
     const isFile = state.srcMode === "file";
     const raw = isFile && state.rawMode;
     const rebuild = raw && $("rebuildMode").checked;
+    // 视频流每码显示时长（秒）：换算为重复帧数由后端完成，缺省 0.33
+    let display = null;
+    if (mode === "video") {
+      display = Number($("qrDisplay").value);
+      if (!isFinite(display) || display < 0.2 || display > 2) {
+        setStatus("每码显示时长须在 0.2-2 秒之间", true);
+        return;
+      }
+    }
     if (isFile && !state.files.length) { setStatus("请先选择文件", true); return; }
     if (!isFile && !$("pasteText").value.trim()) { setStatus("请先粘贴文字内容", true); return; }
 
@@ -827,16 +841,17 @@
     renderJobRows();
 
     // 并发提交全部任务（逐个 FormData 上传）
-    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw, rebuild)));
+    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw, rebuild, display)));
     pollAll();
   }
 
-  async function submitJob(job, mode, version, raw, rebuild) {
+  async function submitJob(job, mode, version, raw, rebuild, display) {
     const fd = new FormData();
     fd.append("mode", mode);
     fd.append("qr_version", String(version));
     fd.append("raw", raw ? "1" : "0");
     if (rebuild) fd.append("rebuild", "1");
+    if (mode === "video" && display != null) fd.append("display", String(display));
     if (job.file) fd.append("file", job.file);
     else fd.append("text", job.text);
     try {
@@ -1002,7 +1017,7 @@
       }
     } else {
       fileName = s.video_name || "qrcode.mp4";
-      summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}，${fmtBytes(s.video_size)}）`;
+      summary += `生成二维码视频 ${s.nframes} 帧（ZFEC k=${s.k}/m=${s.m}，每码 ${displaySecOf(job)} 秒，${fmtBytes(s.video_size)}）`;
       const est = s.estimate;
       if (est && est.kind === "video" && est.seconds) {
         summary += `，扫码全程${fmtDuration(est.seconds)}（APP 凑够纠错阈值即可提前完成）`;
@@ -1121,8 +1136,17 @@
   }
 
   /* 帧序列轮播：后端落盘逐帧 PNG + 前端 setTimeout 固定步进，
-     每 tick 恰好推进一张，卡顿只会整体变慢、绝不跳码 */
-  const STREAM_FRAME_MS = 333; // 与后端 frame_repeat=5（15fps × 5）一致
+     每 tick 恰好推进一张，卡顿只会整体变慢、绝不跳码。
+     步进时长按任务实际显示时长（display 秒/码）走，旧结果缺 display 回退 0.333s。 */
+  const STREAM_FRAME_MS_DEFAULT = 333; // 与后端默认 frame_repeat=5（15fps × 5）一致
+  function frameMsOf(job) {
+    const d = job && job.result && job.result.display;
+    return d > 0 ? Math.round(d * 1000) : STREAM_FRAME_MS_DEFAULT;
+  }
+  function displaySecOf(job) {
+    const d = job && job.result && job.result.display;
+    return d > 0 ? (Math.round(d * 100) / 100) : 0.33;
+  }
   function startJobStream(job, img, cap, count) {
     const st = { count, idx: 0, timer: null, imgs: [], img, cap };
     job.stream = st;
@@ -1149,9 +1173,9 @@
       return;
     }
     st.img.src = im.src;
-    st.cap.textContent = `相机传输画面（循环播放，每码 0.33 秒）：${st.idx + 1}/${st.count}`;
+    st.cap.textContent = `相机传输画面（循环播放，每码 ${displaySecOf(job)} 秒）：${st.idx + 1}/${st.count}`;
     st.idx++;
-    st.timer = setTimeout(() => showNextJobFrame(job), STREAM_FRAME_MS);
+    st.timer = setTimeout(() => showNextJobFrame(job), frameMsOf(job));
   }
   function pauseAllStreams() {
     for (const job of state.jobs) {
@@ -1327,7 +1351,7 @@
         v.play().catch(() => {});
       }
       const hint = stagePpmHint(stg.job, stageSide());
-      $("stageCaption").textContent = "相机传输视频（循环播放，每码约 0.33 秒）"
+      $("stageCaption").textContent = "相机传输视频（循环播放，每码约 " + displaySecOf(stg.job) + " 秒）"
         + (hint ? "　·　" + hint : "");
     }
   }
@@ -1342,9 +1366,9 @@
     const n = stg.idx + 1;
     stg.idx++;
     if (im.complete && im.naturalWidth) {
-      drawStageImage(im, `相机传输画面（每码 0.33 秒）：${n}/${st.count}`);
+      drawStageImage(im, `相机传输画面（每码 ${displaySecOf(stg.job)} 秒）：${n}/${st.count}`);
     }
-    stg.timer = setTimeout(stageStreamTick, STREAM_FRAME_MS);
+    stg.timer = setTimeout(stageStreamTick, frameMsOf(stg.job));
   }
 
   function downloadJobResult(job) {
@@ -1706,6 +1730,8 @@
       resetResult();
       setStatus("");
     });
+    // 输出形式切换：每码显示时长仅视频流模式可设
+    $("mode").addEventListener("change", applyRawHint);
     const drop = $("dropZone"), input = $("fileInput");
     drop.addEventListener("click", () => input.click());
     drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
