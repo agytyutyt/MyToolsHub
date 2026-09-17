@@ -359,6 +359,30 @@
                                                                                          "referenced":  true
                                                                                      }
                                                           }
-                                           }
+                                           },
+                     "info-transfer":  {
+                                           "version":  "1.2.0",
+                                           "file":  "JZToolsHub-插件-info-transfer-v1.2.0.zip",
+                                           "sha256":  "7a8994f7e02cbe7f69e8106fb632b58482ebc7b8fadd315d45a6f3c1c914e2b1",
+                                           "size":  100006,
+                                           "built_at":  "2026-09-17T15:34:18+08:00",
+                                           "code_sha256":  "6f7c8ab27344ae32d4a9a94a2d41e432ca81d55035273ba91dbb8f9c968e70f1",
+                                           "file_count":  9,
+                                           "requires_restart":  true,
+                                           "file_hashes":  {
+                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
+                                                               "plugins/info-transfer/backend/requirements.txt":  "a8c2485222c9aa5f",
+                                                               "plugins/info-transfer/backend/routes.py":  "0a46982e98430899",
+                                                               "plugins/info-transfer/backend/test_protocol_v2.py":  "0b9246bb8a03a412",
+                                                               "plugins/info-transfer/backend/test_roundtrip.py":  "372b51a6e33bf6fa",
+                                                               "plugins/info-transfer/backend/test_video_ondemand.py":  "916f5df63054706f",
+                                                               "plugins/info-transfer/frontend/index.html":  "c8e72b7bd202096d",
+                                                               "plugins/info-transfer/manifest.json":  "5e5ef2fcb082567a",
+                                                               "plugins/info-transfer/README.md":  "477d663860b06b33"
+                                                           },
+                                           "assets":  {
+
+                                                      }
+                                       }
                  }
 }
