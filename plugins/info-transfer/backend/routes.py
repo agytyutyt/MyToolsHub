@@ -176,13 +176,15 @@ BOX_SIZE = 10           # 二维码渲染模块边长；取较大值提升有损
 FRAMERATE = 15
 VIDEO_FOURCC = "avc1"   # H.264，浏览器 <video> 可直接播放
 FEC_RATIO = 0.4         # 前向纠错比例：额外生成 1/(1-fec_ratio) 帧（视频有损压缩下取高冗余）
-CAMERA_FRAME_REPEAT = 5  # 相机传输模式：每码连续重复的帧数（5/15s ≈ 333ms，便于手机摄像头捕获）
-# 视频流每码显示时长（秒，前端可设）：换算关系 repeat = round(时长 × FRAMERATE)。
-# 默认 0.33s 等价于旧固定值 CAMERA_FRAME_REPEAT=5；时长越长越易扫、总耗时线性变长；
-# 下限 0.2s——低于此值手机摄像头（~30fps）每码仅能采到个位数分析帧，识别率显著下降。
-QR_DISPLAY_DEFAULT_SEC = 0.33
-QR_DISPLAY_MIN_SEC = 0.2
-QR_DISPLAY_MAX_SEC = 2.0
+# 相机传输模式（视频流）：每张二维码连续重复的帧数。
+#   - 显示口径：每码停留时间 = repeat / FRAMERATE 秒（帧率恒为 FRAMERATE，帧头协议不变）；
+#   - 默认 5 帧 ≈ 0.33 秒/码（原固定行为）；前端可设 3-30 帧：
+#     帧数越多码面停留越久越易扫，视频总时长线性变长；
+#   - 下限 3 帧（0.2s）——低于此值手机摄像头（~30fps）每码仅能采到个位数分析帧，
+#     识别率显著下降；上限 30 帧（2s）兼顾传输效率。
+CAMERA_FRAME_REPEAT = 5
+REPEAT_MIN = 3
+REPEAT_MAX = 30
 PAYLOAD_SAFETY = 0.9    # 单码载荷安全系数：实际载荷 ≤ 容量的 90%（满容量高熵载荷在部分
                         # 解码器下不稳定——cv2 回读实测可能整码失败甚至截断，见评估报告 §5.3）
 
@@ -2276,7 +2278,7 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                  env_size=len(env_bytes), qr_version=qr_version,
                  nframes=nframes, k=k, m=m, video_size=size,
                  frame_count=(nframes if fdir else 0),
-                 display=round(frame_repeat / FRAMERATE, 3),
+                 display=round(frame_repeat / FRAMERATE, 3),  # 实际每码显示秒数（前端轮播节奏用）
                  video_name=f"{base_name}二维码流.mp4", note=note,
                  rebuilt=rebuilt)
     except TaskCanceled:
@@ -2383,17 +2385,17 @@ def register(app) -> None:
         # T11 拆包重组开关（默认关：字节精确；开启后 ZIP 容器拆包重建，更小但内容等价）
         rebuild_mode = request.form.get("rebuild", "0").strip().lower() in ("1", "true", "on", "yes")
 
-        # 相机传输模式为视频默认行为：每码连续重复若干帧，配合前端帧序列轮播与
-        # APP 自动识别，手机对准屏幕即可传输。每码显示时长可设（默认 0.33s = 旧行为）：
-        # repeat = round(时长 × fps)，实际显示时长取整到整帧（结果里回显 display）。
+        # 视频流每码重复帧数（可设，默认 CAMERA_FRAME_REPEAT=5 ≈ 0.33 秒/码）：
+        # repeat 为每张二维码在视频里连续出现的帧数，实际显示时长 = repeat/FRAMERATE；
+        # 仅改变码面停留时间与视频长度，帧率与帧头协议不变，解析端完全兼容。
+        # 结果里回显换算后的每码秒数（display），供前端轮播节奏与摘要展示。
         try:
-            display_sec = float(request.form.get("display", QR_DISPLAY_DEFAULT_SEC))
+            frame_repeat = int(float(request.form.get("frame_repeat", CAMERA_FRAME_REPEAT)))
         except (TypeError, ValueError):
-            display_sec = QR_DISPLAY_DEFAULT_SEC
-        if mode == "video" and not QR_DISPLAY_MIN_SEC <= display_sec <= QR_DISPLAY_MAX_SEC:
+            frame_repeat = CAMERA_FRAME_REPEAT
+        if mode == "video" and not REPEAT_MIN <= frame_repeat <= REPEAT_MAX:
             return jsonify({"ok": False, "detail":
-                            f"每码显示时长须在 {QR_DISPLAY_MIN_SEC}-{QR_DISPLAY_MAX_SEC} 秒之间"}), 400
-        frame_repeat = max(1, round(display_sec * FRAMERATE))
+                            f"每码重复帧数须在 {REPEAT_MIN}-{REPEAT_MAX} 之间"}), 400
 
         f = request.files.get("file")
         text_input = request.form.get("text")

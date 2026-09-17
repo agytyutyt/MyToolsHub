@@ -495,8 +495,8 @@
         <label class="field">二维码版本（1-40，越大单码容量越大）
           <input id="qrVersion" type="number" min="1" max="40" step="1" value="15" />
         </label>
-        <label class="field" id="displayField" hidden>每码显示时长（秒，0.2-2，越长越易扫、总耗时越长）
-          <input id="qrDisplay" type="number" min="0.2" max="2" step="0.01" value="0.33" />
+        <label class="field" id="displayField" hidden>每码重复帧数（3-30，越大越易扫、总耗时越长；5 帧 ≈ 0.33 秒/码）
+          <input id="qrRepeat" type="number" min="3" max="30" step="1" value="5" />
         </label>
       </div>
       <div class="row">
@@ -785,14 +785,14 @@
     setStatus("");
   }
 
-  /* ---------- 原件传输开关 / 视频流每码显示时长 ---------- */
+  /* ---------- 原件传输开关 / 视频流每码重复帧数 ---------- */
   function applyRawHint() {
     state.rawMode = $("rawMode").checked;
     $("rawSwitchRow").hidden = state.srcMode !== "file";
     // T11 拆包重组：仅在「原件传输 + 文件输入」时可选
     $("rebuildSwitchRow").hidden = !(state.srcMode === "file" && state.rawMode);
     if ($("rebuildSwitchRow").hidden) $("rebuildMode").checked = false;
-    // 每码显示时长仅视频流模式可设（默认 0.33s，与旧固定行为一致）
+    // 每码重复帧数仅视频流模式可设（默认 5 帧 ≈ 0.33 秒/码，与旧固定行为一致）
     $("displayField").hidden = $("mode").value !== "video";
   }
 
@@ -813,12 +813,12 @@
     const isFile = state.srcMode === "file";
     const raw = isFile && state.rawMode;
     const rebuild = raw && $("rebuildMode").checked;
-    // 视频流每码显示时长（秒）：换算为重复帧数由后端完成，缺省 0.33
-    let display = null;
+    // 视频流每码重复帧数（帧率 15fps 恒定，实际每码显示秒数由后端按 repeat/15 换算）
+    let repeat = null;
     if (mode === "video") {
-      display = Number($("qrDisplay").value);
-      if (!isFinite(display) || display < 0.2 || display > 2) {
-        setStatus("每码显示时长须在 0.2-2 秒之间", true);
+      repeat = Math.round(Number($("qrRepeat").value));
+      if (!isFinite(repeat) || repeat < 3 || repeat > 30) {
+        setStatus("每码重复帧数须在 3-30 之间", true);
         return;
       }
     }
@@ -841,17 +841,17 @@
     renderJobRows();
 
     // 并发提交全部任务（逐个 FormData 上传）
-    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw, rebuild, display)));
+    await Promise.all(state.jobs.map((job) => submitJob(job, mode, version, raw, rebuild, repeat)));
     pollAll();
   }
 
-  async function submitJob(job, mode, version, raw, rebuild, display) {
+  async function submitJob(job, mode, version, raw, rebuild, repeat) {
     const fd = new FormData();
     fd.append("mode", mode);
     fd.append("qr_version", String(version));
     fd.append("raw", raw ? "1" : "0");
     if (rebuild) fd.append("rebuild", "1");
-    if (mode === "video" && display != null) fd.append("display", String(display));
+    if (mode === "video" && repeat != null) fd.append("frame_repeat", String(repeat));
     if (job.file) fd.append("file", job.file);
     else fd.append("text", job.text);
     try {
@@ -1048,7 +1048,7 @@
       ? (count > 1
         ? "数据超过单张容量已自动拆分：解析时需上传全部二维码（可打包 ZIP 一次性导入「信息解析」）"
         : "单张二维码可直接打印或发送；用任意扫码工具可读出封装 JSON，用「信息解析」可还原数据")
-      : "相机传输模式：画面循环播放、每码停留约 0.33 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；也可下载 MP4 后用「信息解析 - 二维码视频」还原")
+      : "相机传输模式：画面循环播放、每码停留约 " + displaySecOf(job) + " 秒。用 APP 对准屏幕（自动识别视频流），保持屏幕常亮、调高亮度并放大预览；也可下载 MP4 后用「信息解析 - 二维码视频」还原")
       + (isStatic ? "（点击缩略图可放大查看原尺寸）" : "")
       + "；点「" + (isStatic ? "全屏展示" : "全屏播放") + "」可最大化码面，便于手机扫码";
     const dl = item.querySelector(".ri-download");
@@ -1730,7 +1730,7 @@
       resetResult();
       setStatus("");
     });
-    // 输出形式切换：每码显示时长仅视频流模式可设
+    // 输出形式切换：每码重复帧数仅视频流模式可设
     $("mode").addEventListener("change", applyRawHint);
     const drop = $("dropZone"), input = $("fileInput");
     drop.addEventListener("click", () => input.click());
