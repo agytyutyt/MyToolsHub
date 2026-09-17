@@ -4,7 +4,9 @@
 /.idea
 .DS_Store
 /build
+/app/build
 /captures
 .externalNativeBuild
 .cxx
 qr_test_materials/
+*.apk

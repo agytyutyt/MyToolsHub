@@ -1,3 +1,5 @@
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -13,6 +15,20 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "2.0.0"
+    }
+
+    // full：全 ABI（含 x86 系，模拟器可用）；lite：仅 arm64-v8a + 中英文资源，真机分发用，体积约减半
+    flavorDimensions += "edition"
+    productFlavors {
+        create("full") {
+            dimension = "edition"
+        }
+        create("lite") {
+            dimension = "edition"
+            versionNameSuffix = "-lite"
+            ndk { abiFilters += "arm64-v8a" }
+            resourceConfigurations += listOf("zh", "zh-rCN", "en")
+        }
     }
 
     // 正式签名（内部离线分发，密钥随仓库管理；丢失可用 keytool 重新生成但旧包将无法覆盖安装）
@@ -41,6 +57,15 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // 产物命名带版本号：InfoParse-<versionName>-<buildType>.apk（lite 的 versionName 自带 -lite 后缀）
+    applicationVariants.all {
+        val vName = versionName
+        val btName = buildType.name
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName = "InfoParse-$vName-$btName.apk"
+        }
     }
 }
 
