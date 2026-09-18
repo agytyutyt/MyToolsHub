@@ -662,6 +662,53 @@ body {
 }
 .dropzone-file:empty { display: none; }
 
+/* 异步下载源：开关行 + 次级拖放区（视觉弱化，与主上传区区分层级） */
+/* 整行是 <label>（见 app.js）：点文字、点滑块本体都能切换开关 */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.switch-row:hover .switch-label { color: var(--text); }
+.switch-label { display: block; font-size: 13px; color: var(--text-2); }
+/* .switch 自身不再需要是 label（外层已包住 input），仅负责定位 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex: none;
+}
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+.switch .slider {
+  position: absolute;
+  inset: 0;
+  background: #cfd4dc;
+  border-radius: 999px;
+  transition: background .16s;
+  cursor: pointer;
+}
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(15, 40, 60, .3);
+  transition: transform .16s;
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+.switch input:focus-visible + .slider { box-shadow: 0 0 0 3px var(--accent-light); }
+#m-dl-zone .dropzone-inner { padding: 14px 12px; }
+#m-dl-zone .dropzone-text { margin-top: 6px; font-size: 12px; }
+
 /* ==================== Snackbar ==================== */
 .snackbar {
   position: fixed;
@@ -696,6 +743,22 @@ body {
   color: var(--accent-dark);
   background: var(--accent-light);
   border: 1px solid rgba(92, 107, 192, 0.35);
+  border-radius: 4px;
+  flex: none;
+}
+
+/* 异步下载源角标（纯文本，不用 emoji；琥珀色以区别于"已转换"的靛蓝） */
+.dl-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  vertical-align: 1px;
+  color: #854f0b;
+  background: #faeeda;
+  border: 1px solid rgba(217, 119, 6, 0.35);
   border-radius: 4px;
   flex: none;
 }

@@ -32,6 +32,7 @@ r"""知识库 —— Office(docx/doc/xlsx/xls) → 只读 HTML 预览渲染（xh
 import glob
 import json
 import os
+import re
 import sys
 import threading
 
@@ -215,13 +216,167 @@ def _meta_warnings(result):
     return list(getattr(meta, "warnings", None) or [])
 
 
+# ===================== 渲染产物修正（不改 vendor 的后处理） =====================
+#
+# 背景（2026-09-12/09-18 排查，详见 docs/eval/知识库Word预览三问题排查报告.md）
+# ------------------------------------------------------------------------------
+# 三处显示缺陷全部源自 vendor/dhr 的输出，但按 B-7「vendor 零改动拷贝」约定
+# 不在 vendor 内打补丁（升级要重打），而是对 **渲染产物 HTML** 做后处理：
+#
+# 1) 「仿宋_GB2312 笔画竖过细 / 部分文字莫名加粗」
+#    根因：多数客户端（含开发机）**没装 仿宋_GB2312**，引擎 fallback 链跳一格就
+#    命中 `Microsoft YaHei`（黑体）。Canvas 像素签名实测墨量：雅黑 ≈ 138k
+#    vs 仿宋_GB2312/仿宋 ≈ 54k，**相差约 2.56 倍**——中文整段变黑体，肉眼即
+#    「原文没加粗却显示加粗」；数字/英文走 TNR（细）又造成同行粗细不均。
+#    修法：在 `"仿宋_GB2312"` 与 `"Microsoft YaHei"` 之间插入仿宋族真实可用名
+#    （`"FangSong","仿宋","SimSun"`），优先落回**同类衬线字体**而非黑体。
+#
+# 2) 「单元格文字穿模」
+#    根因 a：引擎在 `<tr style="height:Npx;overflow:hidden">` 上写 overflow:hidden，
+#            但 CSS `overflow` 对 `display:table-row` **无效**，精确行高约束失效，
+#            内容溢出后与相邻行/边框重叠；
+#    根因 b：引擎 base CSS **没有重置 `<p>` 默认 margin**，浏览器 `margin:1em 0`
+#            额外撑高单元格，行距被拉坏；
+#    根因 c：`td/th` 缺 `word-break/overflow-wrap`，超长不可断行串横向撑出。
+#    修法：追加高优先级 CSS 重置 + 补断行规则 + 去掉无效的 overflow:hidden。
+#
+# 所有补丁都作用于**引擎生成的静态 HTML 字符串**，输入不含用户可控的拼接面
+# （字体名已被引擎白名单过滤，CSS 由本模块常量生成），无注入风险。
+
+#: 仿宋族「真实可用」回退名（Windows 自带 simfang.ttf / simsun.ttc）。
+#: 顺序即优先级：FangSong（仿宋）→ 仿宋（中文名）→ SimSun（宋体，同为衬线）。
+_FANGSONG_FALLBACK = ('FangSong', '仿宋', 'SimSun')
+
+#: 引擎 fallback 链里紧跟目标字体之后的那个「黑体」，用于定位插入点。
+_CJK_FALLBACK_HEAD = 'Microsoft YaHei'
+
+#: 需要补上仿宋族回退的 Word 字体名（公文/正式文档常见带 GB2312 后缀的写法）。
+#: ⚠️ 不要把裸 `"仿宋"` 放进来：补链后会往链里插入 `"仿宋"`，二次处理会命中自身
+#: 导致重复注入（幂等破坏）。裸 `仿宋` 由下面的 `_FANGSONG_ALIASES` 单独兜底。
+_FANGSONG_NAMES = ('仿宋_GB2312', '仿宋-GB2312', '仿宋GB2312', 'FangSong_GB2312',
+                   'FangSong-GB2312', '仿宋_GB2312_CN')
+
+#: 裸「仿宋」写法：仅在链里**没有**任何仿宋族别名时才需要补（避免自匹配）。
+_FANGSONG_ALIASES = ('FangSong', '仿宋', 'SimSun')
+
+#: 补丁标记：已注入过的产物不再重复注入（幂等保证，也便于排查）。
+_CSS_PATCH_MARK = "/*kbdoc-patch*/"
+
+#: 追加到首个 `<style>` 的分辨率无关样式重置（preview 场景固定使用 `kbdoc` 前缀）。
+_CSS_PATCH = _CSS_PATCH_MARK + """
+/* ---- 宿主后处理补丁（office_render.py）：不要手工编辑，见该文件注释 ---- */
+/* 1) 段落默认 margin 会撑坏表格单元格行距（Word 无此概念），整体归零 */
+.kbdoc p{margin:0}
+/* 2) 超长不可断行串（合同编号/数字串）必须能断，否则横向撑出单元格 */
+.kbdoc-t td,.kbdoc-t th{word-break:break-all;overflow-wrap:anywhere;word-wrap:break-word}
+/* 3) 精确行高的单元格内容裁剪（overflow 对 table-row 无效，改由内层 p 承担） */
+.kbdoc-t td>p:only-child{overflow:hidden}
+"""
+
+#: 匹配 `<tr ...>` 标签（限定在标签内部，避免误伤 CSS 选择器文本）。
+_TR_TAG_RE = re.compile(r"<tr\b[^>]*>")
+
+#: 匹配 `<tr style="...;overflow:hidden">` 里的无效声明（保留 height，去掉 overflow）。
+_TR_OVERFLOW_RE = re.compile(r"\s*overflow\s*:\s*hidden\s*;?")
+
+
+def _patch_font_fallback(html):
+    """在仿宋族字体名后插入真实可用的同类回退，避免直接跳到黑体（雅黑）。
+
+    只处理 `font-family:"目标字体","...",...,"Microsoft YaHei",...` 这种由引擎生成的
+    声明串。**幂等**：若目标字体与雅黑之间的候选里已出现任一仿宋族别名，即视为已修过
+    并跳过——否则 `"仿宋"` 既是查找键又是插入值，二次处理会自我匹配、重复膨胀。
+    """
+    if _CJK_FALLBACK_HEAD not in html:
+        return html
+
+    def _build(pattern, target_literal):
+        extra = "".join('"%s",' % n for n in _FANGSONG_FALLBACK
+                        if n != target_literal)   # 不重复插入与目标同名的项
+
+        def _sub(m):
+            between = m.group(2) or ""
+            if any('"%s"' % a in between for a in _FANGSONG_ALIASES):
+                return m.group(0)          # 已补过 → 原样返回
+            return m.group(1) + between + extra
+        return pattern.sub(_sub, html)
+
+    # 先试带后缀的正式写法；都没命中再退回裸「仿宋」（且同样受幂等保护）。
+    for name in _FANGSONG_NAMES:
+        pattern = re.compile(
+            r'("' + re.escape(name) + r'",)'      # 目标字体 + 逗号
+            r'((?:"[^"]*",)*)'                    # 中间其它候选（TNR 等）
+            r'(?="' + re.escape(_CJK_FALLBACK_HEAD) + r'")'
+        )
+        out = _build(pattern, name)
+        if out != html:
+            return out
+
+    pattern = re.compile(
+        r'("仿宋",)'                              # 裸「仿宋」写法
+        r'((?:"[^"]*",)*)'
+        r'(?="' + re.escape(_CJK_FALLBACK_HEAD) + r'")'
+    )
+    return _build(pattern, '仿宋')
+
+
+def _patch_table_overflow(html):
+    """去掉 `<tr>` 上对 table-row 无效的 `overflow:hidden` 声明。
+
+    只扫 **标签内部**（`<tr ...>`），不碰 CSS 选择器里的同名文本。
+    """
+    if "overflow:hidden" not in html:
+        return html
+    out = []
+    pos = 0
+    for m in _TR_TAG_RE.finditer(html):
+        tag = m.group(0)
+        if "overflow:hidden" in tag:
+            cleaned = _TR_OVERFLOW_RE.sub("", tag)
+            # 清掉可能留下的空 style 属性（`style=""` 无意义且会污染 diff）
+            cleaned = re.sub(r'\s*style=""', "", cleaned)
+            cleaned = re.sub(r'\s*style="\s*"', "", cleaned)
+            if cleaned != tag:
+                out.append(html[pos:m.start()])
+                out.append(cleaned)
+                pos = m.end()
+    out.append(html[pos:])
+    return "".join(out)
+
+
+def _patch_css(html):
+    """把补丁 CSS 追加进第一个 `<style>` 块（引擎输出保证至少有一个）。
+
+    幂等：已带 `_CSS_PATCH_MARK` 的产物直接返回，避免重复注入导致文件膨胀
+    （每次预览都会经过本函数，重复注入会在反复请求下发散）。
+    """
+    if _CSS_PATCH_MARK in html:
+        return html
+    m = re.search(r"<style[^>]*>", html)
+    if not m:
+        return html
+    return html[:m.end()] + _CSS_PATCH + html[m.end():]
+
+
+def _polish_word_html(html):
+    """Word 预览产物后处理：字体回退补链 + 表格穿模修正 + CSS 重置。"""
+    if not html:
+        return html
+    html = _patch_font_fallback(html)
+    html = _patch_table_overflow(html)
+    html = _patch_css(html)
+    return html
+
+
 def render_word(data):
     """Word（docx/docm/doc 字节）→ {"kind","html","warnings"}。
 
     - mode="flow"：流式连续排版（无打印分页，阅读动线与网页一致；.doc 归一化
       场景上游也推荐 flow）；
     - output="fragment"：`<style>` + `<div class="kbdoc">` 片段，便于嵌入宿主容器；
-    - 图片内联 base64（离线内网无外链可图床）。
+    - 图片内联 base64（离线内网无外链可图床）；
+    - 产物经 `_polish_word_html` 修正三处已知显示缺陷（字体回退/表格穿模），
+      全部在 HTML 后处理层完成，vendor 保持零改动（B-7）。
     """
     if _dhr is None:
         raise OfficeRenderError("服务器渲染引擎未加载，无法生成 Word 预览")
@@ -240,8 +395,8 @@ def render_word(data):
     except Exception as e:
         _raise_from_xhr(e)
     warnings = _meta_warnings(result)
-    return {"kind": "word", "html": result.html, "warnings": warnings[:5],
-            "truncated": False}
+    return {"kind": "word", "html": _polish_word_html(result.html),
+            "warnings": warnings[:5], "truncated": False}
 
 
 def render_sheet(data):

@@ -9,7 +9,7 @@
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 文档版本 | v1.2（2026-09-11）+ 2026-09-17 状态标注 |
+| 文档版本 | v1.2（2026-09-11）+ 2026-09-17 状态标注 + 2026-09-18 阶段 9 / 阶段 10 / 阶段 11 |
 | 适用插件 | `knowledge-base`（知识库） |
 | 文档状态 | **全部阶段（0~5）已完成**：含真实 LibreOffice（25.8.7）环境下的端到端验证 |
 | 实施记录 | §13（本轮实施落地与踩坑） |
@@ -24,7 +24,7 @@
 
 > **覆盖范围**：知识库「预览与文档下载」的设计演进：数据模型、API、前端、安全、性能，以及引擎替换的决策记录
 > ｜**不覆盖**：**该插件的接口与已知限制 → `plugins/knowledge-base/README.md`**；插件整体设计 → `docs/design/知识库插件-设计文档.md`
-> ｜**随包**：是 ｜**最后核对**：2026-09-17
+> ｜**随包**：是 ｜**最后核对**：2026-09-18
 
 ---
 
@@ -780,3 +780,197 @@ def _pdf_task(fid):
 - 解包 LibreOffice 启动会打 stderr `Could not find platform independent libraries <prefix>`，可忽略；设置 `URE_BOOTSTRAP`/`SAL_*` 环境变量**不改善**耗时（实测 17.5s vs 17.8s 基线）。
 - 隔离测试必须复制引擎 config 到临时数据根；`/files?category=root` 只返回已归类文件，未分类文件用 `category=all`。
 - 浏览器自动化：`agent-browser screenshot` 路径用正斜杠；批量点击用 `find text` 绕开 `eval` 的引号歧义；登录 + 全流程要在**同一次 `batch`** 内。
+
+---
+
+## 16. 阶段 9：Word 产物后处理补丁（2026-09-18）
+
+### 16.1 问题与根因
+
+用户反馈 Word 预览三处显示缺陷。模块级复现（`dhr.convert` 直调）+ Canvas 像素签名 +
+agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库Word预览三问题排查报告.md`）：
+
+| 现象 | 根因 |
+| --- | --- |
+| 中文"莫名加粗"、笔画竖过细 | 多数客户端**没装 仿宋_GB2312**，引擎 fallback 链跳过同类衬线体直落 `Microsoft YaHei`；实测墨量 雅黑 138131 vs 仿宋 53860，**差 2.56 倍** |
+| 单元格文字"穿模" | ① `<tr>` 上 `overflow:hidden` 对 `display:table-row` **无效**；② 引擎 base CSS **未重置 `<p>` 默认 margin**，撑高单元格（实测行高 27px 设定 → 实际 49/67px）；③ `td/th` 缺断行规则 |
+
+### 16.2 决策：后处理而非改 vendor
+
+三处缺陷全在 vendor 输出层，但按 **B-7「vendor 零改动拷贝」**约定不在 vendor 内打补丁
+（升级要重打、易漏）。改为在 `office_render.render_word()` 出口做 **HTML 后处理**
+（`_polish_word_html`），与既有 5 条 vendor 补丁互不影响。
+
+### 16.3 实现
+
+- `_patch_font_fallback()`：在目标字体与 `Microsoft YaHei` 之间插入
+  `"FangSong","仿宋","SimSun"`；覆盖 6 种 GB2312 写法 + 裸 `仿宋`。
+- `_patch_table_overflow()`：清除 `<tr>` 上无效的 `overflow:hidden`（保留 `height`）。
+- `_patch_css()`：追加 `p{margin:0}` / `word-break:break-all` / `td>p:only-child{overflow:hidden}`，
+  带标记 `/*kbdoc-patch*/`。
+
+### 16.4 关键坑（踩过，勿重犯）
+
+1. **裸 `"仿宋"` 不能进 `_FANGSONG_NAMES`**：它既是查找键又是插入值，二次处理会自我匹配、
+   重复注入（幂等破坏，实测第二次处理链变成 `"仿宋","FangSong","仿宋","FangSong"...`）。
+   现方案把裸 `仿宋` 单独分支处理，并在插入时跳过与目标同名的项。
+2. **CSS 补丁必须做存在性判据**：`_patch_css` 每次往第一个 `<style>` 插入，无判据时
+   重复调用会线性的膨胀产物。
+3. **`<tr>` 清理必须限定标签内部**：用 `<tr\b[^>]*>` 全标签正则，不要用
+   `<tr[^>]*overflow:hidden[^>]*>`——后者在只替换部分匹配时会破坏标签闭合。
+4. **验证断言的口径**：`font-family:` 的声明串**本身含双引号**，用 `[^;}"]+` 取会截断造成假阴性；
+   必须取到 `;` 或 `}`。同理统计 `<tr>` 数要用标签正则，别用 `<tr\b`（会命中 CSS 选择器文本）。
+
+### 16.5 验证与留痕
+
+- 实测对比：字体 微软雅黑 → **仿宋**；正文字重 `font-weight:400`；表格行高 49/67/49px → **33/51/33px**。
+- 回归断言：`backend/test_routes_preview.py` 第 0b 节 6 项（补链正确性/顺序、tr 清理、
+  CSS 重置、幂等、内容完整性）；边界用例（6 种写法 + 裸仿宋 + 已修链 + 无 `style` 块 + 空串/None）全过。
+- 同步：`plugins/knowledge-base/README.md`（新增「Word 产物后处理补丁」小节 + 排查路径提醒）、
+  `docs/eval/知识库Word预览三问题排查报告.md`（状态改已修复）。
+
+---
+
+## 17. 阶段 10：异步下载源（2026-09-18）
+
+### 17.1 需求
+
+上传文档时允许**另提供一个下载文档**：用户上传 `Demo.pdf` 并在上传对话框打开
+「异步下载源」开关，出现第二个上传控件（**文案固定：「为预览文档提供异步下载源。」**），
+在其中上传 `Demo.doc`。此后任何用户预览 `Demo.pdf` 并点工具栏「下载」，拿到的
+是 `Demo.doc` 而非 `Demo.pdf`。
+
+典型用途：**预览要版式保真（PDF），下载要可编辑（DOC）**——两个诉求用两个文件满足。
+
+### 17.2 关键决策
+
+| 决策点 | 结论 | 理由 |
+| --- | --- | --- |
+| 下载源与预览件是否必须同格式 | **不要求**，完全解耦 | 需求本意就是「预览用一种、下载给另一种」 |
+| 落盘命名 | `<id>.dl.<download_ext>` | 必须区别于 `<id>.<ext>`（原件）与 `<id>.preview.json`，故用带点中缀 |
+| 下载源校验失败 | **不阻断主上传**（B-4） | 下载源是可选增强件，不能拖垮基础能力；响应带 `download_error` 由前端明确提示 |
+| 下载源盘上文件丢失 | **静默回落原件**，不 404 | 同 B-4：下载是基础能力，不因可选件缺失而失效 |
+| 记录字段 | `download_ext`/`download_name`/`download_size`，**未配置则不写键** | 键缺失即「未配置」，`_migrate_files` 无需为此补键（与 `original_*` 恒有值不同） |
+| 是否递增 `PREVIEW_CACHE_VERSION` | **不递增** | 本阶段不改动任何渲染行为，缓存产物不受影响 |
+
+### 17.3 实现
+
+**后端**（`routes.py`）：
+
+- 抽出 `_read_upload(storage)` 统一主文件与下载源的校验口径（SEC-3 白名单 + 20MB
+  流式硬上限），失败抛 `_UploadError(status, message)`；避免两处各写一份而漂移。
+- `kb_file_upload`：`request.files.get("download_file")` 取可选下载源；校验失败只记
+  `download_error` 继续走主流程；Content-Length 预检放宽到 2× 上限（两个文件各 20MB）。
+- `_download_path(fid, ext)`：与 `_file_path` 同款 SEC-1 白名单校验。
+- `kb_file_download`：**优先下载源，缺失回落原件**；`download_name` 沿用下载源原名。
+- `_file_brief`：新增 `has_download_source`/`download_ext`/`download_name`/`download_size`。
+- `kb_file_delete`：清理路径集合加入下载源（按绝对路径去重）。
+
+**前端**（`app.js` / `index.html` / `style.css`）：
+
+- 上传对话框新增「异步下载源」开关（自绘 pill switch，**不用 emoji、不用原生控件**），
+  打开后 `#m-dl-row` 由 `hidden` 转为显示，内含第二个 `bindDropzone` 拖放区；
+  关闭时清空已选文件（防误提交）。开关开启但未选文件 → 提交前拦截并提示。
+- 下载文案随配置变化：dock 下载按钮 `title`、卡片下载按钮 `title` 与 `.dl-badge` 角标
+  （琥珀色，区别于「已转换」的靛蓝）均按 `has_download_source` 切换。
+- 资源版本：`style.css?v=29`、`app.js?v=19`（F-2 纪律）。
+
+### 17.4 关键坑
+
+1. **落盘名必须唯一**：`<id>.dl.<ext>` 而非 `<id>.<ext>` 之类——后者会在
+   「下载源与原件同扩展名」时**直接互相覆盖**（例如预览 pdf、下载也给 pdf）。
+2. **`_read_upload` 的 `filename` 只取 basename**：沿用既有 `os.path.basename`
+   处理，杜绝 `../` 穿越（SEC-1）。
+3. **前端开关关闭必须清空 `input.files`**：否则「先选后关」会把上一个文件继续提交，
+   与用户可见状态不符（老浏览器 `value=""` 清不掉 files，提交时按开关状态忽略）。
+4. **浏览器探针的 `file://` 相对路径**：探针页放在 `backend/out/` 时引用
+   `frontend/style.css` 要写 `../../frontend/`（写 `../frontend/` 会静默 404，
+   表现为「所有 CSS 全失效」——包括本来就正常的规则，容易误判为新样式写错）。
+
+### 17.5 验证与留痕
+
+- 后端回归（`backend/test_routes_preview.py` 第 4b 节，5 组断言）：
+  `Demo.pdf + Demo.doc` 上传后 `has_download_source=true`、落盘 `<id>.dl.doc`、
+  下载字节 == 下载源字节且文件名 `Demo.doc`；未提供下载源 → 下载原件且记录无
+  `download_ext` 键；下载源非法扩展名/超 20MB → **主上传仍成功**且响应带
+  `download_error`；下载源文件被外力删除 → 下载回落原件不 404；删除文档后
+  `.dl.<ext>` 一并清理（`leftover` 断言）。
+- 浏览器实测（真实 `showUpload` + `bindDropzone` 源码抽取到探针页）：
+  开关默认灰色、下载区 `hidden`；点击后开关变蓝、第二个拖放区出现、文案为
+  「为预览文档提供异步下载源。」；提交 FormData 实测含
+  `file=Demo.pdf` + `download_file=Demo.doc`；开关开启但未选文件时提交被拦截
+  （「已开启「异步下载源」，请选择下载文档（或关闭该开关）」）且零 API 调用。
+- 同步：`plugins/knowledge-base/README.md`（功能 / 落盘表 / 元数据 / 接口节）。
+
+---
+
+## 18. 阶段 11：修复「异步下载源」开关点不动（2026-09-18）
+
+### 18.1 现象与根因
+
+用户反馈：上传对话框里的「异步下载源」开关**点了没反应**。
+
+用真实浏览器复现（探针页 `elementFromPoint` 命中测试）：
+
+```
+元素命中(滑块中心) = <SPAN.slider>
+=> 是否命中 <label>? false
+点 .slider 后 checked: false -> false        ← 点那个"按钮"，开关纹丝不动
+点左侧文字 后 checked: false -> true          ← 只有点文字才有效
+```
+
+**根因**：`.slider` 是 `position:absolute; inset:0` 的覆盖层，视觉上就是用户要点的
+「按钮」，但它盖住了 `<input>`；而它自己既不是 `<label>`，`<span class="switch">`
+也不会把点击转发给内部 `<input>`。唯一能激活 checkbox 的是左侧文字上的
+`<label for="m-dl-switch">`——用户不会去点文字，他点的是那个滑块。
+
+这不是 CSS 写坏，是**标记结构选错**：自定义开关必须让 `<label>` 直接包住 `<input>`，
+靠原生 label↔input 关联生效，不能依赖 `for=` 指向一个被覆盖层遮住的隐藏 input。
+
+### 18.2 修法
+
+`app.js` 的 `showUpload()`：整行 `.switch-row` 改成一个 `<label>`，直接包住
+`<input type="checkbox">` 与 `.slider`：
+
+```js
+'<label class="form-row switch-row">' +
+'<span class="switch-label">异步下载源</span>' +
+'<span class="switch"><input id="m-dl-switch" type="checkbox">' +
+'<span class="slider"></span></span></label>' +
+```
+
+`style.css`：`.switch-row` 加 `cursor:pointer`（整行可点）与 hover 反馈；
+`.switch` 自身不再需要 label 语义，仅保留定位尺寸。
+
+资源版本递增（F-2）：`style.css?v=29→30`、`app.js?v=19→20`。
+
+### 18.3 验证
+
+真实指针点击（隔离实例 + 真 `app.js`，非程序化 `.click()`）：
+
+| 动作 | `checked` | `#m-dl-row` class | slider 背景 |
+| --- | --- | --- | --- |
+| 初始 | false | `form-row hidden` | — |
+| 点 `.switch .slider` | **true** | `form-row` | `rgb(92,107,192)` = accent |
+| 再点滑块 | false | `form-row hidden` | `rgb(207,212,220)` |
+| 点 `.switch-label` 文字 | true | `form-row` | accent |
+
+提交链：FormData 实测含 `file=Demo.pdf` + `download_file=Demo.doc`（开关 ON 时）。
+
+静态契约断言（`test_routes_preview.py` 新增第 6 节，回归锁）：
+开关行必须是 `<label class="form-row switch-row">` 且含 `type="checkbox"` 与
+`class="slider"` 且以 `</span></label>` 收尾；**不得出现** `for="m-dl-switch"` 旧写法。
+任何人把 label 改回 div/span，回归立即失败。
+
+### 18.4 关键坑
+
+1. **自定义开关的点击目标**：`.slider` 覆盖层是「看得见但点不着」的——只写
+   `<label for="x">` 指向被遮住的 `<input>` 不够，必须让 label 包住 input。
+2. **浏览器自动化验证不能只用程序化 `.click()`**：`slider.dispatchEvent(new MouseEvent('click'))`
+   在修复前也「看起来」能走通部分路径，只有**真实指针点击**（agent-browser 的
+   `click` 命令）才暴露「点滑块无效」。首次实现时正是只做了程序化点击自测，
+   漏掉了这个真实交互缺陷。
+3. **agent-browser 会话不跨命令**：任何非浏览器命令（如 `echo`）或跨 `;`/`&&` 的
+   独立调用会重置会话；一次链式调用内完成 `open → click → eval → screenshot` 才稳。
+4. 隔离实例做 E2E 时需伪造 `jztools_admin.routes.get_session_user` 返回管理员，
+   否则插件 API 一律 401 并把页面重定向到登录页（表现为「静态资源全 200 但页面变登录页」）。

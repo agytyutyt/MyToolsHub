@@ -202,6 +202,54 @@ def _file_path(fid, ext):
     return os.path.join(FILES_DIR, f"{fid}.{ext}")
 
 
+#: 异步下载源落盘用的中缀。**必须区别于所有正常落盘名**（`<id>.<ext>` /
+#: `<id>.preview.json`），否则会与原件互相覆盖——故用带点前缀的复合扩展名。
+DL_INFIX = "dl."
+
+
+def _download_path(fid, ext):
+    """异步下载源落盘路径：`<id>.dl.<ext>`。
+
+    与 `_file_path` 同款白名单校验（SEC-1）；ext 为空/非法时返回 None。
+    """
+    if not ID_RE.match(fid or ""):
+        return None
+    if ext not in ALLOWED_EXTS:
+        return None
+    return os.path.join(FILES_DIR, f"{fid}.{DL_INFIX}{ext}")
+
+
+def _read_upload(storage):
+    """校验并读出 multipart 文件字段 → `(ext, blob, filename)`；不合法抛 `_UploadError`。
+
+    统一主文件与异步下载源的校验口径（SEC-3：扩展名白名单 + 20MB 流式硬上限），
+    避免两处各写一份而漂移。`blob` 为 `bytes`，`filename` 为原始文件名（仅取 basename
+    使用，见 SEC-1）。
+    """
+    if storage is None or not storage.filename:
+        raise _UploadError("请选择要上传的文件", 400)
+    ext = os.path.splitext(storage.filename)[1].lstrip(".").lower()
+    if not ext:
+        raise _UploadError("无法识别文件类型（缺少扩展名）", 415)
+    if ext not in ALLOWED_EXTS:
+        raise _UploadError(
+            f"暂不支持 .{ext} 格式（支持：PDF/OFD/Word/Excel/Markdown/文本）", 415)
+    blob = storage.stream.read(MAX_UPLOAD_BYTES + 1)
+    if len(blob) > MAX_UPLOAD_BYTES:
+        raise _UploadError("文件超过 20MB 上限", 413)
+    if not blob:
+        raise _UploadError("文件内容为空", 400)
+    return ext, blob, os.path.basename(storage.filename)
+
+
+class _UploadError(Exception):
+    """上传校验失败：携带 HTTP 状态码与用户可读文案（SEC-5 不暴露内部细节）。"""
+
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.status = status
+
+
 def _office_fallback_possible(ext):
     """旧版格式（doc/xls）上传转换失败后，预览是否仍有兜底途径（决定 4xx 是否放行）：
 
@@ -251,7 +299,8 @@ def _migrate_files():
 
 # 预览缓存格式版本：**引擎渲染行为发生变化时递增**（vendor 补丁/升级），
 # 读取时版本不符即视为无缓存重新渲染 —— 否则升级引擎后旧缓存会让修复"不生效"。
-PREVIEW_CACHE_VERSION = 3   # v3：.doc 归一化警告文案按 flow 模式分流（旧缓存警告横幅需重新生成）
+PREVIEW_CACHE_VERSION = 4   # v4：Word 产物经 office_render 后处理（字体回退补链 + 表格穿模修正）
+# v3：.doc 归一化警告文案按 flow 模式分流（旧缓存警告横幅需重新生成）
 
 
 def _preview_cache_path(fid):
@@ -319,6 +368,11 @@ def _file_brief(rec):
     ext = rec.get("ext", "")
     # original_ext：上传时的扩展名（迁移后所有记录都有值；缺失时回落 ext 兼容旧数据）
     original_ext = rec.get("original_ext") or ext
+    # 异步下载源：上传时可选的「单独提供的下载文档」（下载端点优先返回它）。
+    # 三字段齐全才算配置成功（ext 是落盘判据、name 是下载文件名）。
+    dl_ext = rec.get("download_ext") or ""
+    dl_name = rec.get("download_name") or ""
+    has_dl = bool(dl_ext and dl_name)
     return {
         "id": rec.get("id"),
         "name": rec.get("name", ""),
@@ -332,6 +386,11 @@ def _file_brief(rec):
         "category_id": rec.get("category_id"),
         # converted：是否由服务端做过旧版格式转换（原格式 ≠ 落盘主格式）
         "converted": bool(original_ext and original_ext != ext),
+        # 异步下载源（见上）：has_download_source 供前端切换下载文案/角标
+        "has_download_source": has_dl,
+        "download_ext": dl_ext,
+        "download_name": dl_name,
+        "download_size": rec.get("download_size", 0) if has_dl else 0,
         "created_by": rec.get("created_by", ""),
         "created_by_name": rec.get("created_by_name", ""),
         "created_at": rec.get("created_at", ""),
@@ -538,33 +597,36 @@ def register(app) -> None:
         if not _can_manage(user):
             return jsonify({"ok": False, "error": "仅管理员可上传知识库文件"}), 403
 
-        upload = request.files.get("file")
-        if upload is None or not upload.filename:
-            return jsonify({"ok": False, "error": "请选择要上传的文件"}), 400
+        # 大小预检（SEC-3）：先查 Content-Length，再在 _read_upload 里流式读硬上限+1 字节防虚报。
+        # 上限按 2 倍放宽——主文件与异步下载源各可到 20MB。
+        if request.content_length and request.content_length > 2 * MAX_UPLOAD_BYTES + 1024 * 1024:
+            return jsonify({"ok": False, "error": "文件超过 20MB 上限"}), 413
+        try:
+            ext, blob, upload_name = _read_upload(request.files.get("file"))
+        except _UploadError as e:
+            return jsonify({"ok": False, "error": str(e)}), e.status
+
+        # 异步下载源（可选）：与预览文档**无格式关联**——把该字节流作为下载对象单独落盘，
+        # 用户点「下载」时返回它而非原件。未提供/校验失败时降级为「无下载源」，
+        # **不阻断主上传**（B-4 优雅降级）；失败原因随响应 `download_error` 回传前端提示。
+        dl_ext = dl_name = dl_blob = None
+        download_error = ""
+        dl_upload = request.files.get("download_file")
+        if dl_upload is not None and dl_upload.filename:
+            try:
+                dl_ext, dl_blob, dl_name = _read_upload(dl_upload)
+            except _UploadError as e:
+                download_error = str(e)
+
         name = str(request.form.get("name") or "").strip()
         category_id = str(request.form.get("category_id") or "").strip()
         if not name:
-            name = os.path.splitext(upload.filename)[0] or "未命名"
+            name = os.path.splitext(upload_name)[0] or "未命名"
         if len(name) > MAX_NAME_LEN:
             return jsonify({"ok": False, "error": f"文件名不能超过 {MAX_NAME_LEN} 字"}), 400
         summary = str(request.form.get("summary") or "").strip()
         if len(summary) > MAX_SUMMARY_LEN:
             return jsonify({"ok": False, "error": f"简介不能超过 {MAX_SUMMARY_LEN} 字"}), 400
-
-        ext = os.path.splitext(upload.filename)[1].lstrip(".").lower()
-        if not ext:
-            return jsonify({"ok": False, "error": "无法识别文件类型（缺少扩展名）"}), 415
-        if ext not in ALLOWED_EXTS:
-            return jsonify({"ok": False, "error": f"暂不支持 .{ext} 格式（支持：PDF/OFD/Word/Excel/Markdown/文本）"}), 415
-
-        # 大小校验（SEC-3）：先查 Content-Length，再流式读取硬上限+1 字节防虚报
-        if request.content_length and request.content_length > MAX_UPLOAD_BYTES + 1024 * 1024:
-            return jsonify({"ok": False, "error": "文件超过 20MB 上限"}), 413
-        blob = upload.stream.read(MAX_UPLOAD_BYTES + 1)
-        if len(blob) > MAX_UPLOAD_BYTES:
-            return jsonify({"ok": False, "error": "文件超过 20MB 上限"}), 413
-        if not blob:
-            return jsonify({"ok": False, "error": "文件内容为空"}), 400
 
         # 旧版格式（.doc / .xls）→ 服务端转换为 docx / xlsx 作为**渲染件**；
         # 原件始终单独保存（下载端点专用），不再被转换产物替换。
@@ -614,19 +676,31 @@ def register(app) -> None:
             if os.path.abspath(path) != os.path.abspath(orig_path):
                 with open(path, "wb") as f:
                     f.write(render_blob)
-            # 3) 元数据
+            # 3) 异步下载源落盘（可选；`<fid>.dl.<ext>`，与原件/渲染件/缓存均不同名）
+            dl_path = None
+            if dl_ext and dl_blob:
+                dl_path = _download_path(fid, dl_ext)
+                if dl_path is None:
+                    # 走到这里说明 _read_upload 的白名单校验失效（两者口径一致，理论上不可达）；
+                    # 不阻断上传，仅丢弃下载源并告知（SEC-5 不外抛内部状态）。
+                    dl_ext = dl_name = dl_blob = None
+                    download_error = download_error or "下载源文件格式不被支持，已忽略"
+                else:
+                    with open(dl_path, "wb") as f:
+                        f.write(dl_blob)
+            # 4) 元数据
             rec = {
                 "id": fid,
                 "name": name,
                 "summary": summary,
-                "original_name": os.path.basename(upload.filename),
+                "original_name": upload_name,
                 "ext": render_ext,
                 "size": len(render_blob),
                 # 原件（下载用）：扩展名与字节数
                 "original_ext": upload_ext,
                 "original_size": len(blob),
-                # 预览状态字段（pdf_status/html_status）自阶段 8 起废弃：
-                # 预览按需渲染 + 磁盘缓存，不再有任何后台状态机
+                # 异步下载源（可选）：扩展名/原始文件名/字节数；无下载源时三字段不写
+                # （键缺失 = 未配置，_migrate_files 也不需要为此补键）
                 "category_id": category_id or None,
                 # 归属四字段：来源为会话（规范 9.2 铁律一）
                 "created_by": user.get("username", ""),
@@ -636,11 +710,17 @@ def register(app) -> None:
                 "created_at": _now(),
                 "updated_at": None,
             }
+            if dl_ext and dl_blob and dl_name:
+                rec["download_ext"] = dl_ext
+                rec["download_name"] = dl_name
+                rec["download_size"] = len(dl_blob)
             fstore["files"].append(rec)
             _save_store(_files_file(), fstore)
         resp = {"ok": True, "id": fid, "item": _file_brief(rec)}
         if converted_from:
             resp["converted_from"] = converted_from   # 前端据此提示"已自动转换"
+        if download_error:
+            resp["download_error"] = download_error   # 前端降级提示"下载源未生效"
         return jsonify(resp)
 
     @app.put(f"{API_PREFIX}/files/<fid>")
@@ -696,20 +776,22 @@ def register(app) -> None:
             rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
             if not rec:
                 return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
-            # 清理：原件 + 渲染件 + 预览缓存 + 历史 PDF 残留（旧版本产物，按绝对路径去重）
+            # 清理：原件 + 渲染件 + 异步下载源 + 预览缓存 + 历史 PDF 残留（按绝对路径去重）
             seen, paths = set(), []
-            for e in (rec.get("original_ext") or "", rec.get("ext") or "", "pdf"):
-                p = _file_path(fid, e)
+
+            def _push(p):
                 if not p:
-                    continue
+                    return
                 ap = os.path.abspath(p)
                 if ap in seen:
-                    continue
+                    return
                 seen.add(ap)
                 paths.append(p)
-            cp = _preview_cache_path(fid)
-            if cp and os.path.abspath(cp) not in seen:
-                paths.append(cp)
+
+            for e in (rec.get("original_ext") or "", rec.get("ext") or "", "pdf"):
+                _push(_file_path(fid, e))
+            _push(_download_path(fid, rec.get("download_ext") or ""))
+            _push(_preview_cache_path(fid))
             for p in paths:
                 if os.path.isfile(p):
                     try:
@@ -746,10 +828,13 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/files/<fid>/download")
     def kb_file_download(fid):
-        """附件形式下载**原件**（全体登录用户可用）。
+        """附件形式下载（全体登录用户可用）。
 
-        - Word/Excel 下载的是用户上传的原始文档（doc/docx/xls/xlsx），不是 PDF 版；
-        - 其余类型（pdf/ofd/md/txt/csv）原件即唯一文件，同一端点天然适用；
+        - **配置了「异步下载源」时返回下载源**（上传时单独提供的文档，文件名用其原名）；
+        - 否则返回上传的**原件**：Word/Excel 是原始文档（doc/docx/xls/xlsx）而非预览版，
+          其余类型（pdf/ofd/md/txt/csv）原件即唯一文件；
+        - 下载源字段存在但文件已丢失（人为删除/迁移残留）→ **回落原件**，不 404：
+          下载是基础能力，不因可选增强件缺失而失效（B-4 优雅降级）；
         - `download_name` 交给 Flask 处理 RFC 5987 编码（中文文件名老浏览器也可用）；
         - ID 白名单正则 + 扩展名二次校验（SEC-1），缺失/不可读一律 404（SEC-5）。
         """
@@ -762,11 +847,20 @@ def register(app) -> None:
             rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
         if not rec:
             return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+        # 优先异步下载源；缺失则回落原件
         ext = rec.get("original_ext") or rec.get("ext") or ""
         path = _file_path(fid, ext)
+        name = rec.get("original_name") or f"{fid}.{ext}"
+        dl_ext = rec.get("download_ext") or ""
+        dl_name = rec.get("download_name") or ""
+        if dl_ext and dl_name:
+            dl_path = _download_path(fid, dl_ext)
+            if dl_path and os.path.isfile(dl_path):
+                path = dl_path
+                ext = dl_ext
+                name = dl_name
         if not path or not os.path.isfile(path):
             return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
-        name = rec.get("original_name") or f"{fid}.{ext}"
         return send_file(path, mimetype=EXT_MIME.get(ext, "application/octet-stream"),
                          as_attachment=True, download_name=name, conditional=True)
 

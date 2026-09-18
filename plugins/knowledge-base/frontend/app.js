@@ -306,15 +306,21 @@
         ? '<span class="conv-badge" title="上传时为 .' + esc(f.original_ext || "") +
           '，已自动转换为 .' + esc(f.ext) + '">已转换</span>'
         : "";
+      // 配置了异步下载源：角标提示"下载拿到的是另提供的文档"，并给出其格式
+      var dlBadge = f.has_download_source
+        ? '<span class="dl-badge" title="下载将得到上传时另提供的 .' +
+          esc(f.download_ext || "") + ' 文档">异步源</span>'
+        : "";
       html += '<div class="file-card" data-id="' + esc(f.id) + '">' +
         '<div class="file-card-top"><div class="file-icon ext-' + esc(f.ext) + '">' + esc(label) + "</div>" +
         '<div class="file-main"><div class="file-name" title="' + esc(f.name) + '">' + esc(f.name) +
-        convBadge + "</div>" +
+        convBadge + dlBadge + "</div>" +
         '<div class="file-meta">' + esc(fmtSize(f.size)) + " · " + esc(f.created_by_name || f.created_by || "-") +
         " · " + esc(fmtTime(f.created_at)) + "</div></div>" +
-        // 下载：全员可见（下载原件，不属管理操作）
-        '<button type="button" class="card-dl" data-dl="' + esc(f.id) + '" title="下载原始文档">' +
-        DL_SVG + "</button>" +
+        // 下载：全员可见（不属管理操作）；配置了异步下载源时下载的是下载源文档
+        '<button type="button" class="card-dl" data-dl="' + esc(f.id) + '" title="' +
+        (f.has_download_source ? "下载异步下载源文档（." + esc(f.download_ext || "") + "）" : "下载原始文档") +
+        '">' + DL_SVG + "</button>" +
         (state.canManage
           ? '<button type="button" class="card-edit" data-edit="' + esc(f.id) + '" title="编辑">' +
             '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>'
@@ -509,17 +515,39 @@
         '<input id="m-name" class="input" maxlength="80"></div>' +
         '<div class="form-row"><label class="form-label">保存到分类</label>' +
         '<select id="m-cat" class="select">' + catOptions(state.currentCat === "all" ? "" : state.currentCat, true) + "</select></div>" +
+        // 异步下载源：开关关闭时下面的拖放区整体隐藏（hidden 类，见 style.css 的 .hidden）
+        // 整行是一个 <label>（.switch-row）：点文字、点滑块本体都能激活 checkbox。
+        // 注意：只写 <label for=...> 是不够的——滑块是 absolute 覆盖层，点它不会激活
+        // checkbox（已实测复现），必须让 label 直接包住 input。
+        '<label class="form-row switch-row">' +
+        '<span class="switch-label">异步下载源</span>' +
+        '<span class="switch"><input id="m-dl-switch" type="checkbox">' +
+        '<span class="slider"></span></span></label>' +
+        '<div class="form-row hidden" id="m-dl-row">' +
+        '<div id="m-dl-zone" class="dropzone">' +
+        '<input id="m-dl-file" type="file" accept=".pdf,.ofd,.docx,.doc,.xlsx,.xls,.csv,.md,.markdown,.txt" hidden>' +
+        '<div class="dropzone-inner"><span class="dropzone-icon">' +
+        '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>' +
+        '</span><div class="dropzone-text">拖动文件到此处，或 <b>点击选择文件</b></div>' +
+        '<div class="dropzone-file" id="m-dl-file-name"></div></div></div>' +
+        '<div class="form-hint">为预览文档提供异步下载源。</div></div>' +
         '<div class="form-hint">旧版 .doc / .xls 会自动转换为 .docx / .xlsx 后保存（仅保留文字与表格，样式/图片不迁移）。' +
         'Word / Excel 由服务端渲染引擎按需生成原样式预览（连续单页网页展示，不分页，可在线复制）；' +
-        '无论哪种格式，下载拿到的都是您上传的原始文档。</div>',
+        '未开启「异步下载源」时，下载拿到的就是您上传的原始文档。</div>',
         function () {
           var input = $("m-file");
           if (!input.files || !input.files[0]) throw new Error("请选择要上传的文件");
           var file = input.files[0];
+          var dlOn = $("m-dl-switch").checked;
+          var dlInput = $("m-dl-file");
+          if (dlOn && (!dlInput.files || !dlInput.files[0])) {
+            throw new Error("已开启「异步下载源」，请选择下载文档（或关闭该开关）");
+          }
           var fd = new FormData();
           fd.append("file", file);
           fd.append("name", $("m-name").value.trim() || file.name.replace(/\.[^.]+$/, ""));
           fd.append("category_id", $("m-cat").value || "");
+          if (dlOn) fd.append("download_file", dlInput.files[0]);
           $("modal-ok").disabled = true;
           $("modal-ok").textContent = "上传中…";
           return api("POST", "/files", { body: fd }).then(function (data) {
@@ -529,6 +557,9 @@
             if (data && data.converted_from) {
               toast("上传成功：已自动将 ." + data.converted_from + " 转换为 ." +
                     (data.item && data.item.ext ? data.item.ext : ""), false, 3600);
+            } else if (data && data.download_error) {
+              // 下载源校验失败不阻断上传，但要明确告知它没生效（否则用户以为配上了）
+              toast("上传成功，但异步下载源未生效：" + data.download_error, true, 4200);
             } else {
               toast("上传成功");
             }
@@ -539,7 +570,21 @@
             throw e;
           });
         }, "上传");
+      // 主拖放区
       bindDropzone($("m-drop"), $("m-file"), $("m-file-name"), $("m-name"));
+      // 异步下载源：开关切换（显示/隐藏次级拖放区，并清空已选文件避免误提交）
+      var dlSwitch = $("m-dl-switch");
+      var dlRow = $("m-dl-row");
+      dlSwitch.onchange = function () {
+        dlRow.className = dlSwitch.checked ? "form-row" : "form-row hidden";
+        if (!dlSwitch.checked) {
+          var di = $("m-dl-file");
+          try { di.value = ""; } catch (e) { /* 老浏览器：值清不掉，提交时按开关状态忽略 */ }
+          $("m-dl-file-name").textContent = "";
+          $("m-dl-zone").className = "dropzone";
+        }
+      };
+      bindDropzone($("m-dl-zone"), $("m-dl-file"), $("m-dl-file-name"), null);
     }
     $("btn-upload").onclick = showUpload;
     $("fab-upload").onclick = showUpload;
@@ -695,6 +740,10 @@
     $("dock-ext").textContent = EXT_LABEL[f.ext] || (f.ext || "").toUpperCase();
     $("dock-ext").className = "badge ext-" + f.ext;
     $("dock-title").textContent = f.name;
+    // 下载按钮文案随"异步下载源"变化（下的是下载源而非原件，否则用户会以为下错文件）
+    $("btn-download").title = f.has_download_source
+      ? "下载异步下载源文档（." + (f.download_ext || "") + "）"
+      : "下载原始文档";
     // 提示条：PDF 生成中 / 生成失败 / 旧版格式转换（本次会话内关闭过则不再弹）
     showReaderNotice(f);
     $("btn-copy").disabled = true;

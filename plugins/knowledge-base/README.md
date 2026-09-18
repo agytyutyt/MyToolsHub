@@ -6,6 +6,8 @@
 
 - 管理员（管理员角色 / 超级管理员）：
   - 上传文档（≤20MB）：`.pdf .ofd .docx .doc .xlsx .xls .csv .md .markdown .txt`
+  - **异步下载源（可选）**：上传时另提供一个下载文档，之后点「下载」拿到的是
+    该文档而非上传的原件（详见下文「异步下载源」）
   - **旧版格式自动转换**：`.doc` → `.docx`、`.xls` → `.xlsx`，服务端转换后落盘
     （库内只保留现代格式）；页面三处提示——上传 Snackbar、卡片"已转换"角标、阅读页顶部说明条。
     转换仅保留正文文字与表格，样式/图片/页眉页脚不迁移。
@@ -17,7 +19,8 @@
   - 多级分类管理：新建 / 重命名 / 移动 / 删除（仅空分类可删，同级不重名）
   - 文档管理：改名 / 移动分类 / 删除（在文件卡片上右键）
   - 预览为按需渲染 + 磁盘缓存，无后台状态机，无需手动重转（重开阅读页即重试）
-- **全体登录用户**：浏览分类、阅读、选择复制、**下载原始文档**（tools.json 中 `grant_all: true`）
+- **全体登录用户**：浏览分类、阅读、选择复制、**下载文档**（配置了异步下载源则下下载源，
+  否则下原件；tools.json 中 `grant_all: true`）
 - **Markdown 目录（1.2.3）**：打开 `.md/.markdown` 时自动识别正文里的 h1~h6 生成目录，
   以悬浮窗形式固定**在内容卡片之外的左侧留白处**（不在卡片内，故不受内容缩放影响）；
   点击跳转（平滑滚动 + 顶部留白）、滚动高亮当前章节、当前项自动保持在面板可视区。
@@ -40,14 +43,34 @@
 
   | 文件 | 说明 |
   | --- | --- |
-  | `<id>.<original_ext>` | **原件**（所有类型都存），下载端点专用 |
+  | `<id>.<original_ext>` | **原件**（所有类型都存），下载端点的兜底返回对象 |
+  | `<id>.dl.<download_ext>` | **异步下载源**（可选，上传时单独提供），存在时下载端点优先返回它 |
   | `<id>.docx` / `<id>.xlsx` | 渲染件（仅旧版 `.doc`/`.xls` 由 doc_convert 生成），预览与 mammoth/SheetJS 兜底共用 |
   | `<id>.preview.json` | Office 预览缓存（仅 Word/Excel 类，首次阅读时按需生成） |
   | `<id>.pdf` | （历史遗留）旧版本 PDF 预览产物，阶段 8 起不再生成，阅读端不消费；删除文档时一并清理 |
 
   元数据字段：`ext`（归一化主格式）/ `original_ext`（上传时扩展名，恒有值）/
-  `original_size`。旧版的 `pdf_status`/`html_status` 系列状态字段已废弃
-  （预览按需渲染，无后台状态机），历史记录中的残留字段无消费方、无害。
+  `original_size`；异步下载源三字段 `download_ext`/`download_name`/`download_size`
+  **仅在上传时提供了下载源才写入**（键缺失 = 未配置）。旧版的
+  `pdf_status`/`html_status` 系列状态字段已废弃（预览按需渲染，无后台状态机），
+  历史记录中的残留字段无消费方、无害。
+- **异步下载源（可选，上传时配置）**：上传对话框里的「异步下载源」开关打开后，
+  可出现第二个上传控件（文案固定为"为预览文档提供异步下载源。"），提供一个
+  **与预览文档无格式关联**的文档；此后任何人预览该文档并点「下载」，拿到的都是
+  这个下载源（文件名沿用其原名），而不是上传的原件。典型用法：预览用 `.pdf`
+  （版式保真）、下载给可编辑的 `.doc`。
+  - **可下载格式与主上传同口径**（同一 `ALLOWED_EXTS` 白名单 + 20MB 上限）；
+  - **失败不阻断主上传**（B-4 降级）：下载源缺失/校验失败/超限时，上传照常成功，
+    响应带 `download_error`，前端明确提示"下载源未生效"，下载回落原件；
+  - **文件丢失自动回落**：下载源字段存在但盘上文件被外力删除时，`/download`
+    静默回落原件而非 404（下载是基础能力，不因可选增强件缺失而失效）；
+  - 删除文档时下载源与原件/渲染件/缓存一并清理。
+  - **开关可点性（易踩坑）**：开关行整体是 `<label class="form-row switch-row">`，
+    直接包住 `<input type="checkbox">` 与 `.slider`。**不要改回 `<label for="m-dl-switch">`
+    + 外层 `<div>`**——`.slider` 是 `position:absolute;inset:0` 的覆盖层，它盖住了 input，
+    点滑块本体既不是 `<label>` 也不触发 checkbox，只有点左侧文字才有效（实测"点不动"）。
+    用 `.switch-row` 包 input 后，点文字/点滑块/点行内空白都能切换；
+    `test_routes_preview.py` 第 6 节对此有静态契约断言。
 - 前端：原生 JS + Material 风格，文档渲染全部在浏览器端完成（**不使用任何浏览器内置/插件控件**）：
 
 | 格式 | 渲染库 | 复制实现 |
@@ -95,6 +118,30 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 - **只读与安全**：不生成任何编辑控件；引擎侧全部文本转义 + URL 协议/字体白名单，
   前端侧正文过 DOMPurify（引擎 CSS 为静态内容，摘取后原样挂回，不经消毒）。
 
+### Word 产物后处理补丁（三处显示缺陷修正，vendor 零改动）
+
+`office_render.render_word()` 的返回值经 `_polish_word_html()` 处理，修正引擎产物的
+三处已知显示问题（排查报告见 `docs/eval/知识库Word预览三问题排查报告.md`）：
+
+| 现象 | 根因 | 修法 |
+| --- | --- | --- |
+| 中文"莫名加粗"、笔画竖过细 | 多数客户端**没装 仿宋_GB2312**，引擎 fallback 链跳过同类衬线体直落 `Microsoft YaHei`（黑体）。Canvas 像素签名实测墨量：雅黑 138k vs 仿宋 54k，**差约 2.56 倍** | `_patch_font_fallback()`：在目标字体与雅黑之间插入 `"FangSong","仿宋","SimSun"`，优先落回同类衬线体 |
+| 单元格文字"穿模" | ① 引擎给 `<tr>` 写的 `overflow:hidden` 对 `display:table-row` **无效**；② base CSS **未重置 `<p>` 默认 margin**（浏览器 `1em 0`）撑高单元格；③ `td/th` 缺断行规则 | `_patch_table_overflow()` 清除无效属性 + 补 CSS（`p{margin:0}`、`word-break:break-all`、`td>p:only-child{overflow:hidden}`） |
+
+实测对比（同一 docx）：实际渲染字体 微软雅黑 → **仿宋**；正文字重 → `font-weight:400`；
+精确行高表格行高 49/67/49px → **33/51/33px**。
+
+补丁实现要点：
+- **幂等**：补丁 CSS 带标记 `/*kbdoc-patch*/`；字体补链以「目标字体到雅黑之间是否已含
+  仿宋族别名」为判据。**不要**把裸 `"仿宋"` 放进 `_FANGSONG_NAMES`（它同时是插入值，
+  会自我匹配导致反复膨胀）。
+- **只作用于引擎生成的静态 HTML 字符串**：字体名已被引擎白名单过滤、CSS 由本模块常量
+  生成，无注入面。
+- **覆盖写法**：`仿宋_GB2312` / `仿宋-GB2312` / `仿宋GB2312` / `FangSong_GB2312` /
+  `FangSong-GB2312` / `仿宋_GB2312_CN` + 裸 `仿宋`。
+- **回归断言**：`backend/test_routes_preview.py` 第 0b 节 6 项（补链正确性/顺序、tr 清理、
+  CSS 重置、幂等、内容完整性）。改这段代码必须同步跑该测试。
+
 ### LibreOffice（可选）
 
 仅两条窄路径需要：`.xls` 的高保真归一化通道（缺失时自动 xlrd 兜底）、`.doc` 的
@@ -123,6 +170,8 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 - **渲染 bug 排查路径**：先用 `office_render.render_sheet/render_word` 在模块级复现并对照
   openpyxl 原始样式（填充/合并/列宽逐项比对），再查引擎 CSS 类与 `<td>` 的对应关系——
   「样式张冠李戴」类问题（如蓝格子）大概率在引擎的样式解析/去重层，接入层只负责注入。
+  **注意 `render_word` 的产物已过 `_polish_word_html`**：要对照"引擎原产物"须直接调
+  `dhr.convert(...)`，否则看不出补丁差异（排查报告与回归断言均用此法）。
 - **soffice 配置**：`config.json` 键 `office.soffice_path`（兼容旧键 `pdf.soffice_path`），
   经环境变量 `XHR_SOFFICE` 下发给引擎，改配置免重启；仅影响 `.xls` 高保真与 `.doc` 归一化
   两条窄路径（见上文「LibreOffice（可选）」）。
@@ -140,7 +189,9 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 `/status` `/config` `/categories`（GET/POST/PUT/DELETE）`/files`（GET/POST/PUT/DELETE）
 `/files/<id>/raw`（内联读取渲染件）、`/files/<id>/preview`（Office 预览 JSON：
 `{kind, html, warnings, truncated}`，按需渲染 + 缓存，失败 404）、
-`/files/<id>/download`（attachment 下载**原件**，全体登录用户）。
+`/files/<id>/download`（attachment 下载：有异步下载源则下下载源、否则下原件，
+全体登录用户）。`POST /files` 的 multipart 字段：`file`（必填）+ `name` +
+`category_id` + `download_file`（可选，异步下载源）。
 旧版 `/pdf`、`/pdf-retry`、`/preview-retry` 端点已随状态机一并移除。
 
 ## 已知限制
