@@ -842,6 +842,10 @@ def _tray_icon_image():
     return img
 
 
+# 托盘图标对象引用：notify_service_started 需跨线程经它弹系统气泡通知
+_tray_icon = None
+
+
 def run_tray_icon(host, port):
     """在后台线程运行系统托盘图标（仅打包运行，PyInstaller console=False）。
 
@@ -869,12 +873,92 @@ def run_tray_icon(host, port):
             pystray.MenuItem("退出服务", lambda icon, item: _quit()),
         )
         icon = pystray.Icon("JZToolsHub", _tray_icon_image(), "JZ 工具箱", menu)
+        global _tray_icon
+        _tray_icon = icon
         icon.run()
     except Exception:
         pass  # 托盘启动失败不阻断服务（后台静默运行）
 
 
+def notify_service_started(host, port):
+    """服务真正开始监听后，经托盘图标弹系统级通知（气泡；Win10/11 渲染为 toast）。
+
+    在后台线程运行：轮询本机端口直到可连接，再 notify()。服务每次启动（含
+    插件升级「自动重启」拉起的新实例）都会触发，管理员可据此确认重启成功。
+    仅打包运行有效——源码模式没有托盘图标，本函数也不会被调用。
+    """
+    import socket
+    import time
+
+    url = ("http://127.0.0.1:%d" % port) if host in ("0.0.0.0", "::") \
+        else "http://%s:%d" % (host, port)
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.3)
+    else:
+        return  # 15 秒内端口未就绪（如启动失败），不发通知
+    icon = _tray_icon
+    if icon is None:
+        return  # 托盘未起来（如 pystray 初始化失败），静默放弃
+    for _ in range(5):
+        try:
+            icon.notify("服务已启动：%s" % url, "JZ 工具箱")
+            return
+        except Exception:
+            time.sleep(1.0)  # 托盘窗口可能尚未就绪，短暂重试
+
+
+def _run_restart_helper(wait_pid):
+    """冻结模式自重启助手（`exe --wait-restart <旧PID>`，由 routes._spawn_self_restart 派出）。
+
+    等待旧服务进程退出后，按原工作目录重新拉起 exe。旧方案（分离 cmd 轮询
+    tasklist）在无控制台的分离进程里 tasklist 恒输出为空，助手永远走不到 start
+    行，真机自重启从不生效；改用内核句柄等待，不依赖任何控制台工具、不落临时文件。
+
+    返回进程退出码：0=已拉起新实例；1=放弃重启；2=参数非法。
+    """
+    import ctypes
+    import subprocess
+    import time
+
+    SYNCHRONIZE = 0x00100000
+    WAIT_OBJECT_0 = 0
+    handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, int(wait_pid))
+    if handle:
+        try:
+            # 30 秒上限：旧进程若因异常迟迟不退出，放弃重启以免出现双实例
+            if ctypes.windll.kernel32.WaitForSingleObject(handle, 30000) != WAIT_OBJECT_0:
+                return 1
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    # 旧进程已退出：短暂宽限让监听端口/插件文件句柄回归内核，再原位拉起
+    time.sleep(1.5)
+    base = os.path.dirname(sys.executable)
+    flags = 0
+    for name in ("CREATE_NO_WINDOW", "CREATE_NEW_PROCESS_GROUP"):
+        flags |= getattr(subprocess, name, 0)
+    try:
+        subprocess.Popen([sys.executable], cwd=base, creationflags=flags, close_fds=True)
+    except OSError:
+        return 1
+    return 0
+
+
 if __name__ == "__main__":
+    # 冻结模式自重启助手：由管理后台 _spawn_self_restart 以 `exe --wait-restart <旧PID>`
+    # 派出，等待旧进程退出后原位拉起新实例。必须在任何初始化（数据目录 / 端口 / 插件
+    # 加载）之前处理——助手实例自身不对外服务，处理完即退出；参数非法也直接退出，
+    # 绝不落回正常启动（防止与旧实例形成双实例）。
+    if getattr(sys, "frozen", False) and "--wait-restart" in sys.argv:
+        try:
+            _wait_pid = int(sys.argv[sys.argv.index("--wait-restart") + 1])
+        except (IndexError, ValueError):
+            sys.exit(2)
+        sys.exit(_run_restart_helper(_wait_pid))
     init_data_root()  # 迁移旧版程序目录数据 + 解析数据根目录（决定日志/配置位置）
     setup_access_logging(app)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
@@ -906,6 +990,11 @@ if __name__ == "__main__":
         threading.Thread(
             target=run_tray_icon, args=(host, port),
             daemon=True, name="tray-icon",
+        ).start()
+        # 服务就绪后的系统级通知（托盘气泡；自动重启拉起的新实例同样触发）
+        threading.Thread(
+            target=notify_service_started, args=(host, port),
+            daemon=True, name="startup-notify",
         ).start()
     try:
         if getattr(sys, "frozen", False) and serve is not None:

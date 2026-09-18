@@ -648,35 +648,28 @@ def _load_plugin_admin():
 
 
 def _spawn_self_restart():
-    """冻结模式自重启：spawn 独立 cmd，等本进程退出后按原工作目录重新拉起 exe。
+    """冻结模式自重启：派出分离的助手进程，等本进程退出后按原工作目录重新拉起 exe。
 
     见 docs/design/插件独立升级方案-设计文档.md §9.3。返回 (ok, error)。
     要点：① 先回 HTTP 响应再退出（调用方在本函数内用 threading.Timer 延迟 os._exit）；
-         ② 助手轮询本进程 PID 而不是固定延时（避免端口未释放导致启动即失败）；
-         ③ `cd /d <程序目录>` 必须带（与托盘/快捷方式同款工作目录约定）。
+         ② 助手 = exe 自身以 `--wait-restart <本进程PID>` 模式运行（见 app.py
+         `_run_restart_helper`），用 OpenProcess 内核句柄等待旧进程退出，不依赖
+         控制台工具。曾用「cmd 助手轮询 tasklist」方案，实测在 DETACHED_PROCESS
+         下 tasklist 输出恒为空、助手永远走不到 start 行，真机自重启从不生效；
+         ③ 助手以本进程为父派生，工作目录 = 程序目录（与托盘/快捷方式同款约定）。
     """
     import subprocess
-    import tempfile
     import threading
 
     exe = sys.executable
     base = PROJECT_DIR
     pid = os.getpid()
-    helper = os.path.join(tempfile.gettempdir(), "jz-restart-%d.cmd" % pid)
     try:
-        # 助手内容全是 ASCII，而路径可能含中文 → 用系统默认 ANSI（GBK）编码写盘
-        with open(helper, "w", encoding="gbk", errors="replace") as f:
-            f.write("@echo off\r\n")
-            f.write(":wait\r\n")
-            f.write('tasklist /FI "PID eq %d" | find "%d" >nul && '
-                    '(timeout /t 1 /nobreak >nul & goto wait)\r\n' % (pid, pid))
-            f.write('cd /d "%s"\r\n' % base)
-            f.write('start "" /min "%s"\r\n' % exe)
-            f.write('del "%%~f0"\r\n')
         flags = 0
-        for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP"):
+        for name in ("CREATE_NO_WINDOW", "CREATE_NEW_PROCESS_GROUP"):
             flags |= getattr(subprocess, name, 0)
-        subprocess.Popen(["cmd", "/c", helper], creationflags=flags, close_fds=True, cwd=base)
+        subprocess.Popen([exe, "--wait-restart", str(pid)],
+                         creationflags=flags, close_fds=True, cwd=base)
     except Exception as e:  # pragma: no cover - 平台/权限异常
         return False, "启动重启助手失败：%s" % e
 
