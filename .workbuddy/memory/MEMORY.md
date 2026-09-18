@@ -31,6 +31,8 @@
 - 主包版本一律三段式 `X.Y.Z`。
 - 信息传输：**单码口径**，`docx/doc/xlsx/xlsm/xls/csv/txt/md/markdown/ppt/pptx/pdf` 12 个 ext 在册；`ppt`/`pdf` 走精简文本；**多码同屏不采用**。
 - 本机打包：先 commit → `tools/build-deploy-local.py -ZipOnly` → `verify-package.py --smoke`。
+  **只改一个插件就别重出主包** → `tools\build-plugin-package.ps1 -Id <id>`（~1 min）。
+  出包流程见技能 `.workbuddy/skills/jztoolshub-plugin-release/SKILL.md`。
 
 ## C Python / 浏览器基线
 
@@ -42,7 +44,11 @@
 ## D 本机限制与工具
 
 - PowerShell 执行策略 Restricted：用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`。
+  **但不能从 Bash 调 powershell.exe**（安全策略拦）→ 用 PowerShell 工具。
+  **PowerShell 工具不回显子进程 stdout**：必须 `*> $log` 重定向到文件再读，日志是 **UTF-16**。
+  外层 `&` 也会被策略拦 → 要再包一层 `& powershell -NoProfile -ExecutionPolicy Bypass -File "<脚本>"`。
 - Bash PATH 损坏 → 全部绝对路径；**且不要 `cd` 进项目目录**（触发 `cd: null directory` 后长命令会被 SIGTERM 截断）。长脚本输出写文件再读。
+  （`grep/ls/tail/head/dirname/sleep` 均 `command not found`，用专用工具代替。）
 - **浏览器探针页**（放 `backend/out/`）：引 `frontend/` 必须 `../../frontend/`；`<link>` 要加 `?v=<mtime>` 破 `file://` 缓存；否则整个样式表静默失效（易误判为新 CSS 写错）。探针要跑**真实函数**就从源码抽取，别手抄副本。
 - **agent-browser**：`D:\OpenClaw\npm-global\node_modules\agent-browser\bin\agent-browser-win32-x64.exe`；Bash 直接调；多步在同一调用链内 `&&` 串联；eval 禁 `| & >`；先 `set viewport`；原生 click 对插件页无效，用 `eval "el.click()"`。
   **验证 UI 交互必须用真实指针 `click`**（不是 eval 里的 `.click()`）——程序化点击会掩盖"点滑块无反应"这类真实缺陷。
