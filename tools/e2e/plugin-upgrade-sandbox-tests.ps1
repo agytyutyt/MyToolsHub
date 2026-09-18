@@ -126,7 +126,15 @@ if (Test-Path -LiteralPath $fixKb) { Remove-Item -LiteralPath $fixKb -Recurse -F
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $fixKb) | Out-Null
 Copy-Item -LiteralPath (Join-Path $Repo "plugins\knowledge-base") -Destination $fixKb -Recurse -Force
 Get-ChildItem -LiteralPath $fixKb -Recurse -Directory -Force | Where-Object { $_.Name -in @("__pycache__", "out") } | Remove-Item -Recurse -Force
-# ① 基线构建（未改动，1.0.0）→ 记录 ?v=N 基线到沙箱登记
+# 【必须】把夹具版本钉死在 1.0.0：本测试后续步骤用 1.0.1 / 同号 做"版本递增"判定，
+# 若夹具沿用真实插件当前版本（会随发版一路上涨），基线就会高于 1.0.1，
+# 于是步骤②③会被正确地判为"版本未递增"而失败——**这是测试夹具的缺陷，不是产品缺陷**。
+# 同号重建：沙箱登记（-RegistryFile）在本轮起始可能残留上一次的 1.3.0 记录，故先清空。
+if (Test-Path -LiteralPath $RegFile) { Remove-Item -LiteralPath $RegFile -Force }
+$fixMan0 = Get-Content -LiteralPath (Join-Path $fixKb "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$fixMan0.version = "1.0.0"
+Write-JsonFile (Join-Path $fixKb "manifest.json") $fixMan0
+# ① 基线构建（钉死 1.0.0）→ 记录 ?v=N 基线到沙箱登记
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir)
 Check "① 基线构建成功（1.0.0，记录缓存戳基线）" ($r.Code -eq 0) $r.Text
 # ② 改后端 + 改前端 JS，版本 → 1.0.1，但不递增 ?v=N → C-3 必须拒绝
@@ -137,12 +145,16 @@ $fixMan.version = "1.0.1"
 Write-JsonFile (Join-Path $fixKb "manifest.json") $fixMan
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir)
 Check "② C-3：JS 已变但 ?v=N 未递增 → 构建被拒" ($r.Code -ne 0 -and $r.Text -match "缓存") $r.Text
-# ③ 递增 ?v=16 → 17，再构建 → 成功
+# ③ 递增 app.js 的 ?v=N（**按当前值 +1，勿写死数字**）→ 再构建 → 成功
+#    写死 ?v=16→17 会在插件真实 ?v 早已大于 16 时静默不生效，导致步骤③被 C-3 正确拒绝。
 $html = Get-Content -LiteralPath (Join-Path $fixKb "frontend\index.html") -Raw -Encoding UTF8
-$html = $html -replace 'app\.js\?v=16', 'app.js?v=17'
+$m = [regex]::Match($html, 'app\.js\?v=(\d+)')
+if (-not $m.Success) { throw "夹具 index.html 未找到 app.js?v=N，无法执行 C-3 步骤③" }
+$curV = [int]$m.Groups[1].Value
+$html = $html -replace ('app\.js\?v=' + $curV), ('app.js?v=' + ($curV + 1))
 [System.IO.File]::WriteAllText((Join-Path $fixKb "frontend\index.html"), $html, (New-Object System.Text.UTF8Encoding($false)))
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir, "-MinApp", "1.9.0", "-FromMin", "0.9.0")
-Check "③ C-3：递增 ?v=N 后构建成功（v1.0.1）" ($r.Code -eq 0) $r.Text
+Check "③ C-3：递增 ?v=$curV→$($curV + 1) 后构建成功（v1.0.1）" ($r.Code -eq 0) $r.Text
 $pkg = Join-Path $OutDir "JZToolsHub-插件-knowledge-base-v1.0.1.zip"
 Check "   包已产出" (Test-Path -LiteralPath $pkg)
 # ④ 同版本再次发布（不加 -Force）→ C-2 必须拒绝
