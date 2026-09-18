@@ -1,5 +1,16 @@
 # TODO —— 知识库插件预览优化（2026-09-14）
 
+> **✅ 已归档（2026-09-17）** —— 归档原因：**三项需求全部完成（`[x]`）**，
+> 已随 knowledge-base **1.2.1 / 1.2.2 / 1.2.3** 三个版本交付：
+> ① `.doc` 归一化警告按渲染模式分流（vendor dhr 第 5 处补丁，`PREVIEW_CACHE_VERSION` 2→3）；
+> ② PDF 预览改流式连续布局（`reader.js::renderPdf` + `.pdf-scroll`）；
+> ③ dock 常驻全格式内容缩放（0.5~3.0，PDF/OFD 走引擎原生缩放）。
+> **现行落点**：`plugins/knowledge-base/README.md` 与
+> `docs/design/知识库Office预览-设计文档.md`；设计约束看 `docs/design/知识库插件-设计文档.md`。
+> 本文件**内容不再维护**。
+> 文中路径引用已按 2026-09-17 的 `docs/` 分层结构更新。
+
+
 > 三项需求：① 修复 .doc 预览顶部误导性提示；② PDF 预览改流式连续布局；
 > ③ 底部工具栏新增全格式内容缩放（仅缩放内容，不改浏览器缩放）。
 
@@ -63,7 +74,7 @@
 - [x] 前端：agent-browser 走查 PDF 连续滚动 / 页码 / 缩放保位 /
   Word·Excel·MD·TXT 缩放、dock 布局。
 - [x] 文档回写：`plugins/knowledge-base/README.md`、
-  `docs/知识库插件-设计文档.md`（PDF 渲染器与缩放描述）、`HANDOFF.md` 状态头。
+  `docs/design/知识库插件-设计文档.md`（PDF 渲染器与缩放描述）、`HANDOFF.md` 状态头。
 - [x] 当日工作日志 `.workbuddy/memory/2026-09-14.md`。
 
 ## 风险与注意

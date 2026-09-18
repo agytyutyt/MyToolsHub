@@ -9,7 +9,7 @@
     python pdf_research_server.py seed-only     # 造一份多页 A4 测试 PDF 并入库
     python pdf_research_server.py serve         # 起服务（端口 5178，隔离数据根）
 
-配套探测（`.workbuddy/pdf-research/` 下留产出）：
+配套探测（产出写到 `.workbuddy/tmp/pdf-research/`，已 gitignore）：
   1) 探针页 http://127.0.0.1:5178/plugin/knowledge-base/index-probe.html?noio[&id=<文件id>]
      直接调 KBReader.render 打开 PDF，把 dpr / 位图尺寸 / 显示设备像素 / 两轴相位
      POST 回 /probe-report（收在 pdf-research/probe-report.jsonl）；
@@ -26,8 +26,8 @@ import os
 import sys
 import types
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA = os.path.join(REPO, ".workbuddy", "e2e-pdf-data")
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))  # tools/dev/ → 仓库根
+DATA = os.path.join(REPO, ".workbuddy", "tmp", "e2e-pdf-data")   # 隔离数据根，已 gitignore
 os.environ["JZTOOLS_DATA_ROOT"] = DATA
 os.makedirs(DATA, exist_ok=True)
 
@@ -332,8 +332,8 @@ def assets(filename):
     return send_from_directory(FRONTEND, filename)
 
 
-REPORT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "pdf-research", "probe-report.jsonl")
+REPORT_PATH = os.path.join(REPO, ".workbuddy", "tmp", "pdf-research", "probe-report.jsonl")
+os.makedirs(os.path.dirname(REPORT_PATH), exist_ok=True)
 
 
 @app.route("/slow.png")

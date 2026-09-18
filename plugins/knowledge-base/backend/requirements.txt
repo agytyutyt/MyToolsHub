@@ -11,7 +11,7 @@
 #   （先前此处写的"引擎要求 Python >= 3.10"是错的，已纠正——那是上游 pyproject 的
 #   元数据，不是运行时约束。真正的问题是 vendor/xhr/__init__.py 少了一行
 #   `from typing import Optional`，导致 Python ≤3.13 导入即 NameError；详见
-#   vendor/README.md 的补丁清单与 docs/Python版本选型评估.md §1.5。）
+#   vendor/README.md 的补丁清单与 docs/eval/Python版本选型评估.md §1.5。）
 #   任一缺失时插件其余功能不受影响，仅该格式的自动转换不可用（页面明确提示，
 #   见 GET /api/knowledge-base/status 的 convert_legacy 字段）。
 #

@@ -465,7 +465,7 @@ def sync_templates():
     版本一致时跳过（幂等）。
 
     另：插件可经「插件包」单独升级而**不改应用版本**（见
-    docs/插件独立升级方案-设计文档.md §8），因此插件级模板（plugins/<id>/**/*.template.json）
+    docs/design/插件独立升级方案-设计文档.md §8），因此插件级模板（plugins/<id>/**/*.template.json）
     的同步不受应用版本门控，每次启动按内容指纹增量补键（sync_plugin_templates）。
     """
     base = get_base_dir()
@@ -635,7 +635,7 @@ def sync_plugin_templates(base=None, root=None):
 # 管理后台在页内应用插件包（阶段二）时，后端代码换了但进程还在跑旧代码；
 # 这时在状态登记里打一个 restart_pending 标记，页面上提示"需重启生效"，
 # 启动完成后由 app.py 调 clear_plugin_restart_flags() 清掉
-# （见 docs/插件独立升级方案-设计文档.md §9）。
+# （见 docs/design/插件独立升级方案-设计文档.md §9）。
 
 
 def mark_plugin_restart_pending(plugin_id, note="", root=None):

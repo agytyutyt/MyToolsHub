@@ -165,6 +165,6 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 
 ## 设计文档
 
-- `docs/知识库插件-设计文档.md`（基线，含开发 TODO 与断点续开发记录）
-- `docs/插件库优化方案-设计文档.md`（**本轮改造**：原件下载 + Office 预览引擎
+- `docs/design/知识库插件-设计文档.md`（基线，含开发 TODO 与断点续开发记录）
+- `docs/design/知识库Office预览-设计文档.md`（**本轮改造**：原件下载 + Office 预览引擎
   演进（PDF→手绘→xhr/dhr 双引擎），含分阶段 TODO）

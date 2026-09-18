@@ -14,7 +14,7 @@
 #       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
 #       默认**不**把离线运行组件打进包（主包瘦身，约 100 MB 级）：Chrome 与 LibreOffice
 #       改由独立的「离线组件包」分发，目标机按需一键安装（见 tools\build-offline-component.ps1
-#       与 docs\LibreOffice核心组件一键安装评估.md）。要出旧式「组件随包」的胖包时加
+#       与 docs\guide\LibreOffice核心组件一键安装评估.md）。要出旧式「组件随包」的胖包时加
 #       -WithOfflineRuntime；-SkipOfflineRuntime 为旧开关，现已等价于默认行为（保留仅为兼容）。
 #       LibreOffice 若已生成裁剪核心包（runtime\libreoffice\libreoffice-core.zip，
 #       用 tools\build-libreoffice-core.py 生成），随包时默认「用它替代原始 MSI」，
@@ -31,7 +31,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-# 打包解释器基线（与 Windows 10+ 目标机配套；见 docs/Python版本选型评估.md）
+# 打包解释器基线（与 Windows 10+ 目标机配套；见 docs/eval/Python版本选型评估.md）
 $PyBaseline = "3.14"
 
 $Root    = $PSScriptRoot
@@ -140,7 +140,16 @@ foreach ($extra in @("wheels", "tools")) {
     $p = Join-Path $Root $extra
     if (Test-Path $p) { Copy-Item -Recurse -Force $p $AppDir }
 }
-Copy-Item -Recurse -Force (Join-Path $Root "docs")    $AppDir
+# docs 分层随包（2026-09-17）：只带「交付层 guide + 设计层 design + 索引」。
+# 内部层 docs/eval（一次性评估稿）/ docs/plan（活清单）/ docs/archive（历史留证）不随包。
+# ★ 口径与 tools\build-deploy-local.py 的 COPY_DIRS 一致 —— 改一处要两处一起改。
+New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "docs") | Out-Null
+foreach ($sub in @("guide", "design")) {
+    $p = Join-Path $Root "docs\$sub"
+    if (Test-Path $p) { Copy-Item -Recurse -Force $p (Join-Path $AppDir "docs") }
+}
+$docIndex = Join-Path $Root "docs\README.md"
+if (Test-Path $docIndex) { Copy-Item -Force $docIndex (Join-Path $AppDir "docs") }
 Copy-Item -Force (Join-Path $Root "README.md") $AppDir
 Copy-Item -Force (Join-Path $Root "HANDOFF.md") $AppDir
 # 顶层契约文档（README/HANDOFF 会引用它们，此前漏拷导致部署包内引用悬空）
@@ -157,9 +166,9 @@ Copy-Item -Force (Join-Path $Root "config\tools.json") (Join-Path $AppDir "confi
 # out 为插件本地测试产物目录（如 knowledge-base 渲染引擎的目检样例，已 gitignore）
 # ★ 只删精确名 config.json（本机运行时配置，含 API Key）——配置模板一律命名
 #   *.template.json，与运行时配置分离，不会被这条规则命中（历史教训见
-#   docs/P0问题修复方案.md FIX-1：模板曾叫 config.json，被此处删掉导致同步链路静默失效）。
+#   docs/archive/P0问题修复方案.md FIX-1：模板曾叫 config.json，被此处删掉导致同步链路静默失效）。
 # ★ 规则来自 tools\plugin-payload-rules.json —— 与「插件包」构建工具共用同一份清单，
-#   避免"整包"与"插件包"两条链路漂移（见 docs\插件独立升级方案-设计文档.md §4.4 / §6.3）。
+#   避免"整包"与"插件包"两条链路漂移（见 docs\design\插件独立升级方案-设计文档.md §4.4 / §6.3）。
 $rulesFile = Join-Path $Root "tools\plugin-payload-rules.json"
 $excludeDirs  = @("data", ".task_cache", "__pycache__", "out")
 $excludeFiles = @("config.json", "config.local.json", ".env", ".DS_Store", "Thumbs.db")

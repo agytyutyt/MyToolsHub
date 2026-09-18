@@ -29,9 +29,12 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REQUIRED = ["JZToolsHub.exe", "start.bat", "一键安装.bat", "一键卸载.bat", "install.ps1",
             "config/tools.json", "version.json", "README.md", "HANDOFF.md",
-            "插件设计规范.md", "移动端APP.md", "_internal/python3*"]
+            "插件设计规范.md", "移动端APP.md", "docs/README.md", "_internal/python3*"]
 TEMPLATE_MIN = 4
 BAD_IN_PLUGINS = re.compile(r"(__pycache__|/data/|/out/|\.task_cache/|/config\.json$|\.pyc$)")
+# 不随包清单：内部文档层（docs/eval|plan|archive）与插件内测试脚本（口径见
+# tools/plugin-payload-rules.json 的 _comment 与 tools/build-deploy-local.py 的 COPY_DIRS）
+FORBIDDEN_IN_PACKAGE = re.compile(r"^(docs/(eval|plan|archive)/|plugins/.+/test_.*\.py$|plugins/.+/conftest\.py$)")
 
 
 def free_port():
@@ -110,6 +113,10 @@ def main():
     bad = [n for n in names if n.startswith("plugins/") and BAD_IN_PLUGINS.search(n)]
     check(not bad, "plugins/ 无运行态夹带（data/__pycache__/config.json/*.pyc）",
           ("夹带 %d 项：%s" % (len(bad), bad[:3])) if bad else "")
+
+    leaked = [n for n in names if FORBIDDEN_IN_PACKAGE.search(n)]
+    check(not leaked, "无内部文档层 / 插件测试脚本随包（docs eval·plan·archive、test_*.py）",
+          ("夹带 %d 项：%s" % (len(leaked), leaked[:3])) if leaked else "")
 
     try:
         bat = z.read("start.bat").decode("gbk")

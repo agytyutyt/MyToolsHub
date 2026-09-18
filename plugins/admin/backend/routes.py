@@ -650,7 +650,7 @@ def _load_plugin_admin():
 def _spawn_self_restart():
     """冻结模式自重启：spawn 独立 cmd，等本进程退出后按原工作目录重新拉起 exe。
 
-    见 docs/插件独立升级方案-设计文档.md §9.3。返回 (ok, error)。
+    见 docs/design/插件独立升级方案-设计文档.md §9.3。返回 (ok, error)。
     要点：① 先回 HTTP 响应再退出（调用方在本函数内用 threading.Timer 延迟 os._exit）；
          ② 助手轮询本进程 PID 而不是固定延时（避免端口未释放导致启动即失败）；
          ③ `cd /d <程序目录>` 必须带（与托盘/快捷方式同款工作目录约定）。
@@ -1413,7 +1413,7 @@ def register(app):
         return jsonify({"ok": True, "data_root": root, "migrated": moved})
 
     # ---------------- 插件管理（插件包：上传 / 应用 / 回滚 / 批量升级，仅超级管理员） ----------------
-    # 设计：docs/插件独立升级方案-设计文档.md §9（阶段二：应用内升级）与 §10（阶段三：共享盘索引）
+    # 设计：docs/design/插件独立升级方案-设计文档.md §9（阶段二：应用内升级）与 §10（阶段三：共享盘索引）
     # 安全（PU-1~PU-6）：全部仅限超级管理员；上传包先落到数据根 .staging\uploads\（不落程序目录），
     #   校验通过才允许应用；apply 时服务端**重新校验一遍**（不信任前端传来的任何状态）；
     #   逐条规则与目标机离线安装器 tools/plugin-upgrade/install-plugin.ps1 一致。

@@ -270,7 +270,7 @@ def register(app):
     # ★ 路由函数命名纪律：一律带插件前缀 ff_*。
     # Flask 以 view_func.__name__ 作为 endpoint，若本插件定义 def status() 而其他插件
     # 也定义同名函数，会在启动阶段抛 AssertionError 导致注册失败（历史缺陷：本插件
-    # 曾是全项目唯一不带前缀的路由集合）。详见 docs/P0问题修复方案.md FIX-4。
+    # 曾是全项目唯一不带前缀的路由集合）。详见 docs/archive/P0问题修复方案.md FIX-4。
     @app.get(f"{API_PREFIX}/status")
     def ff_status():
         cfg = load_config()

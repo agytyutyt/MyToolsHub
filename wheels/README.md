@@ -86,4 +86,4 @@ python tools/build-zfec-wheel.py --no-verify
 3. `numpy` / `pillow` 同属版本锁定型（`cpXX-cpXX`），一并确认；
    `opencv-python`（`cp37-abi3`）与 `cryptography`（`cp311-abi3`）是稳定 ABI，无需担心。
 
-详细评估与实测证据见 `docs/Python版本选型评估.md` §5。
+详细评估与实测证据见 `docs/eval/Python版本选型评估.md` §5。

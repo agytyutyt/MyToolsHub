@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<DeployName>\（增量合并）。
 
-**为什么不用 build-deploy.ps1 全程跑**（详见 docs\打包部署手册.md §0）：
+**为什么不用 build-deploy.ps1 全程跑**（详见 docs\guide\打包部署手册.md §0）：
   ① 它开头 `Remove-Item -Recurse` 删 dist/ build/ 部署目录 —— 本机工具会话的 safe-delete
      会把「批量删除 >50 项」拦成进程中断；
   ② 整包构建（PyInstaller 冷缓存 ~6 min + 组装 + 压缩 ~3 min）会撞工具 600 s 命令上限。
@@ -10,9 +10,13 @@ r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<Deploy
 
 与 build-deploy.ps1 的对应关系（行为逐一复刻，勿擅自改口径）：
   §3.1   dist\JZToolsHub\*（exe + _internal）
-  §3.2   static/ plugins/ wheels/ tools/ docs/ + README/HANDOFF/插件设计规范/移动端APP
+  §3.2   static/ plugins/ wheels/ tools/ + docs/README.md + docs/guide/ + docs/design/
+         + README/HANDOFF/插件设计规范/移动端APP
          + config\tools.json + install.ps1 + 一键安装.bat + 一键卸载.bat
          复制与清理均按 tools\plugin-payload-rules.json（与「插件包」共用同一份真源）
+         ★ docs 分层随包（2026-09-17）：只带「交付层 guide + 设计层 design + 索引」，
+           内部层 docs/eval（一次性评估）、docs/plan（活清单）、docs/archive（历史留证）
+           不随包 —— 口径与 build-deploy.ps1 §3.2 一致，改一处要两处一起改
   §3.2.1 模板自检：*.template.json >= 4，否则中止（模板被误删是历史事故）
   §3.3   logs/
   §3.4   version.json（UTF-8 **无 BOM**，Python json.load 遇 BOM 会报错）
@@ -40,8 +44,10 @@ PY_BASELINE = "3.14"
 TEMPLATE_MIN = 4
 
 # §3.2 复制清单（顺序与 build-deploy.ps1 一致，勿随意增删）
-COPY_DIRS = ["static", "plugins", "wheels", "tools", "docs"]
-COPY_FILES = ["install.ps1", "一键安装.bat", "一键卸载.bat",
+# ★ docs 只列「随包层」：guide（交付手册）+ design（设计文档）+ 根索引
+#   不随包：docs/eval、docs/plan、docs/archive（内部评估稿 / 活清单 / 历史留证）
+COPY_DIRS = ["static", "plugins", "wheels", "tools", "docs/guide", "docs/design"]
+COPY_FILES = ["install.ps1", "一键安装.bat", "一键卸载.bat", "docs/README.md",
               "README.md", "HANDOFF.md", "插件设计规范.md", "移动端APP.md"]
 
 START_BAT = """@echo off

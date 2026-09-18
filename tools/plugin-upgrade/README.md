@@ -61,6 +61,6 @@ powershell -ExecutionPolicy Bypass -File tools\e2e\plugin-upgrade-sandbox-tests.
 
 ## 相关文档
 
-- `docs/插件独立升级方案-设计文档.md` —— 方案、包规范、验收标准
-- `docs/离线部署包说明.md` §11 —— 目标机操作口径（与整包部署并列）
+- `docs/design/插件独立升级方案-设计文档.md` —— 方案、包规范、验收标准
+- `docs/guide/离线部署包说明.md` §11 —— 目标机操作口径（与整包部署并列）
 - `插件设计规范.md` §15 —— 对插件开发者的新增约束（版本纪律 / 依赖自包含 / 可独立升级性）

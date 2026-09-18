@@ -33,6 +33,11 @@
 
 ---
 
+> **文档地图**：本文件是**项目总览**；要找"我该看哪份"看 **`docs/README.md`**（文档索引 + 覆盖矩阵）；
+> 要做具体的事看 **`docs/项目管理手册.md`**（改代码 / 开插件 / 移植 / 打包运维 四类场景）；
+> 要发版看 **`docs/guide/打包部署手册.md`**（唯一命令真源）；插件开发铁律看 **《插件设计规范.md》**。
+> 每个事实只在一个文档里维护（清单见 `docs/README.md` §3），本文件不重复它们的正文。
+
 ## 1. 项目简介
 
 ### 1.1 它解决什么问题
@@ -72,7 +77,7 @@
 
 | 维度 | 基线 | 说明 |
 | --- | --- | --- |
-| **服务器/目标机操作系统** | **Windows 10 及以上**（x64） | Python 3.14 官方要求 Windows 10+。**不支持 Windows 7**：自 2026-09-14 起正式取消 Win7 兼容，不再维护 Python 3.8 打包支线（原因与影响见 `docs/Python版本选型评估.md` §4） |
+| **服务器/目标机操作系统** | **Windows 10 及以上**（x64） | Python 3.14 官方要求 Windows 10+。**不支持 Windows 7**：自 2026-09-14 起正式取消 Win7 兼容，不再维护 Python 3.8 打包支线（原因与影响见 `docs/eval/Python版本选型评估.md` §4） |
 | **服务端 Python** | **3.14**（打包基线，唯一） | 开发机最低 3.12；详见 §2.2 |
 | **浏览器** | **Chrome ≥ 72**（含 Edge ≥ 79、同内核国产浏览器） | 内网既有环境基线。**低于此版本不保证可用**；页面代码因此保留了若干兼容措施（见下方说明） |
 | **服务端其他** | 无 | 纯 Python + 前端源码，无容器/IIS/数据库依赖 |
@@ -98,7 +103,7 @@
 | --- | --- | --- |
 | **打包 / 生产运行** | **3.14** | 唯一基线。现有部署产物均为 `python314.dll`（跨 v1.3.5~v1.6 实践） |
 | 源码开发 | 最低 3.12，推荐 3.14 | 3.12 起主流依赖仍与开发同步；与打包版本一致最省心 |
-| ~~3.8 / 3.10~~ | **不推荐** | 3.8 随 Win7 一并取消（已 EOL 2024-10）；3.10 于 2026-10-31 EOL。详见 `docs/Python版本选型评估.md` |
+| ~~3.8 / 3.10~~ | **不推荐** | 3.8 随 Win7 一并取消（已 EOL 2024-10）；3.10 于 2026-10-31 EOL。详见 `docs/eval/Python版本选型评估.md` |
 
 > **不需要"升级"到更高版本**：3.14 已经是当前最新稳定版（3.15 预计 2026-10-01 发布，
 > 待第三方 wheel 齐备后再评估）。核实过的真实约束只有两条：目标机 Windows 10+，
@@ -144,6 +149,7 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 | --- | --- | --- |
 | LibreOffice | 外部程序（非 pip） | 仅影响知识库 `.xls` 高保真归一化与 `.doc` 归一化两条窄路径；缺失时 `.xls` 自动走 xlrd 兜底，其余功能不受影响 |
 | Chrome（或任意现代浏览器） | 外部程序 | 仅影响目标机的浏览体验；目标机自带 Chrome/Edge 即可，确实没有时用「Chrome 离线组件包」装 |
+| libopenh264（`openh264-2.5.0-win64.dll`，**仓库已提供**） | 动态库（随仓库分发） | 仅影响「信息传输」视频链路的 MP4 编码；cv2 自带编码器可用时无需它。缺 DLL 时接口会明确提示手工放置。**来源与许可证见 `docs/guide/离线部署包说明.md` §9** |
 | 高德地图 Key | 前端配置 | 仅影响「地图标点」插件 |
 | 大模型 API（OpenAI 兼容） | 前端配置 | 影响战果录入、人物关系星图、过滤器/轨迹速写的"大模型模式" |
 
@@ -157,8 +163,8 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 > 主包（`deploy\JZToolsHub-v<版本>.zip`，≈122 MB）**默认不含任何离线组件**；LibreOffice 组件
 > 内含**裁剪核心包**（只保留 `.doc→.docx` / `.xls→.xlsx` 需要的那套，357.5 MB → 164.5 MB），
 > 安装到 `<程序目录>\runtime\libreoffice\`，应用**自动探测、零配置、装完即生效（无需重启工具箱）**；
-> 也可随时双击 `卸载LibreOffice核心组件.bat` 单独移除。详见 `docs/离线部署包说明.md` §1/§2
-> 与 `docs/LibreOffice核心组件一键安装评估.md`。
+> 也可随时双击 `卸载LibreOffice核心组件.bat` 单独移除。详见 `docs/guide/离线部署包说明.md` §1/§2
+> 与 `docs/guide/LibreOffice核心组件一键安装评估.md`。
 
 ---
 
@@ -180,7 +186,7 @@ python app.py
 
 ### 3.2 打包构建
 
-> **发版操作只看 `docs/打包部署手册.md`**（一页流程 + 可复制命令 + 坑清单 + 故障处置表）。
+> **发版操作只看 `docs/guide/打包部署手册.md`**（一页流程 + 可复制命令 + 坑清单 + 故障处置表）。
 > 本节以下内容是构建脚本的全貌，只在**要改构建口径**时才需要细读。
 
 ```powershell
@@ -219,7 +225,7 @@ powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1 -Comp
 
 * `deploy\JZToolsHub\` + `deploy\JZToolsHub-v<版本>.zip`（主包，默认约 122 MB，**不含组件**）
 * `deploy\JZToolsHub-离线组件-LibreOffice核心-<版本>.zip`（≈163 MB，一键安装、对目标机隐身，
-  详见 `docs/LibreOffice核心组件一键安装评估.md`）
+  详见 `docs/guide/LibreOffice核心组件一键安装评估.md`）
 * `deploy\JZToolsHub-离线组件-Chrome-<版本>.zip`（可选，需管理员安装）
 
 
@@ -279,7 +285,7 @@ deploy\JZToolsHub\
 
 主包约 122 MB，为一个插件重出一版不划算。插件包只含一个插件的**代码**（通常 < 10 MB），
 校验规则与离线安装器 `tools/plugin-upgrade/install-plugin.ps1` 完全同源
-（规则单点定义见 `docs/插件独立升级方案-设计文档.md` §4/§5.3）。
+（规则单点定义见 `docs/design/插件独立升级方案-设计文档.md` §4/§5.3）。
 
 **① 开发侧出包**（先 commit，否则 `version.json.commit` 会记 `<sha>-dirty`）
 
@@ -387,16 +393,33 @@ JZToolsHub/
 │       ├── setup-offline-runtime.ps1   # 胖包模式用：装 Chrome（MSI 静默）/ 解压 LibreOffice 核心包
 │       ├── 安装离线组件.bat             # 胖包双击入口（装 Chrome 需管理员）
 │       └── README.md                   # 组件清单、安装与校验说明
-├── docs/                      # 设计文档（按功能/插件归档；含《离线部署包说明》《LibreOffice核心组件一键安装评估》）
+├── docs/                      # 文档（五层结构，**索引见 docs/README.md**）
+│   ├── README.md              #   文档索引：覆盖矩阵 + 文档模板 + 命名/生命周期规范
+│   ├── 项目管理手册.md         #   ★ 新手入门：改代码 / 开插件 / 移植 / 打包运维 四类场景
+│   ├── guide/                 #   交付层（随包）：打包部署手册、离线部署包说明、LibreOffice 组件评估
+│   ├── design/                #   设计层（随包）：7 份功能/插件设计文档
+│   ├── eval/                  #   评估层（不随包）：信息传输总纲、Python 选型、热插拔路线、手搓引擎
+│   ├── plan/                  #   方案层（不随包）：信息传输 TODO 清单与实施方案
+│   └── archive/               #   归档层（不随包）：已完成 / 已决 / 已取代，只作留证
 ├── 插件设计规范.md             # ★ 插件开发铁律（开发插件前必读）
 ├── 移动端APP.md                # ★ 信息传输协议权威规范
 ├── JZToolsHub.spec            # PyInstaller 打包配置（显式收集插件后端动态导入的库）
 ├── build-deploy.ps1           # 一键打包脚本
 ├── install.ps1                # 一键安装 / 更新 / 卸载核心逻辑（源文件）
-├── test_plugin_templates.py   # 插件级配置模板同步的单元测试（python -m unittest test_plugin_templates）
+├── openh264-2.5.0-win64.dll   # OpenCV 视频编码依赖（cv2 缺 DLL 时手工放置；来源与许可证见 docs/guide/离线部署包说明.md §9）
+├── demo/                      # 多码同屏 PoC（方案已否决，仅背景留存，gitignore）
+├── .bench_corpus/             # 压缩评估语料与脚本（可随时重建，gitignore）
+├── test_plugin_templates.py    # 插件级配置模板同步单测（7 例）
+├── test_plugin_admin.py        # 插件包校验/应用/回滚逻辑单测（19 例，含与出包工具的交叉验证）
+├── test_admin_plugin_manager.py # 后台插件管理页 HTTP 全链路测试
+├── test_bg_image.py            # 背景图清理单测（17 例，含两份副本一致性断言）
 ├── 一键安装.bat  一键卸载.bat   # 双击入口
 └── README.md  HANDOFF.md
 ```
+
+> 根目录四个 `test_*.py` 用 `python -m unittest <模块名>` 在**仓库根**运行（模块就在根，不是包）。
+> 插件自带测试在 `plugins/<id>/backend/test_*.py`，端到端脚本在 `tools/e2e/`；
+> 测试脚本**不随包分发**（口径见 `tools/plugin-payload-rules.json`）。
 
 ### 4.2 数据根目录（运行时生成，默认 `<用户主目录>\.jztoolshub\`）
 
@@ -649,7 +672,7 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | 改名称 / 描述 / 排序 | 编辑数据根目录 `config/tools.json` | 否 |
 | 临时下线 / 恢复 | 该条目 `enabled: false` / `true` | 否 |
 | 按人授权 | 管理后台「人员管理 → 权限」勾选插件 ID | 否（重新登录或刷新会话） |
-| 新增 / 升级插件 | 用插件包：开发侧出包见 **§3.4**，目标机二选一：① 管理后台「插件管理」页上传 zip（免命令行、免解压，程序自动校验 → 备份 → 替换 → 停服重启，页面自动刷新）② 双击「安装插件.bat」（离线脚本，免管理员）。见 `docs/离线部署包说明.md` §11；手工覆盖目录亦可，但需递增 `?v=` 与 `manifest.version` | 视改动而定（含后端改动则自动重启，约 5~10 秒） |
+| 新增 / 升级插件 | 用插件包：开发侧出包见 **§3.4**，目标机二选一：① 管理后台「插件管理」页上传 zip（免命令行、免解压，程序自动校验 → 备份 → 替换 → 停服重启，页面自动刷新）② 双击「安装插件.bat」（离线脚本，免管理员）。见 `docs/guide/离线部署包说明.md` §11；手工覆盖目录亦可，但需递增 `?v=` 与 `manifest.version` | 视改动而定（含后端改动则自动重启，约 5~10 秒） |
 | 批量更新多个插件 | 管理后台「插件管理」→ 共享盘批量更新：填 `index.json` 路径 → 检查更新 → 勾选 → 批量升级（全部成功后若含后端改动则自动统一重启一次） | 视改动而定 |
 | 回滚插件 | 管理后台「插件管理」→ 该行「回滚」（成功后同样自动重启），或命令行 `install-plugin.ps1 -Rollback <插件id>` | 是（自动） |
 | 卸载插件 | 用插件包：`install-plugin.ps1 -Uninstall <插件id>`；手工方式：先删 `tools.json` 条目 → 备份数据 → 再删目录 → 重启 | 是 |
@@ -792,7 +815,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
    （一致则跳过，幂等）——管下面这张清单里的框架级与既有插件模板。
 2. **插件模板门控**：`plugins/<id>/**/*.template.json` 的**内容指纹**与状态登记里的记录不同即同步
    （`jztools_data.sync_plugin_templates()`）。这条**不受应用版本门控**——插件可以经「插件包」单独升级
-   而应用版本不变（见 `docs/插件独立升级方案-设计文档.md` §8），此时插件新增的配置键靠它自动补入。
+   而应用版本不变（见 `docs/design/插件独立升级方案-设计文档.md` §8），此时插件新增的配置键靠它自动补入。
    手工覆盖插件目录的场景同样由它兜底。
 
 | 模板（程序目录 → 数据根目录） | 模式 | 含义 |
@@ -803,9 +826,14 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | `plugins/trajectory-sketch/backend/config.template.json` | ensure-keys | 保留管理员自定义的保留字段名单 / 列映射 / 阈值 / 报告文案 |
 | `plugins/file-filter/backend/config.template.json` | ensure-keys | 保留管理员配置（保留字段名单 / 后处理规则 / LLM） |
 
-> 第 2 条门控使"新增带模板的插件"**不再需要两处手工登记**：把 `backend/config.template.json`
-> 放进插件目录即可（模板内可用 `"_mode": "overwrite"` 声明整份覆盖；缺省 `ensure-keys` 只补缺失键）。
+> 第 2 条门控是**自动发现**的（遍历 `plugins/*/` 下所有 `*.template.json` 算内容指纹），
+> 因此它解决的是"**插件单独升级 / 手工覆盖目录**后新增配置键的自动补入"——这两条路径
+> **无需**人工登记。模板内可用 `"_mode": "overwrite"` 声明整份覆盖；缺省 `ensure-keys` 只补缺失键。
 > 目标机路径映射：`plugins/<id>/backend/config.template.json` → 数据根 `plugins/<id>/config.json`。
+>
+> ⚠️ **但"新增一个带模板的插件"仍要两处登记**：应用侧的自动发现只保证**下次启动**补键，
+> 而安装器 `install.ps1` 走的是**硬编码清单** `Sync-ConfigTemplates` 的 `$cfgPairs`，
+> 漏登记会出现"装完那一刻配置没生成、要等首次启动才补上"的空档。两处清单见本文 §10.2 末段。
 
 > **模板命名纪律：配置模板一律命名 `config.template.json`，与运行时 `config.json` 分离。**
 > 打包脚本会删除插件树内所有 `config.json`（清掉本机含 API Key 的运行时配置），模板若沿用

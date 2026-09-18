@@ -21,7 +21,7 @@
      实测：补该行后引擎在 3.8 / 3.13 / 3.14 渲染产物**字节完全一致**
      （同一份 sample.xlsx 输出 HTML sha256 前 16 位 = `d8535d164748e122`）。
      上游 `TestWorkSpace/xlsx-html-preview` 同样存在此缺陷，待同步。
-     评估过程与证据见 `docs/Python版本选型评估.md` §1.5。
+     评估过程与证据见 `docs/eval/Python版本选型评估.md` §1.5。
 
   2. `xhr/renderer/table.py` `_build_cell_attrs`：XML 里不存在的空单元格原本取
      `style_table[0]`——dedup 表按首次出现顺序 intern，[0] 是首个被解析单元格的样式

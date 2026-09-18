@@ -1,7 +1,7 @@
 # InfoParse（安卓 APP）打包手册（速查）
 
 > **发版只读这一页。** 适用：`android-app\InfoParse`（扫码/解析 APP，离线分发到真机）。
-> 桌面端主包 / 插件包发版看根目录 `docs\打包部署手册.md`；APP 功能与协议规格看根目录 `移动端APP.md`。
+> 桌面端主包 / 插件包发版看根目录 `docs\guide\打包部署手册.md`；APP 功能与协议规格看根目录 `移动端APP.md`。
 > 最后核对：2026-09-17（v2.0.0，AGP 8.5.2 / Gradle 8.7 / JDK 21；full 35.1 MB，lite 19.0 MB；
 > 包结构与进一步瘦身的量化分析见 §3.1）。
 
@@ -96,5 +96,5 @@ assets 0.88 MB（3 个 tflite 模型）+ resources.arsc 0.54 MB（targetSdk 30+ 
 | 想了解 | 去哪 |
 | --- | --- |
 | APP 协议、错误码、测试清单 | 根目录 `移动端APP.md` |
-| 桌面端主包 / 插件包发版 | `docs\打包部署手册.md` |
+| 桌面端主包 / 插件包发版 | `docs\guide\打包部署手册.md` |
 | ML Kit bundled/unbundled 区别 | `移动端APP.md` 末尾「ML Kit」段 |

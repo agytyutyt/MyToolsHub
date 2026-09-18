@@ -4,7 +4,7 @@
 # 用途：
 #   把 plugins\<id>\ 打成一个「插件独立升级包」（zip），供目标机离线单独升级该插件，
 #   不必重出约 122 MB 的整包。包结构 / 字段 / 校验规则见
-#   docs\插件独立升级方案-设计文档.md §4、§6。
+#   docs\design\插件独立升级方案-设计文档.md §4、§6。
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id knowledge-base

@@ -83,4 +83,4 @@ data = resp.json()  # {"rows": [[表头],[数据]...], "kept": [...], "removed":
 pip install -r plugins/file-filter/backend/requirements.txt
 ```
 
-设计文档：`docs/过滤器插件-设计文档.md`
+设计文档：`docs/design/过滤器插件-设计文档.md`

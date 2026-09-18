@@ -12,8 +12,8 @@ import sys
 import tempfile
 import types
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA = os.path.join(REPO, ".workbuddy", "e2e-kb-data")
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))  # tools/dev/ → 仓库根
+DATA = os.path.join(REPO, ".workbuddy", "tmp", "e2e-kb-data")   # 隔离数据根，已 gitignore
 os.environ["JZTOOLS_DATA_ROOT"] = DATA
 os.makedirs(DATA, exist_ok=True)
 SOFFICE = r"C:\Program Files\LibreOffice\program\soffice.exe"

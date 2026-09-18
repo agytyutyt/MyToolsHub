@@ -3,7 +3,7 @@
 > 上传原始轨迹表（Excel，**自动删除文档里的背景图片**）→ 调用「过滤器」插件完成**字段过滤**（默认硬过滤，可切换大模型辅助）
 > → 轨迹分析 → **速写报告**（页内预览 + Excel 工作簿下载）。
 
-JZToolsHub 插件 · L2 前后端一体（A 型源码插件）· 设计文档见仓库 `docs/轨迹速写插件-设计文档.md`
+JZToolsHub 插件 · L2 前后端一体（A 型源码插件）· 设计文档见仓库 `docs/design/轨迹速写插件-设计文档.md`
 
 ---
 
@@ -19,7 +19,7 @@ JZToolsHub 插件 · L2 前后端一体（A 型源码插件）· 设计文档见
 
 > 背景图片清理的实现与边界（只摘背景引用、保留其余部件字节、没命中就不改写文件、
 > `csv`/`xls` 不检测）见 `backend/bg_image.py` 模块文档与
-> `docs/轨迹速写插件-设计文档.md` §2；该文件与 `plugins/file-filter/backend/bg_image.py` 是
+> `docs/design/轨迹速写插件-设计文档.md` §2；该文件与 `plugins/file-filter/backend/bg_image.py` 是
 > **逐字节相同的双份副本**（规范 B-7 禁止插件间 import），改动须两处同步。
 
 ## 2. 依赖

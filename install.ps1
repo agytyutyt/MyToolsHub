@@ -200,7 +200,7 @@ function Sync-ConfigTemplates {
     # 3) ensure-keys：插件 config.json 仅补缺失键（保留用户 LLM 配置与自定义阈值）
     # ★ 模板一律命名 config.template.json：打包与安装过程中插件树内的 config.json
     #   会被当作「本机运行时配置」清理，模板若同名会被连带删除（历史缺陷，见
-    #   docs/P0问题修复方案.md FIX-1）。新增带模板的插件时，本清单须与
+    #   docs/archive/P0问题修复方案.md FIX-1）。新增带模板的插件时，本清单须与
     #   jztools_data._TEMPLATE_SYNC 同时登记且保持一致。
     $cfgPairs = @(
         @("plugins\case-report\backend\config.template.json",      "plugins\case-report\config.json"),
@@ -328,7 +328,7 @@ New-Item -ItemType Directory -Force -Path $Target | Out-Null
 
 # ---- 插件版本防回退（单独升级过的插件不被整包覆盖回去）----
 # 背景：本脚本把 plugins\ 整体覆盖到目标目录。若某个插件已用「插件包」单独升级到更高版本，
-# 直接覆盖会把它静默降级回主包内嵌版本（见 docs\插件独立升级方案-设计文档.md §7）。
+# 直接覆盖会把它静默降级回主包内嵌版本（见 docs\design\插件独立升级方案-设计文档.md §7）。
 # 规则：数据根状态登记（config\.app_state.json → plugins.<id>.version）高于主包内嵌版本 → 跳过该插件；
 #       确需"以主包为准"覆盖时用 -ForcePluginOverwrite。
 $statePath = Join-Path (Get-DataRootDir -Target $Target) "config\.app_state.json"

@@ -2,7 +2,7 @@
   "_comment": [
     "插件 payload 的「代码 / 数据」边界规则（单一真源）。",
     "",
-    "被两处共同读取，避免两条链路漂移（设计要求见 docs/插件独立升级方案-设计文档.md §4.4、§6.3）：",
+    "被两处共同读取，避免两条链路漂移（设计要求见 docs/design/插件独立升级方案-设计文档.md §4.4、§6.3）：",
     "  1. tools/build-plugin-package.ps1 —— 产出插件包 payload 时按本清单剔除；",
     "  2. build-deploy.ps1 §3.2 —— 组装整包时清理 plugins/ 下的运行时数据。",
     "",
@@ -11,18 +11,28 @@
     "exclude_globs —— 文件名通配匹配（* 与 ?）",
     "required      —— payload 必须存在的文件（相对插件目录；<entry> 取 manifest.json 的 entry）",
     "max_files / max_bytes —— 防误打包整个仓库的体积护栏",
-    "template_suffix —— 配置模板命名后缀（命名纪律：模板不得叫 config.json，见 jztools_data.py:74）"
+    "template_suffix —— 配置模板命名后缀（命名纪律：模板不得叫 config.json，见 jztools_data.py:74）",
+    "",
+    "★ 测试与开发脚本一律不随包（2026-09-17 起）：exclude_globs 覆盖 test_*.py / *_test.py /",
+    "  conftest.py，exclude_files 覆盖 _build_phase8.py。插件内的单测（如 info-transfer 的",
+    "  test_protocol_v2.py、knowledge-base 的 test_routes_preview.py）只服务开发与构建期，",
+    "  目标机不需要；此前它们随整包与插件包一起分发（20260914 评估报告 P1-3 遗留项）。",
+    "",
+    "★ exclude_dirs 里的 \"dev\" 是**保留名**：用于放只服务开发的验证服务（现为 tools/dev/ 下",
+    "  的 pdf_research_server.py / e2e_kb_zoom_server.py —— 它们会伪造 admin 会话以隔离测试，",
+    "  绝不能上目标机）。仓库里除 tools/dev/ 外没有别的 dev 目录；插件目录命名请避开 dev。"
   ],
   "schema": 1,
-  "exclude_dirs": ["data", ".task_cache", "__pycache__", "out", "node_modules", ".venv", "venv", ".git"],
+  "exclude_dirs": ["data", ".task_cache", "__pycache__", "out", "node_modules", ".venv", "venv", ".git", "dev"],
   "exclude_files": [
     "config.json",
     "config.local.json",
     ".env",
     ".DS_Store",
-    "Thumbs.db"
+    "Thumbs.db",
+    "_build_phase8.py"
   ],
-  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old"],
+  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old", "test_*.py", "*_test.py", "conftest.py"],
   "required": ["manifest.json", "README.md"],
   "max_files": 5000,
   "max_bytes": 209715200,

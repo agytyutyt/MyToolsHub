@@ -1,7 +1,7 @@
 """jztools_data.sync_plugin_templates 的单元测试。
 
 覆盖「插件经插件包单独升级后，新增配置键自动下发」这条链路（设计见
-docs/插件独立升级方案-设计文档.md §8）：只补缺失键、保留用户已有值、幂等、
+docs/design/插件独立升级方案-设计文档.md §8）：只补缺失键、保留用户已有值、幂等、
 overwrite 模式、跳过 vendor/__pycache__ 等目录。
 
 运行：

@@ -9,6 +9,14 @@
 > `setup-offline-runtime.ps1` / `安装离线组件.bat`（这两个脚本是入库文件，
 > 源在 `tools/offline-runtime/`）。
 
+> ⚠ **「组件随部署包一起分发」已于 2026-09-14 变更**：主包默认瘦身（122 MB，无 `runtime/`），
+> 组件改由**独立「离线组件包」**按需分发，见 `docs/guide/离线部署包说明.md` §1.1。
+> **LibreOffice 核心组件现在走一键安装器** `install-libreoffice-core.ps1`
+> （入口「安装LibreOffice核心组件.bat」）：纯解压、免管理员、对目标机隐身，
+> 带自检 / 自愈 / 诊断日志 —— 见 `docs/guide/LibreOffice核心组件一键安装评估.md`。
+> 本文件 §1~§3 关于 `setup-offline-runtime.ps1` 的说明仍然有效，但只用于
+> **Chrome 组件包**，以及旧式「`-WithOfflineRuntime`」胖包。
+
 ---
 
 ## 1. 组件清单
@@ -23,7 +31,7 @@
 > （356 MB）、图标主题（72 MB）、字体（51 MB）等与格式转换无关。裁剪后 557.9 MB /
 > 2824 个文件，包内占用从 357.5 MB 降到 164.5 MB。
 > 生成工具：`tools/build-libreoffice-core.py`；裁剪清单与避坑说明见
-> `docs/离线部署包说明.md` §3.1。
+> `docs/guide/离线部署包说明.md` §3.1。
 
 各文件的 `sha256`、来源 URL、许可证记录在**同目录的 `manifest.json`** 中
 （由获取脚本在下载时生成，打包前应与 `tools/offline-components.json` 的冻结值一致）。

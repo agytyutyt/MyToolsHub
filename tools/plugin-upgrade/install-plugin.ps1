@@ -4,7 +4,7 @@
 # 用途：
 #   把「插件独立升级包」装到已部署的 JZToolsHub 上。全程离线、免管理员、
 #   可校验、可回退：先只读校验（版本 / 哈希 / 框架版本），再备份，最后才替换。
-#   设计依据：docs\插件独立升级方案-设计文档.md §5。
+#   设计依据：docs\design\插件独立升级方案-设计文档.md §5。
 #
 # 用法：
 #   安装 / 升级：  powershell -ExecutionPolicy Bypass -File install-plugin.ps1

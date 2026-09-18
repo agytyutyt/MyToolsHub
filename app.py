@@ -880,7 +880,7 @@ if __name__ == "__main__":
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
     # 插件后端已按磁盘上的代码加载完毕 → 清掉管理后台留下的"待重启"标记
-    # （管理后台在页内应用插件包后标记 restart_pending；见 docs/插件独立升级方案-设计文档.md §9）
+    # （管理后台在页内应用插件包后标记 restart_pending；见 docs/design/插件独立升级方案-设计文档.md §9）
     try:
         _cleared = jztools_data.clear_plugin_restart_flags()
         if _cleared:
