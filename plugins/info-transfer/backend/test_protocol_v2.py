@@ -311,6 +311,85 @@ fmt, name, data, ext = it.parse_envelope(env1s)
 check("v1 静态经新解码端还原", data == "旧协议文本载荷。" * 50)
 it.PROTOCOL_V2 = True
 
+print("== 9. xlsx 精简提取：<dimension> 声明失真（660.xlsx 回归） ==")
+# 只读模式按 <dimension> 声明确定遍历范围，该声明只是提示；失真声明（声明 A1
+# 而实际有 A1:A4）会让 openpyxl 只读出首格 —— 曾导致 660.xlsx 精简传输只剩
+# 一行一列。修复：reset_dimensions() + 行宽补齐。本用例守住该回归。
+import io as _io9
+import re as _re9
+import zipfile as _zip9
+
+import openpyxl as _op9
+
+
+def _xlsx_patched_dimension(rows, bad_ref):
+    """openpyxl 生成 xlsx，再把 sheet1.xml 的 <dimension> 改成失真声明。"""
+    wb = _op9.Workbook()
+    ws = wb.active
+    for r in rows:
+        ws.append(r)
+    buf = _io9.BytesIO()
+    wb.save(buf)
+    src = _zip9.ZipFile(_io9.BytesIO(buf.getvalue()))
+    out = _io9.BytesIO()
+    with _zip9.ZipFile(out, "w", _zip9.ZIP_DEFLATED) as z:
+        for info in src.infolist():
+            d = src.read(info.filename)
+            if info.filename == "xl/worksheets/sheet1.xml":
+                d = _re9.sub(rb"<dimension[^/>]*/>",
+                             ('<dimension ref="%s"/>' % bad_ref).encode(), d, count=1)
+            z.writestr(info, d)
+    return out.getvalue()
+
+
+def _xlsx_oracle(data):
+    """基准：普通模式（不依赖 dimension 提示）读取 + 同样的裁剪口径。"""
+    wb = _op9.load_workbook(_io9.BytesIO(data), data_only=True)
+    rows = [[it._json_cell(v) for v in r] for r in wb.active.iter_rows(values_only=True)]
+    wb.close()
+    return it._trim_empty_rows(rows)
+
+
+DIM_CASES = [
+    ("4 行 1 列，声明 A1（=660.xlsx 形状）",
+     [["近十五天凌晨所在位置"], ["广东省中山市松兴花园横巷"],
+      ["广东省中山市元丰街美利路"], ["广东省中山市中心路广厚里大街"]], "A1"),
+    ("2 行 3 列，声明 A1:A2（横向截断）",
+     [["a", "b", "c"], ["d", "e", "f"]], "A1:A2"),
+    ("2 行 1 列，声明 A1:Z1000（声明过大）",
+     [["x"], ["y"]], "A1:Z1000"),
+    ("5 行 3 列（末行 C 列有值），声明 A1",
+     [["s1"], [None], [None], [None], [None, None, "s5"]], "A1"),
+]
+for label, rows_in, bad_ref in DIM_CASES:
+    data = _xlsx_patched_dimension(rows_in, bad_ref)
+    got = it._extract_xlsx_rows(data)
+    want = _xlsx_oracle(data)
+    check(f"dimension 失真 {label}", got == want, f"got={got} want={want}")
+    check(f"行宽矩形 {label}",
+          len({len(r) for r in got}) <= 1, f"ragged={[len(r) for r in got]}")
+    check(f"行数未丢 {label}", len(got) == len(want), f"{len(got)} vs {len(want)}")
+
+# 真实故障文件（尺寸不对的 <dimension> 声明的真实样本）：多路径查找，
+# 找不到则跳过，不阻断套件。素材不入库（.workbuddy/test-materials/ 已被 gitignore）。
+_P660_CANDIDATES = [
+    os.path.join(REPO, "660.xlsx"),
+    os.path.join(REPO, ".workbuddy", "test-materials",
+                 "xlsx-stale-dimension", "660.xlsx"),
+    os.path.join(REPO, ".workbuddy", "test-materials", "660.xlsx"),
+]
+_p660 = next((p for p in _P660_CANDIDATES if os.path.exists(p)), None)
+if _p660:
+    with open(_p660, "rb") as f:
+        _b660 = f.read()
+    _got660 = it._extract_xlsx_rows(_b660)
+    check("660.xlsx 真实文件 4 行全提取",
+          len(_got660) == 4 and all(len(r) == 1 and r[0] for r in _got660),
+          f"got={_got660}")
+    check("660.xlsx 与普通模式基准一致", _got660 == _xlsx_oracle(_b660))
+else:
+    print("  SKIP 660.xlsx 真实文件校验（未找到；见 _P660_CANDIDATES）")
+
 print(f"\n结果：PASS={PASSES[0]} FAIL={len(FAILS)}")
 if FAILS:
     print("失败项：", FAILS)

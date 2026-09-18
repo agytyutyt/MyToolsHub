@@ -469,7 +469,15 @@ def _trim_empty_rows(rows):
 
 
 def _extract_xlsx_rows(file_bytes):
-    """xlsx/xlsm → 二维数组（取活动工作表；值取缓存计算结果）。"""
+    """xlsx/xlsm → 二维数组（取活动工作表；值取缓存计算结果）。
+
+    只读模式的遍历范围取自工作表 `<dimension>` 声明，而该声明只是"提示"：
+    部分工具（含 Excel 另存为、第三方库）会写出与实际内容不符的 dimension
+    ——真实案例 660.xlsx 声明 `ref="A1"` 但实际有 A1:A4，导致只读出首格。
+    `reset_dimensions()`（openpyxl ≥3.0.4）清掉该声明，改为按 sheetData 实际
+    内容扫描。注意清掉后稀疏行不再按声明宽度补齐（行变"参差"），故统一补
+    齐到最大列宽，保持二维数组矩形契约。
+    """
     if not OPENPYXL_AVAILABLE:
         raise LeanUnsupported("服务器未安装 openpyxl")
     wb = None
@@ -478,7 +486,12 @@ def _extract_xlsx_rows(file_bytes):
         ws = wb.active
         if ws is None:
             raise LeanUnsupported("工作簿没有活动工作表")
+        if hasattr(ws, "reset_dimensions"):
+            ws.reset_dimensions()
         rows = [[_json_cell(v) for v in row] for row in ws.iter_rows(values_only=True)]
+        width = max((len(r) for r in rows), default=0)
+        if width:
+            rows = [r if len(r) == width else r + [None] * (width - len(r)) for r in rows]
         return _trim_empty_rows(rows)
     except LeanUnsupported:
         raise

@@ -10,17 +10,26 @@
   完成后按文件名分组展示多份二维码/二维码流，均支持单独下载）；
   **格式白名单**（内置清单，经 GET /formats 下发前端）：Word(.docx/.doc) /
   Excel(.xlsx/.xlsm/.xls) / CSV(.csv) / Txt(.txt) / Markdown(.md/.markdown) /
-  PPT 演示(.ppt/.pptx) / PDF 文档(.pdf)——后两类仅支持原件传输；
+  PPT 演示(.ppt/.pptx) / PDF 文档(.pdf)——两类演示/文档格式均可原件传输，
+  其中 `.ppt` / `.pdf` 另有精简提取（转纯文本，见下），`.pptx` 仅原件传输；
 - **精简传输（默认，raw=0）**——只传输数据，不保留格式、宏等参数：
   - `.docx`：提取正文段落与表格文本（按文档顺序），fmt=word；
   - `.txt`：提取文本，fmt=text；`.md`：提取源码，fmt=markdown；
   - `.xlsx` / `.xlsm`：提取内容构建二维数组（值取缓存计算结果，裁剪尾部空行/空列），fmt=excel；
+    **不信任工作表 `<dimension>` 声明**（该声明只是提示，部分工具会写出与实际内容
+    不符的值——如声明 `A1` 而实际有 A1:A4，只读模式下会只读出首格）；改为按
+    `sheetData` 实际内容扫描并统一补齐行宽，保证二维数组矩形；
   - `.xls`（97-2003 二进制）：xlrd 提取内容构建二维数组（数字/日期/布尔按类型还原），fmt=excel；
   - `.csv`：解析构建二维数组（整数/小数→数值、TRUE/FALSE→布尔、前导零保留文本），fmt=excel；
   - 信封声明原始文件后缀名（`ext` 字段，如 docx / xlsx / csv），还原端据此复原为对应格式；
   - `.doc`（97-2003 二进制）：olefile 解析 FIB/CLX 提取正文文本，fmt=word；
   - 白名单内文件精简提取失败（如文件损坏、pdf 为扫描版文本缺失）自动回退原件传输并附提示；
-  - ppt / pdf / pptx 不支持精简提取（白名单标注 extract=none），仅原件传输。
+  - `.pdf`：pypdf 逐页提取文本，fmt=text（扫描版 / 加密件提取失败自动回退原件）；
+  - `.ppt`（97-2003 二进制）：olefile 扫 `TextCharsAtom` / `TextBytesAtom` 抽取文本，fmt=text
+    （控制字符占比 > 30% 判为乱码、拒收并回退原件）；
+  - `.pptx`：**不做精简提取**（白名单 `extract=none`），仅原件传输；
+  - 注：`.doc` / `.pdf` / `.ppt` 的精简产物都不保版式——`.doc` 归一到 Word（fmt=word），
+    `.pdf` / `.ppt` 只出**纯文本**（fmt=text，还原端给 `.txt`）。需要保版式请用原件传输。
 - **原件传输（开关开启，raw=1）**：文件不做任何解析，fmt=file，
   文件字节经 base64 封装——样式、宏、图片、表格等与原文件完全一致（还原字节一致）；
   base64 文本再做一轮压缩试压（v1 zlib；v2 起 zlib 与 LZMA2/xz 试压取更小者，zip=1/flags 标注）：
