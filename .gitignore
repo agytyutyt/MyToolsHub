@@ -20,6 +20,9 @@ logs/
 *.log
 *.pid
 
+# 离线组件安装器的自检日志（脚本同目录生成，用于目标机排障，不入库）
+tools/offline-runtime/安装日志-*.txt
+
 # 管理后台数据与加密密钥（含账号/密码/身份证/大模型密钥，勿提交）
 config/admin.json
 config/.admin_key
@@ -67,8 +70,9 @@ plugins/map-marker/frontend/simulate_yunfu_5min.py
 # 多码同屏 Demo（评估配套，不入库）
 demo/
 
-# 会话临时产物（信息传输测试基准样例 it_bench 等，可随时重建）
-.workbuddy/tmp/
-
-# 真机验收测试数据（信息传输清单项 2/3/4/5，可随时重建，见 .workbuddy/tmp/gen_test_materials_2345.py）
-.workbuddy/test-materials/
+# 会话目录（2026-09-17 起改为**白名单模式**）：默认忽略全部，只跟踪 memory/
+# 理由：该目录是工具会话的工作区 —— 历史上出现过两个"入库的验证脚本"
+# （pdf_research_server.py / e2e_kb_zoom_server.py，已迁 tools/dev/），
+# 且新增临时产物默认会被跟踪，把"出包 dirty 检查"误判为非干净。
+.workbuddy/*
+!.workbuddy/memory/

@@ -137,9 +137,25 @@ JZToolsHub 离线组件：LibreOffice 核心包 $loVer
 故障排查
   - 提示"未找到 JZToolsHub 程序目录"：先安装工具箱，或加参数指定：
       powershell -ExecutionPolicy Bypass -File install-libreoffice-core.ps1 -InstallDir "D:\JZToolsHub"
-  - 自检失败（超时/未产出文件）：检查杀毒软件是否拦截了 soffice.exe，然后加 -Force 重装。
-  - 安装后预览仍走简化通道：确认工具箱已重启，并访问 /api/knowledge-base/status
-    查看 office_render / soffice 字段。
+  ★ 出问题先看日志：安装目录下的「安装日志-LibreOffice核心.txt」。它记录了系统环境、
+    每一步的结果、以及 soffice 的原始输出（含退出码）。**自检失败时请把该文件发给维护者** ——
+    只有它能说明真正原因（旧版本只报"未产出 xlsx"，等于没说）。
+
+  - 自检失败：安装器会**自动重新解压一次再验**（旧组件树残缺是最常见原因），多数情况自愈。
+    仍失败时按顺序自救：
+      powershell -ExecutionPolicy Bypass -File install-libreoffice-core.ps1 -VerifyOnly
+      powershell -ExecutionPolicy Bypass -File install-libreoffice-core.ps1 -Force
+      powershell -ExecutionPolicy Bypass -File install-libreoffice-core.ps1 -Force -SkipSmoke
+      -VerifyOnly 只自检（几十秒，不动文件）；-Force 先清空旧树再解压；
+      -SkipSmoke 跳过自检直接装（装完请自己打开一个 .doc / .xls 验证预览）。
+  - 自检很慢或超时：首次启动要初始化 profile，且杀软会扫描 2800+ 个文件，实测 20~180 秒
+    都属正常。可加长超时：-SmokeTimeoutSec 600；或 -SkipSmoke 先装完再实测。
+  - 提示程序目录不可写：工具箱装在 C:\Program Files 之类需要权限的目录。请右键
+    「安装LibreOffice核心组件.bat」→「以管理员身份运行」。
+  - 自检退出码 77（Fatal Error：无法启动应用程序）：核心包内 presets\ 缺失，
+    说明组件包本身不完整，请重新获取组件包后 -Force 重装。
+  - 安装后预览仍走简化通道：**无需重启工具箱**（渲染时会自动重新探测组件）。访问
+    /api/knowledge-base/status 查看 office_render / soffice 字段确认已识别。
 "@
     Write-TextGbk (Join-Path $stage "使用说明.txt") $readme
 
