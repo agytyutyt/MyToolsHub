@@ -256,6 +256,8 @@ function Invoke-SmokeTest {
         return @{ ok = $false; kind = "noworkdir"; rc = "";
                   msg = "无法创建可写的临时目录（%TEMP% 与程序目录都不可写）" }
     }
+    # 失败时保留现场（profile 里可能留有 crash 数据），成功则清理
+    $keepWork = $false
     $profile = Join-Path $work "profile"
     New-Item -ItemType Directory -Force -Path $profile | Out-Null
     try {
@@ -284,6 +286,7 @@ function Invoke-SmokeTest {
         try {
             $p = [System.Diagnostics.Process]::Start($psi)
         } catch {
+            $keepWork = $true
             return @{ ok = $false; kind = "startfail"; rc = ""; work = $work; out = ""; err = "";
                       msg = "无法启动 soffice.exe：$($_.Exception.Message)`n" +
                             "         常见原因：杀毒 / 安全软件拦截、AppLocker 或「受控文件夹访问」策略。" }
@@ -293,6 +296,7 @@ function Invoke-SmokeTest {
         $exited = $p.WaitForExit($TimeoutSec * 1000)
         if (-not $exited) {
             Stop-ProbeTree -Proc $p -LoRoot $root
+            $keepWork = $true
             return @{ ok = $false; kind = "timeout"; rc = ""; work = $work; out = ""; err = "";
                       msg = "转换超时（>${TimeoutSec}s）" }
         }
@@ -312,11 +316,12 @@ function Invoke-SmokeTest {
             return @{ ok = $true; kind = "ok"; rc = $rcCode; work = $work; out = $sOut; err = $sErr;
                       msg = "转换成功（退出码 $rcCode，$(('{0:N1}' -f $sw.Elapsed.TotalSeconds)) 秒）" }
         }
+        $keepWork = $true
         return @{ ok = $false; kind = "nooutput"; rc = $rcCode; work = $work; out = $sOut; err = $sErr;
                   made = $made; profMade = $profMade;
                   msg = "未产出 xlsx（退出码 $rcCode）" }
     } finally {
-        if (-not $env:JZ_KEEP_PROBE) {
+        if ((-not $keepWork) -and (-not $env:JZ_KEEP_PROBE)) {
             Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
