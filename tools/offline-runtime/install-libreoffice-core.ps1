@@ -21,6 +21,12 @@
 # ★ 出问题先看日志：脚本同目录下的「安装日志-LibreOffice核心.txt」记录了环境、每步结果
 #   和 soffice 的原始输出。**自检失败时请把这个文件发给维护者**，它包含定位所需的全部信息。
 #
+# ★ 安装器会自动补齐 VC++ 运行时（见 Repair-VcRuntime 的注释，那是真机踩出来的坑）：
+#   官方 MSI 用「管理安装」解包时，本该进 System32 的 VC 运行库只能落在 System64\ 子目录，
+#   目标机若缺它或版本不匹配，soffice 会以 0xC0000142 **瞬间退出且零输出、连 profile 都不建**
+#   （2026-09-18 真机实测）。补齐 = 把这套 DLL 复制进 program\（主目录优先于 System32），
+#   免管理员、不动系统目录。System64\ 因此**不可裁剪**。
+#
 # ★ 对目标机是「隐身」的（这是本组件能放心安装的前提，改动前请先读）：
 #   - 只做「解压」一件事：不写注册表、不注册 COM / 文件关联、不创建开始菜单或桌面
 #     快捷方式、「程序和功能」里也不会出现条目 → 目标机的默认应用与文件图标完全不变；
@@ -203,6 +209,71 @@ function Get-PathSha256Short {
     catch { return "(无法计算)" }
 }
 
+# ---------------- 补齐 VC++ 运行时到 program\（必须早于自检） ----------------
+# 为什么必须做（2026-09-18 真机实测定位）：
+#   官方 MSI 用 `msiexec /a` 管理安装解包时，本该装进 System32 的「VC++ 2015-2022 运行库」
+#   只能落在包的 **System64\ 子目录**里，而不是 soffice.bin 同级的 program\。
+#   Windows 的 DLL 搜索顺序是「进程主目录(program\) → System32 → …」，于是：
+#     - 目标机若已装 VC++ 运行库 → 从 System32 兜底，能用（开发机就是这种情况，假阳性）；
+#     - 目标机若没装或版本不匹配 → soffice 在**加载阶段**就死，现象极隐蔽：
+#       进程 1~2 秒退出、**stdout/stderr 一个字都没有**、profile 目录都不建，
+#       退出码 0xC0000142（DLL 初始化失败）—— 真机日志就是这个签名。
+#   把 System64\ 的 DLL 复制进 program\ 即可让组件自足，**免管理员、不碰系统目录**。
+#   实验证据（2026-09-18，见 .workbuddy/memory/2026-09-18.md）：
+#     注入坏 DLL 到 program\ → 0xC000012F（瞬时退出/零输出/无 profile，与真机同族）；
+#     再把 System64\ 的 10 个 DLL 补进 program\ → 自检通过。
+$VcRuntimeDlls = @(
+    "vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threads.dll",
+    "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+    "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll",
+    "concrt140.dll", "vccorlib140.dll"
+)
+
+function Repair-VcRuntime {
+    param([string]$LoRoot, [switch]$CheckOnly)
+    $res = @{ ok = $true; copied = @(); missing = @(); note = "" }
+    $prog = Join-Path $LoRoot "program"
+    $src  = Join-Path $LoRoot "System64"     # 本组件是 x86-64 构建，取 64 位那一套
+    if (-not (Test-Path $prog)) { $res.ok = $false; $res.note = "未找到 program 目录"; return $res }
+
+    $missing = @($VcRuntimeDlls | Where-Object { -not (Test-Path -LiteralPath (Join-Path $prog $_)) })
+    $res.missing = $missing
+    if ($missing.Count -eq 0) { $res.note = "program\ 已自带 VC 运行时（$($VcRuntimeDlls.Count) 个齐全）"; return $res }
+    if ($CheckOnly) {
+        $res.ok = $false
+        $res.note = "program\ 缺 $($missing.Count) 个 VC 运行时 DLL，且当前是只检查模式（未改动）"
+        return $res
+    }
+    if (-not (Test-Path $src)) {
+        $res.ok = $false
+        $res.note = "program\ 缺 $($missing.Count) 个 VC 运行时 DLL，而包内没有 System64\ 可补齐"
+        return $res
+    }
+    foreach ($d in $missing) {
+        $s = Join-Path $src $d
+        if (-not (Test-Path -LiteralPath $s)) { $res.ok = $false; continue }
+        try { Copy-Item -LiteralPath $s -Destination (Join-Path $prog $d) -Force; $res.copied += $d }
+        catch { $res.ok = $false }
+    }
+    $res.note = "已从 System64\ 补进 program\：$($res.copied.Count) 个"
+    return $res
+}
+
+# 统一入口：补一句日志，便于在日志里确认这一步跑过
+function Step-RepairVcRuntime {
+    param([string]$LoRoot, [switch]$CheckOnly)
+    $r = Repair-VcRuntime -LoRoot $LoRoot -CheckOnly:$CheckOnly
+    if ($r.copied.Count -gt 0) {
+        Say "  [补齐] VC++ 运行时缺失 → 已从 System64\ 复制 $($r.copied.Count) 个 DLL 进 program\"
+        Say "         （DLL 搜索顺序里 program\ 优先于 System32，故无需管理员、不改系统目录）"
+    } elseif (-not $r.ok) {
+        Say "  [提示] $($r.note)"
+    } else {
+        Say "  [检查] $($r.note)"
+    }
+    return $r
+}
+
 # ---------------- 自检：用全新 profile 真实转换一次 ----------------
 # 为什么必须用**全新** profile：应用每次转换都用唯一临时 profile（等于每次首启动）。
 # 复用已初始化好的 profile 时，缺 presets 等问题的树看起来是正常的 —— 那是假阳性。
@@ -349,16 +420,42 @@ function Explain-ProbeFailure {
         }
         "nooutput" {
             if ($Probe.profMade -eq $false) {
-                [void]$tips.Add("  profile 目录都没被创建 → soffice 基本没跑起来：多半是杀软拦截或缺运行库。")
+                [void]$tips.Add("  profile 目录都没被创建 → soffice 在「加载 DLL」阶段就死了，还没跑到自己的代码。")
             }
-            if ($Probe.rc -eq 77) {
-                [void]$tips.Add("  退出码 77 = profile 引导失败（典型是核心包里的 presets\ 缺失）。")
-                [void]$tips.Add("  处理：本次组件包可能不完整，请重新解压/重新获取组件包后加 -Force 重装。")
-            } elseif ([string]$Probe.rc -eq "-1073741515") {
-                [void]$tips.Add("  退出码 -1073741515 (0xC0000135) = 缺少运行时 DLL（VC++ 运行库）；")
-                [void]$tips.Add("        目标机需安装 Microsoft Visual C++ 2015-2022 可再发行组件（x64）。")
-            } elseif ([string]$Probe.rc -eq "-1073741819") {
-                [void]$tips.Add("  退出码 -1073741819 (0xC0000005) = 访问冲突，常由安全软件注入或系统组件异常引起。")
+            # NTSTATUS 退出码速查：进程"起不来"的情况下，退出码本身就是结论
+            $codeTips = @{
+                "77" = @(
+                    "退出码 77 = profile 引导失败（典型是核心包里的 presets\ 缺失）。",
+                    "  处理：重新获取组件包后加 -Force 重装。"
+                )
+                "-1073741502" = @(
+                    "退出码 -1073741502 (0xC0000142) = DLL 初始化失败（STATUS_DLL_INIT_FAILED）。",
+                    "  典型原因：目标机的 VC++ 2015-2022 运行库**缺失或版本不匹配**。",
+                    "  本安装器已自动把组件自带 System64\ 里那套 DLL 补进 program\ 来绕开系统库：",
+                    "    · 日志里有 [补齐] 一行 → 已补齐，若仍失败请把本日志发给维护者；",
+                    "    · 日志里是 [检查] 一行 → program\ 本来就有 DLL，属版本/被杀软改写问题，",
+                    "      可考虑装一次 Microsoft Visual C++ 2015-2022 可再发行组件（x64）。"
+                )
+                "-1073741515" = @(
+                    "退出码 -1073741515 (0xC0000135) = 找不到 DLL（STATUS_DLL_NOT_FOUND）。",
+                    "  处理：靠组件自带 System64\ 补齐即可（安装器已自动做）；仍失败则补装 VC++ 运行库。"
+                )
+                "-1073741701" = @(
+                    "退出码 -1073741701 (0xC000007B) = 映像格式无效（位数不匹配）。",
+                    "  处理：确认组件包是 64 位版本，且未与 32 位文件混放。"
+                )
+                "-1073741521" = @(
+                    "退出码 -1073741521 (0xC000012F) = 映像无效（DLL 已损坏或被杀软改写）。",
+                    "  处理：加杀软白名单后删掉 program\ 下的 vcruntime140*.dll / msvcp140*.dll，",
+                    "        再重跑本脚本（会自动从 System64\ 重新补齐）。"
+                )
+                "-1073741819" = @(
+                    "退出码 -1073741819 (0xC0000005) = 访问冲突，常由安全软件注入或系统组件异常引起。"
+                )
+            }
+            $key = [string]$Probe.rc
+            if ($codeTips.ContainsKey($key)) {
+                foreach ($l in $codeTips[$key]) { [void]$tips.Add("  $l") }
             } else {
                 [void]$tips.Add("  请把上面 soffice 的 stdout / stderr 原文连同本日志一起发给维护者。")
             }
@@ -416,6 +513,12 @@ if ($VerifyOnly) {
                  "         请先运行「安装LibreOffice核心组件.bat」。")
     }
     Say "    soffice ：$so"
+    Say ""
+    # 只检查不补齐（-VerifyOnly 的承诺是"不改动任何文件"）
+    $vc = Step-RepairVcRuntime -LoRoot $LoDir -CheckOnly
+    if ($vc.missing.Count -gt 0) {
+        Say "         → 去掉 -VerifyOnly 重跑一次安装即可自动补齐（本模式只检查，不改动文件）。"
+    }
     Say ""
     $probe = Invoke-SmokeTest -Soffice $so -AppDir $AppDir -TimeoutSec $SmokeTimeoutSec
     if ($probe.ok) {
@@ -517,6 +620,9 @@ if (-not $soffice) {
 }
 Say "  soffice ：$soffice"
 
+# ---- 补齐 VC++ 运行时（必须在自检之前：缺它会让 soffice 以 0xC0000142 瞬时退出） ----
+$null = Step-RepairVcRuntime -LoRoot $LoDir
+
 # ---- 自检：全新 profile 真实转换一次 ----
 if ($SkipSmoke) {
     Say ""
@@ -540,6 +646,7 @@ if ($SkipSmoke) {
             Fail 2 @("  [失败] 重新解压后找不到 soffice.exe，组件包可能不完整。")
         }
         Say "  重新解压完成：$soffice"
+        $null = Step-RepairVcRuntime -LoRoot $LoDir   # 重解压后 program\ 又变空了，需重新补齐
         $probe = Invoke-SmokeTest -Soffice $soffice -AppDir $AppDir -TimeoutSec $SmokeTimeoutSec
     }
 

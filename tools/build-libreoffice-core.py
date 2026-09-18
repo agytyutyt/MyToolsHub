@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """把 LibreOffice 官方 MSI 裁剪成「知识库预览够用」的便携核心包。
 
-背景（2026-09-14 实测，见 docs/离线部署包说明.md）：
+背景（2026-09-14 实测，见 docs/guide/离线部署包说明.md）：
   * 应用只用到 soffice 的两条转换 —— `.doc → .docx`（dhr 引擎）与 `.xls → .xlsx`
     （xhr 引擎），都是 Writer/Calc 过滤器；不需要 UI、帮助、拼写词典、界面语言包、
     图标主题，也不需要 Draw/Impress/Math/Base 的运行时。
@@ -116,6 +116,9 @@ MUST_KEEP = [
     "program/soffice.exe", "program/soffice.bin", "program/mergedlo.dll",
     "share/registry/main.xcd", "share/config/soffice.cfg",
     "presets",   # ← 唯一一个删了会让 soffice 以退出码 77 启动失败的目录
+    "System64",  # ← VC++ 2015-2022 运行库所在的目录：管理安装解包不会把它们放进 System32，
+                 #    目标机缺运行库时，安装器靠这里补齐到 program\ 才救得回来（0xC0000142）。
+                 #    删掉它 = 组件失去自足能力，只能要求目标机自行安装 VC++ 可再发行组件。
 ]
 
 #: 许可文件必须保留（MPL-2.0 / LGPL 再分发要求）
