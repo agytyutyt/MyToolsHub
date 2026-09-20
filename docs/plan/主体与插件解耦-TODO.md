@@ -11,7 +11,7 @@
 | --- | --- |
 | 接口契约 | `docs/design/主体与插件解耦-设计文档.md` §3–§5（本文不复制） |
 | 实现路径 | 设计文档 §7 的 23 条改动清单 + §8 阶段划分；本文拆为 T01–T25，逐项标注落点 |
-| 当前实现状态 | 下方状态列（**唯一活清单**）。截至 2026-09-19：**S0 全部落地**、**S1 全部落地**（均沙箱实测）、**S2 的 T21/T22/T24 已完成**；**T20 自动化部分已就绪**（tools/e2e/decouple-acceptance.py，AC-2/3/4/7/18 全绿），真机人工项见文末清单；**T25 第 0 步已完成**（主包 123.8→102.5 MB），第 1 步 PoC 待拍板 |
+| 当前实现状态 | 下方状态列（**唯一活清单**）。截至 2026-09-20：**S0–S3 全部落地**；主包 **v2.3.1**（26.5 MB，仅框架依赖 + admin）、11 个插件包与插件集已重出并与登记一致；自动化回归全绿（`verify-package` 全项、沙箱 E2E 全通过、`decouple-acceptance.py` 15/15、3 个 pytest 文件）；**待真机人工项**见文末清单与 `docs/guide/干净机器部署验收手册.md` |
 | 后续优化方向 | 本清单即唯一活清单；S3（依赖组件包）为可选立项，不阻塞 S0–S2 |
 
 > **覆盖范围**：解耦落地的全部待办条目、执行顺序、验收口径与回归要求（唯一活清单）
@@ -39,10 +39,10 @@
 | T01 | **依赖倒置**：新增主体模块 `jz_api.py`（`get_session_user()` / `set_operation()` / `require_login()`）；admin 在 `register(app)` 注册 provider；`app.py:278`/`:698` 改从 `jz_api` 导入；10 个插件分批改导入；`jztools_admin.routes` 留 **re-export 垫片**（一个版本窗口） | §7 #21、§8 S0-1；`app.py`、`plugins/*/backend/routes.py` | AC-9 | ✅ 已完成 |
 | T02 | **版本契约字段**：`version.json` 增 `plugin_api`（初值 1，`build-deploy.ps1:333-357` 写入、`install.ps1:423-437` 保留）；出包工具把 `api_version` 写进 `plugin-package.json` 与 `index.json` | §7 #8/#9、§5.2 | AC-5 | ✅ 已完成 |
 | T03 | **依赖声明补齐**：16 个插件的 `manifest.json` 增 `requires`（三类：`python_packages` / `vendored` / `external`，含版本与 `required`）；`plugins/<id>/README.md` 的依赖清单一节与声明一致 | §7 #16、§5.3 | AC-13 / AC-19 | ✅ 已完成（11 份插件 README 均含「依赖与升级」节：三类依赖清单 + 能否单独升级 + 是否需重启，对应规范 U-2/U-4/U-6） |
-| T04 | **已安装依赖清单**：`build-deploy.ps1` 生成 `config/installed-deps.json`（打包解释器的 `importlib.metadata` 快照：包名 + 版本） | §7 #13、§5.3 | AC-16 / AC-19 | ✅ 已完成 |
+| T04 | **已安装依赖清单**：`build-deploy.ps1` 生成 `config/installed-deps.json`（打包解释器的 `importlib.metadata` 快照：包名 + 版本） | §7 #13、§5.3 | AC-16 / AC-19 | ✅ 已完成（**口径已修正**：包集合取自冻结目录 `_internal` 的 dist-info，`scope=shipped`，实测 93 → 9 个；原先记的是构建机全量环境，干净机上会把 cv2/numpy/openpyxl 误判为"已安装"——见设计文档 §11.2d I-11） |
 | T05 | **判定引擎 `jz_deps.py`**：读清单 + 插件 `requires` → 三态结论（`ok` / `degraded` / `blocked`）；版本比较器（仅 `>=x.y.z` 与精确，自实现，不引入 `packaging`）；供门控 / 后台 / `/api/tools` 三处复用 | §7 #21、§5.3 | AC-14 | ✅ 已完成 |
 | T06 | **添加期检测（提示但不阻断）**：后台在 `inspect_package` 阶段返回缺失清单供弹窗（「仍然添加」/「取消」）；离线脚本在只读校验后打印缺失清单、**默认继续**，新增 `-SkipDepCheck` / `-StrictDeps` | §7 #17/#18、§5.3 | AC-20 | ✅ 已完成（脚本侧提示不阻断 + 后台上传时依赖弹窗「仍然添加/取消」；`inspect_package` 返回 dep_check） |
-| T07 | **后台依赖展示**：插件列表新增「依赖需求」列（逐依赖徽标：满足绿色 / 不满足红色带 ×）+ 展开明细（声明要求 vs 实际版本）；新增「已安装依赖」区块（框架包 / 外部组件 / 插件自带）；顶部汇总横幅；接口增 `deps` 字段与 `GET /api/admin/deps`；`GET /api/<id>/status` 增 `deps` 段 | §7 #18/#19、§5.3 展示面 | AC-19 / AC-21 | ✅ 已完成 |
+| T07 | **后台依赖展示**：插件列表新增「依赖需求」列（逐依赖徽标：满足绿色 / 不满足红色带 ×）+ 展开明细（声明要求 vs 实际版本）；新增「已安装依赖」区块（框架包 / 外部组件 / 插件自带）；顶部汇总横幅；接口增 `deps` 字段与 `GET /api/admin/deps`；`GET /api/<id>/status` 增 `deps` 段 | §7 #18/#19、§5.3 展示面 | AC-19 / AC-21 | ✅ 已完成（**已补**：白名单名经 modules 归一（PIL→pillow）+ 依赖组件包逐项列出并标注来源 `framework`/`component`——原先组件包只计入 `other_count`，装了哪些组件看不到；见 §11.2d I-13） |
 | T08 | **C-10 交叉校验**：出包工具比对实测 import（`plugin-package.json.deps`）与声明——实测有、声明无 → **拒绝出包**；声明有、实测无 → 警告 | §7 #14、§5.3 | AC-13 | ✅ 已完成 |
 | T09 | **门控 + 健壮性**：启动时逐插件求值（版本门控 §5.2 + 依赖三态 §5.3），`blocked` 不加载并记录；`load_manifests()` / `load_registry()` 加异常保护；`/api/tools` 暴露 `plugin_errors`，首页对加载失败插件显示"暂不可用" | §5.2、§5.3；`app.py:390-400`、`:621-627` | AC-5 / AC-6 / AC-14 / AC-15 | ✅ 已完成 |
 | T10 | **admin 定位调整**：manifest 增 `"core": true`；`install-plugin.ps1` 拒绝 `-Uninstall admin` / `-PurgeEntry admin`；后台卸载入口对核心插件隐藏 | §7 #17/#18、§3.5 | AC-18② | ✅ 已完成（脚本侧拒卸载 + 后台列表对 core 插件不显示卸载按钮） |
@@ -81,7 +81,8 @@
 
 | 编号 | 任务 | 落点 | 验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| T25 | **PoC 与立项**：验证 C 扩展（`cv2` / `numpy`）在冻结环境下经 `sys.path` 注入的可行性（DLL 依赖链）；通过后新增「依赖组件包」形态（装到 `<程序目录>/runtime/pylibs/`，`manifest.json` 声明版本并与主清单合并展示） | §3.4 | 单独立项 | ◐ 第 0 步 ✅（pandas 排除）｜**第 1 步 ✅（依赖组件包）**：主包 123.8 → **38.7 MB**；PoC 通过（未装组件 → `--check-deps` 报 ModuleNotFoundError/退出码 1；装组件 → numpy/cv2 import ok）；插件侧提示已加（/status 的 missing_deps + 页面横幅）；待办：并入发布流程与真机演练 |
+| T25 | **PoC 与立项**：验证 C 扩展（`cv2` / `numpy`）在冻结环境下经 `sys.path` 注入的可行性（DLL 依赖链）；通过后新增「依赖组件包」形态（装到 `<程序目录>/runtime/pylibs/`，`manifest.json` 声明版本并与主清单合并展示） | §3.4 | 单独立项 | ◐ 第 0 步 ✅（pandas 排除）｜**第 1 步 ✅（依赖组件包）**：主包 123.8 → **38.7 MB**；PoC 通过（未装组件 → `--check-deps` 报 ModuleNotFoundError/退出码 1；装组件 → numpy/cv2 import ok）；插件侧提示已加（/status 的 missing_deps + 页面横幅）；待办：真机演练（手册 §5 第 7/8 条已覆盖"装组件转绿 / 未装组件提示不阻断"） |
+| T26 | **依赖检测链路排障（出包复核时发现，按"干净机口径"走查判定链）**：① 清单记了构建机全量环境（93 个包）而非随包分发的 9 个 → 干净机上依赖被误判"已满足"；② 安装器检测不合并 `runtime/pylibs` → 装了组件仍报"缺失"；③ 后台面板白名单名未归一（PIL↔pillow）、组件包不逐项显示；④ `required` 分级在插件间不一致（同类依赖有的标必需 → 插件在目标机被整块隐藏） | §5.3、§11.2d | AC-16 / AC-19 / AC-21 | ✅ 已完成（I-11/I-12/I-13）：生成器改取 `_internal` dist-info（`scope=shipped`）+ 安装器合并组件清单并逐项打印 hint + 面板归一与组件标注 + 规范新增 **U-7a** 统一分级（8 个插件递增版本重出包）；`verify-package` 加断言"清单 ⊆ 随包分发"；沙箱夹具改从仓库 `plugins\` 取源 |
 
 > 收益：主包 zip 有望从约 109 MB 降到约 40 MB 级（`cv2`+`numpy` 约 157 MB 只服务于 2 个插件）。
 > 不阻塞 S0–S2；**前置条件是 T03/T04/T05 已落地**（没有声明与判定链，外置依赖即盲拆）。
