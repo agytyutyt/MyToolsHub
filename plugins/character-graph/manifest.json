@@ -10,15 +10,35 @@
     ".docx/.pdf",
     "离线可用"
   ],
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "JZToolsHub 团队",
   "form": "source",
   "requires": {
     "python_packages": [
-      { "name": "docx", "version": ">=1.0", "required": true },
-      { "name": "flask", "version": ">=3.0", "required": true },
-      { "name": "pypdf", "version": ">=4.0", "required": true },
-      { "name": "requests", "version": ">=2.31", "required": true }
+      {
+        "name": "docx",
+        "version": ">=1.0",
+        "required": true,
+        "hint": "缺少 docx：人物档案 Word 解析不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "flask",
+        "version": ">=3.0",
+        "required": true,
+        "hint": "缺少 flask：本插件全部功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      },
+      {
+        "name": "pypdf",
+        "version": ">=4.0",
+        "required": true,
+        "hint": "缺少 pypdf：人物档案 PDF 解析不可用。请安装依赖包 JZToolsHub-依赖-pypdf-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "requests",
+        "version": ">=2.31",
+        "required": true,
+        "hint": "缺少 requests：大模型辅助抽取不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      }
     ]
   }
 }

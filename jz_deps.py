@@ -42,9 +42,8 @@ PLUGIN_API = 1
 DEPS_LOCK_REL = os.path.join("config", "installed-deps.json")
 # 依赖组件包清单（cv2/numpy 等"不随主包、按需安装"的库；装到 runtime/pylibs/，见 T25）
 DEPS_COMPONENT_REL = os.path.join("runtime", "pylibs", "manifest.json")
-# 依赖组件登记表（包 → 组件的唯一真源；随主包分发在 config/，源码模式读 tools/）
-DEPS_REGISTRY_RELS = (os.path.join("config", "dep-components.json"),
-                      os.path.join("tools", "dep-components.json"))
+# 说明：依赖包（runtime/pylibs 下的 manifest.json）只用于回答"这个依赖装没装、什么版本"，
+# 不再有"包 → 组件"的映射（2026-09-20 取消）；缺依赖时的提示由插件自己声明（declared_hint）。
 # 版本号写法：>=x.y.z 或 x.y.z
 _REQ_RE = re.compile(r"^\s*(>=)?\s*(\d+(?:\.\d+){0,3})\s*$")
 
@@ -172,47 +171,18 @@ def _load_component_deps(app_dir):
         return {"packages": {}, "modules": {}, "components": []}
 
 
-def load_component_registry(app_dir=None):
-    """读依赖组件登记表：{"<包名>": {"id","name","file","requires","affects"}}。
+def declared_hint(dep):
+    """取插件**自己声明**的"缺该依赖时的提示"（manifest.requires[].hint）。
 
-    用途：把"缺哪个包"翻译成"装哪个组件"——后台徽标提示、插件页面横幅、安装期弹窗共用。
-    登记表缺失（未出过组件包）时返回 {}，提示退化为"缺哪个包"。
+    设计取向（2026-09-20 定案）：框架不做"包 → 组件"的映射、也不替插件组织依赖；
+    "缺哪个依赖、影响哪个功能、怎么修"由**插件作者**在声明里写清（规范 U-8），
+    框架只把这段文案原样展示到后台徽标、安装期弹窗与插件页面横幅。
     """
-    app_dir = app_dir or os.path.dirname(os.path.abspath(__file__))
-    for rel in DEPS_REGISTRY_RELS:
-        path = os.path.join(app_dir, rel)
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                obj = json.load(f)
-            comps = obj.get("components") if isinstance(obj, dict) else None
-            if not isinstance(comps, dict):
-                continue
-            out = {}
-            for cid, c in comps.items():
-                if not isinstance(c, dict):
-                    continue
-                info = {"id": cid, "name": c.get("name") or cid, "file": c.get("file") or "",
-                        "requires": c.get("requires") or "", "affects": c.get("affects") or ""}
-                for pkg in (c.get("provides") or []):
-                    out[str(pkg)] = info
-            return out
-        except Exception as exc:
-            log.warning("依赖组件登记表不可解析：%s", exc)
-    return {}
-
-
-def component_hint(package, app_dir=None):
-    """给定包名，返回"请安装哪个依赖组件"的可操作文案；无登记则返回 None。"""
-    reg = load_component_registry(app_dir)
-    info = reg.get(str(package)) or reg.get(str(package).lower())
-    if not info:
-        return None
-    pre = ("（需先安装 %s 组件）" % info["requires"]) if info.get("requires") else ""
-    label = str(info["name"]).replace("依赖组件", "").strip() or info["id"]   # 名称里已含"依赖组件"时避免重复
-    label = str(info["name"]).replace("依赖组件", "").strip() or info["id"]   # 名称已含"依赖组件"时避免重复
-    return "请安装「%s」依赖组件（%s）%s" % (label, info.get("file") or ("JZToolsHub-依赖组件-%s-*.zip" % info["id"]), pre)
+    hint = (dep or {}).get("hint")
+    if isinstance(hint, str) and hint.strip():
+        return hint.strip()
+    name = str((dep or {}).get("name") or (dep or {}).get("id") or "").strip()
+    return ("缺少依赖 %s，相关功能不可用；请安装该依赖后重启服务。" % name) if name else ""
 
 
 def read_requires(manifest):
@@ -328,7 +298,7 @@ def _probe_external(dep_id, app_dir, plugin_id=None):
     d = os.path.join(app_dir, "runtime", dep_id)
     if os.path.isdir(d) and os.listdir(d):
         return ("ok", None, d)
-    return ("missing", None, "")
+    return ("missing", None, "")   # 提示由调用方用 declared_hint(dep) 补上
 
 
 def _check_python_package(dep, installed):
@@ -346,10 +316,9 @@ def _check_python_package(dep, installed):
     dist = installed.get("modules", {}).get(name) or name
     actual = installed["packages"].get(dist.lower())
     if actual is None:
-        hint = component_hint(name)
-        return ("missing", None, ("%s" % hint) if hint else ("主体未安装该包（%s）" % dist))
+        return ("missing", None, declared_hint(dep) or ("主体未安装该包（%s）" % dist))
     if not version_satisfies(actual, require):
-        return ("mismatch", actual, "版本不满足声明")
+        return ("mismatch", actual, declared_hint(dep) or "版本不满足声明")
     return ("ok", actual, "")
 
 
@@ -361,7 +330,7 @@ def _check_vendored(dep, plugin_dir):
     base = os.path.join(plugin_dir, _VENDOR_REL, name)
     if os.path.isdir(base) or os.path.isfile(base + ".py"):
         return ("ok", None, "插件自带（版本由插件声明）")
-    return ("missing", None, "插件目录内缺少 %s" % os.path.join(_VENDOR_REL, name))
+    return ("missing", None, declared_hint(dep) or ("插件目录内缺少 %s" % os.path.join(_VENDOR_REL, name)))
 
 
 # --------------------------------------------------------------------------- #
@@ -414,6 +383,8 @@ def evaluate(plugin_id, plugin_dir, manifest, app_dir=None, app_version=None, pl
                        "required": bool(dep.get("required", True)), "note": note})
     for dep in req["external"]:
         state, actual, note = _probe_external(dep.get("id"), app_dir, plugin_id)
+        if state == "missing" and not note:
+            note = declared_hint(dep)
         detail.append({"name": dep.get("id", ""), "kind": "external",
                        "require": dep.get("version"), "actual": actual, "state": state,
                        "required": bool(dep.get("required", True)), "note": note})

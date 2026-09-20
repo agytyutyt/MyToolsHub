@@ -1,7 +1,7 @@
 {
   "id": "notice-board",
   "name": "公告板",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "JZToolsHub 团队",
   "icon": "📢",
   "accent": "#E8710A",
@@ -13,7 +13,8 @@
       {
         "name": "flask",
         "version": ">=3.0",
-        "required": true
+        "required": true,
+        "hint": "缺少 flask：本插件全部功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
       }
     ]
   }

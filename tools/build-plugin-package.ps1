@@ -465,6 +465,24 @@ if ($vendUndecl.Count -gt 0) {
 if ($extraDecl.Count -gt 0) { Warn "声明了但实测未 import 的包（可能是条件导入，属正常）：$($extraDecl -join ', ')" }
 if ($declaredPkgs.Count -gt 0) { Say "    C-10 依赖声明与实测一致（$($declaredPkgs.Count) 项声明 / $($depsFramework.Count) 项实测）" }
 
+# ---------------- C-12：依赖声明必须带"缺失提示"（规范 U-8） ----------------
+# 缺哪个依赖、影响什么功能、怎么修，由**插件作者**写清（manifest.requires[].hint）；
+# 框架不做"包 → 组件"映射，只原样展示这段文案（后台徽标 / 安装期弹窗 / 插件页面横幅）。
+$noHint = @()
+foreach ($key in @("python_packages", "vendored", "external")) {
+    foreach ($d in @($reqObj.$key)) {
+        if (-not $d) { continue }
+        $h = [string]$d.hint
+        if (-not $h.Trim()) { $noHint += ("$key/$([string]$d.name)$([string]$d.id)") }
+    }
+}
+if ($noHint.Count -gt 0) {
+    $msg = "依赖声明缺少缺失提示（manifest.requires[].hint，规范 U-8）：$($noHint -join ', ')`n" +
+           "        要求：写清「缺哪个依赖 + 哪个功能不可用 + 怎么修（安装哪个依赖包/随主包升级）」——`n" +
+           "        框架不做包到组件的映射，这段文案会原样展示给管理员。"
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
+}
+
 # ---------------- C-11：禁止跨插件 import（规范 B-7 / 设计文档 §5.4 D-9） ----------------
 # 插件之间必须相互独立：不得 import 其他插件的后端模块（含以框架包名 jztools_<其他id> 的形式）。
 # 需要协作时的正规出口：把能力**提升为主体模块**（如 jz_api 的组织架构门面），或**合并为一个插件**。

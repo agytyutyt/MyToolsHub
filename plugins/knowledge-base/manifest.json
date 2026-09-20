@@ -1,7 +1,7 @@
 {
   "id": "knowledge-base",
   "name": "知识库",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "author": "JZToolsHub 团队",
   "icon": "📚",
   "accent": "#5C6BC0",
@@ -14,18 +14,53 @@
   "form": "source",
   "requires": {
     "python_packages": [
-      { "name": "docx", "version": ">=1.0", "required": true },
-      { "name": "flask", "version": ">=3.0", "required": true },
-      { "name": "olefile", "version": ">=0.46", "required": true },
-      { "name": "openpyxl", "version": ">=3.1", "required": true },
-      { "name": "xlrd", "version": ">=2.0", "required": true }
+      {
+        "name": "docx",
+        "version": ">=1.0",
+        "required": true,
+        "hint": "缺少 docx：Word 文档预览不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "flask",
+        "version": ">=3.0",
+        "required": true,
+        "hint": "缺少 flask：本插件全部功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      },
+      {
+        "name": "olefile",
+        "version": ">=0.46",
+        "required": true,
+        "hint": "缺少 olefile：旧版 Office 解析不可用。请安装依赖包 JZToolsHub-依赖-olefile-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "openpyxl",
+        "version": ">=3.1",
+        "required": true,
+        "hint": "缺少 openpyxl：Excel 文档预览不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "xlrd",
+        "version": ">=2.0",
+        "required": true,
+        "hint": "缺少 xlrd：xls 文档预览不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      }
     ],
     "vendored": [
-      { "name": "dhr" },
-      { "name": "xhr" }
+      {
+        "name": "dhr",
+        "hint": "缺少 dhr：相关功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      },
+      {
+        "name": "xhr",
+        "hint": "缺少 xhr：相关功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      }
     ],
     "external": [
-      { "id": "libreoffice", "required": false }
+      {
+        "id": "libreoffice",
+        "required": false,
+        "hint": "缺少 libreoffice：旧版 .doc/.xls 预览（其余格式不受影响）不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      }
     ]
   }
 }

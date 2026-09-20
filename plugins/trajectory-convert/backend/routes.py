@@ -927,6 +927,27 @@ _DEP_FEATURES = [
 ]
 
 
+def _declared_requires():
+    """读本插件 manifest 的 requires（含作者声明的 hint），供缺失提示复用。"""
+    import json as _json
+    import os as _os
+    try:
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        with open(_os.path.join(_os.path.dirname(here), "manifest.json"), "r", encoding="utf-8") as f:
+            req = (_json.load(f) or {}).get("requires") or {}
+        out = {}
+        for key in ("python_packages", "vendored", "external"):
+            for item in (req.get(key) or []):
+                if isinstance(item, dict):
+                    out[str(item.get("name") or item.get("id") or "")] = item
+        return out
+    except Exception:
+        return {}
+
+
+_declared = _declared_requires()
+
+
 def _missing_deps():
     """缺失的依赖清单：指出**哪个依赖未满足、会导致什么功能失效、怎么修**。
 

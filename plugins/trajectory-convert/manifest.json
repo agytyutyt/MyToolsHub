@@ -10,18 +10,53 @@
     "JSON 封装",
     "QR-transfer 视频"
   ],
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "JZToolsHub 团队",
   "form": "source",
   "requires": {
     "python_packages": [
-      { "name": "cv2", "version": ">=4.5", "required": false },
-      { "name": "flask", "version": ">=3.0", "required": true },
-      { "name": "numpy", "version": ">=1.24", "required": false },
-      { "name": "openpyxl", "version": ">=3.1", "required": true },
-      { "name": "qrcode", "version": ">=7.4", "required": false },
-      { "name": "xlrd", "version": ">=2.0", "required": true },
-      { "name": "zfec", "version": ">=1.6", "required": false }
+      {
+        "name": "cv2",
+        "version": ">=4.5",
+        "required": false,
+        "hint": "缺少 cv2：视频码流模式（生成 mp4；静态码模式不受影响）不可用。请安装依赖包 JZToolsHub-依赖-cv2-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "flask",
+        "version": ">=3.0",
+        "required": true,
+        "hint": "缺少 flask：本插件全部功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      },
+      {
+        "name": "numpy",
+        "version": ">=1.24",
+        "required": false,
+        "hint": "缺少 numpy：视频码流模式（生成 mp4；静态码模式不受影响）不可用。请安装依赖包 JZToolsHub-依赖-numpy-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "openpyxl",
+        "version": ">=3.1",
+        "required": true,
+        "hint": "缺少 openpyxl：轨迹表 xlsx 读取不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "qrcode",
+        "version": ">=7.4",
+        "required": false,
+        "hint": "缺少 qrcode：全部出码功能不可用。请安装依赖包 JZToolsHub-依赖-qrcode-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "xlrd",
+        "version": ">=2.0",
+        "required": true,
+        "hint": "缺少 xlrd：轨迹表 xls 读取不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      },
+      {
+        "name": "zfec",
+        "version": ">=1.6",
+        "required": false,
+        "hint": "缺少 zfec：纠删码（出码/解码）不可用。请安装依赖包 JZToolsHub-依赖-zfec-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+      }
     ]
   }
 }

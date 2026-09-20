@@ -21,12 +21,11 @@ param(
     [string]$Name = "",               # 显示名（缺省取预置表 / 同 id）
     [string]$Packages = "",           # 载荷目录（逗号分隔；缺省取预置表）
     [string]$Provides = "",           # 对外提供的 import 名（缺省=载荷去掉 *.libs 等支撑目录）
-    [string]$Affects = "",            # "装了它哪个功能才可用"（缺省取预置表）
+    [string]$Affects = "",            # 兼容保留（提示文案已改由插件声明，不再写进依赖包清单）
     [string]$Version = "",            # 缺省取首个可导入包的实际版本
     [string]$From = "",
     [string]$OutDir = "",
     [string]$MinApp = "",             # 写入 min_app_version（缺省留空=不限制）
-    [string]$RegistryFile = "",       # 登记表（缺省 tools\dep-components.json）：包 → 组件的唯一真源
     [switch]$NoVcRuntime,            # 不随组件分发 VC++ 运行时（默认：含 C 扩展的组件自动带）
     [switch]$Force,
     [switch]$NoZip
@@ -44,46 +43,29 @@ $VcRuntimeDlls = @(
 )
 
 # 预置表：常用组件的默认载荷与文案（新组件可用 -Packages/-Provides/-Affects 覆盖，无需改脚本）
-$PRESETS = @{
-    # numpy 是 cv2 / pandas 的公共底层 → 单独成组件（路径①：避免重复与版本冲突）
-    "numpy"  = @{
-        name     = "NumPy 依赖组件"
-        packages = @("numpy", "numpy.libs")
-        provides = @("numpy")
-        affects  = "cv2 / pandas 等组件的公共底层（单独安装无直接功能，装了是给别的组件用）"
-    }
-    "opencv" = @{
-        name     = "OpenCV 依赖组件"
-        packages = @("cv2", "cv2.libs")
-        provides = @("cv2")
-        requires = "numpy"
-        affects  = "info-transfer / trajectory-convert 的视频码流模式（静态码模式不受影响）"
-    }
-    "office" = @{
-        name     = "Office 文档组件"
-        packages = @("openpyxl", "et_xmlfile", "docx", "lxml", "lxml.libs", "typing_extensions.py",
-                     "xlrd", "olefile", "pypdf")
-        provides = @("openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions", "xlrd", "olefile", "pypdf")
-        affects  = "表格/文档读写：知识库与共享文档预览、战果与轨迹报表、admin 批量导入导出（xlsx；缺失时 admin 降级为仅 CSV）"
-    }
-    "qr"     = @{
-        name     = "二维码编解码组件"
-        packages = @("qrcode", "colorama", "zfec", "zxingcpp", "zxingcpp.libs")
-        provides = @("qrcode", "colorama", "zfec", "zxingcpp")
-        affects  = "信息传输/轨迹转换的出码与校验、QR 视频流解码"
-    }
-    "llm"    = @{
-        name     = "大模型 HTTP 组件"
-        packages = @("requests", "certifi", "charset_normalizer", "idna", "urllib3")
-        provides = @("requests", "certifi", "charset_normalizer", "idna", "urllib3")
-        affects  = "各插件的大模型调用（战果录入、人物关系、过滤器、轨迹速写）"
-    }
+# 依赖单元表（平铺同一层级：一个依赖一个包，不做"簇"分组）。
+#   key  = 载荷目录名（也是文件名里的 id）；value.payload = 该依赖 + 它独占的传递依赖。
+#   共享底层（如 numpy 被 cv2 与插件直接使用）不并入别的单元，由插件在 requires 里显式声明——
+#   同一份依赖在目标机上只存在一份，不重复也不冲突。
+#   提示文案不在这里：缺哪个依赖、影响什么、怎么修，由插件自己声明
+#   （manifest.requires[].hint，见《插件设计规范.md》U-8），框架只原样展示。
+$UNITS = @{
+    "numpy"    = @{ payload = @("numpy", "numpy.libs") }
+    "cv2"      = @{ payload = @("cv2", "cv2.libs") }
+    "openpyxl" = @{ payload = @("openpyxl", "et_xmlfile") }
+    "docx"     = @{ payload = @("docx", "lxml", "lxml.libs", "typing_extensions.py") }
+    "xlrd"     = @{ payload = @("xlrd") }
+    "olefile"  = @{ payload = @("olefile") }
+    "pypdf"    = @{ payload = @("pypdf") }
+    "qrcode"   = @{ payload = @("qrcode", "colorama") }
+    "zfec"     = @{ payload = @("zfec") }
+    "zxingcpp" = @{ payload = @("zxingcpp", "zxingcpp.libs") }
+    "requests" = @{ payload = @("requests", "urllib3", "certifi", "idna", "charset_normalizer") }
 }
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖组件" }
-if (-not $RegistryFile) { $RegistryFile = Join-Path $Root "tools\dep-components.json" }
 $ToolVer = "1.0.0"
 
 function Say { param([string]$m = "") Write-Host $m }
@@ -99,18 +81,13 @@ Say "  JZToolsHub 依赖组件构建（build-dep-component.ps1 $ToolVer）"
 Say "================================================"
 
 # ---- 0. 合并预置与参数 ----
-$preset = $PRESETS[$Id]
-if (-not $Name)     { $Name     = if ($preset) { [string]$preset.name } else { $Id } }
-if (-not $Packages) { if (-not $preset) { Die "未预置组件 id=$Id：请用 -Packages 指定载荷目录（逗号分隔）" }
-                      $Packages = ($preset.packages -join ",") }
-if (-not $Affects)  { $Affects  = if ($preset) { [string]$preset.affects } else { "" } }
-if (-not $Provides -and $preset -and $preset.provides) { $Provides = ($preset.provides -join ",") }   # ★ 预置的 provides 必须读，否则会退回"从载荷推导"（.py 载荷名会被当成 import 名）
+$unit = $UNITS[$Id]
+if (-not $Name)     { $Name     = $Id }
+if (-not $Packages) { if (-not $unit) { Die "未知依赖单元 id=$Id：请用 -Packages 指定载荷目录，或先在 UNITS 表里登记" }
+                      $Packages = ($unit.payload -join ",") }
+if (-not $Provides) { $Provides = $Id }        # 单元只"提供"它自己；闭包里的依赖不声明为 provides
 $pkgList = @($Packages -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($pkgList.Count -eq 0) { Die "-Packages 为空" }
-if (-not $Provides) {
-    # 支撑目录（如 numpy.libs）不是 import 名，不进 provides
-    $Provides = (@($pkgList | Where-Object { $_ -notmatch '\.libs$' -and $_ -notmatch '^_' }) -join ",")
-}
+if ($pkgList.Count -eq 0) { Die "-Packages 为空（载荷目录清单缺失）" }
 $provideList = @($Provides -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 # ---- 1. 定位取源 ----
@@ -206,7 +183,6 @@ $manifest = [ordered]@{
         modules  = $mods
         provides = @($provideList)
         affects  = $Affects
-        requires = $(if ($preset.requires) { [string]$preset.requires } else { "" })
         python   = $pyVer
         platform = "win-amd64"
         vc_runtime = @($vcBundled)
@@ -268,14 +244,14 @@ pause
 [System.IO.File]::WriteAllText((Join-Path $staging "安装依赖组件.bat"), $bat, [System.Text.Encoding]::GetEncoding("GBK"))
 
 $notes = @()
-$notes += "# 依赖组件：$Name v$Version"
+$notes += "# 依赖包：$Name v$Version"
 $notes += ""
 $notes += "包含：" + (($verMap.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join "、") + "（合计约 $([math]::Round($totalBytes/1MB,1)) MB）"
 $notes += ""
 $notes += "## 为什么要单独装"
 $notes += ""
 $notes += "本组件只服务：" + $(if ($Affects) { "**$Affects**" } else { "（见插件 README）" }) + "，"
-if ($preset -and $preset.requires) { $notes += ""; $notes += "**前置**：需先安装 `依赖组件-$(($preset.requires))`（本组件的运行时依赖不在包内）。" }
+if ($false) { $notes += "**前置**：需先安装 `依赖组件-$(($preset.requires))`（本组件的运行时依赖不在包内）。" }
 $notes += "却占主包约 60 MB。解耦后它们不随主包，改由本组件按需安装——"
 $notes += "不装则：插件照常加载，视频码流模式不可用（**静态二维码模式完全不受影响**），"
 $notes += "后台「插件管理」会把这些插件标为「降级」并指出缺哪个依赖。"
@@ -292,7 +268,7 @@ if ($NoZip) { Say ""; Say "==> [-NoZip] 已组装：$staging"; exit 0 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 # 文件名对齐插件包约定：JZToolsHub-依赖组件-<id>-v<版本>.zip（id 机器可读、可容纳多个组件）
-$zipPath = Join-Path $OutDir ("JZToolsHub-依赖组件-{0}-v{1}.zip" -f $Id, $Version)
+$zipPath = Join-Path $OutDir ("JZToolsHub-依赖-{0}-v{1}.zip" -f $Id, $Version)
 if ((Test-Path -LiteralPath $zipPath) -and -not $Force) { Die "产物已存在：$zipPath（加 -Force 覆盖）" }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
@@ -307,32 +283,5 @@ Say "==> 已产出依赖组件包：$zipPath"
 Say ("    体积 {0:N1} MB；sha256 {1}" -f ((Get-Item -LiteralPath $zipPath).Length / 1MB), $sha)
 Say "    目标机操作：解压 → 双击「安装依赖组件.bat」"
 Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
-# ---- 登记表（入库）：包 → 组件的唯一真源，主体据此把"缺哪个包"翻译成"装哪个组件" ----
-$regObj = $null
-if (Test-Path -LiteralPath $RegistryFile) {
-    try { $regObj = Get-Content -LiteralPath $RegistryFile -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
-}
-if (-not $regObj) { $regObj = [pscustomobject]@{ schema = 1; components = [pscustomobject]@{} } }
-if (-not $regObj.components) { $regObj | Add-Member -NotePropertyName components -NotePropertyValue ([pscustomobject]@{}) -Force }
-$entry = [ordered]@{
-    id         = $Id
-    name       = $Name
-    version    = $Version
-    file       = (Split-Path -Leaf $zipPath)
-    sha256     = $sha
-    size       = [long](Get-Item -LiteralPath $zipPath).Length
-    provides   = @($provideList)
-    packages   = $verMap
-    requires   = $(if ($preset.requires) { [string]$preset.requires } else { "" })
-    affects    = $Affects
-    python     = $pyVer
-    platform   = "win-amd64"
-    vc_runtime = @($vcBundled)
-    built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
-}
-$regObj.components | Add-Member -NotePropertyName $Id -NotePropertyValue ([pscustomobject]$entry) -Force
-Write-Utf8NoBom $RegistryFile (($regObj | ConvertTo-Json -Depth 10) + "`n")
-Say "    登记（入库）：$RegistryFile"
-
 Say ""
 Say "==> 构建完成。"

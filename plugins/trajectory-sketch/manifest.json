@@ -1,7 +1,7 @@
 {
   "id": "trajectory-sketch",
   "name": "轨迹速写",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "JZToolsHub 团队",
   "icon": "✍️",
   "accent": "#5E35B1",
@@ -19,17 +19,20 @@
       {
         "name": "flask",
         "version": ">=3.0",
-        "required": true
+        "required": true,
+        "hint": "缺少 flask：本插件全部功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
       },
       {
         "name": "openpyxl",
         "version": ">=3.1",
-        "required": true
+        "required": true,
+        "hint": "缺少 openpyxl：报告导出与表格读取（xlsx）不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
         "name": "xlrd",
         "version": ">=2.0",
-        "required": true
+        "required": true,
+        "hint": "缺少 xlrd：轨迹表 xls 读取不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       }
     ]
   }
