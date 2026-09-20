@@ -43,7 +43,7 @@ DEP_COMPONENT_PACKAGES = [
     #   qr         → qrcode, zfec, zxingcpp           （+ colorama）
     #   llm        → requests                         （+ urllib3 / certifi / idna / charset_normalizer）
     # 本清单同时是「插件依赖白名单」的一部分：出包工具 C-4 允许插件声明这些包，
-    # 但要求目标机装了对应组件（缺则插件降级，后台/插件页面提示"请安装 <id> 依赖组件"）。
+    # 但要求目标机装了对应组件（缺则插件降级，后台/插件页面提示安装对应 <id> 依赖组件）。
     "cv2", "numpy",
     "openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions", "xlrd", "olefile", "pypdf",
     "qrcode", "colorama", "zfec", "zxingcpp",
