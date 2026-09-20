@@ -673,7 +673,7 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | --- | --- | --- |
 | 契约层 | `README.md` / `HANDOFF.md`（本文件）/ `插件设计规范.md` / `移动端APP.md` | 总览、交接状态、开发铁律、协议权威定义 |
 | 流程 | `docs/项目管理手册.md` | 改代码 / 开插件 / 移植 / 打包运维 四类场景（新手入口） |
-| 交付层 | `docs/guide/` | 打包部署手册、离线部署包说明、LibreOffice 组件评估 |
+| 交付层 | `docs/guide/` | 打包部署手册、离线部署包说明、LibreOffice 组件评估、干净机器部署验收手册 |
 | 设计层 | `docs/design/` | 8 份功能/插件设计文档 |
 | 评估层 | `docs/eval/` | 信息传输总纲、Python 选型、热插拔路线、手搓引擎 |
 | 方案层 | `docs/plan/` | 信息传输 TODO 清单、主体与插件解耦 TODO 清单（活清单）与实施方案 |
