@@ -17,14 +17,28 @@
 #     ├── 说明.md
 #     └── payload\pylibs\{cv2,numpy,numpy.libs}\…
 param(
-    [string]$Name = "OpenCV",
-    [string]$Version = "",            # 缺省取 cv2 的实际版本
+    [string]$Id = "opencv",           # 组件 id（机器可读，进文件名：JZToolsHub-依赖组件-<id>-v<版本>.zip）
+    [string]$Name = "",               # 显示名（缺省取预置表 / 同 id）
+    [string]$Packages = "",           # 载荷目录（逗号分隔；缺省取预置表）
+    [string]$Provides = "",           # 对外提供的 import 名（缺省=载荷去掉 *.libs 等支撑目录）
+    [string]$Affects = "",            # "装了它哪个功能才可用"（缺省取预置表）
+    [string]$Version = "",            # 缺省取首个可导入包的实际版本
     [string]$From = "",
     [string]$OutDir = "",
     [string]$MinApp = "",             # 写入 min_app_version（缺省留空=不限制）
     [switch]$Force,
     [switch]$NoZip
 )
+
+# 预置表：常用组件的默认载荷与文案（新组件可用 -Packages/-Provides/-Affects 覆盖，无需改脚本）
+$PRESETS = @{
+    "opencv" = @{
+        name     = "OpenCV 依赖组件"
+        packages = @("cv2", "numpy", "numpy.libs")   # numpy.libs 必须与 numpy 同装同卸（OpenBLAS DLL 链）
+        provides = @("cv2", "numpy")
+        affects  = "info-transfer / trajectory-convert 的视频码流模式（静态码模式不受影响）"
+    }
+}
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖组件" }
@@ -41,6 +55,20 @@ Say ""
 Say "================================================"
 Say "  JZToolsHub 依赖组件构建（build-dep-component.ps1 $ToolVer）"
 Say "================================================"
+
+# ---- 0. 合并预置与参数 ----
+$preset = $PRESETS[$Id]
+if (-not $Name)     { $Name     = if ($preset) { [string]$preset.name } else { $Id } }
+if (-not $Packages) { if (-not $preset) { Die "未预置组件 id=$Id：请用 -Packages 指定载荷目录（逗号分隔）" }
+                      $Packages = ($preset.packages -join ",") }
+if (-not $Affects)  { $Affects  = if ($preset) { [string]$preset.affects } else { "" } }
+$pkgList = @($Packages -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($pkgList.Count -eq 0) { Die "-Packages 为空" }
+if (-not $Provides) {
+    # 支撑目录（如 numpy.libs）不是 import 名，不进 provides
+    $Provides = (@($pkgList | Where-Object { $_ -notmatch '\.libs$' -and $_ -notmatch '^_' }) -join ",")
+}
+$provideList = @($Provides -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 # ---- 1. 定位取源 ----
 $cands = @()
@@ -65,6 +93,16 @@ if (-not $srcDir) { Die ("未找到包含 cv2 的取源目录。请用 -From 指
 Say "  取源    ：$srcDir"
 
 # ---- 2. 读版本（cv2 的发行名是 opencv-python；从 dist-info 或 metadata 取） ----
+# import 名 → 发行包名（如 cv2 → opencv-python；docx → python-docx）。
+# ★ 必须经 packages_distributions 映射：直接按 import 名查版本会得到 unknown（实测踩到）。
+function Get-DistName {
+    param([string]$ImportName)
+    try {
+        $d = & python -c "import importlib.metadata as m;d=m.packages_distributions().get('$ImportName') or [];print(d[0] if d else '$ImportName')" 2>$null | Select-Object -First 1
+        if ($d) { return $d.Trim() }
+    } catch {}
+    return $ImportName
+}
 function Get-DistVersion {
     param([string]$DistName)
     try {
@@ -73,21 +111,31 @@ function Get-DistVersion {
     } catch {}
     return ""
 }
-$cv2Ver = Get-DistVersion "opencv-python"; if (-not $cv2Ver) { $cv2Ver = "unknown" }
-$npVer  = Get-DistVersion "numpy";          if (-not $npVer)  { $npVer  = "unknown" }
-if (-not $Version) { $Version = $cv2Ver }
-Say "  组件版本：$Version（cv2=$cv2Ver，numpy=$npVer）"
+$mods = [ordered]@{}      # import 名 → 发行包名
+$verMap = [ordered]@{}    # 发行包名 → 版本（供组件清单 packages 字段）
+foreach ($m in $provideList) {
+    $dist = Get-DistName $m
+    $mods[$m] = $dist
+    $v = Get-DistVersion $dist
+    if (-not $v) { $v = "unknown" }
+    $verMap[$dist] = $v
+}
+if (-not $Version) { $Version = [string]($verMap.Values | Select-Object -First 1) }
+Say "  组件     ：$Id（$Name）"
+Say "  组件版本 ：$Version"
+Say ("  载荷     ：" + ($pkgList -join ", "))
+Say ("  提供     ：" + ($provideList -join ", ") + "（" + (($verMap.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "，") + "）")
+if ($verMap.Values -contains "unknown") { Die "有包查不到版本（import 名 → 发行包名映射失败）：$($verMap.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })" }
 
 # ---- 3. 组装 ----
 $staging = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-dep-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
 $pylibs = Join-Path $staging "payload\pylibs"
 New-Item -ItemType Directory -Force -Path $pylibs | Out-Null
-$items = @("cv2", "numpy", "numpy.libs")     # numpy.libs 必须与 numpy 同装同卸（OpenBLAS DLL 链）
 $totalBytes = 0
-foreach ($it in $items) {
+foreach ($it in $pkgList) {
     $src = Join-Path $srcDir $it
     if (-not (Test-Path -LiteralPath $src)) {
-        if ($it -eq "numpy.libs") { Warn "取源里没有 numpy.libs（部分 numpy 构建没有该目录，可忽略）"; continue }
+        if ($it -match '\.libs$') { Warn "取源里没有 $it（部分构建无该支撑目录，可忽略）"; continue }
         Die "取源缺少 $it：$src"
     }
     Copy-Item -LiteralPath $src -Destination $pylibs -Recurse -Force
@@ -99,18 +147,18 @@ foreach ($it in $items) {
 $manifest = [ordered]@{
     schema     = 1
     kind       = "dep-component"
-    id         = "opencv"
-    name       = "OpenCV 依赖组件（opencv-python + numpy）"
+    id         = $Id
+    name       = $Name
     version    = $Version
     built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     components = @([ordered]@{
-        id       = "opencv"
-        name     = "OpenCV 依赖组件"
+        id       = $Id
+        name     = $Name
         version  = $Version
-        packages = [ordered]@{ "opencv-python" = $cv2Ver; "numpy" = $npVer }
-        modules  = [ordered]@{ "cv2" = "opencv-python"; "numpy" = "numpy" }
-        provides = @("cv2", "numpy")
-        affects  = "info-transfer / trajectory-convert 的视频码流模式（静态码模式不受影响）"
+        packages = $verMap
+        modules  = $mods
+        provides = @($provideList)
+        affects  = $Affects
     })
 }
 Write-Utf8NoBom (Join-Path $pylibs "manifest.json") (($manifest | ConvertTo-Json -Depth 8) + "`n")
@@ -119,10 +167,11 @@ Write-Utf8NoBom (Join-Path $staging "manifest.json") (($manifest | ConvertTo-Jso
 $pkgMeta = [ordered]@{
     schema          = 1
     kind            = "dep-component-package"
-    id              = "opencv"
+    id              = $Id
     name            = $Name
     version         = $Version
-    provides        = @("cv2", "numpy")
+    provides        = @($provideList)
+    affects         = $Affects
     built_at        = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     built_from      = [ordered]@{ commit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1); source = $srcDir }
     size_bytes      = [long]$totalBytes
@@ -147,11 +196,11 @@ pause
 $notes = @()
 $notes += "# 依赖组件：$Name v$Version"
 $notes += ""
-$notes += "包含：opencv-python(cv2) $cv2Ver、numpy $npVer（合计约 $([math]::Round($totalBytes/1MB,1)) MB）"
+$notes += "包含：" + (($verMap.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" }) -join "、") + "（合计约 $([math]::Round($totalBytes/1MB,1)) MB）"
 $notes += ""
 $notes += "## 为什么要单独装"
 $notes += ""
-$notes += "这两个库只服务 **info-transfer / trajectory-convert 的视频码流模式**（生成 mp4），"
+$notes += "本组件只服务：" + $(if ($Affects) { "**$Affects**" } else { "（见插件 README）" }) + "，"
 $notes += "却占主包约 60 MB。解耦后它们不随主包，改由本组件按需安装——"
 $notes += "不装则：插件照常加载，视频码流模式不可用（**静态二维码模式完全不受影响**），"
 $notes += "后台「插件管理」会把这些插件标为「降级」并指出缺哪个依赖。"
@@ -167,7 +216,8 @@ Write-Utf8NoBom (Join-Path $staging "说明.md") ($notes -join "`n")
 if ($NoZip) { Say ""; Say "==> [-NoZip] 已组装：$staging"; exit 0 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$zipPath = Join-Path $OutDir ("JZToolsHub-依赖组件-{0}-v{1}.zip" -f $Name, $Version)
+# 文件名对齐插件包约定：JZToolsHub-依赖组件-<id>-v<版本>.zip（id 机器可读、可容纳多个组件）
+$zipPath = Join-Path $OutDir ("JZToolsHub-依赖组件-{0}-v{1}.zip" -f $Id, $Version)
 if ((Test-Path -LiteralPath $zipPath) -and -not $Force) { Die "产物已存在：$zipPath（加 -Force 覆盖）" }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue

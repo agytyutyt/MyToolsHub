@@ -147,6 +147,15 @@ if (-not $after.ok) {
     Fail ("自检未通过：组件文件已就位但 exe 无法 import 其中的库。`n" +
           "         请把上面输出反馈给维护者；如需回退可执行 -Uninstall。")
 }
+# 生效功能文案取自组件清单（affects），脚本本身与具体组件无关
+$affects = ""
+$mPath = Join-Path $Pylibs "manifest.json"
+if (Test-Path -LiteralPath $mPath) {
+    try {
+        $mo = Get-Content -LiteralPath $mPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $affects = [string]($mo.components | Select-Object -First 1).affects
+    } catch {}
+}
 Say ""
-Say "  完成：视频码流模式已可用（info-transfer / trajectory-convert）。"
+Say "  完成：本组件已可用$(if ($affects) { '（' + $affects + '）' } else { '' })。"
 Say "  卸载：install-dep-component.ps1 -Uninstall"
