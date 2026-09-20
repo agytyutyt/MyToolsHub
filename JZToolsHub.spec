@@ -15,21 +15,16 @@ from PyInstaller.utils.hooks import collect_all
 # 注：本清单同时是「插件依赖白名单」的唯一真源——出包工具 build-plugin-package.ps1 的
 #     C-4 校验据此判断插件后端引用的第三方库是否在整包内（规范 U-2）。因此下面两项虽由
 #     flask 的 hook 间接带进包，也必须显式登记，否则 admin 插件出包会被误判为"依赖未打包"。
+# ★ 只保留**框架必需**依赖（2026-09-20 彻底模块化）：
+#   - flask / werkzeug / waitress：框架本体（app.py 直接 import）
+#   - cryptography：核心插件 admin 的账号密码/密钥加密（登录体系，必须随主体）
+#   - pystray / PIL：托盘图标常驻（框架功能）
+#   其余第三方库一律移出主包，改由「依赖组件包」按需安装（见 DEP_COMPONENT_PACKAGES）。
 PACKAGES = [
-    "flask",           # Web 框架本体（app.py 直接 import；admin 插件后端也直接 import）
-    "werkzeug",        # flask 的依赖；admin 插件后端用 werkzeug.security 做口令散列
+    "flask",           # Web 框架本体（app.py 直接 import）
+    "werkzeug",        # flask 的依赖；admin 插件用 werkzeug.security 做口令散列
     "waitress",        # 生产 WSGI 服务器（frozen 分支）
-    "cryptography",    # admin 插件（Fernet 加密）
-    "requests",        # case-report / character-graph（大模型调用）
-    "docx",            # python-docx（shared-docs / character-graph）
-    "openpyxl",        # shared-docs / trajectory-convert
-    "xlrd",            # shared-docs / trajectory-convert / info-transfer(.xls)
-    "olefile",         # info-transfer(.doc 旧版二进制提取)
-    "qrcode",          # trajectory-convert
-    "zfec",            # trajectory-convert / qr-video-decode
-    "zxingcpp",        # info-transfer 协议 v2（JZ2 二进制码解码，pip 包名 zxing-cpp）
-    "pypdf",           # info-transfer（T12 pdf 逐页文本提取，pip 包名 pypdf）
-    "pypdf",           # character-graph
+    "cryptography",    # admin 插件（Fernet 加密账号密码/密钥）——登录体系必需
     "pystray",         # 系统托盘图标（打包运行 GUI 常驻后台）
     "PIL",             # pystray 图标生成（pillow）
 ]
@@ -41,8 +36,18 @@ PACKAGES = [
 #   ★ 本清单同样是「插件依赖白名单」的一部分：出包工具 C-4 允许插件声明这些包，
 #     但要求目标机装了对应依赖组件（缺则插件降级，提示"安装依赖组件包"）。
 DEP_COMPONENT_PACKAGES = [
-    "cv2",             # opencv-python（info-transfer / trajectory-convert 视频码流）
-    "numpy",           # cv2 的依赖，两者必须同装同卸（numpy.libs 的 OpenBLAS 链）
+    # 由「依赖组件包」按需提供、**不随主包**（组件划分见 tools/dep-components.json）：
+    #   numpy      → numpy, numpy.libs                （cv2/pandas 的公共底层）
+    #   opencv     → cv2                              （视频码流）
+    #   office     → openpyxl, docx, lxml, xlrd, olefile, pypdf（+ et-xmlfile / typing_extensions）
+    #   qr         → qrcode, zfec, zxingcpp           （+ colorama）
+    #   llm        → requests                         （+ urllib3 / certifi / idna / charset_normalizer）
+    # 本清单同时是「插件依赖白名单」的一部分：出包工具 C-4 允许插件声明这些包，
+    # 但要求目标机装了对应组件（缺则插件降级，后台/插件页面提示"请安装 <id> 依赖组件"）。
+    "cv2", "numpy",
+    "openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions", "xlrd", "olefile", "pypdf",
+    "qrcode", "colorama", "zfec", "zxingcpp",
+    "requests", "urllib3", "certifi", "idna", "charset_normalizer",
 ]
 
 datas = []
@@ -74,10 +79,12 @@ a = Analysis(
     #   （python-docx 元数据声明 lxml>=3.1.0，docx 在 import 期即加载 lxml），
     #   排掉会打断 shared-docs / character-graph / info-transfer / knowledge-base。
     #   新增排除项前务必先用 `importlib.metadata.requires()` 做反向依赖核查。
-    # numpy 亦排除：它由「依赖组件包」提供（见 DEP_COMPONENT_PACKAGES）。
-    # 不排的话 PyInstaller 仍会以传递依赖收集它（实测残留 numpy.libs 21 MB），
-    # 那会让"未装组件"场景被 _internal 里的副本掩盖，PoC 与门控都失真。
-    excludes=["pandas", "numpy", "cv2"],
+    # 全部「由依赖组件提供」的包都显式排除：只从 PACKAGES 移除还不够，
+    # PyInstaller 仍会以传递依赖把它们收集回来（实测 numpy 残留 21 MB），
+    # 那会让"未装组件"场景被 _internal 里的副本掩盖，门控与提示全部失真。
+    excludes=["pandas", "numpy", "cv2", "openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions",
+              "xlrd", "olefile", "pypdf", "qrcode", "colorama", "zfec", "zxingcpp",
+              "requests", "urllib3", "certifi", "idna", "charset_normalizer"],
     noarchive=False,
 )
 

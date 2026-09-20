@@ -32,13 +32,41 @@ param(
 
 # 预置表：常用组件的默认载荷与文案（新组件可用 -Packages/-Provides/-Affects 覆盖，无需改脚本）
 $PRESETS = @{
+    # numpy 是 cv2 / pandas 的公共底层 → 单独成组件（路径①：避免重复与版本冲突）
+    "numpy"  = @{
+        name     = "NumPy 依赖组件"
+        packages = @("numpy", "numpy.libs")
+        provides = @("numpy")
+        affects  = "cv2 / pandas 等组件的公共底层（单独安装无直接功能，装了是给别的组件用）"
+    }
     "opencv" = @{
         name     = "OpenCV 依赖组件"
-        packages = @("cv2", "numpy", "numpy.libs")   # numpy.libs 必须与 numpy 同装同卸（OpenBLAS DLL 链）
-        provides = @("cv2", "numpy")
+        packages = @("cv2", "cv2.libs")
+        provides = @("cv2")
+        requires = "numpy"
         affects  = "info-transfer / trajectory-convert 的视频码流模式（静态码模式不受影响）"
     }
+    "office" = @{
+        name     = "Office 文档组件"
+        packages = @("openpyxl", "et_xmlfile", "docx", "lxml", "lxml.libs", "typing_extensions.py",
+                     "xlrd", "olefile", "pypdf")
+        provides = @("openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions", "xlrd", "olefile", "pypdf")
+        affects  = "表格/文档读写：知识库与共享文档预览、战果与轨迹报表、admin 批量导入导出（xlsx；缺失时 admin 降级为仅 CSV）"
+    }
+    "qr"     = @{
+        name     = "二维码编解码组件"
+        packages = @("qrcode", "colorama", "zfec", "zxingcpp", "zxingcpp.libs")
+        provides = @("qrcode", "colorama", "zfec", "zxingcpp")
+        affects  = "信息传输/轨迹转换的出码与校验、QR 视频流解码"
+    }
+    "llm"    = @{
+        name     = "大模型 HTTP 组件"
+        packages = @("requests", "certifi", "charset_normalizer", "idna", "urllib3")
+        provides = @("requests", "certifi", "charset_normalizer", "idna", "urllib3")
+        affects  = "各插件的大模型调用（战果录入、人物关系、过滤器、轨迹速写）"
+    }
 }
+
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖组件" }
@@ -62,6 +90,7 @@ if (-not $Name)     { $Name     = if ($preset) { [string]$preset.name } else { $
 if (-not $Packages) { if (-not $preset) { Die "未预置组件 id=$Id：请用 -Packages 指定载荷目录（逗号分隔）" }
                       $Packages = ($preset.packages -join ",") }
 if (-not $Affects)  { $Affects  = if ($preset) { [string]$preset.affects } else { "" } }
+if (-not $Provides -and $preset -and $preset.provides) { $Provides = ($preset.provides -join ",") }   # ★ 预置的 provides 必须读，否则会退回"从载荷推导"（.py 载荷名会被当成 import 名）
 $pkgList = @($Packages -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($pkgList.Count -eq 0) { Die "-Packages 为空" }
 if (-not $Provides) {
@@ -159,6 +188,7 @@ $manifest = [ordered]@{
         modules  = $mods
         provides = @($provideList)
         affects  = $Affects
+        requires = $(if ($preset.requires) { [string]$preset.requires } else { "" })
     })
 }
 Write-Utf8NoBom (Join-Path $pylibs "manifest.json") (($manifest | ConvertTo-Json -Depth 8) + "`n")
@@ -201,6 +231,7 @@ $notes += ""
 $notes += "## 为什么要单独装"
 $notes += ""
 $notes += "本组件只服务：" + $(if ($Affects) { "**$Affects**" } else { "（见插件 README）" }) + "，"
+if ($preset -and $preset.requires) { $notes += ""; $notes += "**前置**：需先安装 `依赖组件-$(($preset.requires))`（本组件的运行时依赖不在包内）。" }
 $notes += "却占主包约 60 MB。解耦后它们不随主包，改由本组件按需安装——"
 $notes += "不装则：插件照常加载，视频码流模式不可用（**静态二维码模式完全不受影响**），"
 $notes += "后台「插件管理」会把这些插件标为「降级」并指出缺哪个依赖。"
