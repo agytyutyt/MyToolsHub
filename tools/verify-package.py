@@ -126,6 +126,23 @@ def main():
         check(False, "已安装依赖清单可解析（config/installed-deps.json）", str(e))
     check(isinstance(deps.get("modules"), dict) and bool(deps.get("modules")),
           "已安装依赖清单含 import→发行包 映射（modules）")
+    # 清单**只许**记录随包分发的包（scope=shipped）：若把构建机环境的包也写进来，
+    # 干净机上插件声明的依赖会被误判为"已满足"，缺依赖提示与红 × 都不出现
+    # （2026-09-20 修复：曾写入 93 个构建机包，实际随包只有 9 个）。
+    check(deps.get("scope") == "shipped",
+          "已安装依赖清单 scope=shipped（不得记录构建机独有包）", "scope=%r" % deps.get("scope"))
+    # 只取**顶层** dist-info（`_internal/<name>-<ver>.dist-info/METADATA`）；
+    # 嵌套的 vendored 副本（如 _internal/setuptools/_vendor/…）不算随包分发的包。
+    shipped = sorted({n.split("/")[1][: -len(".dist-info")].rsplit("-", 1)[0].lower()
+                      for n in names
+                      if n.startswith("_internal/") and n.count("/") == 2
+                      and n.endswith(".dist-info/METADATA")})
+    listed = sorted({str(k).lower().replace("_", "-") for k in (deps.get("packages") or {})})
+    extra = [x for x in listed if x not in shipped]
+    missing = [x for x in shipped if x not in listed]
+    check(not extra, "清单包集合 ⊆ 随包分发集合（_internal 的 dist-info）",
+          ("清单多出：%s" % ", ".join(extra)) if extra else "实际：%d 个包，与 _internal 一致" % len(listed))
+    check(not missing, "随包分发的包都在清单里", ("清单缺：%s" % ", ".join(missing)) if missing else "实际：%d 个" % len(shipped))
 
     tpl = [n for n in files if n.endswith(".template.json")]
     check(len(tpl) >= TEMPLATE_MIN, "配置模板 >= %d" % TEMPLATE_MIN, "实际 %d：%s" % (len(tpl), ", ".join(tpl)))

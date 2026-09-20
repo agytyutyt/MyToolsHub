@@ -10,7 +10,7 @@
     "本地存档",
     "规则/大模型"
   ],
-  "version": "1.2.2",
+  "version": "1.2.3",
   "author": "JZToolsHub 团队",
   "form": "source",
   "requires": {
@@ -24,7 +24,7 @@
       {
         "name": "openpyxl",
         "version": ">=3.1",
-        "required": true,
+        "required": false,
         "hint": "缺少 openpyxl：战果报表 xlsx 读写不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {

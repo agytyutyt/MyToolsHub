@@ -10,7 +10,7 @@
     "JSON 封装",
     "QR-transfer 视频"
   ],
-  "version": "1.1.2",
+  "version": "1.1.3",
   "author": "JZToolsHub 团队",
   "form": "source",
   "requires": {
@@ -36,7 +36,7 @@
       {
         "name": "openpyxl",
         "version": ">=3.1",
-        "required": true,
+        "required": false,
         "hint": "缺少 openpyxl：轨迹表 xlsx 读取不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
@@ -48,7 +48,7 @@
       {
         "name": "xlrd",
         "version": ">=2.0",
-        "required": true,
+        "required": false,
         "hint": "缺少 xlrd：轨迹表 xls 读取不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {

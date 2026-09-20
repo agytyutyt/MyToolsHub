@@ -828,7 +828,22 @@ if (-not $SkipDepCheck -and $meta.requires) {
     $pkgs = @{}; $mods = @{}
     if ($lock -and $lock.packages) { foreach ($p in $lock.packages.PSObject.Properties) { $pkgs[$p.Name.ToLower()] = [string]$p.Value } }
     if ($lock -and $lock.modules)  { foreach ($p in $lock.modules.PSObject.Properties)  { $mods[$p.Name] = [string]$p.Value } }
-    $depLockAvailable = ($null -ne $lock)
+    # 依赖组件（runtime\pylibs\manifest.json）：组件装了就等于"本机已安装"。
+    # 口径与主体 jz_deps.load_installed_deps 的合并一致——否则装了 cv2/numpy 组件仍会报"缺失"。
+    $compPath = Join-Path $AppDir "runtime\pylibs\manifest.json"
+    $compIds = @()
+    if (Test-Path -LiteralPath $compPath) {
+        try {
+            $comp = Get-Content -LiteralPath $compPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($c in @($comp.components)) {
+                if (-not $c) { continue }
+                $compIds += [string]$c.id
+                if ($c.packages) { foreach ($p in $c.packages.PSObject.Properties) { if (-not $pkgs.ContainsKey($p.Name.ToLower())) { $pkgs[$p.Name.ToLower()] = [string]$p.Value } } }
+                if ($c.modules)  { foreach ($p in $c.modules.PSObject.Properties)  { if (-not $mods.ContainsKey($p.Name)) { $mods[$p.Name] = [string]$p.Value } } }
+            }
+        } catch { Warn "依赖组件清单不可解析（按未安装处理）：$compPath" }
+    }
+    $depLockAvailable = ($null -ne $lock) -or ($compIds.Count -gt 0)
 
     foreach ($d in @($meta.requires.python_packages)) {
         if (-not $d) { continue }
@@ -842,14 +857,14 @@ if (-not $SkipDepCheck -and $meta.requires) {
             $c = Compare-SemVer $actual $want
             if ($null -ne $c -and $c -lt 0) { $ok = $false }
         }
-        $depRows += [pscustomobject]@{ kind = "框架包"; name = $nm; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false) }
+        $depRows += [pscustomobject]@{ kind = "框架包"; name = $nm; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false); hint = [string]$d.hint }
     }
     foreach ($d in @($meta.requires.vendored)) {
         if (-not $d) { continue }
         $nm = [string]$d.name
         $vend = Join-Path (Join-Path (Join-Path $pkgRoot "payload") ("plugins\$id\backend\vendor")) $nm
         $ok = Test-Path -LiteralPath $vend
-        $depRows += [pscustomobject]@{ kind = "自带"; name = $nm; require = ""; actual = $(if ($ok) { "包内自带" } else { $null }); ok = $ok; required = ($d.required -ne $false) }
+        $depRows += [pscustomobject]@{ kind = "自带"; name = $nm; require = ""; actual = $(if ($ok) { "包内自带" } else { $null }); ok = $ok; required = ($d.required -ne $false); hint = [string]$d.hint }
     }
     foreach ($d in @($meta.requires.external)) {
         if (-not $d) { continue }
@@ -870,12 +885,13 @@ if (-not $SkipDepCheck -and $meta.requires) {
             $ok = (Test-Path -LiteralPath $dir)
             if ($ok) { $actual = $dir }
         }
-        $depRows += [pscustomobject]@{ kind = "外部组件"; name = $eid; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false) }
+        $depRows += [pscustomobject]@{ kind = "外部组件"; name = $eid; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false); hint = [string]$d.hint }
     }
 
     if ($depRows.Count -gt 0) {
         Say ""
         Say "  依赖检测（包内声明 vs 本机现状）："
+        if ($compIds.Count -gt 0) { Say ("    （已装依赖组件：{0}）" -f ($compIds -join "、")) }
         foreach ($r in $depRows) {
             $mark = if ($r.ok) { "[满足]    " } elseif ($r.required) { "[缺失]    " } else { "[可选缺失]" }
             Say ("    {0} {1,-8} {2,-16} 声明 {3,-10} 实际 {4}" -f $mark, $r.kind, $r.name, $(if ($r.require) { $r.require } else { "—" }), $(if ($r.actual) { $r.actual } else { "—" }))
@@ -883,10 +899,28 @@ if (-not $SkipDepCheck -and $meta.requires) {
         $depBlocking = @($depRows | Where-Object { -not $_.ok -and $_.required })
         if ($depBlocking.Count -gt 0) {
             $names = ($depBlocking | ForEach-Object { $_.name }) -join "、"
-            $tip = ("依赖不满足运行需要：$names`n" +
+            $detail = ""
+            foreach ($r in $depBlocking) {
+                if ($r.hint) { $detail += ("           · {0}：{1}`n" -f $r.name, $r.hint) }
+            }
+            $tip = ("依赖不满足运行需要：$names`n" + $detail +
                     "         仍会继续完成安装（环境问题不阻断）；装好后该插件会被主体标记为「不可运行」并暂不加载，`n" +
                     "         补齐依赖并重启后自动恢复。如需改为中止：加 -StrictDeps；跳过检测：-SkipDepCheck。")
             if ($StrictDeps) { Fail $tip } else { Warn $tip }
+        }
+        # 可选依赖缺失：不阻断也不告警（避免"狼来了"），但要把"哪个功能会失效"讲清楚——
+        # 文案来自插件自己声明的 hint（规范 U-8），逐项列出便于照着补依赖包。
+        $depOptional = @($depRows | Where-Object { -not $_.ok -and -not $_.required })
+        if ($depOptional.Count -gt 0) {
+            Say ""
+            Say "  提示：以下可选依赖未安装，对应功能在目标机上不可用（插件仍可使用其它功能）："
+            foreach ($r in $depOptional) {
+                # hint 通常自带"缺少 <包>："前缀（规范 U-8 的写法），与行首包名重复时去掉
+                $h = [string]$r.hint
+                $pfx = "缺少" + $r.name + "："
+                if ($h.StartsWith($pfx)) { $h = $h.Substring($pfx.Length) }
+                Say ("    · {0}：{1}" -f $r.name, $(if ($h) { $h } else { "该功能不可用" }))
+            }
         }
     }
     if (-not $depLockAvailable) {

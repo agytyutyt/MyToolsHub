@@ -984,16 +984,37 @@ def installed_deps(base_dir):
     raw = read_json(os.path.join(base_dir, "config", "installed-deps.json")) or {}
     lock = jz_deps.load_installed_deps(base_dir) if jz_deps else {"available": False, "packages": {}, "path": ""}
     pkgs = lock.get("packages", {})
-    whitelist = [str(x).lower() for x in (raw.get("whitelist") or [])]
+    raw_mods = raw.get("modules") or {}
+    # 白名单项写的是 import 名（PIL），先经 modules 归一到发行包名（pillow）再比对，
+    # 否则白名单包会被算进"其它包"、面板上看不到它。
+    whitelist = set()
+    for x in (raw.get("whitelist") or []):
+        whitelist.add(str(raw_mods.get(str(x), x)).lower())
     import_of = {}
-    for mod, dist in (raw.get("modules") or {}).items():
+    for mod, dist in raw_mods.items():
         import_of.setdefault(str(dist).lower(), []).append(str(mod))
-    wl_rows, other_rows = [], []
+    # 依赖组件包（cv2/numpy/openpyxl…）装在 runtime/pylibs/，由「依赖组件」单独安装：
+    # 这些包要逐项列出（要看"装了哪些组件、什么版本"），不能只算进 other_count。
+    comp_of = {}
+    for c in (lock.get("components") or []):
+        for d in (c.get("packages") or {}):
+            comp_of[str(d).lower()] = str(c.get("id") or c.get("name") or "component")
+        for mod, dist in (c.get("modules") or {}).items():
+            import_of.setdefault(str(dist).lower(), []).append(str(mod))
+    wl_rows, comp_rows, other_rows = [], [], []
     for dist, ver in sorted(pkgs.items(), key=lambda kv: kv[0].lower()):
         row = {"dist": dist, "version": ver, "imports": sorted(import_of.get(dist.lower(), []))[:3]}
-        (wl_rows if dist.lower() in whitelist else other_rows).append(row)
-    groups = [{"id": "framework", "name": "框架包（随主包）", "available": lock.get("available", False),
-               "items": wl_rows, "other_count": len(other_rows),
+        if dist.lower() in whitelist:
+            wl_rows.append(row)
+        elif dist.lower() in comp_of:
+            row["component"] = comp_of[dist.lower()]
+            comp_rows.append(row)
+        else:
+            other_rows.append(row)
+    items = ([dict(r, source="framework") for r in wl_rows]
+             + [dict(r, source="component") for r in comp_rows])
+    groups = [{"id": "framework", "name": "框架包（随主包 / 依赖组件）", "available": lock.get("available", False),
+               "items": items, "other_count": len(other_rows),
                "generated_at": lock.get("generated_at", ""), "python": lock.get("python", "")}]
     # 外部程序组件：探测标准位置（与 jz_deps._probe_external 同口径）
     ext_items = []

@@ -221,9 +221,12 @@
                    : it.state === 'ok' ? ' <span class="dep-badge ok">已装 ✅</span>' : '';
           const path = it.path ? `<span class="dep-path">${esc(it.path)}</span>` : '';
           const imports = (it.imports && it.imports.length) ? `<span class="dep-path">import ${esc(it.imports.join('/'))}</span>` : '';
-          return `<li><code>${esc(name)}</code>${ver}${st}${imports}${path}</li>`;
+          // 依赖组件包（cv2/numpy…）单独安装，标注来源便于对着「依赖组件」包核对
+          const src = it.source === 'component'
+            ? ` <span class="dep-badge src">依赖组件${it.component ? '：' + esc(it.component) : ''}</span>` : '';
+          return `<li><code>${esc(name)}</code>${ver}${src}${st}${imports}${path}</li>`;
         }).join('');
-        const extra = g.other_count ? `<p class="admin-hint">另有 ${g.other_count} 个框架包未在依赖白名单内（已安装，未逐项列出）。</p>` : '';
+        const extra = g.other_count ? `<p class="admin-hint">另有 ${g.other_count} 个包随主包分发但不在依赖白名单内（传递依赖，未逐项列出）。</p>` : '';
         const na = g.available === false ? '<p class="admin-hint">（本机没有 installed-deps.json：源码开发形态，框架包清单不可核验）</p>' : '';
         return `<div class="deps-group"><h4>${esc(g.name)}</h4>${na}<ul>${rows || '<li class="dep-none">（无）</li>'}</ul>${extra}</div>`;
       }).join('');

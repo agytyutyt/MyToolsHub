@@ -1,7 +1,7 @@
 {
   "id": "info-transfer",
   "name": "信息传输",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "author": "JZToolsHub 团队",
   "icon": "📨",
   "accent": "#00897b",
@@ -24,7 +24,7 @@
       {
         "name": "docx",
         "version": ">=1.0",
-        "required": true,
+        "required": false,
         "hint": "缺少 docx：docx 精简提取不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
@@ -42,19 +42,19 @@
       {
         "name": "olefile",
         "version": ">=0.46",
-        "required": true,
+        "required": false,
         "hint": "缺少 olefile：doc 旧版二进制提取不可用。请安装依赖包 JZToolsHub-依赖-olefile-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
         "name": "openpyxl",
         "version": ">=3.1",
-        "required": true,
+        "required": false,
         "hint": "缺少 openpyxl：xlsx 精简提取不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
         "name": "pypdf",
         "version": ">=4.0",
-        "required": true,
+        "required": false,
         "hint": "缺少 pypdf：pdf 精简提取不可用。请安装依赖包 JZToolsHub-依赖-pypdf-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
@@ -66,7 +66,7 @@
       {
         "name": "xlrd",
         "version": ">=2.0",
-        "required": true,
+        "required": false,
         "hint": "缺少 xlrd：xls 精简提取不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       },
       {
@@ -78,7 +78,7 @@
       {
         "name": "zxingcpp",
         "version": ">=2.0",
-        "required": true,
+        "required": false,
         "hint": "缺少 zxingcpp：视频解码校验不可用。请安装依赖包 JZToolsHub-依赖-zxingcpp-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
       }
     ]

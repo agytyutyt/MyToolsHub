@@ -84,6 +84,24 @@ function Read-ZipJson {
     } finally { $zip.Dispose() }
 }
 
+function Copy-PluginsSeed {
+    # 解耦后主包只带核心插件（admin），业务插件走插件包 / 插件集分发；沙箱需要一份
+    # "目标机上已装的旧版插件"，故从仓库 plugins\ 取源，并清掉运行态产物
+    # （data/out/__pycache__/.task_cache/*.pyc），避免把开发机残留带进夹具。
+    param([string]$Dest)
+    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+    # 注意用 -Path：通配符只在 -Path 下展开（-LiteralPath 会把 * 当字面量，静默少拷）
+    Copy-Item -Path (Join-Path $Repo "plugins\*") -Destination $Dest -Recurse -Force
+    if (-not (Test-Path -LiteralPath (Join-Path $Dest "knowledge-base\manifest.json"))) {
+        throw "沙箱夹具取源失败：$Dest 下没有 knowledge-base\manifest.json"
+    }
+    Get-ChildItem -LiteralPath $Dest -Recurse -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { @("data", "out", "__pycache__", ".task_cache") -contains $_.Name } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $Dest -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq ".pyc" } | Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 # ============================================================================
 #  0. 准备沙箱
 # ============================================================================
@@ -93,7 +111,7 @@ New-Item -ItemType Directory -Force -Path $App, $Data, $OutDir, $OutVar | Out-Nu
 
 Copy-Item -LiteralPath (Join-Path $Repo "deploy\JZToolsHub\version.json") -Destination $App -Force
 Copy-Item -LiteralPath (Join-Path $Repo "deploy\JZToolsHub\config") -Destination $App -Recurse -Force
-Copy-Item -LiteralPath (Join-Path $Repo "deploy\JZToolsHub\plugins") -Destination $App -Recurse -Force
+Copy-PluginsSeed (Join-Path $App "plugins")
 [System.IO.File]::WriteAllText((Join-Path $App "JZToolsHub.exe"), "", (New-Object System.Text.UTF8Encoding($false)))
 # 沙箱里的 knowledge-base 当作"目标机上的旧版本 0.9.0"
 $kbApp = Join-Path $App "plugins\knowledge-base"
@@ -353,7 +371,7 @@ if (Test-Path -LiteralPath $mainPkg) { Remove-Item -LiteralPath $mainPkg -Recurs
 New-Item -ItemType Directory -Force -Path $mainPkg | Out-Null
 Copy-Item -LiteralPath (Join-Path $Repo "install.ps1") -Destination $mainPkg -Force
 Write-JsonFile (Join-Path $mainPkg "version.json") @{ app = "1.9.1"; schema = 1 }
-Copy-Item -LiteralPath (Join-Path $Repo "deploy\JZToolsHub\plugins") -Destination $mainPkg -Recurse -Force
+Copy-PluginsSeed (Join-Path $mainPkg "plugins")
 [System.IO.File]::WriteAllText((Join-Path $mainPkg "JZToolsHub.exe"), "", (New-Object System.Text.UTF8Encoding($false)))
 $mainKbMan = Get-Content -LiteralPath (Join-Path $mainPkg "plugins\knowledge-base\manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $mainKbMan.version = "0.9.0"
