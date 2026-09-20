@@ -904,7 +904,7 @@ def display_name(names, plugin_id, manifest=None, extra=None):
 def align_state_version(base_dir, data_root, pid):
     """把状态登记的版本对齐到**程序目录的实际代码版本**（登记漂移的一键修复）。
 
-    为什么需要：install.ps1 的插件防回退比较的是**登记版本**（`config\.app_state.json`），
+    为什么需要：install.ps1 的插件防回退比较的是**登记版本**（`config/.app_state.json`），
     所以"代码比登记新"时保护会失效——下次主包升级可能覆盖较新的插件代码（静默降级）。
     本操作只写数据根的登记（版本 + installed_by/at），**不动代码、不动用户数据**；
     判定仍以程序目录 manifest 为准（设计文档 §5.3 / R-8）。
