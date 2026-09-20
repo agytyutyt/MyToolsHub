@@ -21,6 +21,7 @@ param(
     [string]$Name = "",               # 显示名（缺省取预置表 / 同 id）
     [string]$Packages = "",           # 载荷目录（逗号分隔；缺省取预置表）
     [string]$Provides = "",           # 对外提供的 import 名（缺省=载荷去掉 *.libs 等支撑目录）
+    [string]$Requires = "",           # 依赖的其它组件 id（逗号分隔；缺省取 UNITS 表）——写进清单供安装器校验
     [string]$Affects = "",            # 兼容保留（提示文案已改由插件声明，不再写进依赖包清单）
     [string]$Version = "",            # 缺省取首个可导入包的实际版本
     [string]$From = "",
@@ -51,7 +52,9 @@ $VcRuntimeDlls = @(
 #   （manifest.requires[].hint，见《插件设计规范.md》U-8），框架只原样展示。
 $UNITS = @{
     "numpy"    = @{ payload = @("numpy", "numpy.libs") }
-    "cv2"      = @{ payload = @("cv2", "cv2.libs") }
+    # cv2 的 Python 绑定在 import 期就要 numpy（实测 "OpenCV bindings requires numpy"）——
+    # 组件间依赖必须显式声明，安装器才能在"只装 cv2"时给出可照做的提示，而不是报"组件损坏"。
+    "cv2"      = @{ payload = @("cv2", "cv2.libs"); requires = @("numpy") }
     "openpyxl" = @{ payload = @("openpyxl", "et_xmlfile") }
     "docx"     = @{ payload = @("docx", "lxml", "lxml.libs", "typing_extensions.py") }
     "xlrd"     = @{ payload = @("xlrd") }
@@ -85,6 +88,9 @@ $unit = $UNITS[$Id]
 if (-not $Name)     { $Name     = $Id }
 if (-not $Packages) { if (-not $unit) { Die "未知依赖单元 id=$Id：请用 -Packages 指定载荷目录，或先在 UNITS 表里登记" }
                       $Packages = ($unit.payload -join ",") }
+if (-not $Requires -and $unit -and $unit.requires) { $Requires = ($unit.requires -join ",") }
+$requireList = @()
+if ($Requires) { $requireList = @($Requires -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 if (-not $Provides) { $Provides = $Id }        # 单元只"提供"它自己；闭包里的依赖不声明为 provides
 $pkgList = @($Packages -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($pkgList.Count -eq 0) { Die "-Packages 为空（载荷目录清单缺失）" }
@@ -186,6 +192,7 @@ $manifest = [ordered]@{
         python   = $pyVer
         platform = "win-amd64"
         vc_runtime = @($vcBundled)
+        requires_components = @($requireList)
     })
 }
 # ---- VC++ 运行时：组件含 C 扩展（.pyd/.dll）时自动随包（-NoVcRuntime 可关） ----
@@ -207,6 +214,28 @@ if ($hasNative -and -not $NoVcRuntime) {
     Say "    （纯 Python 组件：无需 VC++ 运行时）"
 }
 
+# 清单在 VC 运行时打包**之后**定稿：vc_runtime 必须反映实际随包的 DLL（写在打包前会恒为空），
+# 并登记本组件的文件清单（相对 pylibs 的路径）——安装器据此按组件精确清理旧文件，
+# 而不是清空整个 pylibs（cv2 与 numpy 必须共存）。
+# 清理载荷里的构建机字节码：__pycache__/*.pyc 体积大、且只对构建机的 Python 版本有效
+# （目标机解释器版本不同会直接忽略，留着纯属浪费体积，还会进文件清单）。
+$pyc = @(Get-ChildItem -LiteralPath $pylibs -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
+foreach ($d in $pyc) { Remove-Item -LiteralPath $d.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+# 注意：-Include 与 -LiteralPath 同用时会被忽略（实测把整个载荷都匹配上并删光），
+# 故这里用 Where-Object 显式按扩展名过滤。
+$pycFiles = @(Get-ChildItem -LiteralPath $pylibs -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { @(".pyc", ".pyo") -contains $_.Extension })
+foreach ($f in $pycFiles) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue }
+if ($pyc.Count -gt 0 -or $pycFiles.Count -gt 0) {
+    Say ("    已剔除构建机字节码：" + $pyc.Count + " 个 __pycache__ 目录 / " + $pycFiles.Count + " 个 .pyc")
+}
+
+$manifest.components[0].vc_runtime = @($vcBundled)
+$manifest.components[0].files = @(
+    Get-ChildItem -LiteralPath $pylibs -Recurse -File | Sort-Object FullName |
+    ForEach-Object { $_.FullName.Substring($pylibs.Length).TrimStart([char]92) } |
+    Where-Object { $_ -ne "manifest.json" }
+)
 Write-Utf8NoBom (Join-Path $pylibs "manifest.json") (($manifest | ConvertTo-Json -Depth 8) + "`n")
 Write-Utf8NoBom (Join-Path $staging "manifest.json") (($manifest | ConvertTo-Json -Depth 8) + "`n")
 
@@ -225,6 +254,8 @@ $pkgMeta = [ordered]@{
     python          = $pyVer
     platform        = "win-amd64"
     vc_runtime      = @($vcBundled)
+    # 组件间依赖（如 cv2 → numpy）：安装器据此在"只装 cv2"时给出可照做的提示
+    requires_components = @($requireList)
 }
 if ($MinApp) { $pkgMeta["min_app_version"] = $MinApp }
 Write-Utf8NoBom (Join-Path $staging "dep-component.json") (($pkgMeta | ConvertTo-Json -Depth 8) + "`n")
@@ -251,7 +282,11 @@ $notes += ""
 $notes += "## 为什么要单独装"
 $notes += ""
 $notes += "本组件只服务：" + $(if ($Affects) { "**$Affects**" } else { "（见插件 README）" }) + "，"
-if ($false) { $notes += "**前置**：需先安装 `依赖组件-$(($preset.requires))`（本组件的运行时依赖不在包内）。" }
+if ($requireList.Count -gt 0) {
+    $notes += "**前置**：本组件需要先安装依赖组件 **" + ($requireList -join "、") + "**" +
+              "（它的运行时依赖不并入本包，避免同一份库被重复分发）；"
+    $notes += "只装本组件时安装器会自检失败并提示缺哪个组件——按提示先装即可。"
+}
 $notes += "却占主包约 60 MB。解耦后它们不随主包，改由本组件按需安装——"
 $notes += "不装则：插件照常加载，视频码流模式不可用（**静态二维码模式完全不受影响**），"
 $notes += "后台「插件管理」会把这些插件标为「降级」并指出缺哪个依赖。"

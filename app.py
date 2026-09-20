@@ -88,17 +88,42 @@ def _setup_dep_components():
 
 
 def dep_components_status():
-    """依赖组件的安装与可用性摘要（供 --check-deps 自检与后台展示）。"""
+    """依赖组件的安装与可用性摘要（供 --check-deps 自检与后台展示）。
+
+    探针**取自已装组件自己声明的 modules**（`runtime/pylibs/manifest.json`），不是写死
+    numpy/cv2——写死会让"装 openpyxl/zxingcpp 等非 cv2/numpy 组件"自检必然失败（假失败），
+    而新组件也永远不被验证。无清单（旧版组件包）时回退到历史探针。
+    """
     base = os.path.join(BASE_DIR, "runtime", "pylibs")
     installed = sorted(n for n in (os.listdir(base) if os.path.isdir(base) else [])
                        if os.path.isdir(os.path.join(base, n)))
-    out = {"path": base, "installed": installed, "imports": {}}
-    for mod in ("numpy", "cv2"):
+    mods, requires, comps = [], [], []
+    try:
+        with open(os.path.join(base, "manifest.json"), "r", encoding="utf-8-sig") as f:
+            man = json.load(f)
+        for c in (man.get("components") or []):
+            comps.append(c.get("id") or c.get("name") or "")
+            for m in (c.get("modules") or {}):
+                if m not in mods:
+                    mods.append(m)
+            for r in (c.get("requires_components") or []):
+                if r not in requires:
+                    requires.append(r)
+    except Exception:
+        pass
+    if not mods:
+        mods = ["numpy", "cv2"]          # 回退：旧版组件包没有 modules 字段
+    out = {"path": base, "installed": installed, "components": [c for c in comps if c],
+           "requires": requires, "imports": {}}
+    for mod in mods:
         try:
             __import__(mod)
             out["imports"][mod] = "ok"
         except Exception as exc:
             out["imports"][mod] = "%s: %s" % (type(exc).__name__, exc)
+    # 组件间依赖：声明了 requires_components 但没装的，单独点明——这类失败不是"组件损坏"，
+    # 而是"还差另一个组件"（如 cv2 需要 numpy），提示必须能直接照做。
+    out["missing_requires"] = [r for r in requires if r not in installed]
     return out
 
 
