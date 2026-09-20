@@ -1,7 +1,7 @@
 {
   "id": "info-transfer",
   "name": "信息传输",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "JZToolsHub 团队",
   "icon": "📨",
   "accent": "#00897b",
@@ -12,5 +12,20 @@
     "静态/动态二维码",
     "文档提取"
   ],
-  "form": "source"
+  "form": "source",
+  "requires": {
+    "python_packages": [
+      { "name": "cv2", "version": ">=4.5", "required": false },
+      { "name": "docx", "version": ">=1.0", "required": true },
+      { "name": "flask", "version": ">=3.0", "required": true },
+      { "name": "numpy", "version": ">=1.24", "required": false },
+      { "name": "olefile", "version": ">=0.46", "required": true },
+      { "name": "openpyxl", "version": ">=3.1", "required": true },
+      { "name": "pypdf", "version": ">=4.0", "required": true },
+      { "name": "qrcode", "version": ">=7.4", "required": false },
+      { "name": "xlrd", "version": ">=2.0", "required": true },
+      { "name": "zfec", "version": ">=1.6", "required": false },
+      { "name": "zxingcpp", "version": ">=2.0", "required": true }
+    ]
+  }
 }

@@ -1,11 +1,20 @@
 {
   "id": "notice-board",
   "name": "公告板",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "JZToolsHub 团队",
   "icon": "📢",
   "accent": "#E8710A",
   "entry": "index.html",
   "features": [],
-  "form": "source"
+  "form": "source",
+  "requires": {
+    "python_packages": [
+      {
+        "name": "flask",
+        "version": ">=3.0",
+        "required": true
+      }
+    ]
+  }
 }

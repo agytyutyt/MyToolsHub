@@ -31,6 +31,7 @@ from cryptography.fernet import Fernet
 from flask import g, jsonify, redirect, request, send_from_directory, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import jz_api
 import jztools_data
 # 会话超时默认值（config/admin.json 的 session 节可覆盖）
 SESSION_IDLE_MINUTES = 30    # 空闲超时：连续这么久没有任何请求，自动登出
@@ -452,6 +453,39 @@ def _grant_all_tool_ids():
         return set()
 
 
+def build_org_tree():
+    """构建 单位→部门→用户 树（只读，仅标识与姓名，不含敏感字段）。
+
+    本函数是**框架 API 的 admin 侧实现**：既供本插件的 /api/admin/org-tree
+    （历史路径，保留兼容）使用，也经 jz_api.register_providers 暴露给主体
+    的 /api/org/tree——业务插件因此不必再直连 admin 的接口（插件间零依赖，
+    见 docs/design/主体与插件解耦-设计文档.md §5.4）。
+    """
+    cfg = load_admin_config()
+    tree = []
+    for u in cfg.get("units", []):
+        tree.append({
+            "id": u.get("id", ""),
+            "name": u.get("name", ""),
+            "type": "unit",
+            "children": [
+                {
+                    "id": d.get("id", ""),
+                    "name": d.get("name", ""),
+                    "type": "department",
+                    "children": [
+                        {"id": x.get("username", ""),
+                         "name": x.get("name") or x.get("username", ""),
+                         "type": "user"}
+                        for x in d.get("users", [])
+                    ],
+                }
+                for d in u.get("departments", [])
+            ],
+        })
+    return tree
+
+
 def _normalize_permission_points(value):
     """规范化权限点（tools.json 中的插件 ID 列表），返回 (列表, 错误或 None)。"""
     if value is None:
@@ -745,6 +779,16 @@ def register(app):
     idle_minutes, absolute_hours = _session_settings(cfg)
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=absolute_hours)
 
+    # 框架 API 注册（依赖倒置，见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3）：
+    # 主体与业务插件一律从主体模块 jz_api 取用会话工具与组织架构树，
+    # 不再 import 本插件的内部模块（jztools_admin.routes）——插件之间因此互不依赖。
+    # 本插件卸载/未加载时，jz_api 自动降级为"未登录 / 空操作 / 组织架构不可用"。
+    jz_api.register_providers(
+        get_session_user=get_session_user,
+        set_operation=set_operation,
+        get_org_tree=build_org_tree,
+    )
+
     # 全局拦截（注册顺序即执行顺序，必须先超时守卫、再登录拦截）：
     #   1. make_session_guard    空闲/绝对超时登出 + 滑动续期（R1）
     #   2. _enforce_login        白名单外一律要求登录（R2）
@@ -850,31 +894,11 @@ def register(app):
         """返回 单位→部门→用户 树（只读，仅标识与姓名），仅需登录。
 
         供公告板等插件选择可见范围；不含密码/身份证等敏感字段。
+        **新代码请调主体接口 `/api/org/tree`**（同一份实现经 jz_api 暴露，
+        插件间因此零依赖）；本路径保留兼容旧版前端。
         """
         set_operation("查询组织架构树")
-        cfg = load_admin_config()
-        tree = []
-        for u in cfg.get("units", []):
-            tree.append({
-                "id": u.get("id", ""),
-                "name": u.get("name", ""),
-                "type": "unit",
-                "children": [
-                    {
-                        "id": d.get("id", ""),
-                        "name": d.get("name", ""),
-                        "type": "department",
-                        "children": [
-                            {"id": x.get("username", ""),
-                             "name": x.get("name") or x.get("username", ""),
-                             "type": "user"}
-                            for x in d.get("users", [])
-                        ],
-                    }
-                    for d in u.get("departments", [])
-                ],
-            })
-        return jsonify({"ok": True, "tree": tree})
+        return jsonify({"ok": True, "tree": build_org_tree()})
 
     # ---------------- 后台总览 ----------------
 
@@ -1467,15 +1491,36 @@ def register(app):
         set_operation("查询插件列表")
         rows = plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
         cfg = load_admin_config()
+        # 依赖概况（设计文档 §5.3 展示面）：可运行 / 降级 / 不可运行 三档汇总，
+        # 前端据此显示"逐依赖徽标（绿 / 红 ×）"与顶部横幅。
+        summary = {"ok": 0, "degraded": 0, "blocked": 0, "unknown": 0}
+        for r in rows:
+            d = r.get("deps") or {}
+            st = d.get("status") or "unknown"
+            summary[st if st in summary else "unknown"] += 1
         return jsonify({
             "ok": True,
             "plugins": rows,
+            "deps_summary": summary,
             "app_version": plugin_admin.app_version(PROJECT_DIR) or "",
             "data_root": jztools_data.get_data_root(),
             "index_path": cfg.get("plugin_index_path") or "",
             "frozen": bool(getattr(sys, "frozen", False)),
             "restart_pending": [r["id"] for r in rows if r["restart_pending"]],
         })
+
+    @app.get("/api/admin/deps")
+    @login_required
+    def admin_api_deps():
+        """本机「已安装依赖」清单（框架包 / 外部组件 / 插件自带，含版本）。
+
+        设计文档 §5.3 D-7：管理员要能看到"本机装了什么、什么版本"，
+        才能判断插件为什么不可运行（缺什么、要不要装组件）。
+        """
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可查看依赖清单"}), 403
+        set_operation("查询已安装依赖清单")
+        return jsonify(plugin_admin.installed_deps(PROJECT_DIR))
 
     @app.post("/api/admin/plugins/upload")
     @login_required
@@ -1625,6 +1670,61 @@ def register(app):
         if not ok:
             return jsonify({"error": "tools.json 中没有该插件的注册条目"}), 404
         return jsonify({"ok": True, "id": pid, "enabled": enabled})
+
+    @app.post("/api/admin/plugins/uninstall")
+    @login_required
+    def admin_api_plugins_uninstall():
+        """卸载插件（规范 §11 顺序：删/停注册条目 → 备份数据 → 删目录）。
+
+        - 核心插件（manifest.core = true，如 admin）拒绝卸载（设计文档 §3.5）；
+        - 用户数据默认保留；purge_entry 删除注册条目，backup_data 先只读打包一份数据。
+        """
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "").strip()
+        if not plugin_admin.PLUGIN_ID_RE.match(pid):
+            return jsonify({"error": "插件 id 非法"}), 400
+        set_operation("卸载插件")
+        res = plugin_admin.uninstall_plugin(
+            PROJECT_DIR, jztools_data.get_data_root(), pid,
+            purge_entry=bool(data.get("purge_entry")),
+            backup_data=bool(data.get("backup_data")),
+        )
+        if not res.get("ok"):
+            return jsonify({"error": res.get("error") or "卸载失败", "steps": res.get("steps") or []}), 400
+        app.logger.warning("插件 %s 已被管理员卸载：%s", pid, "；".join(res.get("steps") or []))
+        return jsonify(res)
+
+    @app.post("/api/admin/plugins/align")
+    @login_required
+    def admin_api_plugins_align():
+        """把状态登记的版本对齐到程序目录的实际版本（登记漂移的一键修复）。
+
+        只改数据根 .app_state.json 的登记版本；代码与用户数据不动。
+        防回退比较的是登记版本，漂移会让下次主包升级误判 → 该操作消除这个隐患。
+        """
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "").strip()
+        if pid and pid != "*":                      # 单插件（保留能力）
+            if not plugin_admin.PLUGIN_ID_RE.match(pid):
+                return jsonify({"error": "插件 id 非法"}), 400
+            set_operation("对齐插件登记")
+            res = plugin_admin.align_state_version(PROJECT_DIR, jztools_data.get_data_root(), pid)
+            if not res.get("ok"):
+                return jsonify({"error": res.get("error") or "对齐失败"}), 400
+            if res.get("changed"):
+                app.logger.warning("插件 %s 的登记版本已对齐：%s → %s", pid,
+                                   res.get("from_version") or "（无登记）", res.get("to_version"))
+            return jsonify(res)
+        # 一键对齐（列表外按钮）：不带 id 或 id="*"
+        set_operation("一键对齐插件登记")
+        res = plugin_admin.align_state_versions(PROJECT_DIR, jztools_data.get_data_root())
+        app.logger.warning("一键对齐插件登记：%d 个已对齐（共 %d 个插件，失败 %d）",
+                           len(res.get("aligned") or []), res.get("total"), len(res.get("failed") or []))
+        return jsonify(res)
 
     @app.get("/api/admin/plugins/index")
     @login_required

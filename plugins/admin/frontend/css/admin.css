@@ -722,9 +722,18 @@ select.admin-input {
 .plugin-banner .admin-btn { flex: 0 0 auto; }
 
 .plugin-name { display: flex; align-items: center; gap: 8px; }
+/* 中文名在上、英文 id 在下（上下两行） */
+.plugin-name .plugin-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+.plugin-title { display: block; }
 .plugin-icon { font-size: 18px; line-height: 1; }
 .plugin-id {
-  margin-left: 8px; padding: 1px 6px; border-radius: 6px;
+  margin-left: 0; padding: 1px 6px; border-radius: 6px;   /* 换行后不再需要左边距 */
   background: rgba(66, 133, 244, .10); color: #5f6368;
   font-size: 12px; font-family: "Roboto Mono", Consolas, monospace;
 }
@@ -766,3 +775,152 @@ select.admin-input {
 
 /* hidden 属性必须能压住 .plugin-banner 的 display:flex（作者样式优先于 UA 的 [hidden] 规则） */
 .plugin-banner[hidden] { display: none; }
+
+/* ===== 依赖徽标（主体与插件解耦 · 设计文档 §5.3 展示面）=====
+   逐依赖一个徽标：满足=绿色，不满足=红色带 ×；悬停显示「声明要求 vs 实际版本」。 */
+.dep-badge {
+  display: inline-block; padding: 1px 7px; margin: 1px 2px 1px 0;
+  border-radius: 10px; font-size: 12px; line-height: 18px;
+  background: #EEF1F5; color: #5F6368; white-space: nowrap;
+}
+.dep-badge.ok   { background: #E6F4EA; color: #137333; }
+.dep-badge.bad  { background: #FCE8E6; color: #C5221F; font-weight: 600; }
+.dep-badge.warn { background: #FEF7E0; color: #B06000; }
+.dep-none { color: #9AA0A6; font-size: 12px; }
+.dep-ver  { color: #5F6368; font-size: 12px; }
+.dep-path { color: #9AA0A6; font-size: 12px; margin-left: 6px; }
+#deps-summary { margin: 8px 0; }
+#deps-summary .plugin-chip { margin-right: 6px; }
+#deps-summary .plugin-chip.danger { background: #FCE8E6; color: #C5221F; }
+.deps-group { margin: 10px 0 4px; }
+.deps-group h4 { margin: 8px 0 4px; font-size: 13px; color: #3C4043; }
+.deps-group ul { margin: 0; padding-left: 18px; }
+.deps-group li { font-size: 13px; line-height: 22px; }
+
+/* ===================== 盘点表：滚动条与边缘渐隐 =====================
+   两个问题（2026-09-20 真机反馈）：
+   ① 横向滚动条是方形的，与卡片圆角不匹配 → "穿模"；
+   ② 表格内容超出可视区时被硬切，应"靠近边缘逐渐模糊消失"。
+   做法：滚动条自身做圆角 + 轨道透明（不再是一条方角灰条压在圆角上）；
+        滚动容器右缘加 mask 渐变（内容渐隐而非硬切）；
+        "依赖需求"列限宽让徽标换行（从根上减少横向溢出）；
+        行内插件名过长时单行截断 + 右缘模糊渐隐。 */
+.data-table-wrap {
+  overflow-y: hidden;                 /* 纵向不滚，让圆角对滚动条生效 */
+  scrollbar-width: thin;              /* Firefox */
+  scrollbar-color: #dadce0 transparent;
+}
+/* 边缘渐隐：**仅在真的横向溢出时**启用（由 JS 打 .is-overflowing / .is-scrolled），
+   否则没溢出也会淡化首末列的文字。左右对称：右侧溢出淡出，左滚之后左侧同样淡出。 */
+.data-table-wrap.is-overflowing {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+}
+.data-table-wrap.is-scrolled {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+          mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+.data-table-wrap.is-overflowing.is-scrolled {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 28px,
+                                      #000 calc(100% - 28px), transparent 100%);
+          mask-image: linear-gradient(to right, transparent, #000 28px,
+                                      #000 calc(100% - 28px), transparent 100%);
+}
+.data-table-wrap::-webkit-scrollbar { height: 10px; background: transparent; }
+.data-table-wrap::-webkit-scrollbar-track { background: transparent; }
+.data-table-wrap::-webkit-scrollbar-thumb {
+  background: #dadce0;
+  border-radius: 8px;                 /* 圆角滑块，与卡片圆角协调 */
+}
+.data-table-wrap::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
+.data-table-wrap::-webkit-scrollbar-corner { background: transparent; }
+
+/* "依赖需求"列：限宽 + **多行显示**（不截断），避免把整表撑宽。
+   ★ 注意：<td> 上的 max-width 在 auto 表格布局里**不生效**（实测会"穿模"到下一列），
+     必须在单元格内套一层块级容器限宽。
+   ★ 单个徽标过长时**换行显示全文**（不再省略号截断）：徽标内允许折行 + 长串可断。 */
+.data-table td.dep-cell { padding-right: 12px; }
+/* ★ 必须同时覆盖 .data-table td 的 white-space: nowrap（第 351 行）——
+   否则徽标之间的空白不换行，整列仍是一长条溢出到邻列（真机"穿模"的根因，已用无头 Chrome 复现）。
+   nowrap 只作用于徽标**内部**的文字，管不到徽标之间。 */
+.data-table td.dep-cell,
+.dep-cell-inner { white-space: normal; }
+.dep-cell-inner { min-width: 320px; max-width: 820px; }
+.data-table td.dep-cell .dep-badge {
+  max-width: 100%;
+  white-space: normal;         /* 覆盖 .dep-badge 的 nowrap：允许徽标内部换行 */
+  overflow-wrap: break-word;   /* 长依赖名放不下时才断词（不要用 anywhere，会压垮列宽） */
+  vertical-align: middle;
+}
+
+/* 行内插件名过长：单行截断 + 右缘模糊渐隐。
+   ★ 只在**真的被截断**时启用（JS 打 .is-clipped）——否则短名字右侧的 id 徽标会被淡化。 */
+.plugin-title { position: relative; overflow: hidden; }
+.plugin-title.is-clipped {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%);
+          mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent 100%);
+}
+.plugin-title.is-clipped::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0; right: 0;
+  width: 28px;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(3px);
+          backdrop-filter: blur(3px);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 85%);
+          mask-image: linear-gradient(to right, transparent, #000 85%);
+}
+
+/* 操作列：三个按钮统一最小宽度 + 居中，保证各行（含核心插件的"核心"按钮）纵向对齐。
+   背景：核心插件那一行原本用的是文字徽标，比"卸载"按钮窄，右对齐下把"回滚"推到了右边。 */
+#plugin-table td:last-child .admin-btn.small {
+  min-width: 56px;
+  text-align: center;
+}
+
+/* ===================== 插件管理页：卡片间距与上传控件 =====================
+   ① 卡片之间留出空隙（原先 .settings-card 无外边距，相邻卡片紧贴在一起）；
+   ② 上传控件改为**虚线框**（dropzone 观感），并美化原生"选择文件"按钮。 */
+.settings-card + .settings-card { margin-top: 16px; }
+
+/* 虚线拖拽「上传条」：整行宽、高度紧凑（84px），左侧图标+说明（点击选文件），
+   右侧「校验并预览」按钮。相比"竖向大框 + 孤立按钮"更省纵向空间、动作与按钮在同一视觉组内。
+   ★ 选择器带 label 前缀：`.settings-form label` 的 flex 行样式会覆盖纯类选择器。 */
+.upload-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 84px;
+  padding: 12px 16px;
+  border: 2px dashed #dadce0;
+  border-radius: var(--md-radius-m);
+  background: #fafafa;
+  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+}
+.upload-bar.is-dragover {
+  border-color: var(--md-primary, #4285F4);
+  background: #e8f0fe;
+  box-shadow: 0 0 0 3px rgba(66, 133, 244, .12);   /* 拖入时的"接收"光环 */
+}
+label.upload-bar-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: pointer;
+}
+.upload-bar input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.upload-bar-icon { font-size: 22px; line-height: 1; }
+.upload-bar-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.upload-bar-title { font-size: 14px; color: #3c4043; }
+.upload-bar-hint {
+  font-size: 12px; color: #80868b;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.upload-bar.is-picked .upload-bar-title { color: #1a73e8; font-weight: 500; }
+#btn-inspect { flex: 0 0 auto; white-space: nowrap; }   /* 按钮保持自然宽度、不折行 */

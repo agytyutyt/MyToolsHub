@@ -132,14 +132,35 @@ New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 Copy-Item -Recurse -Force (Join-Path $Dist "JZToolsHub\*") $AppDir
 
 # 3.2 前端与插件源码（可修改）、配置模板、文档
+# ★ 主体与插件解耦（S1，见 docs\design\主体与插件解耦-设计文档.md §3.3 / §7 #1）：
+#   主包**只带核心插件白名单**（一期 = admin），业务插件走「插件包 / 插件集」独立分发。
+#   这样主体升级（整包覆盖）从机制上不可能碰到业务插件代码——「升级只针对主体」成立。
+#   目标机已装的业务插件原地保留；全新装机由插件集安装（install.ps1 完成时提示）。
+$CorePlugins = @("admin")
 Copy-Item -Recurse -Force (Join-Path $Root "static")  $AppDir
-Copy-Item -Recurse -Force (Join-Path $Root "plugins") $AppDir
-# wheels/tools 随包分发：体积很小（约百 KB），便于后续在部署目录里重装/重建 zfec
-# （目标是冻结 exe 运行时不依赖它们，但 README §2.3 与 wheels/README.md 的说明要可用）
-foreach ($extra in @("wheels", "tools")) {
-    $p = Join-Path $Root $extra
-    if (Test-Path $p) { Copy-Item -Recurse -Force $p $AppDir }
+$dstPlugins = Join-Path $AppDir "plugins"
+New-Item -ItemType Directory -Force -Path $dstPlugins | Out-Null
+foreach ($cp in $CorePlugins) {
+    $src = Join-Path $Root "plugins\$cp"
+    if (-not (Test-Path $src)) { throw "核心插件目录缺失：plugins\$cp（见 docs\design\主体与插件解耦-设计文档.md §3.5）" }
+    Copy-Item -Recurse -Force $src $dstPlugins
 }
+# 组装自检：包内 plugins\ 只允许出现核心插件白名单内的目录（漏改会静默把业务插件带回主包）
+$strayPlugins = @(Get-ChildItem -Directory $dstPlugins | Where-Object { $CorePlugins -notcontains $_.Name })
+if ($strayPlugins.Count -gt 0) {
+    throw "主包 plugins\ 内出现非核心插件：$(($strayPlugins | ForEach-Object { $_.Name }) -join ', ')（主体与插件解耦要求主包只带 $($CorePlugins -join '/')）"
+}
+Write-Host "    插件随包：仅核心插件 $($CorePlugins -join '/')（业务插件走插件包 / 插件集）"
+
+# tools 随包：只带**目标机运维需要**的 plugin-upgrade（离线装插件）。
+# 其余子目录（dev 伪造会话的验证服务 / e2e 回归 / offline-runtime 胖包脚本 / __pycache__）不上目标机
+# （设计文档 §3.3；dev 与 e2e 由 tools\plugin-payload-rules.json 的 exclude_dirs 兜底排除）。
+$toolsSrc = Join-Path $Root "tools\plugin-upgrade"
+if (Test-Path $toolsSrc) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "tools") | Out-Null
+    Copy-Item -Recurse -Force $toolsSrc (Join-Path $AppDir "tools")
+}
+# wheels/ 不随主包（无运行时消费方，仅构建机重建 zfec 用；设计文档 §3.3）
 # docs 分层随包（2026-09-17）：只带「交付层 guide + 设计层 design + 索引」。
 # 内部层 docs/eval（一次性评估稿）/ docs/plan（活清单）/ docs/archive（历史留证）不随包。
 # ★ 口径与 tools\build-deploy-local.py 的 COPY_DIRS 一致 —— 改一处要两处一起改。
@@ -159,8 +180,37 @@ foreach ($doc in @("插件设计规范.md", "移动端APP.md")) {
 }
 
 # config 仅复制 tools.json 模板（admin.json / .admin_key 属密钥，首启自动生成）
+# ★ 首装模板**收窄为「site + 分类骨架 + 核心插件条目」**（设计文档 §3.2 / §7 #7）：
+#   分类必须保留（否则插件卡片会落到"未分类"）；业务插件的注册条目由各自的插件包
+#   tools_entry 在安装时写入（机制已有）。仓库里的 config\tools.json 保持全量，
+#   便于源码开发与既有安装继续工作——收窄只发生在**打包产物**里。
 New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "config") | Out-Null
-Copy-Item -Force (Join-Path $Root "config\tools.json") (Join-Path $AppDir "config")
+$toolsTemplate = Join-Path $Root "config\tools.json"
+try {
+    $tpl = Get-Content -LiteralPath $toolsTemplate -Raw -Encoding UTF8 | ConvertFrom-Json
+    $kept = @($tpl.tools | Where-Object { $CorePlugins -contains $_.id })
+    $narrowed = [ordered]@{
+        site       = $tpl.site
+        categories = $tpl.categories
+        tools      = $kept
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $AppDir "config\tools.json"),
+        ($narrowed | ConvertTo-Json -Depth 10),
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+    Write-Host "    首装注册表：site + $($tpl.categories.Count) 个分类 + $($kept.Count) 条核心插件条目（业务插件由插件包写入）"
+} catch {
+    Write-Warning "收窄首装注册表失败，回退为原样复制：$($_.Exception.Message)"
+    Copy-Item -Force $toolsTemplate (Join-Path $AppDir "config")
+}
+
+# 3.2.3 已安装依赖清单（插件依赖判定的真源；见 docs\design\主体与插件解耦-设计文档.md §5.3）
+# 冻结 exe 现场没有 pip、_internal 内 .dist-info 也不保证完整，故由**构建期**在打包解释器上
+# 采集一次（发行包名 → 版本 + import 名 → 发行包名），随主包分发；后台据此展示"已安装依赖"
+# 并与插件 manifest.requires 比对得出可运行性结论（jz_deps.py）。
+& $Python (Join-Path $Root "tools\gen-installed-deps.py") --out (Join-Path $AppDir "config\installed-deps.json")
+if ($LASTEXITCODE -ne 0) { throw "生成已安装依赖清单失败（tools\gen-installed-deps.py）" }
 
 # 清理插件目录中的运行时数据 / 密钥 / 缓存（全新部署由程序自动重建）
 # out 为插件本地测试产物目录（如 knowledge-base 渲染引擎的目检样例，已 gitignore）
@@ -199,13 +249,21 @@ if (Test-Path $pluginDir) {
 }
 
 # 3.2.1 模板自检：清理后必须仍保留同步模板（防止未来有人把模板又命名回 config.json）
+# ★ 期望值随**核心插件白名单**动态计算（解耦后主包只带 admin，业务插件的模板不随主包）：
+#   硬编码 4 会在主包收窄后直接误报中止（设计文档 §7 #2）。
+$tplExpect = 0
+foreach ($cp in $CorePlugins) {
+    $cpDir = Join-Path $Root "plugins\$cp"
+    if (Test-Path $cpDir) {
+        $tplExpect += @(Get-ChildItem -Recurse -File $cpDir -Filter *.template.json -ErrorAction SilentlyContinue).Count
+    }
+}
 $tpl = @(Get-ChildItem -Recurse -File $pluginDir -Filter *.template.json -ErrorAction SilentlyContinue)
-$tplExpect = 4   # case-report / character-graph / file-filter / trajectory-sketch
 if ($tpl.Count -lt $tplExpect) {
-    throw "打包清理异常：包内配置模板仅剩 $($tpl.Count) 个（期望 >= $tplExpect）。" +
+    throw "打包清理异常：包内配置模板仅剩 $($tpl.Count) 个（期望 >= $tplExpect，来自核心插件 $($CorePlugins -join '/')）。" +
           "请检查上方清理规则是否误删了 *.template.json（模板不得命名为 config.json）。"
 }
-Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留"
+Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留（核心插件期望 $tplExpect）"
 
 # 3.2.2 离线运行组件（Chrome / LibreOffice 安装包 + 随包安装脚本）
 #   源 A：<仓库>\runtime\           —— 由 tools/fetch-offline-bundle.py 从官方源下载（已 gitignore）
@@ -348,6 +406,9 @@ $verObj = @{
     built_at = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
     python   = $PyVer          # 打包解释器版本（基线 $PyBaseline，不符时已在开头告警）
     offline  = ($offlineSummary -join "; ")   # 随包离线组件（空串表示瘦包）
+    # 插件 API 版本（主体对插件的承诺面版本；真源在 jz_deps.PLUGIN_API）。
+    # 插件包据此声明 api_version，主体启动时按它做门控（见 docs\design\主体与插件解耦-设计文档.md §5.2）。
+    plugin_api = [int](& $Python -c "import jz_deps,sys;sys.stdout.write(str(jz_deps.PLUGIN_API))")
 }
 # 注意：必须 UTF-8 无 BOM（Python json.load 遇 BOM 会报错）
 [System.IO.File]::WriteAllText(

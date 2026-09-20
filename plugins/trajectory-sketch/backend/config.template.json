@@ -11,7 +11,8 @@
       "LATITUDE"
     ],
     "post_rules": [],
-    "use_filter_plugin_rules": false
+    "use_filter_plugin_rules": false,
+    "_comment": "过滤由本插件自带实现（filter_local）：mode 仅支持 hard；use_filter_plugin_rules 为兼容旧配置保留，不再有\"借用过滤器插件规则\"的分支；post_rules 的 pattern/replacement/is_regex/enabled 语义与过滤器插件一致。"
   },
   "schema": {
     "required": [

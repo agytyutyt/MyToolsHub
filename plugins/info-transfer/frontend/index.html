@@ -429,9 +429,15 @@
     background: rgba(0, 0, 0, .55);
   }
   @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .dep-warn { background:#FEF7E0; border:1px solid #F9AB00; color:#7A4F01;
+              padding:10px 12px; border-radius:8px; margin:12px 0; font-size:14px; line-height:1.7; }
+  .dep-warn-title { font-weight:600; margin-bottom:4px; }
+  .dep-warn ul { margin:0; padding-left:20px; }
+  .dep-warn code { background:#fff; padding:0 4px; border-radius:3px; }
 </style>
 </head>
 <body>
+  <div id="dep-warn" class="dep-warn" hidden></div>
 <div class="container">
   <h1>信息传输</h1>
   <p class="subtitle">把文字 / 文档封装为二维码（静态图片或动态视频流）；精简传输只传数据不传格式，原件传输完整还原原文件</p>
@@ -2049,6 +2055,23 @@
   }
 
   document.addEventListener("DOMContentLoaded", init);
+</script>
+<script>
+/* 依赖未满足提示（主体与插件解耦 · T25）：指出缺哪个依赖、会导致什么功能失效、怎么修。
+   数据来自本插件 /status 的 missing_deps（由后端 _missing_deps() 生成）。 */
+(function () {
+  fetch('/api/info-transfer/status').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    var miss = (d && d.missing_deps) || [];
+    if (!miss.length) return;
+    var el = document.getElementById('dep-warn');
+    if (!el) return;
+    var items = miss.map(function (x) {
+      return '<li><code>' + x.name + '</code> 未满足 → <b>' + x.feature + '</b> 不可用；' + x.fix + '</li>';
+    }).join('');
+    el.innerHTML = '<div class="dep-warn-title">⚠ 依赖未满足：以下功能将不可用</div><ul>' + items + '</ul>';
+    el.hidden = false;
+  }).catch(function () { /* 未登录等场景静默 */ });
+})();
 </script>
 </body>
 </html>

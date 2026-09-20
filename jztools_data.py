@@ -80,19 +80,13 @@ _DATA_SUBDIRS = ("config", "logs", "plugins")
 #   必须同时登记且保持一致。
 _TEMPLATE_SYNC = [
     # (程序目录相对路径, 数据根目录相对路径, 模式)
+    #
+    # ★ 只登记**框架级**模板。业务插件的模板（plugins/<id>/backend/*.template.json）
+    #   一律由 sync_plugin_templates() 自动发现 + 内容指纹门控负责——它与插件从哪来无关
+    #   （主包内嵌 / 插件包安装 / 手工拷贝目录都能补键），因此不再需要在此逐条登记。
+    #   历史背景：本清单曾硬编码 4 个业务插件的模板，解耦后主包不再携带这些插件，
+    #   每次启动都会刷"源目录缺少 …/config.template.json"的告警（2026-09-19 清理）。
     (("config", "tools.json"), ("config", "tools.json"), "merge-tools"),
-    (("plugins", "case-report", "backend", "config.template.json"),
-     ("plugins", "case-report", "config.json"), "ensure-keys"),
-    (("plugins", "character-graph", "backend", "config.template.json"),
-     ("plugins", "character-graph", "config.json"), "ensure-keys"),
-    # 轨迹速写：配置含保留字段名单 / 列映射 / 分析阈值 / 报告文案，
-    # 均为管理员可在插件页自定义的值 → ensure-keys（只补模板新增字段，不覆盖用户设置）。
-    (("plugins", "trajectory-sketch", "backend", "config.template.json"),
-     ("plugins", "trajectory-sketch", "config.json"), "ensure-keys"),
-    # 过滤器：管理员配置（保留字段名单 / 后处理规则 / LLM），
-    # 此前完全不在同步清单中，新增配置键永远不下发 → 本次补入。
-    (("plugins", "file-filter", "backend", "config.template.json"),
-     ("plugins", "file-filter", "config.json"), "ensure-keys"),
 ]
 
 # 应用版本状态文件：数据根目录 config/.app_state.json（记录上次启动的应用版本，

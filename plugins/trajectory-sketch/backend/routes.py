@@ -22,20 +22,19 @@ from typing import Any, Dict, List, Optional
 
 from flask import jsonify, request, send_file
 
+# 会话工具经主体模块 jz_api 取用（依赖倒置：插件不再 import admin 插件的内部模块，
+# 插件之间零依赖；admin 未加载时自动降级为「未登录 / 空操作」）。
+# 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
+import jz_api
+
+_get_session_user = jz_api.get_session_user
+_set_operation = jz_api.set_operation
+
 from . import bg_image, config_store, excel_io, filter_bridge, report_store
 from .engine import analyze_rows, available_algorithms, normalize_params, resolve_columns
 from .engine.contract import AnalysisError
 
-try:
-    from jztools_admin.routes import get_session_user as _get_session_user
-except Exception:                     # admin 插件缺失时兜底
-    _get_session_user = None
 
-try:
-    from jztools_admin.routes import set_operation as _set_operation
-except Exception:                     # 主应用未提供日志辅助时兜底
-    def _set_operation(op):
-        pass
 
 API_PREFIX = "/api/trajectory-sketch"
 PLUGIN_ID = "trajectory-sketch"
@@ -118,8 +117,10 @@ def _self_check(filtered_rows: List[List[Any]], cfg: Dict[str, Any]) -> Dict[str
 
 
 def _filter_meta(res: Dict[str, Any], mode: str) -> Dict[str, Any]:
+    # 以**实际生效**的模式为准：请求 llm 时会回退为 hard（见 filter_local 模块头）
     return {
-        "mode": mode,
+        "mode": res.get("mode") or mode,
+        "warning": res.get("warning") or "",
         "kept": res.get("kept") or [],
         "removed": res.get("removed") or [],
         "replace_count": res.get("replace_count") or 0,
@@ -138,8 +139,9 @@ def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
         report_store.set_task(task_id, status="running", step="字段过滤")
         cfg = config_store.load_config()
         keep_cols, _notes = config_store.expand_keep_columns(cfg)
-        post_rules = None if cfg["filter"].get("use_filter_plugin_rules") \
-            else cfg["filter"].get("post_rules")
+        # 过滤已在本插件内自带（filter_local）：后处理规则的唯一来源是本插件配置。
+        # 配置项 use_filter_plugin_rules 保留仅为兼容旧配置，不再有"借用对方规则"这一分支。
+        post_rules = cfg["filter"].get("post_rules")
 
         raw_rows = excel_io.read_rows(stage["path"], "upload.%s" % stage.get("ext", "xlsx"))
         if len(raw_rows) < 2:
@@ -349,8 +351,7 @@ def register(app):
         try:
             res = filter_bridge.apply_filter(
                 _app_ref, raw_rows, mode="hard", columns=keep_cols,
-                post_rules=(None if cfg["filter"].get("use_filter_plugin_rules")
-                            else cfg["filter"].get("post_rules")),
+                post_rules=cfg["filter"].get("post_rules"),   # 见上：规则唯一来源是本插件配置
                 cookie=_cookie(), host_url=_host_url())
         except filter_bridge.FilterError as exc:
             report_store.drop_stage(stage["staged_id"])

@@ -192,9 +192,15 @@
   }
   .modal .row { margin-top: 14px; justify-content: flex-end; }
   @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+  .dep-warn { background:#FEF7E0; border:1px solid #F9AB00; color:#7A4F01;
+              padding:10px 12px; border-radius:8px; margin:12px 0; font-size:14px; line-height:1.7; }
+  .dep-warn-title { font-weight:600; margin-bottom:4px; }
+  .dep-warn ul { margin:0; padding-left:20px; }
+  .dep-warn code { background:#fff; padding:0 4px; border-radius:3px; }
 </style>
 </head>
 <body>
+  <div id="dep-warn" class="dep-warn" hidden></div>
 <div class="container">
   <h1>轨迹转换</h1>
   <p class="subtitle">读取 Excel 轨迹表（时间 / 经度 / 纬度，列名由后端 config.json 配置），按时间间隔抽样并封装为 JSON，再经 QR-transfer 编码生成二维码视频流</p>
@@ -669,6 +675,23 @@
   }
 
   document.addEventListener("DOMContentLoaded", init);
+</script>
+<script>
+/* 依赖未满足提示（主体与插件解耦 · T25）：指出缺哪个依赖、会导致什么功能失效、怎么修。
+   数据来自本插件 /status 的 missing_deps（由后端 _missing_deps() 生成）。 */
+(function () {
+  fetch('/api/trajectory-convert/status').then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    var miss = (d && d.missing_deps) || [];
+    if (!miss.length) return;
+    var el = document.getElementById('dep-warn');
+    if (!el) return;
+    var items = miss.map(function (x) {
+      return '<li><code>' + x.name + '</code> 未满足 → <b>' + x.feature + '</b> 不可用；' + x.fix + '</li>';
+    }).join('');
+    el.innerHTML = '<div class="dep-warn-title">⚠ 依赖未满足：以下功能将不可用</div><ul>' + items + '</ul>';
+    el.hidden = false;
+  }).catch(function () { /* 未登录等场景静默 */ });
+})();
 </script>
 </body>
 </html>

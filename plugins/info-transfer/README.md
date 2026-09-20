@@ -142,10 +142,20 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
 | GET | /decode/<id> | 视频解析任务轮询 |
 | POST | /export | 解析数据 → 导出文件（file 直接还原原始文件；word/excel 重建 docx/xlsx） |
 
-## 依赖
+## 依赖与升级
 
-`pip install -r backend/requirements.txt`
-（qrcode、zfec、opencv-python、numpy、openpyxl、python-docx、xlrd、olefile、zxing-cpp、pypdf）
+| 项 | 内容 |
+| --- | --- |
+| 框架已打包依赖 | `cv2` >=4.5（可选）、`docx` >=1.0、`flask` >=3.0、`numpy` >=1.24（可选）、`olefile` >=0.46、`openpyxl` >=3.1、`pypdf` >=4.0、`qrcode` >=7.4（可选）、`xlrd` >=2.0、`zfec` >=1.6（可选）、`zxingcpp` >=2.0 |
+| 插件自带依赖（`backend/vendor/`） | 无 |
+| 外部程序组件 | 无 |
+| 能否单独升级 | ✅ 可以——依赖全部落在框架已打包清单或插件目录内（构建期 C-4/C-10 校验） |
+| 升级是否需重启 | 含 `backend/**` 改动**需要**重启（后台/安装器会自动重启，约 5~10 秒）；纯前端改动免重启，Ctrl+F5 即可 |
+
+> 声明真源是 `manifest.json` 的 `requires`（三类依赖：框架包 / 自带 vendor / 外部程序组件）；
+> 出包工具构建期校验「声明 ↔ 实测 import」一致（C-10）。后台「插件管理」按它显示
+> 逐依赖徽标与可运行性：缺**必需**依赖 → 标记不可运行并暂不加载，补齐后重启自动恢复；
+> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-2 / U-4 / U-6。
 
 ## 已知限制
 

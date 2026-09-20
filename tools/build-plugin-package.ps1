@@ -49,6 +49,13 @@ $ErrorActionPreference = "Stop"
 $ScriptVer = "1.0.0"
 $Root      = Split-Path -Parent $PSScriptRoot          # 仓库根目录
 $PythonCmd = $Python
+
+# 插件 API 版本（主体对插件的承诺面版本）：真源是主体模块 jz_deps.PLUGIN_API，
+# 写入 plugin-package.json / index.json 的 api_version，供主体启动门控比对（设计文档 §5.2）。
+$pluginApi = 1
+try {
+    $pluginApi = [int](& $PythonCmd -c "import sys;sys.path.insert(0,r'$Root');import jz_deps;sys.stdout.write(str(jz_deps.PLUGIN_API))" 2>$null | Select-Object -First 1)
+} catch { Write-Warning "未能从 jz_deps.PLUGIN_API 读取插件 API 版本，按 1 处理" }
 $RulesFile = Join-Path $PSScriptRoot "plugin-payload-rules.json"
 if ([string]::IsNullOrWhiteSpace($RegistryFile)) { $RegistryFile = Join-Path $PSScriptRoot "plugin-packages.json" }
 if (-not [System.IO.Path]::IsPathRooted($RegistryFile)) { $RegistryFile = Join-Path $Root $RegistryFile }
@@ -266,6 +273,15 @@ $fwPkgs = @()
 if ($specText -match '(?s)PACKAGES\s*=\s*\[(.*?)\]') {
     $fwPkgs = @([regex]::Matches($matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
 }
+# 「依赖组件包」提供的库（cv2/numpy）：不随主包，但允许插件声明——
+# 目标机装了对应组件即满足；没装则插件降级并提示"安装依赖组件包"（见设计文档 §3.4 / T25）。
+if ($specText -match '(?s)DEP_COMPONENT_PACKAGES\s*=\s*\[(.*?)\]') {
+    $depPkgs = @([regex]::Matches($matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+    if ($depPkgs.Count -gt 0) {
+        $fwPkgs = @($fwPkgs + $depPkgs | Select-Object -Unique)
+        Write-Host "    依赖组件包提供的库（允许声明，需目标机装组件）：$($depPkgs -join ', ')"
+    }
+}
 if ($fwPkgs.Count -eq 0) { Warn "未能从 JZToolsHub.spec 解析出 PACKAGES 白名单（C-4 将只对照 vendor 与标准库）" }
 
 $depScript = @'
@@ -294,17 +310,21 @@ def top_imports(path):
     return mods, False
 
 stdlib = set(getattr(sys, 'stdlib_module_names', ()))
+# 主体（框架）模块：插件 import 它们是**框架 API 面**（FC-2/FC-3），不是第三方依赖，
+# 故既不并入框架白名单、也不参与 C-4/C-10 判定。
+FRAMEWORK_MODULES = {'jz_api', 'jz_deps', 'jztools_data'}
 # 主程序自身的第三方依赖（app.py / jztools_data.py 直接 import 的库随 exe 一起打包）
 for name in ('app.py', 'jztools_data.py'):
     fp = root / name
     if fp.is_file():
         m, _ = top_imports(fp)
-        fw |= {x for x in m if x not in stdlib and not x.startswith('jztools_')}
+        fw |= {x for x in m if x not in stdlib and not x.startswith('jztools_')
+               and x not in FRAMEWORK_MODULES}
 
 backend = plugin / 'backend'
 if not backend.is_dir():
     print(json.dumps({'no_backend': True, 'own': {}, 'vendor': {}, 'test': {},
-                      'syntax': [], 'used_fw': [], 'vendored': []}, ensure_ascii=False))
+                      'syntax': [], 'used_fw': [], 'vendored': [], 'cross': []}, ensure_ascii=False))
     sys.exit(0)
 
 local = set()
@@ -337,11 +357,21 @@ for p in backend.rglob('*.py'):
 
 own, vend_bad, test_bad = {}, {}, {}
 used_fw = set()
+cross = set()
 for m, files in sorted(imports.items()):
     if m in fw:
         used_fw.add(m)
         continue
-    if m in stdlib or m in local or m.startswith('jztools_'):
+    # 框架模块（jz_api / jz_deps / jztools_data）是**框架 API 面**（FC-2/FC-3），先放行；
+    # 注意顺序：必须早于下面的 jztools_ 判定，否则 jztools_data 会被误判为跨插件 import。
+    if m in FRAMEWORK_MODULES:
+        continue
+    # 跨插件 import（C-11）：插件**不得** import 其他插件的后端模块（规范 B-7 / 设计文档 §5.4 D-9）。
+    # 走到这里的 jztools_* 只可能是「以框架包名 import 某个插件的后端」（如 jztools_admin）。
+    if m.startswith('jztools_'):
+        cross.add(m)
+        continue
+    if m in stdlib or m in local:
         continue
     # 三档收口：插件自身后端模块 → 失败；vendor/ 与 test_*.py → 警告
     own_files  = [f for f in sorted(files) if not f.startswith('vendor/') and not Path(f).name.startswith('test_')]
@@ -354,7 +384,8 @@ for m, files in sorted(imports.items()):
     if test_files:
         test_bad[m] = test_files
 print(json.dumps({'no_backend': False, 'own': own, 'vendor': vend_bad, 'test': test_bad,
-                  'syntax': syntax, 'used_fw': sorted(used_fw), 'vendored': sorted(vendored)}, ensure_ascii=False))
+                  'syntax': syntax, 'used_fw': sorted(used_fw), 'vendored': sorted(vendored),
+                  'cross': sorted(cross)}, ensure_ascii=False))
 '@
 # 关键：脚本与白名单都走临时文件，而不是 python -c 内联参数。
 #   PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号（$PSNativeCommandArgumentPassing 是 PS 7.3+ 才有），
@@ -400,6 +431,49 @@ if ($depObj) {
             Warn "测试文件引用了框架未打包的库 $($p.Name)（$($p.Value -join ', ')）—— 仅开发环境用（如 pytest），不影响目标机；如介意可从包中移除该测试文件"
         }
     }
+}
+
+# ---------------- C-10：依赖声明与实测一致（设计文档 §5.3 / 规范 U-7） ----------------
+# manifest.requires 是**运行时判定输入**（主体按它判"能不能跑"），本处扫描出的
+# used_fw / vendored 是**实测**。两者漂移会出现"判定可运行、现场缺包"，故：
+#   实测有、声明无 → 拒绝出包；声明有、实测无 → 警告（可能是条件导入）。
+$reqObj = $null
+$declaredPkgs = @()
+$declaredVend = @()
+$manifestPath = Join-Path $payloadPlugin "manifest.json"
+if (Test-Path -LiteralPath $manifestPath) {
+    try {
+        $manifestObj = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($manifestObj -and $manifestObj.requires) {
+            $reqObj = $manifestObj.requires
+            if ($reqObj.python_packages) { $declaredPkgs = @($reqObj.python_packages | ForEach-Object { [string]$_.name }) }
+            if ($reqObj.vendored)        { $declaredVend = @($reqObj.vendored | ForEach-Object { [string]$_.name }) }
+        }
+    } catch { Warn "manifest.json 不可解析，跳过 C-10：$($_.Exception.Message)" }
+}
+$undeclared = @($depsFramework | Where-Object { $declaredPkgs -notcontains $_ })
+$vendUndecl = @($depsVendored | Where-Object { $declaredVend -notcontains $_ })
+$extraDecl  = @($declaredPkgs | Where-Object { $depsFramework -notcontains $_ })
+if ($undeclared.Count -gt 0) {
+    $msg = "依赖声明缺项（实测 import 了但 manifest.requires 未声明）：$($undeclared -join ', ')`n        修法：在 plugins\$Id\manifest.json 的 requires.python_packages 补上（含 version 与 required 标记）。"
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
+}
+if ($vendUndecl.Count -gt 0) {
+    $msg = "自带依赖未登记：backend\vendor\ 下的 $($vendUndecl -join ', ') 未写入 manifest.requires.vendored（规范 S-9）。"
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
+}
+if ($extraDecl.Count -gt 0) { Warn "声明了但实测未 import 的包（可能是条件导入，属正常）：$($extraDecl -join ', ')" }
+if ($declaredPkgs.Count -gt 0) { Say "    C-10 依赖声明与实测一致（$($declaredPkgs.Count) 项声明 / $($depsFramework.Count) 项实测）" }
+
+# ---------------- C-11：禁止跨插件 import（规范 B-7 / 设计文档 §5.4 D-9） ----------------
+# 插件之间必须相互独立：不得 import 其他插件的后端模块（含以框架包名 jztools_<其他id> 的形式）。
+# 需要协作时的正规出口：把能力**提升为主体模块**（如 jz_api 的组织架构门面），或**合并为一个插件**。
+if ($depObj -and $depObj.cross -and @($depObj.cross).Count -gt 0) {
+    $msg = "跨插件 import（规范 B-7 禁止，插件之间必须相互独立）：$(@($depObj.cross) -join ', ')`n" +
+           "        修法：① 会话/日志/组织架构等框架能力改从主体模块 jz_api 取用；`n" +
+           "              ② 需要另一个插件的能力时，把该能力提升为主体模块，或把两个插件合并为一个；`n" +
+           "              ③ 确实只是历史遗留的 HTTP 调用，请在本插件内自带一份实现（见设计文档 §5.4）。"
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
 }
 if ($depObj -and $depObj.no_backend) {
     Say "  依赖      ：纯前端插件（无 backend/），不涉及第三方库"
@@ -578,6 +652,9 @@ $pkgMeta = [ordered]@{
     kind              = "plugin-upgrade"
     id                = $Id
     version           = $Version
+    # 插件 API 版本（主体对插件的承诺面版本）：与主体 version.json 的 plugin_api 同源，
+    # 真源是 jz_deps.PLUGIN_API（见 docs\design\主体与插件解耦-设计文档.md §5.2）。
+    api_version       = $pluginApi
     requires_restart  = [bool]$restart
     built_at          = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     built_from        = [ordered]@{ commit = $gitCommit; dirty = [bool]$gitDirty }
@@ -591,6 +668,7 @@ $pkgMeta = [ordered]@{
         framework_packages    = @($depsFramework)
     }
 }
+if ($reqObj) { $pkgMeta["requires"] = $reqObj }   # 声明快照（与 manifest.json 同源，C-10 已校验一致）
 if ($FromMin) { $pkgMeta["upgrade_from_min"] = $FromMin }
 if ($FromMax) { $pkgMeta["upgrade_from_max"] = $FromMax }
 if ($MinApp)  { $pkgMeta["min_app_version"] = $MinApp }
@@ -700,6 +778,7 @@ foreach ($k in ($assets.Keys | Sort-Object)) {
 
 $regEntry = [ordered]@{
     version          = $Version
+    api_version      = $pluginApi
     file             = $zipName
     sha256           = $zipSha
     size             = [long]$zipSize
@@ -728,6 +807,7 @@ $list = @($indexObj.packages | Where-Object { $_.id -ne $Id -and $null -ne $_.id
 $list += [pscustomobject][ordered]@{
     id               = $Id
     version          = $Version
+    api_version      = $pluginApi
     file             = $zipName
     sha256           = $zipSha
     size             = [long]$zipSize

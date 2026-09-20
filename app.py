@@ -15,8 +15,14 @@ from datetime import datetime, timedelta
 
 from flask import Flask, g, jsonify, render_template, request, send_from_directory
 
+import jz_api
+import jz_deps
 import jztools_data
 from jztools_data import get_data_root, get_data_root_dir
+
+# 框架日志（插件门控 / 注册表与 manifest 读取失败 / 依赖组件注入的告警）。
+# ★ 必须定义在模块顶部：_setup_dep_components() 在模块加载时就会调用它。
+log = logging.getLogger("jztools.app")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, "frozen", False):
@@ -33,6 +39,63 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config", "tools.json")
 PLUGINS_DIR = os.path.join(BASE_DIR, "plugins")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "access.log")
+
+
+# 依赖组件包（runtime/pylibs）的 DLL 目录句柄：必须持有引用，否则句柄被 GC 后目录失效
+_DEP_DLL_HANDLES = []
+
+
+def _setup_dep_components():
+    """把「依赖组件包」注入 sys.path 与 DLL 搜索路径（设计文档 §3.4 / T25 第 1 步）。
+
+    cv2(opencv-python) 与 numpy 不再随主包（压缩后约 60 MB），改由独立组件包按需安装到
+    ``<程序目录>/runtime/pylibs/``。本函数在**模块加载时**执行（早于插件后端导入）：
+      · 把该目录插入 sys.path 首位 → 插件的 ``import cv2`` 能找到；
+      · 每个子目录加入 Windows DLL 搜索路径 → cv2 的 .pyd 能找到同目录 DLL、
+        numpy 能找到 ``numpy.libs`` 里的 OpenBLAS（二者必须同装同卸）。
+    未安装组件时静默返回（插件侧自行降级并给出"安装依赖组件包"的提示）。
+    """
+    base = os.path.join(BASE_DIR, "runtime", "pylibs")
+    if not os.path.isdir(base):
+        return []
+    if base not in sys.path:
+        sys.path.insert(0, base)
+    found = []
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return []
+    for name in names:
+        d = os.path.join(base, name)
+        if not os.path.isdir(d):
+            continue
+        found.append(name)
+        if hasattr(os, "add_dll_directory"):
+            try:
+                _DEP_DLL_HANDLES.append(os.add_dll_directory(d))
+            except OSError:
+                pass
+    if found:
+        log.info("依赖组件已注入：%s（%s）", "、".join(found), base)
+    return found
+
+
+def dep_components_status():
+    """依赖组件的安装与可用性摘要（供 --check-deps 自检与后台展示）。"""
+    base = os.path.join(BASE_DIR, "runtime", "pylibs")
+    installed = sorted(n for n in (os.listdir(base) if os.path.isdir(base) else [])
+                       if os.path.isdir(os.path.join(base, n)))
+    out = {"path": base, "installed": installed, "imports": {}}
+    for mod in ("numpy", "cv2"):
+        try:
+            __import__(mod)
+            out["imports"][mod] = "ok"
+        except Exception as exc:
+            out["imports"][mod] = "%s: %s" % (type(exc).__name__, exc)
+    return out
+
+
+_setup_dep_components()
 
 
 def init_data_root():
@@ -81,6 +144,18 @@ _plugin_home_card_hooks = {}
 # AssertionError。任何异常都在 register_plugin_backends() 内被隔离并记录于此，
 # 供启动日志与故障排查使用；每次 register_plugin_backends() 执行时清空。
 _plugin_load_errors = {}
+
+# 单个插件 manifest.json 损坏的记录 {插件id: "异常类型: 摘要"}（load_manifests 填充）。
+# 解耦后插件目录由外部介质写入，坏文件概率上升：只跳过该插件，不拖垮整站。
+_manifest_errors = {}
+# tools.json 读取/解析失败的记录（空串表示正常）。
+_registry_error = ""
+
+# 插件运行状态 {插件id: {"status": "ok|degraded|blocked", "missing": […], "reason": "…"}}。
+# 由 register_plugin_backends() 在加载前求值（jz_deps.evaluate）：版本门控 + 三类依赖，
+# 三态结论——blocked 不加载、degraded 加载但标注；供 /api/tools 与后台展示
+# （见 docs/design/主体与插件解耦-设计文档.md §5.2 / §5.3）。
+_plugin_states = {}
 
 # 打包运行（PyInstaller）时 Flask 内置 /static 默认指向 _internal/static，
 # 前端源码保留在 exe 同层，故显式指定 static_folder 指向部署根目录下的 static。
@@ -267,21 +342,14 @@ def parse_operation():
 
 
 def get_current_user():
-    """当前登录用户信息（admin 插件提供 get_session_user）；匿名返回 None。
+    """当前登录用户信息（经框架 API 门面 jz_api 取自 admin 插件）；匿名返回 None。
 
     供日志记录 username 使用；admin 插件未加载时返回 None，不阻断请求。
     静态资源请求不解析用户，减少不必要的文件 I/O。
     """
     if request.path.startswith("/static/"):
         return None
-    try:
-        from jztools_admin.routes import get_session_user
-    except Exception:
-        return None
-    try:
-        return get_session_user()
-    except Exception:
-        return None
+    return jz_api.get_session_user()
 
 
 @app.before_request
@@ -374,9 +442,20 @@ def _log_response(response):
 
 
 def load_registry():
-    """加载后台配置(config/tools.json)，这是工具的注册清单。"""
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """加载后台配置(config/tools.json)，这是工具的注册清单。
+
+    健壮性（解耦后插件目录由外部介质写入，坏文件概率上升）：读取/解析失败时
+    返回空注册表并告警，绝不让单个坏文件把整站打挂（见设计文档 §2 健壮性缺口）。
+    """
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        return obj if isinstance(obj, dict) else {"site": {}, "categories": [], "tools": []}
+    except Exception as exc:
+        global _registry_error
+        _registry_error = f"{type(exc).__name__}: {exc}"
+        log.warning("tools.json 不可读/不可解析，已按空注册表继续：%s", _registry_error)
+        return {"site": {}, "categories": [], "tools": []}
 
 
 def save_registry(registry):
@@ -388,15 +467,28 @@ def save_registry(registry):
 
 
 def load_manifests():
-    """扫描 plugins/ 下所有插件目录，读取各自 manifest.json。"""
+    """扫描 plugins/ 下所有插件目录，读取各自 manifest.json。
+
+    健壮性：单个插件 manifest 缺失/损坏只跳过该插件并记入 `_manifest_errors`，
+    其余插件与整站启动不受影响（设计文档 §2 健壮性缺口 / AC-6）。
+    """
     manifests = {}
+    _manifest_errors.clear()
     if not os.path.isdir(PLUGINS_DIR):
         return manifests
     for name in os.listdir(PLUGINS_DIR):
         manifest_path = os.path.join(PLUGINS_DIR, name, "manifest.json")
-        if os.path.isfile(manifest_path):
+        if not os.path.isfile(manifest_path):
+            continue
+        try:
             with open(manifest_path, "r", encoding="utf-8") as f:
-                manifests[name] = json.load(f)
+                obj = json.load(f)
+            if not isinstance(obj, dict):
+                raise ValueError("manifest 不是 JSON 对象")
+            manifests[name] = obj
+        except Exception as exc:
+            _manifest_errors[name] = f"{type(exc).__name__}: {exc}"
+            log.warning("插件 %s 的 manifest.json 不可解析，已跳过：%s", name, exc)
     return manifests
 
 
@@ -470,6 +562,9 @@ def get_aggregated_tools():
        结果作为卡片展示字段的最高优先级来源；
     2. tools.json 兜底（方式二）：插件未提供钩子时，name / description 取
        config/tools.json（权威），icon / accent / features 取 manifest.json。
+
+    健康状态（解耦后新增）：门控结论为 blocked 的插件**不出现在卡片里**
+    （避免"能打开但一用就报错"）；degraded 的照常展示并带 health 字段供前端标角标。
     """
     registry = load_registry()
     manifests = load_manifests()
@@ -488,6 +583,9 @@ def get_aggregated_tools():
         manifest = manifests.get(item["id"])
         if manifest is None:
             continue
+        state = _plugin_states.get(item["id"]) or {}
+        if state.get("status") == "blocked":
+            continue  # 不可运行：不出现卡片（缺失清单在后台可见）
         m = meta.get(item["id"], {})
         # 方式一：插件主动声明的卡片内容优先（未声明则为空 dict，走 tools.json 兜底）
         card = _resolve_home_card(item["id"])
@@ -512,6 +610,9 @@ def get_aggregated_tools():
             "category": category_map.get(item.get("category"), "未分类"),
             "category_id": item.get("category", ""),
             "order": item.get("order", 0),
+            # 健康状态：ok / degraded（可选依赖缺失，前端可标"功能降级"角标）
+            "health": state.get("status", "ok"),
+            "health_degraded": state.get("degraded", []),
         })
     tools.sort(key=lambda t: t["order"])
     return tools
@@ -587,10 +688,15 @@ def register_plugin_backends(app):
     加载失败隔离：每个插件的后端加载（模块导入 + register(app)）整体包在
     try/except 内。任一插件因 endpoint 冲突、依赖缺失、语法错误等原因失败时，
     只记录到 _plugin_load_errors 并打日志告警，其余插件与整站启动不受影响。
+
+    版本与依赖门控（解耦后新增，设计文档 §5.2 / §5.3）：加载前逐插件求值
+    「版本门控 + 三类依赖」三态结论——blocked 不加载并记录缺失清单，
+    degraded 照常加载但标注；结论存于 _plugin_states，供 /api/tools 与后台展示。
     """
     global _plugin_home_card_hooks
     _plugin_home_card_hooks = {}  # 每次启动重新收集，避免跨重启残留旧钩子
     _plugin_load_errors.clear()
+    _plugin_states.clear()
 
     registry = load_registry()
     tools = list(registry.get("tools", []))
@@ -640,10 +746,45 @@ def register_plugin_backends(app):
     if not load_routes("admin"):
         app.logger.warning("核心插件 admin 未加载，登录鉴权 / 工具访问控制将不可用")
 
+    # 版本与依赖门控（设计文档 §5.2 / §5.3）：加载前逐插件求值，三态结论——
+    #   ok       正常加载
+    #   degraded 仅可选依赖缺失 → 加载，列表/卡片标注"功能降级"
+    #   blocked  必需依赖缺失或版本门控不满足 → **不加载**并记录原因
+    # 与既有"加载失败隔离"同一条纪律：任何单插件问题都不拖垮整站。
+    manifests = load_manifests()
+    app_dir = BASE_DIR
+    _vj = jz_deps.read_version_json(app_dir)
+    app_version, plugin_api = _vj.get("app"), _vj.get("plugin_api")
+
     for item in tools:
-        if item["id"] == "admin" or not item.get("enabled", True):
+        plugin_id = item["id"]
+        if plugin_id == "admin" or not item.get("enabled", True):
             continue
-        load_routes(item["id"])
+        manifest = manifests.get(plugin_id) or {}
+        plugin_dir = get_plugin_dir(plugin_id)
+        if not plugin_dir or not manifest:
+            # manifest 损坏/缺失：load_manifests 已记录，这里只标注状态
+            if plugin_id in _manifest_errors:
+                _plugin_states[plugin_id] = {"status": "blocked",
+                                             "missing": ["manifest.json"],
+                                             "reason": "manifest.json 不可解析"}
+            continue
+        verdict = jz_deps.evaluate(plugin_id, plugin_dir, manifest, app_dir=app_dir,
+                                   app_version=app_version, plugin_api=plugin_api)
+        _plugin_states[plugin_id] = {
+            "status": verdict["status"],
+            "missing": verdict["missing"],
+            "degraded": verdict.get("degraded", []),
+            "reason": verdict.get("reason", ""),
+        }
+        if verdict["status"] == "blocked":
+            why = verdict.get("reason") or ("缺少必需依赖：" + "、".join(verdict["missing"]))
+            app.logger.warning("插件 %s 不可运行，已跳过加载（%s）", plugin_id, why)
+            continue
+        if verdict["status"] == "degraded":
+            app.logger.warning("插件 %s 功能降级（可选依赖缺失：%s）",
+                               plugin_id, "、".join(verdict.get("degraded", [])))
+        load_routes(plugin_id)
 
 
 @app.route("/")
@@ -673,6 +814,13 @@ def api_tools():
         "site": registry.get("site", {}),
         "categories": categories,
         "tools": _filter_visible_tools(get_aggregated_tools()),
+        # 插件健康状况（解耦后新增）：加载失败原因 + 版本/依赖门控三态结论。
+        # 首页据此对"不可运行"的插件不显示卡片、对"降级"的插件显示角标
+        # （见 docs/design/主体与插件解耦-设计文档.md §5.3 展示面）。
+        "plugin_errors": dict(_plugin_load_errors),
+        "plugin_states": dict(_plugin_states),
+        "registry_error": _registry_error,
+        "manifest_errors": dict(_manifest_errors),
     })
 
 
@@ -685,20 +833,32 @@ def api_tool(tool_id):
     return jsonify({"error": "tool not found"}), 404
 
 
+@app.route("/api/org/tree")
+def api_org_tree():
+    """框架级组织架构树（单位→部门→用户，只读）。
+
+    主体对插件的稳定契约（FC-4）：数据经 jz_api 的 provider 取自 admin 插件，
+    插件（如公告板）调用本接口即"调主体"，不再直连另一个插件的接口——
+    插件之间因此互不依赖（见 docs/design/主体与插件解耦-设计文档.md §5.4）。
+    未登录由 admin 的全局拦截兜底（401）；admin 未加载时返回 503。
+    """
+    tree = jz_api.get_org_tree()
+    if tree is None:
+        return jsonify({"error": "组织架构数据不可用（核心插件未加载）"}), 503
+    jz_api.set_operation("查询组织架构树")
+    return jsonify({"ok": True, "tree": tree})
+
+
 def _current_user_allowlist():
     """当前登录用户可见工具 ID 集合；None 表示不限制。
 
-    权限点的唯一读取入口：来自 admin 插件 get_session_user() 的
+    权限点的唯一读取入口：来自框架 API 门面 `jz_api.get_session_user()` 的
     permissions 字段（逐人授权 + grant_all 全站开放工具；超级管理员
     授予全部）。admin 插件未加载或读取失败时返回 None（不限制），
     与既有降级策略一致。所有需要按权限过滤工具清单的接口都应经过
     本函数，避免各处自行读取造成口径不一。
     """
-    try:
-        from jztools_admin.routes import get_session_user
-    except Exception:
-        return None
-    info = get_session_user()
+    info = jz_api.get_session_user()
     if info is None or info.get("super_admin"):
         return None
     return set(info.get("permissions") or [])
@@ -707,7 +867,7 @@ def _current_user_allowlist():
 def _filter_visible_tools(tools):
     """按当前登录用户的权限点过滤可见工具；匿名或超级管理员不限制。
 
-    get_session_user 由 admin 插件（jztools_admin）提供，未加载时不做过滤。
+    权限信息经 jz_api 取自 admin 插件（框架 API 门面），未加载时不做过滤。
     """
     allowed = _current_user_allowlist()
     if allowed is None:
@@ -953,6 +1113,28 @@ if __name__ == "__main__":
     # 派出，等待旧进程退出后原位拉起新实例。必须在任何初始化（数据目录 / 端口 / 插件
     # 加载）之前处理——助手实例自身不对外服务，处理完即退出；参数非法也直接退出，
     # 绝不落回正常启动（防止与旧实例形成双实例）。
+    # 依赖组件自检：安装器在目标机上用它做"装完能不能真的 import"的验证（T25 第 1 步）
+    if "--check-deps" in sys.argv:
+        # ★ 冻结 exe 是 GUI 子系统（console=False），print 无处可去 —— 结果写文件，
+        #   由安装器读取（见 tools/dep-component/install-dep-component.ps1）。
+        #   用法：JZToolsHub.exe --check-deps [<输出json路径>]
+        import json as _json
+        st = dep_components_status()
+        try:
+            i = sys.argv.index("--check-deps")
+            out = sys.argv[i + 1] if len(sys.argv) > i + 1 else os.path.join(
+                BASE_DIR, "runtime", "pylibs", ".check-deps.json")
+        except (ValueError, IndexError):
+            out = os.path.join(BASE_DIR, "runtime", "pylibs", ".check-deps.json")
+        ok = all(v == "ok" for v in st["imports"].values()) and bool(st["installed"])
+        st["ok"] = ok
+        try:
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            with open(out, "w", encoding="utf-8") as f:
+                _json.dump(st, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+        sys.exit(0 if ok else 1)
     if getattr(sys, "frozen", False) and "--wait-restart" in sys.argv:
         try:
             _wait_pid = int(sys.argv[sys.argv.index("--wait-restart") + 1])

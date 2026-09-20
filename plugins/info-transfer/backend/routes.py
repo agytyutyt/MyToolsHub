@@ -35,6 +35,13 @@
 - 前端通过 GET /status/<task_id> 轮询，完成后经 /download、/image 取产物。
 """
 
+# 会话工具经主体模块 jz_api 取用（依赖倒置：插件不再 import admin 插件的内部模块，
+# 插件之间零依赖；admin 未加载时自动降级为「未登录 / 空操作」）。
+# 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
+import jz_api
+
+get_session_user = jz_api.get_session_user
+
 import base64
 import csv as csv_mod
 import io
@@ -56,10 +63,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 from flask import jsonify, request, send_file
 
-try:
-    from jztools_admin.routes import get_session_user
-except Exception:  # admin 插件缺失时兜底（理论上不会发生）
-    get_session_user = None
 
 import jztools_data
 
@@ -2456,6 +2459,7 @@ def register(app) -> None:
             "protocol": 2 if PROTOCOL_V2 else 1,
             "openpyxl": OPENPYXL_AVAILABLE,
             "docx": DOCX_AVAILABLE,
+            "missing_deps": _missing_deps(),
         })
 
     @app.get(f"{API_PREFIX}/formats")
@@ -2845,3 +2849,29 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/ping")
     def it_ping():
         return jsonify({"ok": True})
+
+
+# 依赖 → 失效功能 → 修复指引（供 /status 的 missing_deps 与前端横幅使用）
+_DEP_FEATURES = [
+    ("opencv-python(cv2)", CV2_AVAILABLE, "视频码流模式（生成 mp4）", True),
+    ("numpy", NUMPY_AVAILABLE, "视频码流模式（生成 mp4）", True),
+    ("qrcode", QRCODE_AVAILABLE, "全部出码功能", False),
+    ("zfec", ZFEC_AVAILABLE, "全部出码功能（纠删码）", False),
+    ("zxingcpp", ZXING_AVAILABLE, "视频解码校验", False),
+]
+
+
+def _missing_deps():
+    """缺失的依赖清单：指出**哪个依赖未满足、会导致什么功能失效、怎么修**。
+
+    cv2/numpy 由「依赖组件包」按需提供（不随主包，见 docs/design/主体与插件解耦-设计文档.md
+    §3.4 / T25）：未装组件时本插件仍可加载，但视频码流模式不可用——这里给出可操作的提示。
+    """
+    out = []
+    for name, ok, feature, by_component in _DEP_FEATURES:
+        if ok:
+            continue
+        out.append({"name": name, "feature": feature,
+                    "fix": "请安装「依赖组件包」（JZToolsHub-依赖组件-OpenCV-*.zip，解压后双击「安装依赖组件.bat」）" if by_component else "请升级主包或联系维护者"})
+    return out
+

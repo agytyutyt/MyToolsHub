@@ -1,7 +1,7 @@
 {
   "id": "trajectory-sketch",
   "name": "轨迹速写",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "JZToolsHub 团队",
   "icon": "✍️",
   "accent": "#5E35B1",
@@ -13,5 +13,24 @@
     "速写报告",
     "停留点/出行段"
   ],
-  "form": "source"
+  "form": "source",
+  "requires": {
+    "python_packages": [
+      {
+        "name": "flask",
+        "version": ">=3.0",
+        "required": true
+      },
+      {
+        "name": "openpyxl",
+        "version": ">=3.1",
+        "required": true
+      },
+      {
+        "name": "xlrd",
+        "version": ">=2.0",
+        "required": true
+      }
+    ]
+  }
 }

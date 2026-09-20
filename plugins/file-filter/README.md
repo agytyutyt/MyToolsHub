@@ -68,14 +68,20 @@ resp = requests.post(
 data = resp.json()  # {"rows": [[表头],[数据]...], "kept": [...], "removed": [...], "replace_count": N}
 ```
 
-## 依赖
+## 依赖与升级
 
-`backend/requirements.txt`：openpyxl（xlsx 读写）、xlrd（xls 读取）、requests（大模型调用）。
-缺依赖时 `/status` 上报，相关功能优雅降级提示，不拖垮主进程（B-4）。
+| 项 | 内容 |
+| --- | --- |
+| 框架已打包依赖 | `flask` >=3.0、`openpyxl` >=3.1、`requests` >=2.31（可选）、`xlrd` >=2.0 |
+| 插件自带依赖（`backend/vendor/`） | 无 |
+| 外部程序组件 | 无 |
+| 能否单独升级 | ✅ 可以——依赖全部落在框架已打包清单或插件目录内（构建期 C-4/C-10 校验） |
+| 升级是否需重启 | 含 `backend/**` 改动**需要**重启（后台/安装器会自动重启，约 5~10 秒）；纯前端改动免重启，Ctrl+F5 即可 |
 
-> 背景图片清理（`backend/bg_image.py`）**零第三方依赖、零框架依赖**（纯标准库 zip/XML 改写），
-> 且在 `plugins/trajectory-sketch/backend/bg_image.py` 有一份**逐字节相同**的副本
-> （规范 B-7 禁止插件间 import，故刻意双份；`test_bg_image.py` 会断言两份一致，改动须两处同步）。
+> 声明真源是 `manifest.json` 的 `requires`（三类依赖：框架包 / 自带 vendor / 外部程序组件）；
+> 出包工具构建期校验「声明 ↔ 实测 import」一致（C-10）。后台「插件管理」按它显示
+> 逐依赖徽标与可运行性：缺**必需**依赖 → 标记不可运行并暂不加载，补齐后重启自动恢复；
+> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-2 / U-4 / U-6。
 
 ## 依赖检查
 

@@ -82,7 +82,12 @@ async function render() {
 
     const tools = data.tools || [];
     if (tools.length === 0) {
-      grid.innerHTML = '<div class="loading">暂无可用工具，请在 config/tools.json 中注册。</div>';
+      // 首装引导（主体与插件解耦后，主包只带核心插件 admin）：
+      // 业务插件由「插件集 / 插件包」安装——给出可执行的下一步，而不是让管理员面对空白页。
+      grid.innerHTML = '<div class="loading">暂无可用工具。<br>'
+        + '主程序默认只带管理后台：请安装「插件集」或逐个安装插件包后刷新本页'
+        + '（解压插件集 → 双击「安装插件集.bat」；详见 docs/guide/离线部署包说明.md）。<br>'
+        + '管理员可登录后台在「插件管理」中查看已装插件与依赖状态。</div>';
       return;
     }
 

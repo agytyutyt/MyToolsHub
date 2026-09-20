@@ -15,6 +15,14 @@
 - excel:  {"rows": [[单元格, ...], ...]}   空单元格统一存空字符串
 """
 
+# 会话工具经主体模块 jz_api 取用（依赖倒置：插件不再 import admin 插件的内部模块，
+# 插件之间零依赖；admin 未加载时自动降级为「未登录 / 空操作」）。
+# 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
+import jz_api
+
+_get_session_user = jz_api.get_session_user
+_set_operation = jz_api.set_operation
+
 import io
 import json
 import os
@@ -26,16 +34,7 @@ from datetime import datetime
 
 from flask import jsonify, request, send_file
 
-try:
-    from jztools_admin.routes import get_session_user as _get_session_user
-except Exception:  # admin 插件缺失时兜底（理论上不会发生）
-    _get_session_user = None
 
-try:
-    from jztools_admin.routes import set_operation as _set_operation
-except Exception:  # 主应用未提供日志辅助时兜底（理论上不会发生）
-    def _set_operation(op):
-        pass
 
 API_PREFIX = "/api/shared-docs"
 

@@ -41,12 +41,17 @@ from datetime import datetime
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY_BASELINE = "3.14"
-TEMPLATE_MIN = 4
+# 核心插件白名单：解耦后主包**只带核心插件**，业务插件走插件包 / 插件集独立分发
+# （见 docs/design/主体与插件解耦-设计文档.md §3.3 / §3.5）。口径与 build-deploy.ps1 的
+# $CorePlugins 一致 —— 改一处要两处一起改。
+CORE_PLUGINS = ["admin"]
 
 # §3.2 复制清单（顺序与 build-deploy.ps1 一致，勿随意增删）
 # ★ docs 只列「随包层」：guide（交付手册）+ design（设计文档）+ 根索引
 #   不随包：docs/eval、docs/plan、docs/archive（内部评估稿 / 活清单 / 历史留证）
-COPY_DIRS = ["static", "plugins", "wheels", "tools", "docs/guide", "docs/design"]
+# ★ plugins / wheels / tools 不再整目录随包：plugins 只拷核心插件白名单、
+#   tools 只拷 plugin-upgrade（目标机离线装插件）、wheels 不随包（无运行时消费方）。
+COPY_DIRS = ["static", "docs/guide", "docs/design"]
 COPY_FILES = ["install.ps1", "一键安装.bat", "一键卸载.bat", "docs/README.md",
               "README.md", "HANDOFF.md", "插件设计规范.md", "移动端APP.md"]
 
@@ -215,26 +220,62 @@ def main():
             stats["added"].append(f)
         if not args.check_only:
             shutil.copy2(s, t)
+    # §3.2 插件：只拷核心插件白名单（业务插件不随主包）
+    for cp in CORE_PLUGINS:
+        src = os.path.join(ROOT, "plugins", cp)
+        if not os.path.isdir(src):
+            raise SystemExit("核心插件目录缺失：plugins/%s（见设计文档 §3.5）" % cp)
+        merge_copy(src, os.path.join(app, "plugins", cp), rules, stats, args.check_only)
+    # 组装自检：包内 plugins/ 只允许核心插件白名单
+    pdir = os.path.join(app, "plugins")
+    if os.path.isdir(pdir):
+        stray = [d for d in os.listdir(pdir)
+                 if os.path.isdir(os.path.join(pdir, d)) and d not in CORE_PLUGINS]
+        if stray:
+            raise SystemExit("主包 plugins/ 内出现非核心插件：%s（解耦要求主包只带 %s）"
+                             % (", ".join(stray), "/".join(CORE_PLUGINS)))
+    # tools：只带目标机运维需要的 plugin-upgrade
+    tools_src = os.path.join(ROOT, "tools", "plugin-upgrade")
+    if os.path.isdir(tools_src):
+        merge_copy(tools_src, os.path.join(app, "tools", "plugin-upgrade"), rules, stats, args.check_only)
+    # config/tools.json：首装模板收窄为「site + 分类骨架 + 核心插件条目」
+    # （仓库里的 config/tools.json 保持全量，便于源码开发；收窄只发生在打包产物里）
     if not args.check_only:
         os.makedirs(os.path.join(app, "config"), exist_ok=True)
-        shutil.copy2(os.path.join(ROOT, "config", "tools.json"),
-                     os.path.join(app, "config", "tools.json"))
+        with open(os.path.join(ROOT, "config", "tools.json"), encoding="utf-8") as f:
+            tpl_obj = json.load(f)
+        narrowed = {"site": tpl_obj.get("site"),
+                    "categories": tpl_obj.get("categories", []),
+                    "tools": [t for t in tpl_obj.get("tools", []) if t.get("id") in CORE_PLUGINS]}
+        with open(os.path.join(app, "config", "tools.json"), "w", encoding="utf-8", newline="") as f:
+            f.write(json.dumps(narrowed, ensure_ascii=False, indent=2))
     cleanup_plugins(app, rules, stats, args.check_only)
 
     # ---- §3.2.1 模板自检 ----
     tpl = []
     for cur, _d, files in os.walk(os.path.join(app, "plugins")):
         tpl += [f for f in files if f.endswith(".template.json")]
-    if len(tpl) < TEMPLATE_MIN:
-        raise SystemExit("模板自检失败：仅 %d 个 *.template.json（期望 >= %d）。"
-                         "检查清理规则是否误删模板（模板不得命名为 config.json）。" % (len(tpl), TEMPLATE_MIN))
+    tpl_expect = 0
+    for cp in CORE_PLUGINS:
+        for cur, _d, files in os.walk(os.path.join(ROOT, "plugins", cp)):
+            tpl_expect += len([f for f in files if f.endswith(".template.json")])
+    if len(tpl) < tpl_expect:
+        raise SystemExit("模板自检失败：仅 %d 个 *.template.json（期望 >= %d，来自核心插件 %s）。"
+                         "检查清理规则是否误删模板（模板不得命名为 config.json）。"
+                         % (len(tpl), tpl_expect, "/".join(CORE_PLUGINS)))
 
     # ---- §3.3 / §3.4 / §4 ----
     if not args.check_only:
         os.makedirs(os.path.join(app, "logs"), exist_ok=True)
+        try:
+            sys.path.insert(0, ROOT)
+            import jz_deps as _jz_deps
+            plugin_api = int(_jz_deps.PLUGIN_API)
+        except Exception:
+            plugin_api = 1
         obj = {"app": version, "schema": 1, "commit": commit,
                "built_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-               "python": pyver, "offline": ""}
+               "python": pyver, "offline": "", "plugin_api": plugin_api}
         with open(vf, "w", encoding="utf-8", newline="") as f:   # UTF-8 无 BOM
             f.write(json.dumps(obj, indent=4, ensure_ascii=False))
         with open(os.path.join(app, "start.bat"), "w", encoding="gbk", newline="\r\n") as f:

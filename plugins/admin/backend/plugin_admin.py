@@ -26,6 +26,11 @@ try:                                  # 框架模块：状态登记 / 模板同�
 except Exception:                     # 单元测试环境可能未在 sys.path 上
     jztools_data = None
 
+try:                                  # 框架模块：依赖判定引擎（三态结论，见设计文档 §5.3）
+    import jz_deps
+except Exception:                     # 单元测试环境可能未在 sys.path 上
+    jz_deps = None
+
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 PLUGIN_PACKAGE_KIND = "plugin-upgrade"
 PACKAGE_SCHEMA = 1
@@ -268,6 +273,26 @@ def _parse_sums(path):
     return items
 
 
+def _dep_check_for_package(meta, staging, base_dir, pid):
+    """按包内 `requires` 评估本机依赖满足情况（供上传计划弹窗；不阻断添加）。"""
+    if jz_deps is None or not pid:
+        return None
+    try:
+        req = (meta or {}).get("requires")
+        manifest = {"requires": req} if isinstance(req, dict) else {}
+        pdir = os.path.join(staging or "", "payload", "plugins", pid)
+        if not manifest:
+            manifest = read_json(os.path.join(pdir, "manifest.json")) or {}
+        vj = jz_deps.read_version_json(base_dir)
+        v = jz_deps.evaluate(pid, pdir, manifest, app_dir=base_dir,
+                             app_version=vj.get("app"), plugin_api=vj.get("plugin_api"))
+        return {"status": v["status"], "missing": v["missing"], "degraded": v.get("degraded", []),
+                "reason": v.get("reason", ""), "detail": v.get("detail", []),
+                "lock_available": v.get("lock_available", False)}
+    except Exception:
+        return None
+
+
 def inspect_package(zip_path, base_dir, data_root, force=False, staging=None):
     """只读校验插件包（不写程序目录）；返回 dict：
 
@@ -318,6 +343,10 @@ def inspect_package(zip_path, base_dir, data_root, force=False, staging=None):
         result["errors"].append("包清单 id 非法：%r" % pid)
     if not re.match(r"^\d+\.\d+\.\d+$", version):
         result["errors"].append("包清单版本号不是 主.次.修订：%r" % version)
+
+    # 依赖检测（设计文档 §5.3 D-8：**提示但不阻断**）——包内声明 vs 本机现状，
+    # 结果放进计划供前端弹窗（缺失只提示，apply 照常执行：环境问题允许"先装插件、后补依赖"）。
+    result["dep_check"] = _dep_check_for_package(meta, staging, base_dir, pid)
 
     payload_plugin = os.path.join(staging, "payload", "plugins", pid) if pid else ""
     manifest = read_json(os.path.join(payload_plugin, "manifest.json")) if payload_plugin else None
@@ -777,6 +806,80 @@ def set_plugin_enabled(data_root, pid, enabled, tools_cfg_path=None):
 
 # ======================== 总览（list） ========================
 
+def uninstall_plugin(base_dir, data_root, pid, purge_entry=False, backup_data=False):
+    """卸载插件（规范 §11 顺序铁律：先删/停注册条目 → 备份数据 → 再删目录）。
+
+    - **核心插件（manifest.core = true）拒绝卸载**（设计文档 §3.5）：admin 承担登录 / 鉴权 /
+      权限 / 后台 / 插件管理本身，卸载即"自锁"（没有管理入口、也没有鉴权）。
+    - 用户数据默认**保留**（数据根 plugins/<id>/ 全程只读）；`backup_data=True` 时先把数据目录
+      只读打包到 backups/plugins/<id>/data-<时间戳>.zip（不删除原数据）。
+    - 与目标机安装器 `-Uninstall` 同一顺序与同一拒绝规则（两处实现同源）。
+
+    返回 {"ok", "steps": [...], "error"?}
+    """
+    if not PLUGIN_ID_RE.match(pid or ""):
+        return {"ok": False, "error": "插件 id 非法"}
+    manifest = read_json(plugin_manifest(base_dir, pid))     # 注意：plugin_manifest 返回**路径**
+    manifest = manifest if isinstance(manifest, dict) else {}
+    if manifest.get("core"):
+        return {"ok": False, "error": "「%s」是核心插件（随主体分发），不可卸载。" % pid}
+    pdir = plugin_dir(base_dir, pid)
+    steps = []
+
+    # ① 注册条目：先停用（默认）或删除（purge_entry）——避免目录删掉后留下悬空引用
+    if purge_entry:
+        path = os.path.join(data_root, "config", "tools.json")
+        cfg = read_json(path)
+        if isinstance(cfg, dict) and isinstance(cfg.get("tools"), list):
+            kept = [t for t in cfg["tools"] if not (isinstance(t, dict) and t.get("id") == pid)]
+            if len(kept) != len(cfg["tools"]):
+                cfg["tools"] = kept
+                write_json(path, cfg)
+                steps.append("已删除注册条目（tools.json）")
+            else:
+                steps.append("tools.json 中没有该插件的注册条目（跳过）")
+        else:
+            steps.append("tools.json 不可读（跳过注册条目处理）")
+    else:
+        if set_plugin_enabled(data_root, pid, False):
+            steps.append("已停用注册条目（enabled:false；用 -PurgeEntry 语义可删除）")
+        else:
+            steps.append("tools.json 中没有该插件的注册条目（跳过）")
+
+    # ② 数据备份（只读打包，不删除数据）——放数据根 backups/，与程序目录解耦
+    data_dir = plugin_data_dir(data_root, pid)
+    if backup_data and os.path.isdir(data_dir) and dir_size(data_dir) > 0:
+        bdir = backups_dir(data_root, pid)
+        zip_path = os.path.join(bdir, "data-%s.zip" % now_stamp())
+        try:
+            zip_dir_with_prefix(data_dir, zip_path, "plugins/%s/" % pid)
+            steps.append("已备份插件数据 → %s" % zip_path)
+        except Exception as exc:
+            return {"ok": False, "error": "数据备份失败，已中止卸载（不留备份不删数据）：%s" % exc,
+                    "steps": steps}
+    elif os.path.isdir(data_dir):
+        steps.append("插件数据保留在数据根（%s），未打包（未勾选备份）" % data_dir)
+
+    # ③ 删程序目录（插件代码）
+    if os.path.isdir(pdir):
+        _rm(pdir)
+        steps.append("已删除插件代码目录 plugins/%s" % pid)
+    else:
+        steps.append("插件代码目录不存在（可能已删除）")
+
+    # ④ 清状态登记（避免下次安装被旧登记误判）
+    state = read_state(data_root)
+    if _state_entry(state, pid) is not None:
+        try:
+            state.get("plugins", {}).pop(pid, None)
+            write_state(data_root, state)
+            steps.append("已清除状态登记（.app_state.json）")
+        except Exception:
+            steps.append("状态登记清理失败（不影响卸载）")
+    return {"ok": True, "steps": steps, "data_dir": data_dir,
+            "note": "用户数据默认保留；如需彻底清理，请手工删除数据根下的该目录。"}
+
+
 def plugin_names(cfg):
     """从 tools.json 取 id → 展示名 映射（规范 M-2：展示名的权威来源是 config/tools.json）。"""
     names = {}
@@ -798,8 +901,133 @@ def display_name(names, plugin_id, manifest=None, extra=None):
     return plugin_id
 
 
+def align_state_version(base_dir, data_root, pid):
+    """把状态登记的版本对齐到**程序目录的实际代码版本**（登记漂移的一键修复）。
+
+    为什么需要：install.ps1 的插件防回退比较的是**登记版本**（`config\.app_state.json`），
+    所以"代码比登记新"时保护会失效——下次主包升级可能覆盖较新的插件代码（静默降级）。
+    本操作只写数据根的登记（版本 + installed_by/at），**不动代码、不动用户数据**；
+    判定仍以程序目录 manifest 为准（设计文档 §5.3 / R-8）。
+    """
+    if not PLUGIN_ID_RE.match(pid or ""):
+        return {"ok": False, "error": "插件 id 非法"}
+    ver = installed_version(base_dir, pid)
+    if not ver:
+        return {"ok": False, "error": "读不到该插件的 manifest.json（程序目录 plugins/%s）" % pid}
+    state = read_state(data_root)
+    entry = dict(_state_entry(state, pid) or {})
+    old = str(entry.get("version") or "")
+    if old == ver:
+        return {"ok": True, "id": pid, "from_version": old, "to_version": ver, "changed": False}
+    entry["version"] = ver
+    entry["installed_by"] = "admin-web/align"
+    entry["installed_at"] = now_iso()
+    _set_state_entry(data_root, pid, entry)
+    return {"ok": True, "id": pid, "from_version": old, "to_version": ver, "changed": True}
+
+
+def align_state_versions(base_dir, data_root):
+    """一键对齐：把**所有**"登记版本 ≠ 程序目录实际版本"的插件登记批量对齐。
+
+    返回 {"ok", "aligned":[{id, from_version, to_version}], "total", "failed":[{id,error}]}。
+    与单插件版同一条路径（逐个调用 align_state_version），因此行为完全一致、可审计。
+    """
+    plugins_root = os.path.join(base_dir, "plugins")
+    aligned, failed, total = [], [], 0
+    if not os.path.isdir(plugins_root):
+        return {"ok": True, "aligned": [], "total": 0, "failed": []}
+    for pid in sorted(os.listdir(plugins_root)):
+        pdir = os.path.join(plugins_root, pid)
+        if not PLUGIN_ID_RE.match(pid or "") or not os.path.isdir(pdir):
+            continue
+        total += 1
+        res = align_state_version(base_dir, data_root, pid)
+        if not res.get("ok"):
+            failed.append({"id": pid, "error": res.get("error", "")})
+        elif res.get("changed"):
+            aligned.append({"id": pid, "from_version": res["from_version"], "to_version": res["to_version"]})
+    return {"ok": True, "aligned": aligned, "total": total, "failed": failed}
+
+
+def plugin_deps(base_dir, pid, pdir, manifest=None):
+    """单插件的依赖判定（版本门控 + 三类依赖 → 三态），与主体启动门控同一引擎。
+
+    供后台「插件管理」列表展示依赖需求与可运行性（设计文档 §5.3 展示面）。
+    引擎不可用（测试环境）时返回 None，前端按"未判定"展示。
+    """
+    if jz_deps is None:
+        return None
+    try:
+        if manifest is None:
+            manifest = read_json(os.path.join(pdir, "manifest.json")) or {}
+        vj = jz_deps.read_version_json(base_dir)
+        verdict = jz_deps.evaluate(pid, pdir, manifest, app_dir=base_dir,
+                                   app_version=vj.get("app"), plugin_api=vj.get("plugin_api"))
+        return {
+            "status": verdict["status"],
+            "missing": verdict["missing"],
+            "degraded": verdict.get("degraded", []),
+            "reason": verdict.get("reason", ""),
+            "lock_available": verdict.get("lock_available", False),
+            "detail": verdict.get("detail", []),
+        }
+    except Exception:
+        return None
+
+
+def installed_deps(base_dir):
+    """本机「已安装依赖」清单（分类 + 版本），供后台「插件管理」展示（设计文档 §5.3 D-7）。
+
+    三类来源：① 框架包（随主包的第三方库，白名单优先）② 外部程序组件 ③ 插件自带 vendor/。
+    真源是 config/installed-deps.json（构建期由 tools/gen-installed-deps.py 生成）。
+    """
+    raw = read_json(os.path.join(base_dir, "config", "installed-deps.json")) or {}
+    lock = jz_deps.load_installed_deps(base_dir) if jz_deps else {"available": False, "packages": {}, "path": ""}
+    pkgs = lock.get("packages", {})
+    whitelist = [str(x).lower() for x in (raw.get("whitelist") or [])]
+    import_of = {}
+    for mod, dist in (raw.get("modules") or {}).items():
+        import_of.setdefault(str(dist).lower(), []).append(str(mod))
+    wl_rows, other_rows = [], []
+    for dist, ver in sorted(pkgs.items(), key=lambda kv: kv[0].lower()):
+        row = {"dist": dist, "version": ver, "imports": sorted(import_of.get(dist.lower(), []))[:3]}
+        (wl_rows if dist.lower() in whitelist else other_rows).append(row)
+    groups = [{"id": "framework", "name": "框架包（随主包）", "available": lock.get("available", False),
+               "items": wl_rows, "other_count": len(other_rows),
+               "generated_at": lock.get("generated_at", ""), "python": lock.get("python", "")}]
+    # 外部程序组件：探测标准位置（与 jz_deps._probe_external 同口径）
+    ext_items = []
+    for dep_id, label in (("libreoffice", "LibreOffice 核心"), ("chrome", "Chrome 浏览器")):
+        state, actual, note = ("missing", None, "")
+        if jz_deps is not None:
+            state, actual, note = jz_deps._probe_external(dep_id, base_dir)
+        ext_items.append({"id": dep_id, "name": label, "state": state, "path": actual or "", "note": note})
+    groups.append({"id": "external", "name": "外部程序组件", "available": True, "items": ext_items})
+    # 插件自带（backend/vendor/）
+    vend_items = []
+    plugins_root = os.path.join(base_dir, "plugins")
+    if os.path.isdir(plugins_root):
+        for pid in sorted(os.listdir(plugins_root)):
+            vend = os.path.join(plugins_root, pid, "backend", "vendor")
+            if os.path.isdir(vend):
+                for name in sorted(os.listdir(vend)):
+                    # 只列真正的自带依赖（目录或 .py），跳过 README 之类的说明文件
+                    if name.startswith("__") or name.startswith("."):
+                        continue
+                    if not (os.path.isdir(os.path.join(vend, name)) or name.endswith(".py")):
+                        continue
+                    vend_items.append({"id": "%s/%s" % (pid, name), "name": name, "plugin": pid,
+                                       "note": "插件自带（版本由插件声明）"})
+    groups.append({"id": "vendored", "name": "插件自带（vendor/）", "available": True, "items": vend_items})
+    return {"ok": True, "lock_path": lock.get("path", ""), "groups": groups}
+
+
 def list_plugins(base_dir, data_root, tools_cfg=None):
-    """列出所有插件的 展示名 / 代码版本 / 登记版本 / 待重启 / 备份 / 数据占用 / 启停状态。"""
+    """列出所有插件的 展示名 / 代码版本 / 登记版本 / 待重启 / 备份 / 数据占用 / 启停状态。
+
+    解耦后新增 `deps`（依赖判定三态 + 逐依赖明细）与 `core`（核心插件标记，不可卸载），
+    供后台列表展示"依赖需求情况 + 是否可运行"（设计文档 §5.3 展示面 / §3.5）。
+    """
     plugins_root = os.path.join(base_dir, "plugins")
     state = read_state(data_root)
     cfg = read_json(tools_cfg) if tools_cfg else read_json(os.path.join(data_root, "config", "tools.json"))
@@ -836,6 +1064,8 @@ def list_plugins(base_dir, data_root, tools_cfg=None):
             "has_backend": os.path.isdir(os.path.join(pdir, "backend")),
             "backups": len(list_backups(data_root, pid)),
             "data_bytes": dir_size(plugin_data_dir(data_root, pid)),
+            "core": bool((manifest or {}).get("core")),      # 核心插件：不可卸载（§3.5）
+            "deps": plugin_deps(base_dir, pid, pdir, manifest),
         })
     return rows
 

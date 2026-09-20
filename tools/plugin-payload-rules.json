@@ -20,7 +20,12 @@
     "",
     "★ exclude_dirs 里的 \"dev\" 是**保留名**：用于放只服务开发的验证服务（现为 tools/dev/ 下",
     "  的 pdf_research_server.py / e2e_kb_zoom_server.py —— 它们会伪造 admin 会话以隔离测试，",
-    "  绝不能上目标机）。仓库里除 tools/dev/ 外没有别的 dev 目录；插件目录命名请避开 dev。"
+    "  绝不能上目标机）。仓库里除 tools/dev/ 外没有别的 dev 目录；插件目录命名请避开 dev。",
+    "",
+    "★ map-marker 的本地测试素材不随包（2026-09-19 定案）：*.mp4 / yunfu* / simulate_*.py /",
+    "  generate_qr_stream.py 是**本地生成的测试素材**（已 .gitignore），前端 index.html 与 *.js",
+    "  对它们零引用，不是交付资产。此前它们随整包分发（约 9.5 MB），且与旧版",
+    "  《插件独立升级方案-设计文档.md》§4.4「属交付资产」的判断相冲突——现按测试素材处理。"
   ],
   "schema": 1,
   "exclude_dirs": ["data", ".task_cache", "__pycache__", "out", "node_modules", ".venv", "venv", ".git", "dev"],
@@ -32,7 +37,8 @@
     "Thumbs.db",
     "_build_phase8.py"
   ],
-  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old", "test_*.py", "*_test.py", "conftest.py"],
+  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old", "test_*.py", "*_test.py", "conftest.py",
+                    "*.mp4", "yunfu*", "simulate_*.py", "generate_qr_stream.py"],
   "required": ["manifest.json", "README.md"],
   "max_files": 5000,
   "max_bytes": 209715200,

@@ -28,9 +28,13 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REQUIRED = ["JZToolsHub.exe", "start.bat", "一键安装.bat", "一键卸载.bat", "install.ps1",
-            "config/tools.json", "version.json", "README.md", "HANDOFF.md",
+            "config/tools.json", "config/installed-deps.json", "version.json", "README.md", "HANDOFF.md",
             "插件设计规范.md", "移动端APP.md", "docs/README.md", "_internal/python3*"]
-TEMPLATE_MIN = 4
+TEMPLATE_MIN = 0   # 解耦后主包只带核心插件（admin 无 *.template.json）；模板随业务插件包分发
+# 核心插件白名单：主包 plugins/ 内只允许出现它（口径与 build-deploy.ps1 的 $CorePlugins 一致）
+CORE_PLUGINS = ["admin"]
+# 不随主包（解耦后）：业务插件目录、wheels（无运行时消费方）、tools 下除 plugin-upgrade 的子目录
+ALLOWED_TOOLS_SUBDIRS = ["plugin-upgrade"]
 BAD_IN_PLUGINS = re.compile(r"(__pycache__|/data/|/out/|\.task_cache/|/config\.json$|\.pyc$)")
 # 不随包清单：内部文档层（docs/eval|plan|archive）与插件内测试脚本（口径见
 # tools/plugin-payload-rules.json 的 _comment 与 tools/build-deploy-local.py 的 COPY_DIRS）
@@ -83,7 +87,8 @@ def main():
     files = [n for n in names if not n.endswith("/")]
 
     check(z.testzip() is None, "zip CRC 全量校验")
-    check(len(files) > 2500, "文件数合理", "%d 文件 / %d 条目" % (len(files), len(names)))
+    # 阈值随解耦下调：主包不再携带业务插件（约 -250 条目），也不再带 pandas（约 -900 条目）
+    check(len(files) > 1500, "文件数合理", "%d 文件 / %d 条目" % (len(files), len(names)))
     top = set(n.split("/")[0] for n in names)
     check("JZToolsHub" not in top and "dist" not in top,
           "无顶层目录前缀（解压即见 JZToolsHub.exe）", "顶层：%d 项" % len(top))
@@ -102,13 +107,41 @@ def main():
         check(True, "version.json 可解析（UTF-8 无 BOM）", json.dumps(v, ensure_ascii=False))
     except Exception as e:
         check(False, "version.json 可解析", str(e))
-    for k in ("app", "schema", "commit", "built_at", "python", "offline"):
+    for k in ("app", "schema", "commit", "built_at", "python", "offline", "plugin_api"):
         check(k in v, "version.json 含字段 %s" % k)
     check(bool(re.match(r"^\d+\.\d+\.\d+$", str(v.get("app", "")))), "app 为三段式版本号", str(v.get("app")))
+    check(isinstance(v.get("plugin_api"), int) and v["plugin_api"] >= 1,
+          "plugin_api 为 >=1 的整数（插件 API 版本，真源 jz_deps.PLUGIN_API）", str(v.get("plugin_api")))
     check("-dirty" not in str(v.get("commit", "")), "commit 无 -dirty 干净戳", str(v.get("commit")))
+
+    # 已安装依赖清单（插件依赖判定的真源，见 docs/design/主体与插件解耦-设计文档.md §5.3）
+    deps = {}
+    try:
+        deps = json.loads(z.read("config/installed-deps.json").decode("utf-8-sig"))
+        ok = isinstance(deps.get("packages"), dict) and bool(deps["packages"])
+        check(ok, "已安装依赖清单可解析且非空",
+              "%d 个包 / %d 条 import 映射" % (len(deps.get("packages", {})), len(deps.get("modules", {}))))
+    except Exception as e:
+        check(False, "已安装依赖清单可解析（config/installed-deps.json）", str(e))
+    check(isinstance(deps.get("modules"), dict) and bool(deps.get("modules")),
+          "已安装依赖清单含 import→发行包 映射（modules）")
 
     tpl = [n for n in files if n.endswith(".template.json")]
     check(len(tpl) >= TEMPLATE_MIN, "配置模板 >= %d" % TEMPLATE_MIN, "实际 %d：%s" % (len(tpl), ", ".join(tpl)))
+
+    # 主体与插件解耦（S1）：主包只带核心插件；业务插件走插件包 / 插件集
+    # （见 docs/design/主体与插件解耦-设计文档.md §3.3 / §7 #4）
+    plugin_dirs = sorted({n.split("/")[1] for n in names if n.startswith("plugins/") and n.count("/") >= 2})
+    stray = [d for d in plugin_dirs if d not in CORE_PLUGINS]
+    check(not stray, "主包 plugins/ 仅含核心插件 %s" % "/".join(CORE_PLUGINS),
+          ("非核心插件：%s" % ", ".join(stray)) if stray else "实际：%s" % ", ".join(plugin_dirs))
+    check("wheels/" not in names and not any(n.startswith("wheels/") for n in names),
+          "不含 wheels/（无运行时消费方，解耦后移出主包）")
+    bad_tools = sorted({n.split("/")[1] for n in names
+                        if n.startswith("tools/") and n.count("/") >= 2
+                        and n.split("/")[1] not in ALLOWED_TOOLS_SUBDIRS})
+    check(not bad_tools, "tools/ 仅含 %s" % "/".join(ALLOWED_TOOLS_SUBDIRS),
+          ("多余子目录：%s" % ", ".join(bad_tools)) if bad_tools else "")
 
     bad = [n for n in names if n.startswith("plugins/") and BAD_IN_PLUGINS.search(n)]
     check(not bad, "plugins/ 无运行态夹带（data/__pycache__/config.json/*.pyc）",

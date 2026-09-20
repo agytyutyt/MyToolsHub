@@ -50,7 +50,10 @@ param(
     [switch]$PurgeEntry,
     [switch]$BackupData,
     [string]$BackupFile = "",
-    [int]$PruneBackups = 3
+    [int]$PruneBackups = 3,
+    [switch]$SkipDepCheck,            # 跳过添加期依赖检测（设计文档 §5.3）
+    [switch]$StrictDeps,              # 依赖不满足时中止安装（缺省仅提示并继续，供批量脚本用）
+    [string]$Set = ""                 # 插件集目录（内含 index.json 与插件包）：批量安装（设计文档 §4.2）
 )
 $ErrorActionPreference = "Stop"
 
@@ -447,6 +450,80 @@ if ($List) {
     exit 0
 }
 
+# ---- 插件集批量安装（-Set <目录>，设计文档 §4.2 / §7 #11） ----
+# 读目录内的 index.json（出包工具生成，含各包的 file / sha256 / version），逐个应用：
+#   · 逐个**子进程**调用本脚本装单包（复用全部只读校验与替换逻辑，互不干扰）；
+#   · 已装版本 ≥ 包版本 → 跳过（不视为失败）；任一失败继续其余并汇总；
+#   · 全部成功且原本服务在运行 → **统一重启一次**（子进程一律 -NoStart）。
+if ($Set) {
+    $setDir = $Set
+    if (-not (Test-Path -LiteralPath $setDir)) { Fail "插件集目录不存在：$setDir" }
+    $indexPath = Join-Path $setDir "index.json"
+    if (-not (Test-Path -LiteralPath $indexPath)) {
+        Fail ("插件集目录缺少 index.json：$setDir`n" +
+              "         插件集应由 tools\build-plugin-set.ps1 生成（含 index.json + 各插件包 + 安装脚本）。")
+    }
+    $idx = $null
+    try { $idx = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+    if (-not $idx -or -not $idx.packages) { Fail "index.json 不可解析或不含 packages：$indexPath" }
+    $pkgs = @($idx.packages | Where-Object { $_.id })
+    Say ""
+    Say "==> 插件集批量安装：$($pkgs.Count) 个包（$setDir）"
+    $wasRunning = Test-ServiceRunning
+    $okList = @(); $skipList = @(); $failList = @()
+    foreach ($p in $pkgs) {
+        $pid2 = [string]$p.id
+        $zip = Join-Path $setDir ([string]$p.file)
+        if (-not (Test-Path -LiteralPath $zip)) {
+            # 兜底：部分解压工具会按本地代码页改写中文文件名（UTF-8 条目名被读成乱码），
+            # 此时按「插件 id + 版本」在目录里再找一次，避免"文件明明在却报缺失"。
+            $alt = @(Get-ChildItem -LiteralPath $setDir -File -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Name -like "*$pid2*v$($p.version).zip" -and $_.Name -notlike "*.sha256" })
+            if ($alt.Count -ge 1) { $zip = $alt[0].FullName }
+        }
+        if (-not (Test-Path -LiteralPath $zip)) { $failList += "$pid2（包文件缺失：$($p.file)）"; continue }
+        if ($p.sha256) {
+            $h = Get-Sha256File $zip
+            if ($h -and ($h -ine [string]$p.sha256)) { $failList += "$pid2（sha256 与索引不符）"; continue }
+        }
+        $installedVer = ""
+        $manPath = Join-Path (Join-Path $AppDir "plugins\$pid2") "manifest.json"
+        if (Test-Path -LiteralPath $manPath) {
+            try { $installedVer = [string]((Get-Content -LiteralPath $manPath -Raw -Encoding UTF8 | ConvertFrom-Json).version) } catch { }
+        }
+        $c = Compare-SemVer $installedVer ([string]$p.version)
+        if ($installedVer -and $null -ne $c -and $c -ge 0) {
+            $skipList += "$pid2（已装 $installedVer ≥ 包 $($p.version)）"
+            continue
+        }
+        Say ""
+        Say "---- [$pid2] $($p.file) ----"
+        $childArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath,
+                       "-Package", $zip, "-InstallDir", $AppDir, "-DataRoot", $DataRoot, "-NoStart")
+        if ($SkipDepCheck) { $childArgs += "-SkipDepCheck" }
+        if ($StrictDeps) { $childArgs += "-StrictDeps" }
+        & powershell @childArgs
+        if ($LASTEXITCODE -eq 0) { $okList += "$pid2 → $($p.version)" }
+        else { $failList += "$pid2（安装失败，退出码 $LASTEXITCODE）" }
+    }
+    Say ""
+    Say "==> 插件集结果"
+    if ($okList.Count) { Say "  已安装/升级（$($okList.Count)）：$($okList -join '；')" }
+    if ($skipList.Count) { Say "  跳过（$($skipList.Count)）：$($skipList -join '；')" }
+    if ($failList.Count) { Say "  失败（$($failList.Count)）：$($failList -join '；')" }
+    if ($failList.Count -eq 0 -and $wasRunning -and -not $NoStart) {
+        Say ""
+        Say "  统一重启服务（各包安装时均未启动）…"
+        Start-JZApp -AppDir $AppDir
+        $base = Get-SiteBaseUrl
+        if (Wait-HttpOk "$base/api/tools" 60) { Say "  服务已就绪：$base" } else { Warn "服务启动后未在 60 秒内响应，请手工确认。" }
+    } elseif ($failList.Count -gt 0) {
+        Warn "存在失败项，已跳过统一重启（保留现场供排查）；修好后可重跑本命令（已装成功的会自动跳过）。"
+    }
+    if ($failList.Count -gt 0) { exit 1 }
+    exit 0
+}
+
 # ============================================================================
 #  回滚
 # ============================================================================
@@ -543,6 +620,12 @@ if ($Rollback) {
 if ($Uninstall) {
     $id = $Uninstall
     if ($id -notmatch '^[A-Za-z0-9_-]+$') { Fail "插件 id 非法：$id" }
+    # 核心插件不可卸载（设计文档 §3.5）：admin 承担登录/鉴权/权限/后台/插件管理本身，
+    # 卸载即"自锁"——没有管理入口、也没有鉴权。它是随主体分发的框架能力载体。
+    if ($id -eq "admin") {
+        Fail ("admin 是核心插件，随主体分发，**不可卸载**（它是登录鉴权 / 权限 / 后台 / 插件管理本身）。`n" +
+              "         如需更新它：用 admin 的插件包升级（可单独升级）；如需停用：在后台「插件管理」里停用。")
+    }
     $pluginDir = Join-Path (Join-Path $AppDir "plugins") $id
     Say ""
     Say "==> 卸载插件 $id"
@@ -729,6 +812,90 @@ if ($isFresh) {
         }
     }
 }
+# ---- 依赖检测：提示但不阻断（设计文档 §5.3 D-8） ----
+# 与主体 jz_deps.py 同一口径（三类依赖：框架第三方包 / 插件自带 vendor / 外部程序组件），
+# 缺失只**提示**并继续安装——依赖属"环境问题"，允许"先装插件、后补依赖"；
+# 与版本/哈希/路径那三类"完整性问题"（拒绝且零写入）区别对待。
+# -SkipDepCheck 跳过检测；-StrictDeps 改为中止（供批量脚本用）。
+$depRows = @()
+$depLockAvailable = $false
+if (-not $SkipDepCheck -and $meta.requires) {
+    $lockPath = Join-Path $AppDir "config\installed-deps.json"
+    $lock = $null
+    if (Test-Path -LiteralPath $lockPath) {
+        try { $lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $lock = $null }
+    }
+    $pkgs = @{}; $mods = @{}
+    if ($lock -and $lock.packages) { foreach ($p in $lock.packages.PSObject.Properties) { $pkgs[$p.Name.ToLower()] = [string]$p.Value } }
+    if ($lock -and $lock.modules)  { foreach ($p in $lock.modules.PSObject.Properties)  { $mods[$p.Name] = [string]$p.Value } }
+    $depLockAvailable = ($null -ne $lock)
+
+    foreach ($d in @($meta.requires.python_packages)) {
+        if (-not $d) { continue }
+        $nm = [string]$d.name
+        $dist = if ($mods.ContainsKey($nm)) { $mods[$nm] } else { $nm }
+        $actual = $null
+        if ($pkgs.ContainsKey($dist.ToLower())) { $actual = $pkgs[$dist.ToLower()] }
+        $ok = ($null -ne $actual)
+        if ($ok -and $d.version) {
+            $want = ([string]$d.version) -replace '^\s*>=?\s*', ''
+            $c = Compare-SemVer $actual $want
+            if ($null -ne $c -and $c -lt 0) { $ok = $false }
+        }
+        $depRows += [pscustomobject]@{ kind = "框架包"; name = $nm; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false) }
+    }
+    foreach ($d in @($meta.requires.vendored)) {
+        if (-not $d) { continue }
+        $nm = [string]$d.name
+        $vend = Join-Path (Join-Path (Join-Path $pkgRoot "payload") ("plugins\$id\backend\vendor")) $nm
+        $ok = Test-Path -LiteralPath $vend
+        $depRows += [pscustomobject]@{ kind = "自带"; name = $nm; require = ""; actual = $(if ($ok) { "包内自带" } else { $null }); ok = $ok; required = ($d.required -ne $false) }
+    }
+    foreach ($d in @($meta.requires.external)) {
+        if (-not $d) { continue }
+        $eid = ([string]$d.id).ToLower()
+        $ok = $false; $actual = $null
+        if ($eid -eq "libreoffice") {
+            foreach ($cand in @((Join-Path $AppDir "runtime\libreoffice\program\soffice.exe"),
+                                (Join-Path $AppDir "runtime\libreoffice\soffice.exe"))) {
+                if (Test-Path -LiteralPath $cand) { $ok = $true; $actual = $cand; break }
+            }
+            if (-not $ok -and (Get-Command soffice.exe -ErrorAction SilentlyContinue)) { $ok = $true; $actual = "PATH 中" }
+        } elseif ($eid -eq "chrome") {
+            foreach ($base in @($env:PROGRAMFILES, ${env:PROGRAMFILES(X86)}, $env:LOCALAPPDATA)) {
+                if ($base -and (Test-Path -LiteralPath (Join-Path $base "Google\Chrome\Application\chrome.exe"))) { $ok = $true; $actual = "已安装"; break }
+            }
+        } else {
+            $dir = Join-Path $AppDir "runtime\$eid"
+            $ok = (Test-Path -LiteralPath $dir)
+            if ($ok) { $actual = $dir }
+        }
+        $depRows += [pscustomobject]@{ kind = "外部组件"; name = $eid; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false) }
+    }
+
+    if ($depRows.Count -gt 0) {
+        Say ""
+        Say "  依赖检测（包内声明 vs 本机现状）："
+        foreach ($r in $depRows) {
+            $mark = if ($r.ok) { "[满足]    " } elseif ($r.required) { "[缺失]    " } else { "[可选缺失]" }
+            Say ("    {0} {1,-8} {2,-16} 声明 {3,-10} 实际 {4}" -f $mark, $r.kind, $r.name, $(if ($r.require) { $r.require } else { "—" }), $(if ($r.actual) { $r.actual } else { "—" }))
+        }
+        $depBlocking = @($depRows | Where-Object { -not $_.ok -and $_.required })
+        if ($depBlocking.Count -gt 0) {
+            $names = ($depBlocking | ForEach-Object { $_.name }) -join "、"
+            $tip = ("依赖不满足运行需要：$names`n" +
+                    "         仍会继续完成安装（环境问题不阻断）；装好后该插件会被主体标记为「不可运行」并暂不加载，`n" +
+                    "         补齐依赖并重启后自动恢复。如需改为中止：加 -StrictDeps；跳过检测：-SkipDepCheck。")
+            if ($StrictDeps) { Fail $tip } else { Warn $tip }
+        }
+    }
+    if (-not $depLockAvailable) {
+        Warn "本机没有 config\installed-deps.json（源码开发形态），框架包依赖无法核验——已按「不可核验」放行。"
+    }
+} elseif (-not $SkipDepCheck) {
+    Say "  依赖检测：包内未声明 requires（视为无第三方依赖）"
+}
+
 # ---- 重启判定：以目标机事实为准，而不是只信包里的声明 ----
 # 包里的 requires_restart 是"构建期相对上一版包"的判定；到了目标机还要看它当前装的是什么：
 # 只要 backend/** 与磁盘现状不同（新增/变更/将删除）就必须重启（规范 R-4）；

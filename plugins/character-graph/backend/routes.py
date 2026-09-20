@@ -11,6 +11,13 @@
 - 前端通过 GET /result/<task_id> 轮询任务状态。
 """
 
+# 会话工具经主体模块 jz_api 取用（依赖倒置：插件不再 import admin 插件的内部模块，
+# 插件之间零依赖；admin 未加载时自动降级为「未登录 / 空操作」）。
+# 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
+import jz_api
+
+_get_session_user = jz_api.get_session_user
+
 import json
 import os
 import threading
@@ -22,10 +29,6 @@ from flask import jsonify, request
 
 from . import document_reader, llm_client
 
-try:
-    from jztools_admin.routes import get_session_user as _get_session_user
-except Exception:  # admin 插件缺失时兜底（理论上不会发生）
-    _get_session_user = None
 
 import jztools_data
 CONFIG_FILE = jztools_data.get_data_root_file("plugins", "character-graph", "config.json")

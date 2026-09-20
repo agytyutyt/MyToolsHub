@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>插件管理 · 管理后台</title>
   <link rel="stylesheet" href="/static/css/style.css?v=14">
-  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=7">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=21">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
 </head>
 <body>
@@ -42,6 +42,17 @@
         「代码版本」= 程序目录里插件目录的当前版本；「登记版本」= 上次通过插件包安装时登记的版本。
         两者不一致通常说明目录被人工改动过。<span id="app-version-note"></span>
       </p>
+      <p class="settings-desc">
+        「依赖需求」列按依赖逐个显示徽标：<span class="dep-badge ok">已满足 ✅</span>
+        <span class="dep-badge bad">未满足 ×</span>（悬停可看声明要求与实际版本）。
+        不可运行的插件不会被主体加载，补齐依赖后重启自动恢复。
+      </p>
+      <div id="deps-summary" hidden></div>
+      <p>
+        <button type="button" class="admin-btn small" id="btn-deps">查看已安装依赖（含版本）</button>
+        <button type="button" class="admin-btn small" id="btn-align" disabled
+                title="所有插件的登记版本都与实际版本一致">一键对齐登记</button>
+      </p>
       <div class="data-table-wrap">
         <table class="data-table" id="plugin-table">
           <thead>
@@ -50,19 +61,22 @@
               <th>代码版本</th>
               <th>登记版本</th>
               <th>状态</th>
+              <th>依赖需求</th>
               <th>备份</th>
               <th>数据占用</th>
               <th style="text-align:right">操作</th>
             </tr>
           </thead>
           <tbody id="plugin-rows">
-            <tr><td colspan="7" class="admin-empty">加载中…</td></tr>
+            <tr><td colspan="8" class="admin-empty">加载中…</td></tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <div class="settings-card">
+    <div class="settings-card wide" id="deps-panel" hidden></div>
+
+    <div class="settings-card wide">
       <h3>离线升级包（单个插件）</h3>
       <p class="settings-desc">
         选择由 <code>tools\build-plugin-package.ps1</code> 生成的
@@ -71,8 +85,15 @@
         若含后端改动则自动停服重启，本页随后自动刷新。
       </p>
       <div class="settings-form">
-        <div class="form-row">
-          <input type="file" id="pkg-file" class="admin-input" accept=".zip">
+        <div class="upload-bar" id="pkg-drop">
+          <label class="upload-bar-pick" for="pkg-file">
+            <input type="file" id="pkg-file" accept=".zip">
+            <span class="upload-bar-icon">📦</span>
+            <span class="upload-bar-text">
+              <span class="upload-bar-title">把插件包拖到这里，或点击选择文件</span>
+              <span class="upload-bar-hint" id="pkg-file-name">支持 .zip（不要解压）；也可直接拖入本框</span>
+            </span>
+          </label>
           <button type="button" class="admin-btn primary" id="btn-inspect">校验并预览</button>
         </div>
         <label class="plugin-check">
@@ -92,7 +113,7 @@
       <div id="inspect-result"></div>
     </div>
 
-    <div class="settings-card">
+    <div class="settings-card wide">
       <h3>共享盘批量更新</h3>
       <p class="settings-desc">
         指向内网共享盘上由出包工具维护的 <code>index.json</code>（与包文件同一目录）。
@@ -113,6 +134,6 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="/plugin/admin/js/admin-common.js?v=6"></script>
-  <script src="/plugin/admin/js/admin-plugins.js?v=3"></script>
+  <script src="/plugin/admin/js/admin-plugins.js?v=11"></script>
 </body>
 </html>

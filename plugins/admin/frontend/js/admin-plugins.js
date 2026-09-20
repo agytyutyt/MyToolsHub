@@ -36,6 +36,7 @@
     else out.push(p.enabled ? '<span class="plugin-chip ok">已启用</span>'
                             : '<span class="plugin-chip">已停用</span>');
     if (p.hidden) out.push('<span class="plugin-chip">隐藏</span>');
+    if (p.core) out.push('<span class="plugin-chip">核心插件</span>');
     if (p.restart_pending) out.push('<span class="plugin-chip warn">待重启</span>');
     if (p.code_version && p.state_version && p.code_version !== p.state_version) {
       out.push('<span class="plugin-chip warn">登记不一致</span>');
@@ -43,21 +44,69 @@
     return out.join(' ');
   }
 
+  /* 依赖需求：逐依赖一个徽标 —— 满足=绿色，不满足=红色带 ×（设计文档 §5.3 展示面）。
+     detail 行的 state：ok / missing / mismatch / unknown（unknown 表示本机清单不可核验）。 */
+  function depBadges(p) {
+    const d = p.deps;
+    if (!d) return '<span class="dep-none">未判定</span>';
+    const rows = (d.detail || []).filter(x => x.kind !== 'framework');   // 版本门控单列，不混在依赖里
+    if (!rows.length) return '<span class="dep-none">无第三方依赖</span>';
+    const html = rows.map(x => {
+      const ok = x.state === 'ok' || x.state === 'unknown';
+      const cls = ok ? 'ok' : 'bad';
+      const mark = ok ? '✅' : '×';
+      const title = [x.kind, x.require ? ('要求 ' + x.require) : '', x.actual ? ('实际 ' + x.actual) : '',
+                     x.note || ''].filter(Boolean).join(' / ');
+      return `<span class="dep-badge ${cls}" title="${esc(title)}">${esc(x.name)} ${mark}</span>`;
+    }).join(' ');
+    const extra = [];
+    if (d.status === 'blocked') extra.push('<span class="dep-badge bad" title="' + esc(d.reason || ('缺 ' + (d.missing || []).join('、'))) + '">不可运行</span>');
+    else if (d.status === 'degraded') extra.push('<span class="dep-badge warn" title="可选依赖缺失，功能降级">降级</span>');
+    return html + (extra.length ? ' ' + extra.join(' ') : '');
+  }
+
+
+  /* 表格横向溢出检测：只有**真的溢出**时才启用"右缘渐隐"，
+     否则最后一列的文字会被无谓地淡化（2026-09-20 加固）。 */
+  function syncTableOverflow() {
+    document.querySelectorAll('.data-table-wrap').forEach(function (w) {
+      const overflowing = w.scrollWidth > w.clientWidth + 1;
+      const atStart = w.scrollLeft <= 1;
+      const atEnd = w.scrollLeft + w.clientWidth >= w.scrollWidth - 1;
+      // 右缘渐隐 = 有溢出**且没到尽头**（到尽头说明右边没有内容了 → 恢复正常硬边界）
+      w.classList.toggle('is-overflowing', overflowing && !atEnd);
+      // 左缘渐隐 = 有溢出**且已向左滚动**（还在起点说明左边没有内容）
+      w.classList.toggle('is-scrolled', overflowing && !atStart);
+      if (!w.dataset.scrollBound) {
+        w.dataset.scrollBound = '1';
+        w.addEventListener('scroll', syncTableOverflow, { passive: true });
+      }
+    });
+    // 插件名过长才渐隐（否则右缘的 id 徽标会被无谓淡化）
+    document.querySelectorAll('.plugin-title').forEach(function (el) {
+      el.classList.toggle('is-clipped', el.scrollWidth > el.clientWidth + 1);
+    });
+  }
+
   function renderRows(plugins) {
     const tbody = document.getElementById('plugin-rows');
     if (!plugins.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="admin-empty">没有发现插件</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">没有发现插件</td></tr>';
       return;
     }
     tbody.innerHTML = plugins.map(p => `
       <tr data-id="${esc(p.id)}">
         <td>
           <div class="plugin-name"><span class="plugin-icon">${esc(p.icon || '🧩')}</span>
-            <span>${esc(p.name)}<span class="plugin-id">${esc(p.id)}</span></span></div>
+            <span class="plugin-text">
+              <span class="plugin-title">${esc(p.name)}</span>
+              <span class="plugin-id">${esc(p.id)}</span>
+            </span></div>
         </td>
         <td>${esc(p.code_version || '-')}</td>
         <td>${esc(p.state_version || '-')}</td>
         <td>${statusChips(p)}</td>
+        <td class="dep-cell"><div class="dep-cell-inner">${depBadges(p)}</div></td>
         <td>${p.backups ? p.backups + ' 份' : '-'}</td>
         <td>${fmtSize(p.data_bytes)}</td>
         <td style="text-align:right;white-space:nowrap">
@@ -65,8 +114,63 @@
                   ${p.backups ? '' : 'disabled'}>回滚</button>
           <button type="button" class="admin-btn small ${p.enabled ? 'danger' : 'primary'}"
                   data-act="toggle">${p.enabled ? '停用' : '启用'}</button>
+          ${p.core
+            ? '<button type="button" class="admin-btn small" disabled title="核心插件随主体分发，不可卸载">核心</button>'
+            : '<button type="button" class="admin-btn small" data-act="uninstall">卸载</button>'}
         </td>
       </tr>`).join('');
+  }
+
+  /* 一键对齐登记：统计"登记版本 ≠ 代码版本"的行数，显示在按钮上；0 时禁用 */
+  function syncAlignButton() {
+    const btn = document.getElementById('btn-align');
+    if (!btn) return;
+    const bad = (window.__plugins || []).filter(p =>
+      p.code_version && p.state_version && p.code_version !== p.state_version);
+    btn.textContent = bad.length ? ('一键对齐登记（' + bad.length + '）') : '一键对齐登记';
+    btn.disabled = bad.length === 0;
+    btn.title = bad.length
+      ? ('有 ' + bad.length + ' 个插件的登记版本与程序目录实际版本不一致：点此一次对齐')
+      : '所有插件的登记版本都与实际版本一致';
+  }
+
+  async function alignAll() {
+    const bad = (window.__plugins || []).filter(p =>
+      p.code_version && p.state_version && p.code_version !== p.state_version);
+    if (!bad.length) { showToast('全部一致，无需对齐'); return; }
+    const rows = bad.map(p => `<li><code>${esc(p.id)}</code>：${esc(p.state_version)} → <b>${esc(p.code_version)}</b></li>`).join('');
+    const wrap = window.AdminCommon.openModal('一键对齐登记（' + bad.length + ' 个）', `
+      <div class="settings-form">
+        <p class="settings-hint">
+          以下插件的**登记版本**与程序目录的实际版本不一致：<ul style="margin:6px 0 8px 18px">${rows}</ul>
+          插件防回退比较的是<b>登记版本</b>，代码比登记新时下次主包升级可能覆盖较新的插件代码。<br>
+          本操作只把数据根 <code>.app_state.json</code> 的版本号对齐到实际版本，<b>不动代码与用户数据</b>。
+        </p>
+        <div class="modal-foot">
+          <button type="button" class="admin-btn" data-close>取消</button>
+          <button type="button" class="admin-btn primary" id="al-ok">一键对齐</button>
+        </div>
+      </div>`);
+    wrap.querySelector('#al-ok').addEventListener('click', async () => {
+      wrap.querySelector('[data-close]').click();
+      try {
+        const res = await api('/api/admin/plugins/align', { method: 'POST', body: {} });
+        const n = (res.aligned || []).length;
+        showToast(n ? ('已对齐 ' + n + ' 个插件的登记') : '全部一致，无需对齐');
+        load();
+      } catch (err) { showToast(err.message, true); }
+    });
+  }
+
+  /* 顶部汇总：可运行 / 降级 / 不可运行（依赖视角） */
+  function renderDepsSummary(summary) {
+    const el = document.getElementById('deps-summary');
+    if (!el) return;
+    if (!summary) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = '<span class="plugin-chip ok">可运行 ' + (summary.ok || 0) + '</span>'
+      + '<span class="plugin-chip warn">降级 ' + (summary.degraded || 0) + '</span>'
+      + '<span class="plugin-chip ' + (summary.blocked ? 'danger' : '') + '">不可运行 ' + (summary.blocked || 0) + '</span>';
   }
 
   function renderBanner(pending, frozen) {
@@ -85,15 +189,48 @@
       const data = await api('/api/admin/plugins');
       nameMap = {};
       (data.plugins || []).forEach(p => { nameMap[p.id] = p.name; });
+      window.__plugins = data.plugins || [];
       renderRows(data.plugins || []);
+      syncTableOverflow();
       renderBanner(data.restart_pending, data.frozen);
+      renderDepsSummary(data.deps_summary);
+      syncAlignButton();
       document.getElementById('app-version-note').textContent =
         data.app_version ? ` 主程序版本 ${data.app_version}。` : '';
       const idx = document.getElementById('index-path');
       if (!idx.value && data.index_path) idx.value = data.index_path;
     } catch (err) {
       document.getElementById('plugin-rows').innerHTML =
-        `<tr><td colspan="7" class="admin-empty">加载失败：${esc(err.message)}</td></tr>`;
+        `<tr><td colspan="8" class="admin-empty">加载失败：${esc(err.message)}</td></tr>`;
+    }
+  }
+
+  /* 已安装依赖清单（设计文档 §5.3 D-7）：框架包 / 外部组件 / 插件自带，含版本。
+     管理员据此判断"插件为什么不可运行、要装什么"。 */
+  async function loadInstalledDeps() {
+    const box = document.getElementById('deps-panel');
+    box.hidden = false;
+    box.innerHTML = '<p class="admin-hint">正在读取已安装依赖…</p>';
+    try {
+      const data = await api('/api/admin/deps');
+      const parts = (data.groups || []).map(g => {
+        const rows = (g.items || []).map(it => {
+          const name = it.dist || it.name;
+          const ver = it.version ? ` <span class="dep-ver">${esc(it.version)}</span>` : '';
+          const st = it.state === 'missing' ? ' <span class="dep-badge bad">未装 ×</span>'
+                   : it.state === 'ok' ? ' <span class="dep-badge ok">已装 ✅</span>' : '';
+          const path = it.path ? `<span class="dep-path">${esc(it.path)}</span>` : '';
+          const imports = (it.imports && it.imports.length) ? `<span class="dep-path">import ${esc(it.imports.join('/'))}</span>` : '';
+          return `<li><code>${esc(name)}</code>${ver}${st}${imports}${path}</li>`;
+        }).join('');
+        const extra = g.other_count ? `<p class="admin-hint">另有 ${g.other_count} 个框架包未在依赖白名单内（已安装，未逐项列出）。</p>` : '';
+        const na = g.available === false ? '<p class="admin-hint">（本机没有 installed-deps.json：源码开发形态，框架包清单不可核验）</p>' : '';
+        return `<div class="deps-group"><h4>${esc(g.name)}</h4>${na}<ul>${rows || '<li class="dep-none">（无）</li>'}</ul>${extra}</div>`;
+      }).join('');
+      box.innerHTML = '<h3>已安装依赖</h3>' + parts
+        + `<p class="admin-hint">清单真源：<code>${esc(data.lock_path || 'config/installed-deps.json')}</code>（构建期生成，随主体升级更新）</p>`;
+    } catch (err) {
+      box.innerHTML = `<p class="admin-empty">读取失败：${esc(err.message)}</p>`;
     }
   }
 
@@ -151,6 +288,42 @@
     return '';
   }
 
+  /* 虚线拖拽区：点击（label→input）与拖入都能选包；拖入时给出视觉反馈。
+     拖进来的文件塞回 input.files（用 DataTransfer），inspect() 无需改动。 */
+  function setupDropZone() {
+    const drop = document.getElementById('pkg-drop');
+    const input = document.getElementById('pkg-file');
+    if (!drop || !input) return;
+    const showName = () => {
+      const f = input.files && input.files[0];
+      const el = document.getElementById('pkg-file-name');
+      drop.classList.toggle('is-picked', !!f);
+      if (el) el.textContent = f
+        ? (f.name + '（' + fmtSize(f.size) + '）')
+        : '支持 .zip（不要解压）；也可直接拖入本框';
+    };
+    ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => {
+      e.preventDefault(); e.stopPropagation(); drop.classList.add('is-dragover');
+    }));
+    ['dragleave', 'dragend', 'drop'].forEach(t => drop.addEventListener(t, e => {
+      e.preventDefault(); e.stopPropagation(); drop.classList.remove('is-dragover');
+    }));
+    drop.addEventListener('drop', e => {
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!f) return;
+      if (!/\.zip$/i.test(f.name)) { showToast('只接受 .zip 插件包', true); return; }
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      input.files = dt.files;
+      showName();
+    });
+    input.addEventListener('change', () => {
+      const f = input.files && input.files[0];
+      if (f && !/\.zip$/i.test(f.name)) { showToast('只接受 .zip 插件包', true); input.value = ''; showName(); return; }
+      showName();
+    });
+  }
+
   async function inspect() {
     const fileInput = document.getElementById('pkg-file');
     const f = fileInput.files && fileInput.files[0];
@@ -167,7 +340,26 @@
       box.innerHTML = planHtml(res);
       const btn = document.getElementById('btn-apply');
       if (btn) btn.addEventListener('click', applyPackage);
-      showToast('校验通过，请确认计划后应用');
+      // 依赖不满足 → 弹窗提示，但**不阻断**添加（设计文档 §5.3 D-8）：
+      // 管理员可先装插件、后补依赖；装完该插件会被标记为「不可运行」并暂不加载。
+      const dc = res.dep_check;
+      if (dc && (dc.missing || []).length) {
+        const rows = (dc.detail || []).filter(x => x.required && x.state !== 'ok' && x.state !== 'unknown')
+          .map(x => `<li><code>${esc(x.name)}</code>（${esc(x.kind)}${x.require ? '，要求 ' + esc(x.require) : ''}）`
+                    + ` — ${esc(x.note || '本机未满足')}</li>`).join('');
+        window.AdminCommon.openModal('依赖不满足：' + esc(res.id || ''), `
+          <div class="settings-form">
+            <p class="settings-hint">本机缺少以下<b>必需依赖</b>，插件装好后会被主体标记为「不可运行」并暂不加载；补齐依赖并重启后自动恢复。</p>
+            <ul style="margin:6px 0 10px 18px">${rows}</ul>
+            <p class="settings-hint">仍要继续吗？（不会阻断安装：先装插件、后补依赖是允许的）</p>
+            <div class="modal-foot">
+              <button type="button" class="admin-btn" data-close>取消</button>
+              <button type="button" class="admin-btn primary" id="dep-ok">仍然添加</button>
+            </div>
+          </div>`);
+      } else {
+        showToast('校验通过，请确认计划后应用');
+      }
     } catch (err) {
       lastUpload = '';
       box.innerHTML = `<div class="plugin-plan-line warn">校验未通过：</div>${errListHtml(err)}${rejectHint(err)}`;
@@ -256,6 +448,37 @@
       if (!btn) return;
       const tr = btn.closest('tr');
       const id = tr.getAttribute('data-id');
+      if (btn.dataset.act === 'uninstall') {
+        const row = (window.__plugins || []).find(x => x.id === id) || {};
+        const wrap = window.AdminCommon.openModal('卸载插件：' + nm(id, row.name), `
+          <div class="settings-form">
+            <p class="settings-hint">卸载按《插件设计规范》§11 的顺序执行：<br>
+              <b>① 停用注册条目 → ② （可选）备份数据 → ③ 删除插件代码目录</b>。<br>
+              用户数据默认<b>保留</b>在数据根，可随时重装恢复；如需一并打包留档，请勾选下面的备份。</p>
+            <label style="display:flex;gap:6px;align-items:center">
+              <input type="checkbox" id="un-purge"> 同时删除注册条目（默认仅停用）
+            </label>
+            <label style="display:flex;gap:6px;align-items:center">
+              <input type="checkbox" id="un-backup" checked> 先把插件数据打包备份到数据根 backups/
+            </label>
+            <div class="modal-foot">
+              <button type="button" class="admin-btn" data-close>取消</button>
+              <button type="button" class="admin-btn danger" id="un-ok">确认卸载</button>
+            </div>
+          </div>`);
+        wrap.querySelector('#un-ok').addEventListener('click', async () => {
+          const body = { id,
+            purge_entry: wrap.querySelector('#un-purge').checked,
+            backup_data: wrap.querySelector('#un-backup').checked };
+          wrap.querySelector('[data-close]').click();
+          try {
+            const res = await api('/api/admin/plugins/uninstall', { method: 'POST', body });
+            showToast('已卸载 ' + id + '（' + (res.steps || []).length + ' 步完成）');
+            load();
+          } catch (err) { showToast(err.message, true); }
+        });
+        return;
+      }
       if (btn.dataset.act === 'rollback') {
         const data = await api('/api/admin/plugins/backups?id=' + encodeURIComponent(id));
         const items = data.backups || [];
@@ -435,6 +658,9 @@
     }
     renderUserMenu(document.getElementById('user-slot'));
     document.getElementById('btn-inspect').addEventListener('click', inspect);
+    setupDropZone();
+    document.getElementById('btn-deps').addEventListener('click', loadInstalledDeps);
+    document.getElementById('btn-align').addEventListener('click', alignAll);
     document.getElementById('btn-check').addEventListener('click', checkUpdates);
     document.getElementById('index-path').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); checkUpdates(); }
@@ -444,5 +670,6 @@
     load();
   }
 
+  window.addEventListener('resize', syncTableOverflow);
   document.addEventListener('DOMContentLoaded', init);
 })();

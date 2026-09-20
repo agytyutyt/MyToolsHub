@@ -10,7 +10,15 @@
     "实时同步",
     "导入/导出"
   ],
-  "version": "1.2.0",
+  "version": "1.2.1",
   "author": "JZToolsHub 团队",
-  "form": "source"
+  "form": "source",
+  "requires": {
+    "python_packages": [
+      { "name": "docx", "version": ">=1.0", "required": false },
+      { "name": "flask", "version": ">=3.0", "required": true },
+      { "name": "openpyxl", "version": ">=3.1", "required": false },
+      { "name": "xlrd", "version": ">=2.0", "required": false }
+    ]
+  }
 }

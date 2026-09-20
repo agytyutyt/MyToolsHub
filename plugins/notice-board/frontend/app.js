@@ -65,7 +65,10 @@ async function loadConfig() {
 /* ==================== 组织树（含用户） ==================== */
 async function loadOrgTree() {
   try {
-    const data = await api("/api/admin/org-tree");
+    // 组织架构树走**主体**接口 /api/org/tree（框架 API，FC-4）：
+    // 不再直连 admin 插件的 /api/admin/org-tree——插件之间零依赖
+    // （见 docs/design/主体与插件解耦-设计文档.md §5.4 第一处修补）。
+    const data = await api("/api/org/tree");
     ORG_TREE = data.tree || [];
     for (const k of Object.keys(NAME_MAP)) delete NAME_MAP[k];
     for (const unit of ORG_TREE) {

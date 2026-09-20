@@ -28,7 +28,9 @@ param(
     [switch]$ForcePluginOverwrite,  # 更新时不跳过"已单独升级到更高版本"的插件（默认跳过，防回退）
     [switch]$NoRegistry,        # 绿色模式：不写注册表、不建快捷方式（受管环境/移动介质部署）
     [string]$InstallDir = "",   # 安装目录；留空时用 %LOCALAPPDATA%\JZToolsHub
-    [string]$DataRoot = ""      # 数据根目录；留空时按 .jztoolshub.json 指针自动解析
+    [string]$DataRoot = "",     # 数据根目录；留空时按 .jztoolshub.json 指针自动解析
+    [switch]$Rollback,          # 回滚主体：用最近一份主体备份覆盖回升级前（设计文档 §6 / §7 #6）
+    [string]$BackupFile = ""    # 指定回滚用的主体备份 zip（缺省取最近一份）
 )
 $ErrorActionPreference = "Stop"
 
@@ -79,6 +81,67 @@ function Get-DataRootDir {
 function Stop-JZService {
     $p = Get-Process -Name $AppName -ErrorAction SilentlyContinue
     if ($p) { $p | Stop-Process -Force; Start-Sleep -Milliseconds 600 }
+}
+
+# ---------------- 主体备份 / 回滚（设计文档 §6 步骤④、§7 #6） ----------------
+# 升级前留一份**可回滚的主体快照**：exe + _internal + static + config 模板 + 脚本 + version.json
+# + 核心插件（不含业务插件，也不含数据根）。放数据根 backups\app\：程序目录会被整体替换，
+# 备份必须与之解耦；默认只保留最近 1 份（_internal 约 235 MB，压缩后约 120 MB —— 体积换可回滚）。
+function New-AppBackup {
+    param([string]$Target, [string]$DataRoot, [string]$OldVersion)
+    if (-not (Test-Path -LiteralPath (Join-Path $Target $ExeName))) { return "" }
+    $dir = Join-Path $DataRoot "backups\app"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $zip = Join-Path $dir "app-$OldVersion-$stamp.zip"
+    $items = @()
+    foreach ($n in @($ExeName, "_internal", "static", "config", "version.json", "install.ps1",
+                     "一键安装.bat", "一键卸载.bat", "start.bat")) {
+        $p = Join-Path $Target $n
+        if (Test-Path -LiteralPath $p) { $items += $p }
+    }
+    $corePlugin = Join-Path $Target "plugins\admin"
+    if (Test-Path -LiteralPath $corePlugin) { $items += $corePlugin }
+    if ($items.Count -eq 0) { return "" }
+    Write-Host "  备份主体 → $zip（$($items.Count) 项，约 120 MB，请稍候）"
+    if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+    Compress-Archive -Path $items -DestinationPath $zip -CompressionLevel Fastest -Force
+    # 只保留最近 1 份
+    Get-ChildItem -LiteralPath $dir -Filter "app-*.zip" -File |
+        Sort-Object LastWriteTime -Descending | Select-Object -Skip 1 |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
+    return $zip
+}
+
+function Invoke-AppRollback {
+    param([string]$Target, [string]$DataRoot, [string]$BackupFile, [bool]$Start = $true)
+    $dir = Join-Path $DataRoot "backups\app"
+    $zip = $BackupFile
+    if (-not $zip) {
+        $cands = @(Get-ChildItem -LiteralPath $dir -Filter "app-*.zip" -File -ErrorAction SilentlyContinue |
+                   Sort-Object LastWriteTime -Descending)
+        if ($cands.Count -eq 0) {
+            Write-Host "  [失败] 没有找到主体备份（$dir\app-*.zip）—— 无从回滚。"
+            exit 1
+        }
+        $zip = $cands[0].FullName
+    }
+    if (-not (Test-Path -LiteralPath $zip)) { Write-Host "  [失败] 备份文件不存在：$zip"; exit 1 }
+    Write-Host ""
+    Write-Host "==> 回滚主体：$zip → $Target"
+    Stop-JZService
+    Expand-Archive -LiteralPath $zip -DestinationPath $Target -Force
+    Write-Host "  已用备份覆盖程序目录（业务插件与数据根未受影响）"
+    if ($Start) {
+        Start-Sleep -Milliseconds 800
+        try {
+            Start-Process -WindowStyle Minimized -WorkingDirectory $Target (Join-Path $Target $ExeName)
+            Write-Host "  已重新启动服务"
+        } catch {
+            Write-Host "  [提示] 自动启动失败，请手工运行 $ExeName：$($_.Exception.Message)"
+        }
+    }
+    Write-Host "  回滚完成。若插件在回滚后被标记「需升级主体」，属预期（主体版本变低了）。"
 }
 
 # ---------------- 语义化版本比较（插件版本防回退用） ----------------
@@ -326,6 +389,13 @@ if ($info) {
 
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
 
+# ---- 回滚分支（-Rollback）：用最近一份主体备份覆盖回升级前，然后退出 ----
+if ($Rollback) {
+    Invoke-AppRollback -Target $Target -DataRoot (Get-DataRootDir -Target $Target) `
+        -BackupFile $BackupFile -Start (-not $NoStart)
+    exit 0
+}
+
 # ---- 插件版本防回退（单独升级过的插件不被整包覆盖回去）----
 # 背景：本脚本把 plugins\ 整体覆盖到目标目录。若某个插件已用「插件包」单独升级到更高版本，
 # 直接覆盖会把它静默降级回主包内嵌版本（见 docs\design\插件独立升级方案-设计文档.md §7）。
@@ -353,6 +423,22 @@ if ((Test-Path -LiteralPath $statePath) -and (-not $ForcePluginOverwrite)) {
     }
 }
 
+# ---- 主体备份（升级前必留一份，失败即中止 —— 与插件链路的"底线三"同一条纪律）----
+$prevVersion = "unknown"
+try {
+    $pv = Join-Path $Target "version.json"
+    if (Test-Path -LiteralPath $pv) {
+        $prevVersion = [string]((Get-Content -LiteralPath $pv -Raw -Encoding UTF8 | ConvertFrom-Json).app)
+    }
+} catch { }
+try {
+    $backupZip = New-AppBackup -Target $Target -DataRoot (Get-DataRootDir -Target $Target) -OldVersion $prevVersion
+    if ($backupZip) { Write-Host "  回滚命令：install.ps1 -Rollback" }
+} catch {
+    Write-Host "  [失败] 主体备份失败，已中止（不留备份不升级）：$($_.Exception.Message)"
+    exit 1
+}
+
 # ---- 复制项目文件（源为解压目录时复制；源=目标则就地更新） ----
 $SourceFull = [System.IO.Path]::GetFullPath($Source)
 $TargetFull = [System.IO.Path]::GetFullPath($Target)
@@ -366,6 +452,20 @@ if ($SourceFull -ne $TargetFull) {
         Write-Host "    如需以主包为准覆盖这些插件，请加 -ForcePluginOverwrite"
     }
     $exclude = @(".zcode", "deploy", "dist", "build", "__pycache__")
+    # 主体与插件解耦（设计文档 §6 步骤⑤ / §7 #5）：主包只带核心插件，**源包里没有的插件
+    # 一律不动**（Copy-Item 只覆盖同名项、不删除多余项）——"主体升级不触碰业务插件"由此成立。
+    $srcPlugins = @()
+    if (Test-Path -LiteralPath (Join-Path $Source "plugins")) {
+        $srcPlugins = @(Get-ChildItem -Directory (Join-Path $Source "plugins") | ForEach-Object { $_.Name })
+    }
+    $dstPluginDirs = @()
+    if (Test-Path -LiteralPath (Join-Path $Target "plugins")) {
+        $dstPluginDirs = @(Get-ChildItem -Directory (Join-Path $Target "plugins") | ForEach-Object { $_.Name })
+    }
+    $keepPlugins = @($dstPluginDirs | Where-Object { $srcPlugins -notcontains $_ })
+    if ($keepPlugins.Count -gt 0) {
+        Write-Host "  目标机独有插件（源包不含，保持原样不动）：$($keepPlugins -join ', ')"
+    }
     Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
         if ($_.Name -in $exclude) { return }
         if ($_.Name -eq "plugins" -and $skipPlugins.Count -gt 0) {
@@ -489,3 +589,17 @@ Write-Host "    双击桌面「$AppName」或运行 start.bat 启动（浏览器
 Write-Host "    默认管理员：admin / admin123（首启自动生成，请登录后尽快改密）"
 Write-Host "    用户数据保存在：$DataRoot"
 Write-Host "    如需卸载：双击「一键卸载.bat」（将同时删除用户数据，可用 -KeepData 保留）"
+
+# 首装引导（主体与插件解耦后，主包只带核心插件 admin；业务插件走插件集 / 插件包）
+$bizPlugins = @()
+if (Test-Path -LiteralPath (Join-Path $Target "plugins")) {
+    $bizPlugins = @(Get-ChildItem -Directory (Join-Path $Target "plugins") |
+                    Where-Object { $_.Name -ne "admin" } | ForEach-Object { $_.Name })
+}
+if ($bizPlugins.Count -eq 0) {
+    Write-Host ""
+    Write-Host "  [提示] 当前只有核心插件（admin），工具箱首页暂时没有工具卡片。"
+    Write-Host "         请安装「插件集」或逐个安装插件包：解压后双击「安装插件集.bat」"
+    Write-Host "         （也可用 tools\plugin-upgrade\install-plugin.ps1 -Set <插件集目录>）"
+    Write-Host "         安装完成后刷新浏览器即可看到工具；管理员可在后台「插件管理」查看依赖状态。"
+}
