@@ -205,7 +205,16 @@ try {
     Copy-Item -Force $toolsTemplate (Join-Path $AppDir "config")
 }
 
-# 3.2.3 已安装依赖清单（插件依赖判定的真源；见 docs\design\主体与插件解耦-设计文档.md §5.3）
+# 3.2.3 依赖组件登记表（包 → 组件的唯一真源；主体据此把"缺哪个包"翻译成"装哪个组件"）
+$depReg = Join-Path $Root "tools\dep-components.json"
+if (Test-Path -LiteralPath $depReg) {
+    Copy-Item -LiteralPath $depReg -Destination (Join-Path $AppDir "config\dep-components.json") -Force
+    Write-Host "    依赖组件登记表已随包：config\dep-components.json"
+} else {
+    Write-Warning "缺少 tools\dep-components.json（未出过依赖组件包？）——主包内提示将只显示缺哪个包、不指向组件"
+}
+
+# 3.2.4 已安装依赖清单（插件依赖判定的真源；见 docs\design\主体与插件解耦-设计文档.md §5.3）
 # 冻结 exe 现场没有 pip、_internal 内 .dist-info 也不保证完整，故由**构建期**在打包解释器上
 # 采集一次（发行包名 → 版本 + import 名 → 发行包名），随主包分发；后台据此展示"已安装依赖"
 # 并与插件 manifest.requires 比对得出可运行性结论（jz_deps.py）。

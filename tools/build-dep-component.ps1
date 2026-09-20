@@ -26,6 +26,7 @@ param(
     [string]$From = "",
     [string]$OutDir = "",
     [string]$MinApp = "",             # 写入 min_app_version（缺省留空=不限制）
+    [string]$RegistryFile = "",       # 登记表（缺省 tools\dep-components.json）：包 → 组件的唯一真源
     [switch]$Force,
     [switch]$NoZip
 )
@@ -70,6 +71,7 @@ $PRESETS = @{
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖组件" }
+if (-not $RegistryFile) { $RegistryFile = Join-Path $Root "tools\dep-components.json" }
 $ToolVer = "1.0.0"
 
 function Say { param([string]$m = "") Write-Host $m }
@@ -263,5 +265,29 @@ Say "==> 已产出依赖组件包：$zipPath"
 Say ("    体积 {0:N1} MB；sha256 {1}" -f ((Get-Item -LiteralPath $zipPath).Length / 1MB), $sha)
 Say "    目标机操作：解压 → 双击「安装依赖组件.bat」"
 Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+# ---- 登记表（入库）：包 → 组件的唯一真源，主体据此把"缺哪个包"翻译成"装哪个组件" ----
+$regObj = $null
+if (Test-Path -LiteralPath $RegistryFile) {
+    try { $regObj = Get-Content -LiteralPath $RegistryFile -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
+}
+if (-not $regObj) { $regObj = [pscustomobject]@{ schema = 1; components = [pscustomobject]@{} } }
+if (-not $regObj.components) { $regObj | Add-Member -NotePropertyName components -NotePropertyValue ([pscustomobject]@{}) -Force }
+$entry = [ordered]@{
+    id         = $Id
+    name       = $Name
+    version    = $Version
+    file       = (Split-Path -Leaf $zipPath)
+    sha256     = $sha
+    size       = [long](Get-Item -LiteralPath $zipPath).Length
+    provides   = @($provideList)
+    packages   = $verMap
+    requires   = $(if ($preset.requires) { [string]$preset.requires } else { "" })
+    affects    = $Affects
+    built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+}
+$regObj.components | Add-Member -NotePropertyName $Id -NotePropertyValue ([pscustomobject]$entry) -Force
+Write-Utf8NoBom $RegistryFile (($regObj | ConvertTo-Json -Depth 10) + "`n")
+Say "    登记（入库）：$RegistryFile"
+
 Say ""
 Say "==> 构建完成。"

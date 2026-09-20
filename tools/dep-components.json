@@ -1,0 +1,118 @@
+{
+    "schema":  1,
+    "components":  {
+                       "qr":  {
+                                  "id":  "qr",
+                                  "name":  "二维码编解码组件",
+                                  "version":  "8.2",
+                                  "file":  "JZToolsHub-依赖组件-qr-v8.2.zip",
+                                  "sha256":  "97b3af5200b0d6e2c45bbc2009f416a09cd745c9c61988d906cb5526e3e1e4a8",
+                                  "size":  1334209,
+                                  "provides":  [
+                                                   "qrcode",
+                                                   "colorama",
+                                                   "zfec",
+                                                   "zxingcpp"
+                                               ],
+                                  "packages":  {
+                                                   "qrcode":  "8.2",
+                                                   "colorama":  "0.4.6",
+                                                   "zfec":  "1.6.0.0",
+                                                   "zxing-cpp":  "3.1.1"
+                                               },
+                                  "requires":  "",
+                                  "affects":  "信息传输/轨迹转换的出码与校验、QR 视频流解码",
+                                  "built_at":  "2026-09-20T15:20:29+08:00"
+                              },
+                       "llm":  {
+                                   "id":  "llm",
+                                   "name":  "大模型 HTTP 组件",
+                                   "version":  "2.34.2",
+                                   "file":  "JZToolsHub-依赖组件-llm-v2.34.2.zip",
+                                   "sha256":  "69688c91d0ff4058742e6e8d661834e7e2450d569ed1456aa4f72e8b5bba2a1c",
+                                   "size":  1209692,
+                                   "provides":  [
+                                                    "requests",
+                                                    "certifi",
+                                                    "charset_normalizer",
+                                                    "idna",
+                                                    "urllib3"
+                                                ],
+                                   "packages":  {
+                                                    "requests":  "2.34.2",
+                                                    "certifi":  "2026.7.22",
+                                                    "charset-normalizer":  "3.5.0",
+                                                    "idna":  "3.18",
+                                                    "urllib3":  "2.7.0"
+                                                },
+                                   "requires":  "",
+                                   "affects":  "各插件的大模型调用（战果录入、人物关系、过滤器、轨迹速写）",
+                                   "built_at":  "2026-09-20T15:20:36+08:00"
+                               },
+                       "office":  {
+                                      "id":  "office",
+                                      "name":  "Office 文档组件",
+                                      "version":  "3.1.5",
+                                      "file":  "JZToolsHub-依赖组件-office-v3.1.5.zip",
+                                      "sha256":  "c9cf7f28ad1379270a3780766d5734ffe0b56356d6be77b7f7faa1ad298c4064",
+                                      "size":  7885002,
+                                      "provides":  [
+                                                       "openpyxl",
+                                                       "et_xmlfile",
+                                                       "docx",
+                                                       "lxml",
+                                                       "typing_extensions",
+                                                       "xlrd",
+                                                       "olefile",
+                                                       "pypdf"
+                                                   ],
+                                      "packages":  {
+                                                       "openpyxl":  "3.1.5",
+                                                       "et_xmlfile":  "2.0.0",
+                                                       "python-docx":  "1.2.0",
+                                                       "lxml":  "6.1.1",
+                                                       "typing_extensions":  "4.16.0",
+                                                       "xlrd":  "2.0.2",
+                                                       "olefile":  "0.47",
+                                                       "pypdf":  "6.16.0"
+                                                   },
+                                      "requires":  "",
+                                      "affects":  "表格/文档读写：知识库与共享文档预览、战果与轨迹报表、admin 批量导入导出（xlsx；缺失时 admin 降级为仅 CSV）",
+                                      "built_at":  "2026-09-20T15:20:49+08:00"
+                                  },
+                       "numpy":  {
+                                     "id":  "numpy",
+                                     "name":  "NumPy 依赖组件",
+                                     "version":  "2.5.2",
+                                     "file":  "JZToolsHub-依赖组件-numpy-v2.5.2.zip",
+                                     "sha256":  "30ceeb3c2f4222d9d2ac1a8bd303ae2e2333c61a77b8c6b11ab267045048259d",
+                                     "size":  19032901,
+                                     "provides":  [
+                                                      "numpy"
+                                                  ],
+                                     "packages":  {
+                                                      "numpy":  "2.5.2"
+                                                  },
+                                     "requires":  "",
+                                     "affects":  "cv2 / pandas 等组件的公共底层（单独安装无直接功能，装了是给别的组件用）",
+                                     "built_at":  "2026-09-20T15:21:02+08:00"
+                                 },
+                       "opencv":  {
+                                      "id":  "opencv",
+                                      "name":  "OpenCV 依赖组件",
+                                      "version":  "5.0.0.93",
+                                      "file":  "JZToolsHub-依赖组件-opencv-v5.0.0.93.zip",
+                                      "sha256":  "02859b2d1d1362875e7854d01ed404e1317ea18131dc6c5e29912827f523968a",
+                                      "size":  48755396,
+                                      "provides":  [
+                                                       "cv2"
+                                                   ],
+                                      "packages":  {
+                                                       "opencv-python":  "5.0.0.93"
+                                                   },
+                                      "requires":  "numpy",
+                                      "affects":  "info-transfer / trajectory-convert 的视频码流模式（静态码模式不受影响）",
+                                      "built_at":  "2026-09-20T15:21:07+08:00"
+                                  }
+                   }
+}

@@ -42,6 +42,9 @@ PLUGIN_API = 1
 DEPS_LOCK_REL = os.path.join("config", "installed-deps.json")
 # 依赖组件包清单（cv2/numpy 等"不随主包、按需安装"的库；装到 runtime/pylibs/，见 T25）
 DEPS_COMPONENT_REL = os.path.join("runtime", "pylibs", "manifest.json")
+# 依赖组件登记表（包 → 组件的唯一真源；随主包分发在 config/，源码模式读 tools/）
+DEPS_REGISTRY_RELS = (os.path.join("config", "dep-components.json"),
+                      os.path.join("tools", "dep-components.json"))
 # 版本号写法：>=x.y.z 或 x.y.z
 _REQ_RE = re.compile(r"^\s*(>=)?\s*(\d+(?:\.\d+){0,3})\s*$")
 
@@ -167,6 +170,49 @@ def _load_component_deps(app_dir):
     except Exception as exc:
         log.warning("依赖组件清单不可解析（按未安装处理）：%s", exc)
         return {"packages": {}, "modules": {}, "components": []}
+
+
+def load_component_registry(app_dir=None):
+    """读依赖组件登记表：{"<包名>": {"id","name","file","requires","affects"}}。
+
+    用途：把"缺哪个包"翻译成"装哪个组件"——后台徽标提示、插件页面横幅、安装期弹窗共用。
+    登记表缺失（未出过组件包）时返回 {}，提示退化为"缺哪个包"。
+    """
+    app_dir = app_dir or os.path.dirname(os.path.abspath(__file__))
+    for rel in DEPS_REGISTRY_RELS:
+        path = os.path.join(app_dir, rel)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                obj = json.load(f)
+            comps = obj.get("components") if isinstance(obj, dict) else None
+            if not isinstance(comps, dict):
+                continue
+            out = {}
+            for cid, c in comps.items():
+                if not isinstance(c, dict):
+                    continue
+                info = {"id": cid, "name": c.get("name") or cid, "file": c.get("file") or "",
+                        "requires": c.get("requires") or "", "affects": c.get("affects") or ""}
+                for pkg in (c.get("provides") or []):
+                    out[str(pkg)] = info
+            return out
+        except Exception as exc:
+            log.warning("依赖组件登记表不可解析：%s", exc)
+    return {}
+
+
+def component_hint(package, app_dir=None):
+    """给定包名，返回"请安装哪个依赖组件"的可操作文案；无登记则返回 None。"""
+    reg = load_component_registry(app_dir)
+    info = reg.get(str(package)) or reg.get(str(package).lower())
+    if not info:
+        return None
+    pre = ("（需先安装 %s 组件）" % info["requires"]) if info.get("requires") else ""
+    label = str(info["name"]).replace("依赖组件", "").strip() or info["id"]   # 名称里已含"依赖组件"时避免重复
+    label = str(info["name"]).replace("依赖组件", "").strip() or info["id"]   # 名称已含"依赖组件"时避免重复
+    return "请安装「%s」依赖组件（%s）%s" % (label, info.get("file") or ("JZToolsHub-依赖组件-%s-*.zip" % info["id"]), pre)
 
 
 def read_requires(manifest):
@@ -300,7 +346,8 @@ def _check_python_package(dep, installed):
     dist = installed.get("modules", {}).get(name) or name
     actual = installed["packages"].get(dist.lower())
     if actual is None:
-        return ("missing", None, "主体未安装该包（%s）" % dist)
+        hint = component_hint(name)
+        return ("missing", None, ("%s" % hint) if hint else ("主体未安装该包（%s）" % dist))
     if not version_satisfies(actual, require):
         return ("mismatch", actual, "版本不满足声明")
     return ("ok", actual, "")
