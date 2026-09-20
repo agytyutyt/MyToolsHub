@@ -25,6 +25,24 @@ $ExeName = "$AppName.exe"
 $Source = $PSScriptRoot
 $RegKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
 
+function Write-Utf8NoBom {
+    # 清单必须是 UTF-8 **无 BOM**（带 BOM 会让部分 JSON 读取方解析失败）
+    param([string]$Path, [string]$Text)
+    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+}
+function Remove-EmptyDirs {
+    # 按文件清单删除只会留下空壳目录，而"已装组件"是按 pylibs 下的目录列举的
+    # （dep_components_status）——空壳会让卸载后的组件仍显示为已安装。自底向上清掉。
+    param([string]$Root)
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    $dirs = @(Get-ChildItem -LiteralPath $Root -Recurse -Directory -ErrorAction SilentlyContinue |
+              Sort-Object { $_.FullName.Length } -Descending)
+    foreach ($d in $dirs) {
+        if (@(Get-ChildItem -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+            Remove-Item -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 function Say { param([string]$m = "") Write-Host $m }
 function Warn { param([string]$m) Write-Warning $m }
 function Fail { param([string]$m) Write-Host ""; Write-Host "  [失败] $m" -ForegroundColor Red; exit 1 }
@@ -122,6 +140,7 @@ if ($Remove) {
         $abs = Join-Path $Pylibs $rel
         if (Test-Path -LiteralPath $abs) { Remove-Item -LiteralPath $abs -Recurse -Force -ErrorAction SilentlyContinue; $n++ }
     }
+    Remove-EmptyDirs $Pylibs
     $keepR = @($entriesR | Where-Object { [string]$_.id -ne $Remove })
     if ($keepR.Count -eq 0) {
         Remove-Item -LiteralPath $Pylibs -Recurse -Force
@@ -249,6 +268,7 @@ if ($prev) {
             $removed++
         }
     }
+    Remove-EmptyDirs $Pylibs
     Say ("    清理上一版（v" + $prev.version + "）文件：$removed 项")
 }
 
