@@ -46,10 +46,17 @@ Say "================================================"
 $cands = @()
 if ($From) { $cands += $From }
 $cands += (Join-Path $Root "deploy\JZToolsHub\_internal")
-try {
-    $sp = & python -c "import sysconfig;print(sysconfig.get_paths()['purelib'])" 2>$null | Select-Object -First 1
-    if ($sp) { $cands += $sp }
-} catch {}
+# 取源探测：本机可能把包装在**用户级 site-packages**（pip install --user），只查 purelib 会漏；
+# 最后再用 `import cv2` 反查真实位置兜底（最可靠）。
+foreach ($probe in @(
+    "import site;print(site.getusersitepackages())",
+    "import sysconfig;print(sysconfig.get_paths()['purelib'])",
+    "import cv2,os;print(os.path.dirname(os.path.dirname(cv2.__file__)))")) {
+    try {
+        $sp = & python -c $probe 2>$null | Select-Object -First 1
+        if ($sp) { $cands += $sp.Trim() }
+    } catch {}
+}
 $srcDir = ""
 foreach ($c in $cands) {
     if ($c -and (Test-Path -LiteralPath (Join-Path $c "cv2"))) { $srcDir = $c; break }
