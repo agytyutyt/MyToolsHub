@@ -27,8 +27,20 @@ param(
     [string]$OutDir = "",
     [string]$MinApp = "",             # 写入 min_app_version（缺省留空=不限制）
     [string]$RegistryFile = "",       # 登记表（缺省 tools\dep-components.json）：包 → 组件的唯一真源
+    [switch]$NoVcRuntime,            # 不随组件分发 VC++ 运行时（默认：含 C 扩展的组件自动带）
     [switch]$Force,
     [switch]$NoZip
+)
+
+# VC++ 2015-2022 运行时（C 扩展的硬前提）——与 LibreOffice 组件包同一份清单与做法。
+# 为什么必须随组件分发：主包 _internal 只带 VCRUNTIME140*.dll，**不带 msvcp140***；
+# 目标机若没装 VC++ 运行库，cv2/lxml 等 .pyd 会在加载阶段失败（现象极隐蔽：
+# "DLL load failed"、开发机上因 System32 兜底而测不出来——LibreOffice 已踩过同一个坑）。
+$VcRuntimeDlls = @(
+    "vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threads.dll",
+    "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+    "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll",
+    "concrt140.dll", "vccorlib140.dll"
 )
 
 # 预置表：常用组件的默认载荷与文案（新组件可用 -Packages/-Provides/-Affects 覆盖，无需改脚本）
@@ -143,6 +155,8 @@ function Get-DistVersion {
     return ""
 }
 $mods = [ordered]@{}      # import 名 → 发行包名
+$pyVer = (& python -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null | Select-Object -First 1)
+if (-not $pyVer) { $pyVer = "unknown" }
 $verMap = [ordered]@{}    # 发行包名 → 版本（供组件清单 packages 字段）
 foreach ($m in $provideList) {
     $dist = Get-DistName $m
@@ -182,6 +196,8 @@ $manifest = [ordered]@{
     name       = $Name
     version    = $Version
     built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+    python     = $pyVer
+    platform   = "win-amd64"
     components = @([ordered]@{
         id       = $Id
         name     = $Name
@@ -191,8 +207,30 @@ $manifest = [ordered]@{
         provides = @($provideList)
         affects  = $Affects
         requires = $(if ($preset.requires) { [string]$preset.requires } else { "" })
+        python   = $pyVer
+        platform = "win-amd64"
+        vc_runtime = @($vcBundled)
     })
 }
+# ---- VC++ 运行时：组件含 C 扩展（.pyd/.dll）时自动随包（-NoVcRuntime 可关） ----
+$vcBundled = @()
+$hasNative = @(Get-ChildItem -LiteralPath $pylibs -Recurse -File -Include *.pyd, *.dll -ErrorAction SilentlyContinue).Count -gt 0
+if ($hasNative -and -not $NoVcRuntime) {
+    $sys32 = Join-Path $env:WINDIR "System32"
+    foreach ($dll in $VcRuntimeDlls) {
+        $src = Join-Path $sys32 $dll
+        if (Test-Path -LiteralPath $src) {
+            Copy-Item -LiteralPath $src -Destination $pylibs -Force
+            $vcBundled += $dll
+        } else {
+            Warn "构建机 System32 缺少 $dll（未随组件分发）"
+        }
+    }
+    Say ("    + VC++ 运行时   " + $vcBundled.Count + " 个 DLL（C 扩展硬前提，目标机免装运行库）")
+} elseif (-not $hasNative) {
+    Say "    （纯 Python 组件：无需 VC++ 运行时）"
+}
+
 Write-Utf8NoBom (Join-Path $pylibs "manifest.json") (($manifest | ConvertTo-Json -Depth 8) + "`n")
 Write-Utf8NoBom (Join-Path $staging "manifest.json") (($manifest | ConvertTo-Json -Depth 8) + "`n")
 
@@ -207,6 +245,10 @@ $pkgMeta = [ordered]@{
     built_at        = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     built_from      = [ordered]@{ commit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1); source = $srcDir }
     size_bytes      = [long]$totalBytes
+    # ABI 契约：组件里的 C 扩展只能被同版本同架构的解释器加载（主包换 Python 版本必须重出组件）
+    python          = $pyVer
+    platform        = "win-amd64"
+    vc_runtime      = @($vcBundled)
 }
 if ($MinApp) { $pkgMeta["min_app_version"] = $MinApp }
 Write-Utf8NoBom (Join-Path $staging "dep-component.json") (($pkgMeta | ConvertTo-Json -Depth 8) + "`n")
@@ -283,6 +325,9 @@ $entry = [ordered]@{
     packages   = $verMap
     requires   = $(if ($preset.requires) { [string]$preset.requires } else { "" })
     affects    = $Affects
+    python     = $pyVer
+    platform   = "win-amd64"
+    vc_runtime = @($vcBundled)
     built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
 }
 $regObj.components | Add-Member -NotePropertyName $Id -NotePropertyValue ([pscustomobject]$entry) -Force

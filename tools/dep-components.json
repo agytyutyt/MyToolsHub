@@ -6,8 +6,8 @@
                                   "name":  "二维码编解码组件",
                                   "version":  "8.2",
                                   "file":  "JZToolsHub-依赖组件-qr-v8.2.zip",
-                                  "sha256":  "97b3af5200b0d6e2c45bbc2009f416a09cd745c9c61988d906cb5526e3e1e4a8",
-                                  "size":  1334209,
+                                  "sha256":  "4408d686735b6c62a099a8ff0b043dfc2f1b20b9d34c71e874bb378f0938ebb7",
+                                  "size":  2185363,
                                   "provides":  [
                                                    "qrcode",
                                                    "colorama",
@@ -22,15 +22,29 @@
                                                },
                                   "requires":  "",
                                   "affects":  "信息传输/轨迹转换的出码与校验、QR 视频流解码",
-                                  "built_at":  "2026-09-20T15:20:29+08:00"
+                                  "python":  "3.14.7",
+                                  "platform":  "win-amd64",
+                                  "vc_runtime":  [
+                                                     "vcruntime140.dll",
+                                                     "vcruntime140_1.dll",
+                                                     "vcruntime140_threads.dll",
+                                                     "msvcp140.dll",
+                                                     "msvcp140_1.dll",
+                                                     "msvcp140_2.dll",
+                                                     "msvcp140_atomic_wait.dll",
+                                                     "msvcp140_codecvt_ids.dll",
+                                                     "concrt140.dll",
+                                                     "vccorlib140.dll"
+                                                 ],
+                                  "built_at":  "2026-09-20T15:46:23+08:00"
                               },
                        "llm":  {
                                    "id":  "llm",
                                    "name":  "大模型 HTTP 组件",
                                    "version":  "2.34.2",
                                    "file":  "JZToolsHub-依赖组件-llm-v2.34.2.zip",
-                                   "sha256":  "69688c91d0ff4058742e6e8d661834e7e2450d569ed1456aa4f72e8b5bba2a1c",
-                                   "size":  1209692,
+                                   "sha256":  "32024bb000b6c47c52e04c413503ed6eee0f466b725caee39ac74c8e0daf873b",
+                                   "size":  2060832,
                                    "provides":  [
                                                     "requests",
                                                     "certifi",
@@ -47,15 +61,29 @@
                                                 },
                                    "requires":  "",
                                    "affects":  "各插件的大模型调用（战果录入、人物关系、过滤器、轨迹速写）",
-                                   "built_at":  "2026-09-20T15:20:36+08:00"
+                                   "python":  "3.14.7",
+                                   "platform":  "win-amd64",
+                                   "vc_runtime":  [
+                                                      "vcruntime140.dll",
+                                                      "vcruntime140_1.dll",
+                                                      "vcruntime140_threads.dll",
+                                                      "msvcp140.dll",
+                                                      "msvcp140_1.dll",
+                                                      "msvcp140_2.dll",
+                                                      "msvcp140_atomic_wait.dll",
+                                                      "msvcp140_codecvt_ids.dll",
+                                                      "concrt140.dll",
+                                                      "vccorlib140.dll"
+                                                  ],
+                                   "built_at":  "2026-09-20T15:46:29+08:00"
                                },
                        "office":  {
                                       "id":  "office",
                                       "name":  "Office 文档组件",
                                       "version":  "3.1.5",
                                       "file":  "JZToolsHub-依赖组件-office-v3.1.5.zip",
-                                      "sha256":  "c9cf7f28ad1379270a3780766d5734ffe0b56356d6be77b7f7faa1ad298c4064",
-                                      "size":  7885002,
+                                      "sha256":  "7053b172f2af210423e327ef4d2789c8228b2ffd117728775a0701dccd0434d9",
+                                      "size":  8736141,
                                       "provides":  [
                                                        "openpyxl",
                                                        "et_xmlfile",
@@ -78,15 +106,29 @@
                                                    },
                                       "requires":  "",
                                       "affects":  "表格/文档读写：知识库与共享文档预览、战果与轨迹报表、admin 批量导入导出（xlsx；缺失时 admin 降级为仅 CSV）",
-                                      "built_at":  "2026-09-20T15:20:49+08:00"
+                                      "python":  "3.14.7",
+                                      "platform":  "win-amd64",
+                                      "vc_runtime":  [
+                                                         "vcruntime140.dll",
+                                                         "vcruntime140_1.dll",
+                                                         "vcruntime140_threads.dll",
+                                                         "msvcp140.dll",
+                                                         "msvcp140_1.dll",
+                                                         "msvcp140_2.dll",
+                                                         "msvcp140_atomic_wait.dll",
+                                                         "msvcp140_codecvt_ids.dll",
+                                                         "concrt140.dll",
+                                                         "vccorlib140.dll"
+                                                     ],
+                                      "built_at":  "2026-09-20T15:46:43+08:00"
                                   },
                        "numpy":  {
                                      "id":  "numpy",
                                      "name":  "NumPy 依赖组件",
                                      "version":  "2.5.2",
                                      "file":  "JZToolsHub-依赖组件-numpy-v2.5.2.zip",
-                                     "sha256":  "30ceeb3c2f4222d9d2ac1a8bd303ae2e2333c61a77b8c6b11ab267045048259d",
-                                     "size":  19032901,
+                                     "sha256":  "0ec2a8372477f08bbe2a38cf9c1036e5d7c63232a3f70b17ae61700625f4207d",
+                                     "size":  19884061,
                                      "provides":  [
                                                       "numpy"
                                                   ],
@@ -95,15 +137,29 @@
                                                   },
                                      "requires":  "",
                                      "affects":  "cv2 / pandas 等组件的公共底层（单独安装无直接功能，装了是给别的组件用）",
-                                     "built_at":  "2026-09-20T15:21:02+08:00"
+                                     "python":  "3.14.7",
+                                     "platform":  "win-amd64",
+                                     "vc_runtime":  [
+                                                        "vcruntime140.dll",
+                                                        "vcruntime140_1.dll",
+                                                        "vcruntime140_threads.dll",
+                                                        "msvcp140.dll",
+                                                        "msvcp140_1.dll",
+                                                        "msvcp140_2.dll",
+                                                        "msvcp140_atomic_wait.dll",
+                                                        "msvcp140_codecvt_ids.dll",
+                                                        "concrt140.dll",
+                                                        "vccorlib140.dll"
+                                                    ],
+                                     "built_at":  "2026-09-20T15:46:56+08:00"
                                  },
                        "opencv":  {
                                       "id":  "opencv",
                                       "name":  "OpenCV 依赖组件",
                                       "version":  "5.0.0.93",
                                       "file":  "JZToolsHub-依赖组件-opencv-v5.0.0.93.zip",
-                                      "sha256":  "02859b2d1d1362875e7854d01ed404e1317ea18131dc6c5e29912827f523968a",
-                                      "size":  48755396,
+                                      "sha256":  "35222980a44fc05038cb9b9931d4e1d52bdf8523fbe842be57f05f4083d5df44",
+                                      "size":  49606565,
                                       "provides":  [
                                                        "cv2"
                                                    ],
@@ -112,7 +168,21 @@
                                                    },
                                       "requires":  "numpy",
                                       "affects":  "info-transfer / trajectory-convert 的视频码流模式（静态码模式不受影响）",
-                                      "built_at":  "2026-09-20T15:21:07+08:00"
+                                      "python":  "3.14.7",
+                                      "platform":  "win-amd64",
+                                      "vc_runtime":  [
+                                                         "vcruntime140.dll",
+                                                         "vcruntime140_1.dll",
+                                                         "vcruntime140_threads.dll",
+                                                         "msvcp140.dll",
+                                                         "msvcp140_1.dll",
+                                                         "msvcp140_2.dll",
+                                                         "msvcp140_atomic_wait.dll",
+                                                         "msvcp140_codecvt_ids.dll",
+                                                         "concrt140.dll",
+                                                         "vccorlib140.dll"
+                                                     ],
+                                      "built_at":  "2026-09-20T15:47:02+08:00"
                                   }
                    }
 }

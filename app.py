@@ -60,6 +60,13 @@ def _setup_dep_components():
         return []
     if base not in sys.path:
         sys.path.insert(0, base)
+    # pylibs 根目录本身也要进 DLL 搜索路径：依赖组件自带的 VC++ 运行时（msvcp140*.dll 等）
+    # 就放在根下，不进这一条的话 C 扩展在干净机器上会 "DLL load failed"。
+    if hasattr(os, "add_dll_directory"):
+        try:
+            _DEP_DLL_HANDLES.append(os.add_dll_directory(base))
+        except OSError:
+            pass
     found = []
     try:
         names = sorted(os.listdir(base))

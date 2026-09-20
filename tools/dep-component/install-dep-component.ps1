@@ -108,6 +108,26 @@ $metaPath = Join-Path $Source "dep-component.json"
 if (Test-Path -LiteralPath $metaPath) {
     try { $meta = Get-Content -LiteralPath $metaPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
 }
+# ---- 前置校验：组件与主程序的 Python 版本 / 平台必须一致（C 扩展 ABI 硬约束） ----
+# 主包换 Python 版本后，旧组件里的 .pyd 会加载失败 → 这里在写盘前就拒绝并给出指引。
+if ($meta) {
+    $vf = Join-Path $AppDir "version.json"
+    $appPy = ""
+    if (Test-Path -LiteralPath $vf) {
+        try { $appPy = [string]((Get-Content -LiteralPath $vf -Raw -Encoding UTF8 | ConvertFrom-Json).python) } catch {}
+    }
+    $cPy = [string]$meta.python
+    if ($appPy -and $cPy -and $cPy -ne "unknown") {
+        $mm = { param($v) ($v -split '\.')[0..1] -join '.' }
+        if ((& $mm $appPy) -ne (& $mm $cPy)) {
+            Fail ("本组件是为 Python $cPy 构建的，当前主程序内置 Python $appPy —— 版本不匹配。`n" +
+                  "         请取与主程序匹配的依赖组件包（用对应版本的主包构建产物），或先升级主包。")
+        }
+    }
+    if ($meta.platform -and $meta.platform -ne "win-amd64") {
+        Warn "该组件声明平台为 $($meta.platform)，与当前安装器（win-amd64）可能不匹配。"
+    }
+}
 if ($meta -and $meta.min_app_version) {
     $vf = Join-Path $AppDir "version.json"
     if (Test-Path -LiteralPath $vf) {
@@ -145,7 +165,9 @@ Say "==> 安装结果"
 Say $after.text
 if (-not $after.ok) {
     Fail ("自检未通过：组件文件已就位但 exe 无法 import 其中的库。`n" +
-          "         请把上面输出反馈给维护者；如需回退可执行 -Uninstall。")
+          "         常见原因：① 本机缺 VC++ 2015-2022 运行库且组件包内未自带（报 DLL load failed）；`n" +
+          "                   ② 组件与主程序的 Python 版本不匹配（见组件清单 python 字段）；`n" +
+          "                   ③ 组件包不完整。请把上面输出反馈给维护者；回退可执行 -Uninstall。")
 }
 # 生效功能文案取自组件清单（affects），脚本本身与具体组件无关
 $affects = ""
