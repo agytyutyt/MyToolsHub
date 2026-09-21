@@ -500,7 +500,8 @@ README_TMPL = """# JZToolsHub 验收测试数据
 
 > 用途：配合 `docs\\guide\\干净机器部署验收手册.md` 做功能验收。**所有数据均为虚构测试数据**
 > （身份证号/手机号/单位人员均非真实信息）。
-> 生成脚本：`tools\\e2e\\make-acceptance-testdata.py`（可重新生成；本目录已 gitignore）。
+> 生成脚本：`tools\\e2e\\make-acceptance-testdata.py`（可重新生成）。本目录**随仓库提交**（约 400 KB），
+> 因此拿到仓库就有经过校验的验收数据；发布介质另见 `deploy\\JZToolsHub-验收测试数据-v<日期>.zip`。
 
 ## 怎么用
 
