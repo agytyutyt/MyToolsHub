@@ -176,6 +176,13 @@ Head "2. 将删除的内容"
 $items = @()
 if ($Scope -eq "Deps") {
     $items += @{ Path = $pylibs; Note = "依赖组件（runtime\pylibs：cv2/numpy/openpyxl… 全部）" }
+    # 组件包若被解压到**程序目录里**再运行安装器，会在程序目录留下 payload\pylibs\<组件> 这份
+    # 解压残留（不在 sys.path 上、不影响运行，但会让人以为"依赖没清掉"）。产品布局不使用
+    # payload\ 目录，故可安全清理。
+    $payload = Join-Path $target "payload"
+    if ((Test-Path -LiteralPath (Join-Path $payload "pylibs")) -or (Test-Path -LiteralPath (Join-Path $payload "plugins"))) {
+        $items += @{ Path = $payload; Note = "组件/插件包解压残留（payload\）" }
+    }
 } else {
     $links = @((Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"))
     $desktop = [Environment]::GetFolderPath("Desktop")
