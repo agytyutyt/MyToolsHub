@@ -516,11 +516,19 @@ def r01(cl, ctx):
     deps = cl.get_json("/api/admin/deps")
     groups = {g["id"]: g for g in deps.get("groups", [])}
     need("framework" in groups and "external" in groups, "依赖面板缺少分组：%s" % list(groups))
+    # 面板按**发行包名**列出（python-docx / opencv-python），插件声明用 **import 名**（docx / cv2）
+    # ——两者是同一件事，故把面板行的 dist/name **和 imports[]** 一起收进集合再比对
+    # （imports 来自清单的 modules 映射与依赖组件的 modules，见 plugin_admin.installed_deps）。
     installed = set()
     for g in deps["groups"]:
         for it in g.get("items") or []:
-            if it.get("state") in (None, "ok") and (it.get("dist") or it.get("name")):
-                installed.add(str(it.get("dist") or it.get("name")).lower())
+            if it.get("state") not in (None, "ok"):
+                continue
+            for key in ("dist", "name"):
+                if it.get(key):
+                    installed.add(str(it[key]).lower())
+            for imp in it.get("imports") or []:
+                installed.add(str(imp).lower())
     rows = cl.get_json("/api/admin/plugins").get("plugins") or []
     bad = []
     for row in rows:
@@ -529,11 +537,13 @@ def r01(cl, ctx):
                 continue
             name = str(d.get("name") or "").lower()
             state_ok = d.get("state") == "ok"
-            listed = name in installed or name.replace("_", "-") in installed
+            listed = (name in installed or name.replace("_", "-") in installed
+                      or name.replace("-", "_") in installed)
             if state_ok and not listed and d.get("state") != "unknown":
                 bad.append("%s/%s：判定 ok 但面板未列出" % (row["id"], name))
     need(not bad, "判定与面板不一致：%s" % "；".join(bad[:3]))
-    return "面板 %d 个分组；%d 个插件的逐依赖判定与面板一致" % (len(groups), len(rows))
+    return "面板 %d 个分组 / 收录 %d 个包名（含 import 别名）；%d 个插件的逐依赖判定与面板一致" % (
+        len(groups), len(installed), len(rows))
 
 
 @case("R-02", "R", "插件页面自报依赖（/status）可读且与判定一致")
