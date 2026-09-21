@@ -13,7 +13,8 @@ r"""生成「验收测试数据」：各插件的测试文件 + 预生成二维�
     python tools\e2e\make-acceptance-testdata.py --verify --base http://127.0.0.1:5000
                                                                     # 对预生成产物做往返校验（推荐）
 
-产物：`testdata\`（已 gitignore；发布时打包为 deploy\JZToolsHub-验收测试数据-v<日期>.zip）
+产物：`testdata\`（**随仓库提交**，约 400 KB：拿到仓库就有经过校验的数据，不必跑生成器；
+      发布时另打包为 deploy\JZToolsHub-验收测试数据-v<日期>.zip）
     testdata\README.md              ← 逐插件：文件 → 操作 → 通过口径（验收时照这个走）
     testdata\<插件id>\...           ← 测试文件
 
