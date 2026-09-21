@@ -15,6 +15,15 @@
 #   ... -VerifyOnly                # 只做干净度核查，不删任何东西
 #   ... -Yes                       # 不询问（脚本化/双击场景）
 #   ... -InstallDir D:\JZToolsHub -DataRoot D:\jzdata    # 非默认位置
+#   ... -RemoveVCRuntime           # ★ 连系统级 VC++ 2015-2022 运行库一起卸掉（见下）
+#
+# ★ -RemoveVCRuntime 说明：组件自带的 VC 运行时 DLL 在 runtime\pylibs 里，随依赖组件一起删；
+#   但"这台机器装过 VC++ 可再发行组件包"属于**系统状态**，会让"缺 VC 运行库"这类验收测不出来
+#   （验收手册 §1 第 5 项要求 msvcp140.dll 不在 System32）。该开关会：
+#     ① 优先调用官方卸载（msiexec /x <ProductCode> /qn /norestart）；
+#     ② 卸不掉（无卸载项/失败）时退化为删除 System32 下 10 个运行时 DLL + 清注册表标记键；
+#     ③ 逐项报告结果，需要重启才生效的会说明。
+#   仅用于**测试机**：删掉系统运行库会影响这台机器上其它依赖它的软件。需要管理员权限。
 #
 # 退出码：0 = 已清理且核查通过；1 = 有残留（输出里逐条列出）
 # ============================================================================
@@ -26,6 +35,8 @@ param(
     [switch]$KeepData,
     [switch]$KeepRegistry,
     [switch]$KeepShortcuts,
+    [switch]$RemoveVCRuntime,   # 连**系统级** VC++ 2015-2022 运行库一起卸（仅测试机；需管理员）
+    [switch]$IncludeX86,        # 同时处理 x86 版（SysWOW64 / WOW6432Node）
     [switch]$DryRun,
     [switch]$VerifyOnly,
     [switch]$Yes
@@ -87,6 +98,123 @@ function Resolve-DataRoot {
     }
     return (Join-Path $env:USERPROFILE (".{0}" -f $AppName.ToLower()))
 }
+# VC++ 2015-2022 x64 运行时 DLL（与依赖组件随包的那 10 个同名单）
+$VcRuntimeDlls = @(
+    "vcruntime140.dll", "vcruntime140_1.dll", "vcruntime140_threads.dll",
+    "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
+    "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll",
+    "concrt140.dll", "vccorlib140.dll"
+)
+$VcMarkerX64 = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+$VcMarkerX86 = "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x86"
+
+function Test-Admin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    return ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-VCRuntimeInfo {
+    # 探测系统级 VC++ 运行库：标记键版本 + System32/SysWOW64 里还剩几个 DLL + 卸载登记项
+    $info = [ordered]@{
+        MarkerX64 = (Test-Path $VcMarkerX64)
+        MarkerX86 = (Test-Path $VcMarkerX86)
+        Version   = ""
+        DllsX64   = @()
+        DllsX86   = @()
+        Entries   = @()
+    }
+    if ($info.MarkerX64) {
+        try { $info.Version = [string](Get-ItemProperty -Path $VcMarkerX64 -ErrorAction Stop).Version } catch {}
+    }
+    $sys32 = Join-Path $env:WINDIR "System32"
+    $syswow = Join-Path $env:WINDIR "SysWOW64"
+    $info.DllsX64 = @($VcRuntimeDlls | Where-Object { Test-Path -LiteralPath (Join-Path $sys32 $_) })
+    $info.DllsX86 = @($VcRuntimeDlls | Where-Object { Test-Path -LiteralPath (Join-Path $syswow $_) })
+    $keys = @()
+    $keys += Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue
+    $keys += Get-ChildItem "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue
+    foreach ($k in $keys) {
+        $dn = ""
+        try { $dn = [string]$k.GetValue("DisplayName") } catch {}
+        if ($dn -match "Visual C\+\+.*Redistributable") {
+            $code = $k.PSChildName
+            # ★ 只按显示名判断架构：VC++ 的 x64 卸载项**也在** WOW6432Node 下（安装器是 32 位），
+            #   看注册表路径会把 x64 误判成 x86（实测踩到）。名称里没有 (xNN) 时按 x64 处理。
+            $arch = if ($dn -match "\(x86\)") { "x86" } else { "x64" }
+            $quiet = ""
+            try { $quiet = [string]$k.GetValue("QuietUninstallString") } catch {}
+            $info.Entries += [pscustomobject]@{ Name = $dn; Code = $code; Arch = $arch; Quiet = $quiet }
+        }
+    }
+    return $info
+}
+
+function Remove-VCRuntime {
+    param([switch]$IncludeX86, [switch]$DryRun)
+    Head "系统级 VC++ 运行库"
+    $info = Get-VCRuntimeInfo
+    Say ("  标记键 x64：{0}{1}" -f $info.MarkerX64, $(if ($info.Version) { "（$($info.Version)）" } else { "" }))
+    Say ("  System32 里运行时 DLL：{0}/10" -f $info.DllsX64.Count)
+    if ($info.DllsX86.Count -gt 0) { Say ("  SysWOW64 里运行时 DLL：{0}/10（x86 版）" -f $info.DllsX86.Count) }
+    foreach ($e in $info.Entries) { Say ("  卸载登记项：{0}（{1}，{2}）" -f $e.Name, $e.Arch, $e.Code) }
+    if ($info.DllsX64.Count -eq 0 -and -not $info.MarkerX64 -and $info.Entries.Count -eq 0) {
+        Say "  [OK] 未发现系统级 VC++ 运行库——已经是干净的（可验「缺 VC 运行库」类问题）"
+        return $true
+    }
+    if ($DryRun) {
+        Say "  [-DryRun] 将执行：优先 msiexec 官方卸载；无卸载项时删除上面列出的 DLL 并清标记键。"
+        return $true
+    }
+    if (-not (Test-Admin)) {
+        Warn "需要管理员权限才能卸载系统运行库。请用管理员身份重开 PowerShell 后重跑："
+        Warn ("  powershell -ExecutionPolicy Bypass -File `"{0}`" -RemoveVCRuntime" -f $PSCommandPath)
+        return $false
+    }
+    $ok = $true
+    # ① 官方卸载（x64 必做；x86 仅在 -IncludeX86 时）
+    foreach ($e in $info.Entries) {
+        if ($e.Arch -eq "x86" -and -not $IncludeX86) { Say ("  跳过 x86 版（不影响 x64 验收；要一并卸掉加 -IncludeX86）：{0}" -f $e.Name); continue }
+        $args = @("/x", $e.Code, "/qn", "/norestart")
+        Say ("  正在卸载：{0} …" -f $e.Name)
+        try {
+            $p = Start-Process -FilePath "msiexec.exe" -ArgumentList $args -Wait -PassThru -WindowStyle Hidden
+            if ($p.ExitCode -eq 0 -or $p.ExitCode -eq 3010) {
+                Say ("    卸载完成（退出码 {0}{1}）" -f $p.ExitCode, $(if ($p.ExitCode -eq 3010) { "，需重启生效" } else { "" }))
+                if ($p.ExitCode -eq 3010) { $ok = $false }
+            } else {
+                Warn ("    卸载返回退出码 {0}，稍后用兜底方式清理" -f $p.ExitCode)
+            }
+        } catch {
+            Warn ("    调用 msiexec 失败：{0}" -f $_.Exception.Message)
+        }
+    }
+    # ② 兜底：残留 DLL + 标记键（官方卸载后一般已清掉；被占用/无卸载项时才会走到这里）
+    Start-Sleep -Milliseconds 500
+    $info = Get-VCRuntimeInfo
+    $targets = @()
+    $targets += @($info.DllsX64 | ForEach-Object { Join-Path (Join-Path $env:WINDIR "System32") $_ })
+    if ($IncludeX86) { $targets += @($info.DllsX86 | ForEach-Object { Join-Path (Join-Path $env:WINDIR "SysWOW64") $_ }) }
+    $left = 0
+    foreach ($f in $targets) {
+        try { Remove-Item -LiteralPath $f -Force -ErrorAction Stop; Say ("    已删除：{0}" -f (Split-Path -Leaf $f)) }
+        catch { $left++; Warn ("    删除失败（可能被占用，重启后再试）：{0} —— {1}" -f (Split-Path -Leaf $f), $_.Exception.Message) }
+    }
+    foreach ($mk in @($VcMarkerX64, $(if ($IncludeX86) { $VcMarkerX86 } else { $null }))) {
+        if ($mk -and (Test-Path $mk)) {
+            try { Remove-Item -Path $mk -Recurse -Force -ErrorAction Stop; Say ("    已清标记键：{0}" -f $mk) } catch { Warn ("    清标记键失败：{0}" -f $mk) }
+        }
+    }
+    $after = Get-VCRuntimeInfo
+    Say ""
+    if ($after.DllsX64.Count -eq 0 -and -not $after.MarkerX64) {
+        Say "  [OK] 系统级 VC++ 运行库已清除——现在可以验「缺 VC 运行库」类问题了" -ForegroundColor Green
+        return $true
+    }
+    Warn ("仍有残留：System32 {0}/10 个 DLL，标记键 {1}（{2}）" -f $after.DllsX64.Count, $after.MarkerX64, $(if ($after.MarkerX64) { "未清" } else { "已清" }))
+    if ($left -gt 0) { Warn "有 DLL 被占用：**重启这台机器**后重跑本脚本即可删掉。" }
+    return $false
+}
+
 function Stop-Service {
     $procs = @(Get-Process -Name $AppName -ErrorAction SilentlyContinue)
     if ($procs.Count -eq 0) { Say "  （服务未在运行）"; return 0 }
@@ -117,10 +245,15 @@ function Invoke-CleanCheck {
     param([string]$Mode = "Full")
     Head ("干净度核查（对齐验收手册 §1；Scope={0}）" -f $Mode)
     # 2.1 系统级：这两项决定"能不能验出缺运行库/缺 Python 类问题"
-    $msvcp = Test-Path -LiteralPath (Join-Path $env:WINDIR "System32\msvcp140.dll")
+    $vc = Get-VCRuntimeInfo
+    $msvcp = $vc.DllsX64 -contains "msvcp140.dll"
     $hasPy = [bool](Get-Command python -ErrorAction SilentlyContinue)
     Say ("  {0} msvcp140.dll 在系统里：{1}" -f $(if ($msvcp) { "[i]" } else { "[OK]" }), $msvcp)
-    if ($msvcp) { Warn "系统已有 VC++ 运行库 → 本机测不出「缺 VC 运行时」这类问题（要换机器或接受这一项测不到）" }
+    Say ("  {0} 系统级 VC++ 运行库：{1}" -f $(if ($vc.DllsX64.Count -gt 0 -or $vc.MarkerX64) { "[i]" } else { "[OK]" }),
+         $(if ($vc.DllsX64.Count -gt 0 -or $vc.MarkerX64) {
+             "已装（System32 有 {0}/10 个 DLL{1}）；要清掉请用 -RemoveVCRuntime（需管理员，仅测试机）" -f $vc.DllsX64.Count, $(if ($vc.Version) { "，$($vc.Version)" } else { "" })
+         } else { "未安装——可以验「缺 VC 运行库」类问题" }))
+    if ($msvcp) { Warn "系统已有 VC++ 运行库 → 本机测不出「缺 VC 运行时」这类问题（换机器，或加 -RemoveVCRuntime 清掉后再测）" }
     Say ("  {0} 目标机是否装了 Python：{1}" -f $(if ($hasPy) { "[i]" } else { "[OK]" }), $hasPy)
 
     # 2.2 产品痕迹：目录 / 注册表 / 快捷方式 / 进程
@@ -221,6 +354,18 @@ Say ("  合计释放约：{0}" -f (Fmt-Size $total))
 if ($Scope -eq "Full" -and $KeepData) { Warn "按 -KeepData 保留用户数据根（下一轮验收建议不要保留）" }
 if ($Scope -eq "Deps") { Say "  （-Scope Deps：只清依赖组件，程序与数据保留）" }
 
+if ($RemoveVCRuntime) {
+    Say ""
+    Remove-VCRuntime -IncludeX86:$IncludeX86 -DryRun | Out-Null
+} else {
+    $vc = Get-VCRuntimeInfo
+    if ($vc.DllsX64.Count -gt 0 -or $vc.MarkerX64) {
+        Say ""
+        Warn ("系统里仍有 VC++ 运行库（System32 有 {0}/10 个 DLL{1}）——「缺 VC 运行库」这类验收会测不出来；" -f $vc.DllsX64.Count, $(if ($vc.Version) { "，$($vc.Version)" } else { "" }))
+        Warn "要连它一起清（仅测试机、需管理员）请加 -RemoveVCRuntime。"
+    }
+}
+
 if ($DryRun) { Say ""; Say "  [-DryRun] 仅演算，未做任何改动。"; exit 0 }
 if (-not $Yes) {
     Say ""
@@ -248,10 +393,17 @@ foreach ($it in $items) {
     }
 }
 
+# ---- 系统级 VC++ 运行库（显式开关；不属于"本产品留下的东西"，故单独处理） ----
+$vcOk = $true
+if ($RemoveVCRuntime) {
+    $vcOk = Remove-VCRuntime -IncludeX86:$IncludeX86
+}
+
 # ============================================================================
 #  5. 清理后核查 + 下一轮提示
 # ============================================================================
 $clean = Invoke-CleanCheck -Mode $Scope
+if (-not $vcOk) { $clean = $false; Left "系统级 VC++ 运行库未完全清除（详见上文；被占用的 DLL 重启后重跑即可）" }
 if ($clean) {
     Say ""
     Say "  下一轮验收（详见 docs\guide\干净机器部署验收手册.md）："
