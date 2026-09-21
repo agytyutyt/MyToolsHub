@@ -45,7 +45,8 @@ docs/
 | 打 Android APP 包 | `android-app/InfoParse/InfoParse-APP打包手册.md` |
 | 部署到目标机 / 卸载 / 换数据目录 | `docs/项目管理手册.md` §6 + `docs/guide/离线部署包说明.md` |
 | 在干净机器上验收部署（含依赖自足性） | `docs/guide/干净机器部署验收手册.md` |
-| **做交付验收**（范围/用例/记录表与结论） | `docs/guide/验收手册.md`（总入口；部署步骤引用上面那份） |
+| **做交付验收**（范围/用例/记录表与结论） | `docs/guide/验收手册.md`（总入口；**已通过验收**，本轮记录见其 §9；部署步骤引用上面那份） |
+| 目标机跑自动验收（无需 Python） | `deploy\JZToolsHub-验收测试-v<日期>.zip` → 双击「一键验收测试.bat」（生成脚本：`tools\e2euild-acceptance-kit.ps1`） |
 | 查某插件有哪些接口、返回什么 | `plugins/<id>/README.md` |
 | 查某个报错 / 踩过的坑 | `HANDOFF.md` §7「踩坑清单」（按主题分 6 类） |
 | 查项目当前状态与待办 | `HANDOFF.md` §2 / §4 |

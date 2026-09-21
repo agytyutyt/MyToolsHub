@@ -122,7 +122,10 @@ ls -1t deploy/JZToolsHub-v*.zip | head -3     # 最近 3 个主包产物
 | 版本形态 | 三段式 `X.Y.Z`；`-Version` 不传自动递增 patch，脚本**拒绝同号重出**（同号会导致目标机判为未升级、跳过模板同步） |
 | 打包解释器 | Python **3.14** 基线（不一致时脚本告警并照实记录） |
 | 离线组件 | **主包不含**（`version.json.offline` 为空串）；Chrome / LibreOffice 由组件包**并列分发** |
-| 体积构成（典型） | `_internal\` ≈225 MB、`JZToolsHub.exe` ≈19 MB、`plugins\` ≈16 MB；主包 zip ≈122 MB / 3000 项上下 |
+| 体积构成（解耦后） | 主包 zip **≈27 MB**（仅框架依赖 + admin）：`_internal\` 为框架闭包、`plugins\` 只有 admin；业务插件与依赖组件**并列分发**，不再随主包 |
+| 并列分发物 | `deploy\插件包\JZToolsHub-插件-<id>-v<版本>.zip` × **16**（含 5 个纯前端工具插件）；`deploy\插件集\*.zip`（一键装齐）；`deploy\依赖组件\*.zip` × **11**（cv2/numpy/openpyxl/docx/xlrd/olefile/pypdf/qrcode/zfec/zxingcpp/requests） |
+| 验收侧交付物 | `deploy\JZToolsHub-验收测试数据-v<日期>.zip`（各插件测试文件 + 预生成二维码/视频）、`deploy\JZToolsHub-验收测试-v<日期>.zip`（**单文件 exe，目标机无需 Python**）；重置回干净机：`tools\e2e
+eset-clean-machine.ps1` |
 | 包内文档 | 根契约四文档 + `docs/README.md` + `docs/guide/` + `docs/design/`（`eval`/`plan`/`archive` 不随包，见 `docs/README.md` §8） |
 | 上线验收 | 解压冒烟：隔离数据根启动 4 s 内 `/` 200、匿名 `/api/*` 401 —— 即 `verify-package.py --smoke` 的断言集 |
 
@@ -200,8 +203,8 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 1. 访问日志字段仅经 Flask test client 验证，未在真实浏览器/多用户高并发环境走查；`get_session_user()` 每请求读 `config/admin.json`（静态资源已跳过），高并发如吃紧要加缓存。
 2. 战果录入为**仅大模型解析**，缴获物品明细依赖大模型结构化输出；换低性能模型需复测。
 3. 公告板 / 共享文档 / 战果录入等前端功能多靠 `node --check` + test client 回归，浏览器走查较少。
-4. 一键安装/卸载脚本已在开发机通过语法检查与 exe 冒烟，**尚未在目标机做完整「全新安装 → 更新 → 卸载」三段式实测**。
-5. `info-transfer` 的 `fmt=file` 端到端（桌面封装 → APP 扫码 → 导出 → 与原文件逐字节比对）尚未真机验证，是移动端首要待办。
+4. ~~一键安装/卸载脚本尚未在目标机做完整三段式实测~~ → **已覆盖**：2026-09-21 目标机验收含全新安装、插件集与依赖组件安装、卸载（D 组）与升级回滚（U 组）。
+5. `info-transfer` 的**桌面侧**端到端已在验收中通过（静态码原件传输 → 解码 → 导出，与原文件 **sha256 一致**）；**APP 扫码那一环**（桌面封装 → 手机扫 → APP 导出）仍未真机验证，是移动端首要待办。
 6. ~~打包用 Python 3.14 时产物不支持 Win7~~ → **已作废**：2026-09-14 起取消 Win7 兼容，目标机基线为 Windows 10+，不再维护 3.8 打包支线（见 §1.1 与 `docs/eval/Python版本选型评估.md` §4）。
 
 ---
@@ -210,6 +213,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-21 | **主体与插件解耦完成并通过验收** | 主包瘦身至 ≈27 MB（仅框架依赖 + admin）；插件独立加载/卸载/升级 + 依赖声明与三态门控（`jz_deps.py`）+ 依赖组件包（按需安装、免重启生效）；16 个插件包与插件集、11 个依赖组件包并列分发；配套「干净机器部署验收手册」「验收手册」「验收测试数据包」「验收工具包（无 Python 可跑）」「重置回干净机脚本」；目标机验收 27 通过 / 0 失败 / 4 跳过（跳过项为需 Key 与需参数三类）。详见 `docs/design/主体与插件解耦-设计文档.md` §11 与 `docs/guide/验收手册.md` §9 |
 | 2026-09-16 | **信息传输优化批次 4（T10-T12）：压缩器升级 + 拆包重组 + pdf/ppt 精简提取** | T10：`_compress_best`（zlib 9 → LZMA2/xz 9\|EXTREME、字典 16MB，试压取更小，fail-open 回退）接入 v2 载荷，flags `comp=2` 标注；APP 增 `org.tukaani:xz:1.10`，`Jz2.kt` XZInputStream 解压。T11：docx/xlsx/xlsm/pptx/zip 原件拆包为连续流（`[条目数 2B] + [name_len 2B][name][content_len 4B][content]…`）再压缩，JZ2 mode=rebuild；两端拆流重建 zip（内容等价、非字节一致，时间戳固定 1980-01-01），仅拆包后更小才启用；前端「拆包重组」开关（raw+file 显示）、结果摘要与 APP 结果页「还原方式：重建」标注，APP `Envelope.rebuilt` + `Jz2.rebuildZip`。T12：`SUPPORTED_FORMATS` 的 ppt/pdf 改精简口径——pypdf 逐页提取（扫描/加密 LeanUnsupported 自动回退原件）、olefile 扫 TextCharsAtom/TextBytesAtom（>30% 控制字符拒收乱码）；`requirements.txt` + `JZToolsHub.spec` PACKAGES 登记 pypdf。验证：`test_protocol_v2.py` 44/44（T10 试压选优用例须让相同文本相隔 >32KB——zlib 窗口外 xz 才必胜；T11 6 例 roundtrip + 残留/越界拒收；T12 fuzz 1000 轮零崩溃）+ T01 47/47；APP `Jz2Test` 新增 xz 还原/坏流拒收、rebuild 重建/损坏拒收 4 例。**遗留**：APP 编译验证（Android Studio）、T11 重建 zip 经 Office/WPS 人工验收、真机 PoC |
 | 2026-09-16 | **过滤器 / 轨迹速写：文档处理流程前新增「删除背景图片」环节** | 两个插件在上传落盘暂存**之前**统一跑一遍 `backend/bg_image.py`（纯标准库，零框架依赖）：识别 `.xlsx` 里嵌入的**工作表背景图片**（Excel「页面布局 → 背景」，即 `xl/worksheets/sheetN.xml` 的 `<picture r:id>` + 对应 Relationship + `xl/media/*` 本体，常被用来夹带水印/机构标识/来源标记），命中即三件套一起摘掉——除这三处外包内部件**逐字节原样搬运**（不重排/不重压/不改时间戳，样式、批注、宏、数据透视表、非背景图片一概不受影响）；图片本体若仍被别处引用（同一张图既当背景又当浮动 logo）只解除背景引用、保留本体。**零风险姿态**：未发现背景图片则原字节返回（连 zip 都不重写）；畸形包/加密包/解压超 256MB/解析异常一律不改写文件、照原样继续流程，原因写进结论 `note`；`csv`（无图片容器）与 `xls`（BIFF 二进制流）不检测并如实说明——两者在本框架里都是"读成二维表 → 重新生成输出"，产物天然不含背景图片。结论落点：`/filter` 与 `/result` 的 `sanitize` 字段、过滤器页面「文档预处理」一行、速写自检卡片「已删背景图片 N 张」标签（悬浮给完整结论）、速写报告「数据质量」sheet 的「源文件预处理」追溯行。B-7 禁止插件间 import → 两个插件各存一份**逐字节相同**的副本，`test_bg_image.py` 断言两份一致防漂移。验证：`test_bg_image.py` 17 项全绿（真实样本 `D:\SQLRewrite\demoData_real.xlsx` 识别删除 1 张 7.2KB / 数据 455 行逐行一致 / zip 结构有效 / 幂等 / 无背景零改写 / 共享图片本体保留 / 多表共用只删一次 / 外部链接 / 加密与畸形包与 zip 炸弹失败不阻断 / csv-xls 说明 / 两份副本一致）+ 两条端到端（`/api/file-filter/filter`、`/api/trajectory-sketch/upload→analyze→download`，临时数据根，断言落盘输入件已无 `<picture>`、报告数据质量 sheet 含「已删除背景图片 1 张」）+ 真实应用浏览器实测（两处 UI 新元素可见、无 JS 报错）。产物：插件包 v1.1.0 ×2（见 §2.2），前端资源戳 app.js v3 / v2，`config/tools.json` 卡片描述同步 |
 | 2026-09-14 | **插件独立升级（阶段二/三）：管理后台「插件管理」+ 共享盘批量更新** | 管理后台新增「插件管理」页（**仅超级管理员**，卡片在后台首页）：① **插件盘点**——代码版本 / 登记版本 / 状态（已启用·已停用·隐藏·待重启·登记不一致）/ 备份数 / 数据占用 / 回滚 / 启停；② **离线升级包**——选 zip → 只读校验 → **计划预览**（新增/修改/未变/删除/保留未知 + 基线说明 + 警示）→ 确认应用（自动备份旧版 → 替换 → **自动停服重启**，页面自动刷新；页面有「应用后自动重启服务」开关，
