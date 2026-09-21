@@ -25,7 +25,9 @@
 """
 
 import glob
+import importlib
 import json
+import types
 import logging
 import os
 import re
@@ -423,3 +425,112 @@ def evaluate_all(plugin_dirs, manifests=None, app_dir=None, app_version=None, pl
                       app_version=app_version, plugin_api=plugin_api)
         for pid, pdir in plugin_dirs.items()
     }
+
+
+# ======================== 依赖可用性：请求期实时探测 ========================
+# 为什么需要：插件后端在**模块导入时**就把 `OPENPYXL_AVAILABLE` 这类标记算好了
+# （`try: import openpyxl / except: = False`），而模块只在服务启动时导入一次。
+# 于是"服务运行中装依赖组件"后，插件页面横幅与 /status 仍报"未安装"，必须重启才刷新
+# ——用户看到的就是"装了却说没装"。这里提供请求期重算：sys.path 里已经有
+# `runtime/pylibs`（app.py:_setup_dep_components 启动时注入），所以新装的组件当场可导入。
+#
+# 纪律：仅标准库；探测失败不抛异常（依赖缺失是正常状态，由调用方按标记分支）。
+
+# 标记名 → import 名（推导不出来的少数几个：变量名与模块名不同）
+_FLAG_ALIASES = {
+    "PDF": "pypdf",        # PDF_AVAILABLE 用的是 pypdf
+    "ZXING": "zxingcpp",   # ZXING_AVAILABLE 用的是 zxingcpp
+    "OPENCV": "cv2",       # 历史命名
+    "PIL": "PIL",
+    "DOCX": "docx",
+}
+
+
+_component_rescanner = None
+
+
+def register_component_rescanner(fn):
+    """主体注册"重新注入依赖组件路径"的回调（app.py 模块加载时调用）。
+
+    为什么需要：`sys.path` / DLL 搜索路径原本只在**服务启动时**注入一次，若 pylibs 目录
+    当时还不存在（首次装组件之前），后装的组件就无法 import —— 判定与功能都会一直显示
+    "未安装"。注册后由本模块在重算标记前调用，装完组件即可生效。
+    """
+    global _component_rescanner
+    _component_rescanner = fn
+
+
+def rescan_components():
+    """调用主体注册的重扫回调（未注册时静默返回）。"""
+    if callable(_component_rescanner):
+        try:
+            return _component_rescanner()
+        except Exception:
+            log.debug("依赖组件重扫失败", exc_info=True)
+    return None
+
+
+def probe_module(name):
+    """实时探测模块能否导入（成功走 sys.modules 缓存；失败不缓存，故装上后即可变 True）。"""
+    if not name:
+        return False
+    try:
+        importlib.import_module(str(name))
+        return True
+    except Exception:
+        return False
+
+
+def flag_import_name(flag, mapping=None):
+    """由 `XXX_AVAILABLE` 推出 import 名（可用 mapping 显式覆盖）。"""
+    if mapping and flag in mapping:
+        return mapping[flag]
+    stem = flag[: -len("_AVAILABLE")] if flag.endswith("_AVAILABLE") else flag
+    return _FLAG_ALIASES.get(stem, stem.lower())
+
+
+def refresh_flags(target, mapping=None):
+    """重算命名空间里 `*_AVAILABLE` 标记中**当前为 False** 的那些；返回翻正的数量。
+
+    target：模块对象或 `globals()` 字典（插件把自己持有标记的模块都传进来即可）。
+    mapping：{标记名: import 名}，用于变量名与模块名不一致的情况。
+    已为 True 的标记不再探测——避免每次请求都做无谓 import。
+    """
+    ns = target if isinstance(target, dict) else getattr(target, "__dict__", None)
+    if not isinstance(ns, dict):
+        return 0
+    pending = [k for k in list(ns.keys()) if k.endswith("_AVAILABLE") and not ns.get(k)]
+    if not pending:
+        return 0
+    rescan_components()          # 可能是"服务运行中刚装上的组件"：先补注入路径再探测
+    changed = 0
+    for flag in pending:
+        if ns.get(flag):
+            continue
+        if probe_module(flag_import_name(flag, mapping)):
+            ns[flag] = True
+            changed += 1
+    return changed
+
+
+def install_refresher(app, *targets, mapping=None):
+    """给插件注册"请求期刷新依赖标记"钩子（一次调用覆盖多个模块）。
+
+    用法（插件 backend/routes.py 的 register() 里）：
+        jz_deps.install_refresher(app, globals(), core)      # 本模块 + 持有标记的其它模块
+    这样"装依赖组件 → 刷新页面即可用"，不必重启服务；插件此前若被门控判为 blocked
+    （未加载路由），仍需重启才能加载。
+    """
+    if app is None or not targets:
+        return
+    def _refresh():                      # pragma: no cover - Flask 钩子
+        for t in targets:
+            try:
+                # 目标可以是模块/globals()，也可以是**返回它们的可调用对象**
+                # （如 admin 的 batch_io 是惰性加载的，注册时还没有模块对象）
+                if callable(t) and not isinstance(t, (dict, types.ModuleType)):
+                    t = t()
+                refresh_flags(t, mapping=mapping)
+            except Exception:            # 刷新失败绝不影响正常请求
+                log.debug("依赖标记刷新失败：%r", t, exc_info=True)
+    app.before_request(_refresh)

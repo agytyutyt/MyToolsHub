@@ -43,28 +43,37 @@ LOG_FILE = os.path.join(LOG_DIR, "access.log")
 
 # 依赖组件包（runtime/pylibs）的 DLL 目录句柄：必须持有引用，否则句柄被 GC 后目录失效
 _DEP_DLL_HANDLES = []
+# 已注入过 DLL 搜索路径的目录（幂等：可重扫，供"服务运行中装组件"后即时生效）
+_DEP_DLL_DIRS = set()
 
 
 def _setup_dep_components():
     """把「依赖组件包」注入 sys.path 与 DLL 搜索路径（设计文档 §3.4 / T25 第 1 步）。
 
     cv2(opencv-python) 与 numpy 不再随主包（压缩后约 60 MB），改由独立组件包按需安装到
-    ``<程序目录>/runtime/pylibs/``。本函数在**模块加载时**执行（早于插件后端导入）：
+    ``<程序目录>/runtime/pylibs/``。本函数在**模块加载时**执行（早于插件后端导入），
+    并在**每次依赖刷新时重入**（`jz_deps.register_component_rescanner`）：
       · 把该目录插入 sys.path 首位 → 插件的 ``import cv2`` 能找到；
       · 每个子目录加入 Windows DLL 搜索路径 → cv2 的 .pyd 能找到同目录 DLL、
         numpy 能找到 ``numpy.libs`` 里的 OpenBLAS（二者必须同装同卸）。
     未安装组件时静默返回（插件侧自行降级并给出"安装依赖组件包"的提示）。
+
+    幂等：sys.path 无条件注入（目录可能"服务运行中才装出来"，不存在的路径条目无害），
+    DLL 目录按已注入集合去重——**装完组件刷新页面即生效，不必重启服务**。
     """
     base = os.path.join(BASE_DIR, "runtime", "pylibs")
-    if not os.path.isdir(base):
-        return []
     if base not in sys.path:
         sys.path.insert(0, base)
+    if not os.path.isdir(base):
+        return []
+    newly = []
     # pylibs 根目录本身也要进 DLL 搜索路径：依赖组件自带的 VC++ 运行时（msvcp140*.dll 等）
     # 就放在根下，不进这一条的话 C 扩展在干净机器上会 "DLL load failed"。
-    if hasattr(os, "add_dll_directory"):
+    if base not in _DEP_DLL_DIRS and hasattr(os, "add_dll_directory"):
         try:
             _DEP_DLL_HANDLES.append(os.add_dll_directory(base))
+            _DEP_DLL_DIRS.add(base)
+            newly.append("(根)")
         except OSError:
             pass
     found = []
@@ -77,12 +86,22 @@ def _setup_dep_components():
         if not os.path.isdir(d):
             continue
         found.append(name)
-        if hasattr(os, "add_dll_directory"):
-            try:
-                _DEP_DLL_HANDLES.append(os.add_dll_directory(d))
-            except OSError:
-                pass
-    if found:
+        if d in _DEP_DLL_DIRS or not hasattr(os, "add_dll_directory"):
+            continue
+        try:
+            _DEP_DLL_HANDLES.append(os.add_dll_directory(d))
+            _DEP_DLL_DIRS.add(d)
+            newly.append(name)
+        except OSError:
+            pass
+    if newly:
+        # ★ 目录可能是"服务运行中才出现"的：必须清掉导入器缓存，否则新装的包在同一进程里
+        #   import 不到——FileFinder 对"当时不存在"的路径会缓存空目录且不重扫（实测踩到）。
+        try:
+            sys.path_importer_cache.pop(base, None)
+            importlib.invalidate_caches()
+        except Exception:                      # 缓存清理失败不影响主流程
+            pass
         log.info("依赖组件已注入：%s（%s）", "、".join(found), base)
     return found
 
@@ -128,6 +147,9 @@ def dep_components_status():
 
 
 _setup_dep_components()
+# 把"重新注入依赖组件路径"注册给判定引擎：jz_deps.refresh_flags 在重算插件标记前会先调用它，
+# 于是"服务运行中装依赖组件 → 刷新页面即可用"（此前必须重启服务才生效）。
+jz_deps.register_component_rescanner(_setup_dep_components)
 
 
 def init_data_root():
@@ -585,6 +607,35 @@ def _resolve_home_card(plugin_id):
         return {}
 
 
+def _refresh_plugin_states():
+    """请求期重算**已加载**插件的依赖状态（只重算当前非 ok 的那些）。
+
+    为什么需要：`_plugin_states` 在启动时算一次；服务运行中装了「依赖组件包」后，
+    插件页面横幅会立刻变好（jz_deps.refresh_flags 实时刷新），但首页卡片/工具列表
+    若继续用启动时的结论，就会一边显示"功能降级"一边功能可用——自相矛盾。
+    blocked 的插件仍以启动结论为准（它们**没被加载**，装依赖后必须重启才能加载路由）。
+    """
+    manifests = None
+    for pid, st in list(_plugin_states.items()):
+        if not st or st.get("status") == "ok" or st.get("status") == "blocked":
+            continue
+        # 注：blocked 的插件在启动时就**没有加载路由**（上面已跳过），装依赖后必须重启
+        # 才能让路由生效，故不在这里重算。
+        if manifests is None:
+            manifests = load_manifests()
+        manifest = manifests.get(pid) or {}
+        plugin_dir = get_plugin_dir(pid)
+        if not plugin_dir or not manifest:
+            continue
+        _vj = jz_deps.read_version_json(BASE_DIR)
+        verdict = jz_deps.evaluate(pid, plugin_dir, manifest, app_dir=BASE_DIR,
+                                   app_version=_vj.get("app"), plugin_api=_vj.get("plugin_api"))
+        if verdict["status"] != st.get("status"):
+            log.info("插件 %s 依赖状态刷新：%s → %s", pid, st.get("status"), verdict["status"])
+            _plugin_states[pid] = {"status": verdict["status"], "missing": verdict["missing"],
+                                   "degraded": verdict.get("degraded", []), "reason": verdict.get("reason", "")}
+
+
 def get_aggregated_tools():
     """聚合后台配置与插件清单，生成前端可用的工具列表。
 
@@ -840,6 +891,7 @@ def plugin_assets(plugin_id, filename):
 
 @app.route("/api/tools")
 def api_tools():
+    _refresh_plugin_states()          # 装依赖组件后无需重启：降级标记实时纠正
     registry = load_registry()
     categories = [c for c in registry.get("categories", []) if c.get("enabled", True)]
     return jsonify({

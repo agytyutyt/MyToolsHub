@@ -187,13 +187,16 @@ if ($NoZip) {
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-# ★ 用 .NET ZipFile 而非 Compress-Archive：后者在 PS 5.1 下按系统代码页写条目名，
-#   中文文件名（JZToolsHub-插件-<id>-v<版本>.zip）会被别的解压工具读成乱码，
-#   导致 -Set 找不到包。这里显式用 UTF-8 写条目名（Windows 资源管理器 / .NET / Python 均可正确读取）。
+# ★ 用 .NET ZipFile 的 4 参重载（不传编码）：默认按 UTF-8 写条目名，并对非 ASCII 名置
+#   UTF-8 标志位（bit 11）——中文文件名（JZToolsHub-插件-<id>-v<版本>.zip）在资源管理器 /
+#   7-Zip / Python 里都能正确显示。若显式传 UTF8Encoding，.NET 反而**不置标志位**，
+#   在中文系统上会被按 GBK 解码成乱码。
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+# ★ 不要传 entryNameEncoding：显式传编码时 .NET **不会**给非 ASCII 条目名写 UTF-8 标志位
+#   （bit 11），Windows 资源管理器 / 7-Zip / Python 会按系统代码页解码 → 中文名乱码。
+#   不传编码时 .NET 默认 UTF-8 且按需置标志位（与 build-plugin-package.ps1 一致）。
 [System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $staging, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false,
-    (New-Object System.Text.UTF8Encoding($false)))
+    $staging, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
 $setSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLower()
 Write-Utf8NoBom "$zipPath.sha256" ("{0}  {1}`n" -f $setSha, (Split-Path -Leaf $zipPath))
 

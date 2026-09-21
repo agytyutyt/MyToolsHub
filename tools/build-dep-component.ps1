@@ -307,9 +307,11 @@ $zipPath = Join-Path $OutDir ("JZToolsHub-依赖-{0}-v{1}.zip" -f $Id, $Version)
 if ((Test-Path -LiteralPath $zipPath) -and -not $Force) { Die "产物已存在：$zipPath（加 -Force 覆盖）" }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+# ★ 不要传 entryNameEncoding：显式传编码时 .NET **不会**给非 ASCII 条目名写 UTF-8 标志位
+#   （bit 11），Windows 资源管理器 / 7-Zip / Python 会按系统代码页解码 → 中文名乱码。
+#   不传编码时 .NET 默认 UTF-8 且按需置标志位（与 build-plugin-package.ps1 一致）。
 [System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $staging, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false,
-    (New-Object System.Text.UTF8Encoding($false)))
+    $staging, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
 $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLower()
 Write-Utf8NoBom "$zipPath.sha256" ("{0}  {1}`n" -f $sha, (Split-Path -Leaf $zipPath))
 

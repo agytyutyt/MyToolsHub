@@ -26,6 +26,7 @@ from flask import jsonify, request, send_file
 # 插件之间零依赖；admin 未加载时自动降级为「未登录 / 空操作」）。
 # 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
 import jz_api
+import jz_deps
 
 _get_session_user = jz_api.get_session_user
 _set_operation = jz_api.set_operation
@@ -200,6 +201,9 @@ def _report_filename() -> str:
 # --------------------------------------------------------------------------
 
 def register(app):
+    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
+    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
+    jz_deps.install_refresher(app, globals(), excel_io, filter_bridge)
     global _app_ref
     _app_ref = app
 

@@ -21,6 +21,7 @@
 # 插件之间零依赖；admin 未加载时自动降级为「未登录 / 空操作」）。
 # 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
 import jz_api
+import jz_deps
 
 get_session_user = jz_api.get_session_user
 
@@ -723,6 +724,9 @@ def _run_convert(task_id, filename, file_bytes, interval_minutes, qr_version, cf
 
 def register(app) -> None:
     """插件入口：由 JZToolsHub 主应用在启动时调用。"""
+    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
+    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
+    jz_deps.install_refresher(app, globals())
 
     @app.get(f"{API_PREFIX}/config")
     def tc_config():

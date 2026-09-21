@@ -32,6 +32,7 @@ from flask import g, jsonify, redirect, request, send_from_directory, session, u
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import jz_api
+import jz_deps
 import jztools_data
 # 会话超时默认值（config/admin.json 的 session 节可覆盖）
 SESSION_IDLE_MINUTES = 30    # 空闲超时：连续这么久没有任何请求，自动登出
@@ -751,6 +752,9 @@ def _maybe_auto_restart(report, needed=None, auto=True):
 
 def register(app):
     """挂载管理后台：会话密钥、鉴权、后台页面与接口。由 register_plugin_backends 调用。"""
+    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
+    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
+    jz_deps.install_refresher(app, globals(), _load_batch_io)
 
     # 会话密钥：首次启动生成并持久化于 config/admin.json，重启后会话保持有效
     ensure_admin_config()
