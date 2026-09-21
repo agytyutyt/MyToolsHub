@@ -599,9 +599,13 @@
       const [cls, label] = SCAN_STATUS[r.status] || ['', r.status];
       const kind = r.kind === 'component' ? '<span class="plugin-chip">依赖组件</span>'
                                           : '<span class="plugin-chip">插件</span>';
+      // data-* 供"逐项安装进度"显示用（名称/版本/类型），不必再问服务端
+      const dataAttrs = `data-path="${esc(r.path)}" data-kind="${esc(r.kind)}" data-id="${esc(r.id)}"`
+        + ` data-name="${esc(r.name || '')}" data-version="${esc(r.version)}"`
+        + ` data-installed="${esc(r.installed || '')}"`;
       const pick = r.status === 'install'
-        ? `<input type="checkbox" data-path="${esc(r.path)}" checked>`
-        : `<input type="checkbox" data-path="${esc(r.path)}" disabled>`;
+        ? `<input type="checkbox" ${dataAttrs} checked>`
+        : `<input type="checkbox" ${dataAttrs} disabled>`;
       const extra = (r.requires_components && r.requires_components.length)
         ? `<div class="dep-path">需同时装：${esc(r.requires_components.join('、'))}</div>` : '';
       return `<tr>
@@ -648,43 +652,125 @@
     }
   }
 
+  /* 一键安装的**逐项进度**：一次装一个包，实时显示
+       ⬜ 待安装 / ⏳ 正在安装 / ✅ 已安装 / ❌ 失败 / ⏭ 未完成（跳过或停止）
+     逐项而不是一次请求装完：后者只有"安装中…"和最终汇总，看不到装到哪个了；
+     逐项还让"失败/停止"不影响已装好的那些（服务端本就是逐项独立安装）。 */
+  function installProgressHtml(picks, st) {
+    const total = picks.length;
+    const doneN = Object.keys(st.done).length;
+    const failN = Object.keys(st.failed).length;
+    const finished = doneN + failN;
+    const pct = total ? Math.round((finished / total) * 100) : 0;
+    const rows = picks.map((p, i) => {
+      const label = p.kind === 'component'
+        ? `依赖组件 <code>${esc(p.id)}</code>`
+        : `插件 <code>${esc(p.id)}</code> <span class="dep-path">${esc(p.name || '')}</span>`;
+      const ver = p.kind === 'component'
+        ? `v${esc(p.version || '')}`
+        : `${esc(p.installed || '（未安装）')} → ${esc(p.version || '')}`;
+      let mark, cls = '', note = '';
+      if (st.done[i]) {
+        mark = '✅ 已安装'; cls = 'ok';
+        const r = st.done[i];
+        const bits = [];
+        if (r.files_written) bits.push(`写入 ${r.files_written} 个文件`);
+        if (r.files_removed) bits.push(`清理旧版 ${r.files_removed} 项`);
+        if (r.requires_components_missing && r.requires_components_missing.length) {
+          bits.push(`还需安装：${r.requires_components_missing.join('、')}`);
+        }
+        note = bits.join('；');
+      } else if (st.failed[i]) {
+        mark = '❌ 失败'; cls = 'bad'; note = st.failed[i];
+      } else if (st.skipped[i]) {
+        mark = '⏭ 未完成'; cls = 'warn'; note = st.cancelled ? '已停止，未执行' : '未执行';
+      } else if (st.running === i) {
+        mark = '⏳ 正在安装…'; cls = 'warn';
+      } else {
+        mark = '⬜ 待安装';
+      }
+      return `<tr>
+        <td><span class="plugin-chip ${cls}">${mark}</span></td>
+        <td>${label}</td>
+        <td>${ver}</td>
+        <td class="dep-cell"><div class="dep-cell-inner">${esc(note)}</div></td>
+      </tr>`;
+    }).join('');
+    const running = st.running >= 0 && picks[st.running]
+      ? `正在安装：<b>${esc(picks[st.running].id)}</b>` : (finished < total ? '准备中…' : '已全部处理完');
+    const stopBtn = (!st.cancelled && finished < total)
+      ? `<button type="button" class="admin-btn small" id="btn-install-stop">停止（剩余标为未完成）</button>` : '';
+    const restartBtn = (st.needRestart && !st.restarted)
+      ? `<button type="button" class="admin-btn primary small" id="btn-install-restart">立即重启服务生效</button>` : '';
+    return `<div class="plugin-plan install-progress">
+      <div class="plugin-plan-line">进度：<b>${finished}/${total}</b>（成功 ${doneN}，失败 ${failN}）　${running}</div>
+      <div class="install-bar"><span style="width:${pct}%"></span></div>
+      <table class="data-table">
+        <thead><tr><th>状态</th><th>包</th><th>版本</th><th>说明</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="form-row" style="margin-top:12px">${stopBtn}${restartBtn}</div>
+      <p class="admin-hint">依赖组件装完即生效（无需重启）；插件含后端改动时需重启服务，装完点上面的按钮即可。</p>
+    </div>`;
+  }
+
   function installScanned() {
-    const paths = Array.from(document.querySelectorAll('#scan-result input[type=checkbox]:checked:not(:disabled)'))
-      .map(c => c.getAttribute('data-path'));
-    if (!paths.length) { showToast('请勾选要安装的包', true); return; }
+    const picks = Array.from(document.querySelectorAll('#scan-result input[type=checkbox]:checked:not(:disabled)'))
+      .map(c => ({
+        path: c.getAttribute('data-path'), kind: c.getAttribute('data-kind'),
+        id: c.getAttribute('data-id'), name: c.getAttribute('data-name'),
+        version: c.getAttribute('data-version'), installed: c.getAttribute('data-installed'),
+      }));
+    if (!picks.length) { showToast('请勾选要安装的包', true); return; }
     const force = !!(document.getElementById('opt-scan-force') || {}).checked;
     const dir = document.getElementById('scan-dir').value.trim();
-    confirmDialog(`将安装 ${paths.length} 个包（依赖组件立即生效；插件含后端改动会自动重启服务）。`, async () => {
+    confirmDialog(`将依次安装 ${picks.length} 个包（依赖组件先装、立即生效；插件含后端改动时最后统一重启）。`
+      + '安装过程中可随时停止，剩余项会标为「未完成」。', async () => {
       const box = document.getElementById('scan-result');
-      box.innerHTML = '<div class="plugin-plan-line">安装中…</div>';
-      try {
-        const res = await api('/api/admin/packages/install', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paths, dir, force }),
-        });
-        const lines = (res.results || []).map(r => {
-          const label = r.kind === 'component'
-            ? `依赖组件 ${esc(r.id)} v${esc(r.version || '')}`
-            : `${esc(nm(r.id, r.name))}（${esc(r.id)}）${esc(r.from_version || '（未安装）')} → ${esc(r.version || '')}`;
-          if (!r.ok) return `<div class="plugin-plan-line warn">❌ ${label}：${esc(r.error || '失败')}</div>`;
-          const extra = (r.requires_components_missing && r.requires_components_missing.length)
-            ? `（还需安装：${esc(r.requires_components_missing.join('、'))}）` : '';
-          return `<div class="plugin-plan-line">✅ ${label}${extra}</div>`;
-        }).join('');
-        const rejected = (res.rejected || []).length
-          ? `<div class="plugin-plan-line warn">${res.rejected.length} 个包不在扫描结果里，已跳过（请重新扫描）。</div>` : '';
-        box.innerHTML = `<div class="plugin-plan">${lines}${rejected}
-          <div class="plugin-plan-line">完成：成功 ${res.installed}，失败 ${res.failed}。</div></div>`;
-        showToast(`安装完成：成功 ${res.installed}，失败 ${res.failed}`);
-        if (res.restarting) { waitAndReload(); return; }
-        load();                       // 刷新插件盘点
-        if (!document.getElementById('deps-panel').hidden) loadInstalledDeps();
-        if (res.needs_restart) showToast('有插件含后端改动，需重启服务后生效', true);
-      } catch (err) {
-        box.innerHTML = `<div class="plugin-plan-line warn">安装失败：${esc(err.message)}</div>`;
-        showToast('安装失败', true);
+      const st = { done: {}, failed: {}, skipped: {}, running: -1, cancelled: false, needRestart: false, restarted: false };
+      const bind = () => {
+        const stop = document.getElementById('btn-install-stop');
+        if (stop) stop.addEventListener('click', () => { st.cancelled = true; render(); showToast('已请求停止，当前项装完后停止'); });
+        const rs = document.getElementById('btn-install-restart');
+        if (rs) rs.addEventListener('click', restartNow);
+      };
+      const render = () => { box.innerHTML = installProgressHtml(picks, st); bind(); };
+      render();
+      for (let i = 0; i < picks.length; i++) {
+        if (st.cancelled) { for (let j = i; j < picks.length; j++) st.skipped[j] = true; break; }
+        st.running = i; render();
+        try {
+          // auto_restart:false —— 逐项安装期间不重启，避免打断后续项；装完由按钮统一重启
+          const res = await api('/api/admin/packages/install', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paths: [picks[i].path], dir, force, auto_restart: false }),
+          });
+          const r = (res.results || [])[0] || {};
+          if (r.ok) { st.done[i] = r; } else { st.failed[i] = r.error || '失败'; }
+          if (res.needs_restart) st.needRestart = true;
+        } catch (err) {
+          st.failed[i] = err.message || '请求失败';
+        }
+        st.running = -1; render();
       }
+      const doneN = Object.keys(st.done).length, failN = Object.keys(st.failed).length;
+      showToast(`安装完成：成功 ${doneN}，失败 ${failN}`);
+      load();                       // 刷新插件盘点
+      if (!document.getElementById('deps-panel').hidden) loadInstalledDeps();
+      if (st.needRestart) showToast('有插件含后端改动：点「立即重启服务生效」后才会加载', true);
     });
+  }
+
+  /* 立即重启服务（与页面顶部"立即重启"同一接口，成功后轮询等待并刷新） */
+  async function restartNow() {
+    try {
+      const res = await api('/api/admin/plugins/restart', { method: 'POST' });
+      if (res.ok) { showToast(res.message || '服务正在重启…'); waitAndReload(); }
+      else { showToast(res.message || res.error || '未能自动重启', true); }
+    } catch (err) {
+      showToast('服务正在重启，稍后刷新页面…');
+      waitAndReload();
+    }
   }
 
   async function checkUpdates() {

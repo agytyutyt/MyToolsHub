@@ -788,6 +788,18 @@ select.admin-input {
 .dep-badge.warn { background: #FEF7E0; color: #B06000; }
 /* 来源标记：随主包 / 依赖组件（cv2、numpy 等单独安装的包） */
 .dep-badge.src  { background: #E8F0FE; color: #1967D2; }
+
+/* 一键扫描安装的逐项进度条（见 admin-plugins.js installProgressHtml） */
+.install-progress .install-bar {
+  height: 6px; border-radius: 3px; background: #EEF1F5; overflow: hidden; margin: 6px 0 12px;
+}
+.install-progress .install-bar > span {
+  display: block; height: 100%; background: #4285F4; border-radius: 3px;
+  transition: width .25s ease;
+}
+.install-progress .data-table td { vertical-align: top; }
+.install-progress .plugin-chip.ok  { background: #E6F4EA; color: #137333; }
+.install-progress .plugin-chip.bad { background: #FCE8E6; color: #C5221F; }
 .dep-none { color: #9AA0A6; font-size: 12px; }
 .dep-ver  { color: #5F6368; font-size: 12px; }
 .dep-path { color: #9AA0A6; font-size: 12px; margin-left: 6px; }
