@@ -114,7 +114,8 @@ if (-not (Test-Path -LiteralPath $target)) { Warn "程序目录不存在（可�
 #  2. 干净度核查（-VerifyOnly 时只做这一步）
 # ============================================================================
 function Invoke-CleanCheck {
-    Head "干净度核查（对齐验收手册 §1）"
+    param([string]$Mode = "Full")
+    Head ("干净度核查（对齐验收手册 §1；Scope={0}）" -f $Mode)
     # 2.1 系统级：这两项决定"能不能验出缺运行库/缺 Python 类问题"
     $msvcp = Test-Path -LiteralPath (Join-Path $env:WINDIR "System32\msvcp140.dll")
     $hasPy = [bool](Get-Command python -ErrorAction SilentlyContinue)
@@ -123,15 +124,26 @@ function Invoke-CleanCheck {
     Say ("  {0} 目标机是否装了 Python：{1}" -f $(if ($hasPy) { "[i]" } else { "[OK]" }), $hasPy)
 
     # 2.2 产品痕迹：目录 / 注册表 / 快捷方式 / 进程
-    if (Test-Path -LiteralPath $target)  { Left "程序目录仍在：$target" }
+    # ★ 按模式核查：-Scope Deps 只负责依赖组件，程序目录/数据根等是**有意保留**的，
+    #   不能算残留（否则退出码会误报 1，脚本没法用于自动化）。
+    $depsOnly = ($Mode -eq "Deps")
     if (Test-Path -LiteralPath $pylibs)  { Left "依赖组件仍在：$pylibs" }
-    if (Test-Path -LiteralPath $data)    { Left "数据根仍在：$data" }
-    if (Test-Path -LiteralPath $Pointer) { Left "数据根指针仍在：$Pointer" }
-    if (Test-Path $RegKey)               { Left "注册表卸载项仍在：$RegKey" }
-    $links = @((Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"))
-    $desktop = [Environment]::GetFolderPath("Desktop")
-    if (-not [string]::IsNullOrWhiteSpace($desktop)) { $links += (Join-Path $desktop "$AppName.lnk") }
-    foreach ($l in $links) { if (Test-Path -LiteralPath $l) { Left "快捷方式仍在：$l" } }
+    else { Say "  [OK] 依赖组件已清空（runtime\pylibs 不存在）" }
+    if ($depsOnly) {
+        foreach ($x in @($target, $data, $Pointer)) {
+            if (Test-Path -LiteralPath $x) { Say ("  [i] 本模式保留：{0}" -f $x) }
+        }
+        if (Test-Path $RegKey) { Say "  [i] 本模式保留：注册表卸载项" }
+    } else {
+        if (Test-Path -LiteralPath $target)  { Left "程序目录仍在：$target" }
+        if (Test-Path -LiteralPath $data)    { Left "数据根仍在：$data" }
+        if (Test-Path -LiteralPath $Pointer) { Left "数据根指针仍在：$Pointer" }
+        if (Test-Path $RegKey)               { Left "注册表卸载项仍在：$RegKey" }
+        $links = @((Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\$AppName.lnk"))
+        $desktop = [Environment]::GetFolderPath("Desktop")
+        if (-not [string]::IsNullOrWhiteSpace($desktop)) { $links += (Join-Path $desktop "$AppName.lnk") }
+        foreach ($l in $links) { if (Test-Path -LiteralPath $l) { Left "快捷方式仍在：$l" } }
+    }
     if (@(Get-Process -Name $AppName -ErrorAction SilentlyContinue).Count -gt 0) { Left "服务进程仍在运行" }
 
     # 2.3 常见的"测试残渣"（不影响判定，但会干扰下一轮；只提示不阻断）
@@ -141,7 +153,11 @@ function Invoke-CleanCheck {
 
     Say ""
     if ($script:Leftovers.Count -eq 0) {
-        Write-Host "  结论：本机已回到「干净机」状态，可直接开始下一轮验收。" -ForegroundColor Green
+        if ($depsOnly) {
+            Write-Host "  结论：依赖组件已清空（程序与数据按 -Scope Deps 保留），可重新测「装依赖组件」这一段。" -ForegroundColor Green
+        } else {
+            Write-Host "  结论：本机已回到「干净机」状态，可直接开始下一轮验收。" -ForegroundColor Green
+        }
         return $true
     }
     Write-Host ("  结论：仍有 {0} 处残留（见上），验收前请处理。" -f $script:Leftovers.Count) -ForegroundColor Red
@@ -149,7 +165,7 @@ function Invoke-CleanCheck {
 }
 
 if ($VerifyOnly) {
-    $clean = Invoke-CleanCheck
+    $clean = Invoke-CleanCheck -Mode $Scope
     exit $(if ($clean) { 0 } else { 1 })
 }
 
@@ -228,7 +244,7 @@ foreach ($it in $items) {
 # ============================================================================
 #  5. 清理后核查 + 下一轮提示
 # ============================================================================
-$clean = Invoke-CleanCheck
+$clean = Invoke-CleanCheck -Mode $Scope
 if ($clean) {
     Say ""
     Say "  下一轮验收（详见 docs\guide\干净机器部署验收手册.md）："
