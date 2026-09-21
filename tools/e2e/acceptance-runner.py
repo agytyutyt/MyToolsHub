@@ -29,7 +29,11 @@ import time
 import urllib.error
 import urllib.request
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if getattr(sys, "frozen", False):
+    # 打包成 exe 后：以 exe 所在目录为根（测试数据 testdata\ 放在它旁边）
+    ROOT = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ============================== 用例注册表 ==============================
 
@@ -548,13 +552,38 @@ def r02(cl, ctx):
 @case("R-06", "R", "--check-deps 真实 import 自检", needs=("app_dir",))
 def r06(cl, ctx):
     import subprocess
+    import tempfile
     exe = os.path.join(ctx["app_dir"], "JZToolsHub.exe")
     need(os.path.isfile(exe), "程序目录里没有 JZToolsHub.exe：%s" % exe)
-    out = os.path.join(ROOT, "build", "_acceptance-checkdeps.json")
+    out = os.path.join(tempfile.gettempdir(), "jz-acceptance-checkdeps.json")
     if os.path.isfile(out):
         os.remove(out)
-    subprocess.run([exe, "--check-deps", out], timeout=180, capture_output=True)
-    need(os.path.isfile(out), "自检未产出结果文件")
+    # ★ 用 Popen + 轮询而不是 subprocess.run(timeout)：旧版主包的 exe **不认识 --check-deps**，
+    #   会把这次调用当成"启动服务"并一直运行——必须主动收掉，避免在目标机上留下一个服务进程。
+    proc = subprocess.Popen([exe, "--check-deps", out],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    t0 = time.time()
+    while time.time() - t0 < 120:
+        if os.path.isfile(out) and os.path.getsize(out) > 0:
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.5)
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+    if not os.path.isfile(out):
+        ver = ""
+        try:
+            vj = json.load(open(os.path.join(ctx["app_dir"], "version.json"), encoding="utf-8-sig"))
+            ver = "（该目录 version.json: app %s）" % vj.get("app")
+        except Exception:
+            pass
+        raise AssertionError("该程序目录的 exe 不支持 --check-deps 或未产出结果%s"
+                            "——疑似旧版主包，请用本批主包验收" % ver)
     js = json.load(open(out, encoding="utf-8-sig"))
     imports = js.get("imports") or {}
     if not imports or not js.get("components"):
@@ -661,6 +690,27 @@ def x03(cl, ctx):
 
 # ============================== 运行器 ==============================
 
+def detect_app_dir():
+    """自动探测程序目录：注册表 InstallLocation → %LOCALAPPDATA%\\JZToolsHub（与安装器同口径）。
+
+    这样在目标机上跑 R-06（--check-deps 自检）不必让执行人知道程序装在哪。
+    """
+    import subprocess
+    try:
+        out = subprocess.run(["reg", "query",
+                              "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\JZToolsHub",
+                              "/v", "InstallLocation"], capture_output=True, timeout=20)
+        m = re.search(r"InstallLocation\s+REG_SZ\s+(.+)", out.stdout.decode("gbk", "replace"))
+        if m:
+            p = m.group(1).strip()
+            if os.path.isfile(os.path.join(p, "JZToolsHub.exe")):
+                return p
+    except Exception:
+        pass
+    cand = os.path.join(os.environ.get("LOCALAPPDATA", ""), "JZToolsHub")
+    return cand if os.path.isfile(os.path.join(cand, "JZToolsHub.exe")) else ""
+
+
 def main():
     ap = argparse.ArgumentParser(description="自动验收：跑可 HTTP 驱动的用例")
     ap.add_argument("--base", default="http://127.0.0.1:5000")
@@ -668,7 +718,7 @@ def main():
     ap.add_argument("--password", default="admin123")
     ap.add_argument("--user2", default="", help="普通账号（跑 S-02）")
     ap.add_argument("--password2", default="")
-    ap.add_argument("--testdata", default=os.path.join(ROOT, "testdata"))
+    ap.add_argument("--testdata", default="", help="测试数据目录（缺省：exe 旁的 testdata\\，再退回仓库）")
     ap.add_argument("--app-dir", default="", help="程序目录（跑 R-06 --check-deps）")
     ap.add_argument("--media", default="", help="插件包目录（跑 S-01 篡改包）")
     ap.add_argument("--groups", default="", help="只跑指定组，如 F,R（逗号分隔）")
@@ -676,7 +726,18 @@ def main():
     ap.add_argument("--timeout", type=int, default=600)
     args = ap.parse_args()
 
-    ctx = {"base": args.base, "testdata": args.testdata, "app_dir": args.app_dir,
+    testdata = args.testdata
+    if not testdata:
+        for cand in (os.path.join(ROOT, "testdata"), os.path.join(os.getcwd(), "testdata")):
+            if os.path.isdir(cand):
+                testdata = cand
+                break
+        testdata = testdata or os.path.join(ROOT, "testdata")
+    app_dir = args.app_dir or detect_app_dir()
+    print("测试数据：%s" % testdata)
+    if app_dir:
+        print("程序目录（自动探测）：%s" % app_dir)
+    ctx = {"base": args.base, "testdata": testdata, "app_dir": app_dir,
            "media": args.media, "user2": args.user2, "password2": args.password2,
            "timeout": args.timeout}
     groups = [g.strip().upper() for g in args.groups.split(",") if g.strip()]
@@ -726,7 +787,7 @@ def main():
     if args.report:
         lines = ["# 自动验收报告", "",
                  "- 实例：`%s`" % args.base,
-                 "- 测试数据：`%s`" % args.testdata,
+                 "- 测试数据：`%s`" % ctx["testdata"],
                  "- 时间：%s" % time.strftime("%Y-%m-%d %H:%M:%S"),
                  "- 结果：**通过 %d / 失败 %d / 跳过 %d**" % (npass, nfail, nskip), "",
                  "| 用例 | 组 | 结果 | 说明 |", "| --- | --- | --- | --- |"]
