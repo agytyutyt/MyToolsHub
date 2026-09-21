@@ -574,6 +574,119 @@
       </div>`;
   }
 
+  /* ---------------- 一键扫描安装（插件包 / 依赖组件包） ----------------
+     场景：离线部署时介质解压在某目录里，逐个双击安装太繁琐。扫描是只读的；
+     安装按包类型分流（插件包走 inspect/apply，组件包走 install_component_package）。 */
+  const SCAN_STATUS = {
+    install:   ['ok', '可安装'],
+    uptodate:  ['', '已是最新'],
+    downgrade: ['warn', '本机版本更高'],
+    abi:       ['warn', '不适用'],
+    unknown:   ['warn', '无法判定'],
+  };
+
+  function scanHtml(res) {
+    const rows = res.items || [];
+    if (!rows.length) {
+      const dirs = (res.default_dirs || []).map(esc).join('、');
+      return `<div class="plugin-plan-line">未找到插件包或依赖组件包。
+        <div class="plugin-plan-files">扫过的目录：${dirs || '（无）'}<br>
+        包名需形如 <code>JZToolsHub-插件-&lt;id&gt;-v&lt;版本&gt;.zip</code> 或
+        <code>JZToolsHub-依赖-&lt;id&gt;-v&lt;版本&gt;.zip</code>。</div></div>`;
+    }
+    const actionable = rows.filter(r => r.status === 'install');
+    const trs = rows.map(r => {
+      const [cls, label] = SCAN_STATUS[r.status] || ['', r.status];
+      const kind = r.kind === 'component' ? '<span class="plugin-chip">依赖组件</span>'
+                                          : '<span class="plugin-chip">插件</span>';
+      const pick = r.status === 'install'
+        ? `<input type="checkbox" data-path="${esc(r.path)}" checked>`
+        : `<input type="checkbox" data-path="${esc(r.path)}" disabled>`;
+      const extra = (r.requires_components && r.requires_components.length)
+        ? `<div class="dep-path">需同时装：${esc(r.requires_components.join('、'))}</div>` : '';
+      return `<tr>
+        <td>${pick}</td>
+        <td>${kind}</td>
+        <td><code>${esc(r.id)}</code><div class="dep-path">${esc(r.name || '')}</div></td>
+        <td>${esc(r.version)}</td>
+        <td>${esc(r.installed || '—')}</td>
+        <td><span class="plugin-chip ${cls}">${esc(label)}</span>
+            <div class="dep-path">${esc(r.reason || '')}${extra}</div></td>
+      </tr>`;
+    }).join('');
+    return `<div class="plugin-plan">
+      <div class="plugin-plan-line">扫描完成：共 ${rows.length} 个包，其中 <b>${actionable.length}</b> 个可安装。</div>
+      <table class="data-table">
+        <thead><tr><th></th><th>类型</th><th>包</th><th>包版本</th><th>本机版本</th><th>状态</th></tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+      <div class="form-row" style="margin-top:12px">
+        <button type="button" class="admin-btn primary" id="btn-scan-install"
+                ${actionable.length ? '' : 'disabled'}>安装勾选的 ${actionable.length} 个包</button>
+        <label class="admin-hint"><input type="checkbox" id="opt-scan-force"> 强制（同版本重装 / 降级 / 越过版本区间）</label>
+      </div>
+      <p class="admin-hint">依赖组件装完即生效（无需重启）；插件包含后端改动时会在装完后自动重启服务。</p>
+    </div>`;
+  }
+
+  async function scanPackages() {
+    const dir = document.getElementById('scan-dir').value.trim();
+    const box = document.getElementById('scan-result');
+    box.innerHTML = '<div class="plugin-plan-line">扫描中…</div>';
+    try {
+      const res = await api('/api/admin/packages/scan', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dir }),
+      });
+      box.innerHTML = scanHtml(res);
+      const btn = document.getElementById('btn-scan-install');
+      if (btn) btn.addEventListener('click', installScanned);
+      showToast(`扫描完成：${(res.items || []).length} 个包`);
+    } catch (err) {
+      box.innerHTML = `<div class="plugin-plan-line warn">扫描失败：${esc(err.message)}</div>`;
+      showToast('扫描失败', true);
+    }
+  }
+
+  function installScanned() {
+    const paths = Array.from(document.querySelectorAll('#scan-result input[type=checkbox]:checked:not(:disabled)'))
+      .map(c => c.getAttribute('data-path'));
+    if (!paths.length) { showToast('请勾选要安装的包', true); return; }
+    const force = !!(document.getElementById('opt-scan-force') || {}).checked;
+    const dir = document.getElementById('scan-dir').value.trim();
+    confirmDialog(`将安装 ${paths.length} 个包（依赖组件立即生效；插件含后端改动会自动重启服务）。`, async () => {
+      const box = document.getElementById('scan-result');
+      box.innerHTML = '<div class="plugin-plan-line">安装中…</div>';
+      try {
+        const res = await api('/api/admin/packages/install', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths, dir, force }),
+        });
+        const lines = (res.results || []).map(r => {
+          const label = r.kind === 'component'
+            ? `依赖组件 ${esc(r.id)} v${esc(r.version || '')}`
+            : `${esc(nm(r.id, r.name))}（${esc(r.id)}）${esc(r.from_version || '（未安装）')} → ${esc(r.version || '')}`;
+          if (!r.ok) return `<div class="plugin-plan-line warn">❌ ${label}：${esc(r.error || '失败')}</div>`;
+          const extra = (r.requires_components_missing && r.requires_components_missing.length)
+            ? `（还需安装：${esc(r.requires_components_missing.join('、'))}）` : '';
+          return `<div class="plugin-plan-line">✅ ${label}${extra}</div>`;
+        }).join('');
+        const rejected = (res.rejected || []).length
+          ? `<div class="plugin-plan-line warn">${res.rejected.length} 个包不在扫描结果里，已跳过（请重新扫描）。</div>` : '';
+        box.innerHTML = `<div class="plugin-plan">${lines}${rejected}
+          <div class="plugin-plan-line">完成：成功 ${res.installed}，失败 ${res.failed}。</div></div>`;
+        showToast(`安装完成：成功 ${res.installed}，失败 ${res.failed}`);
+        if (res.restarting) { waitAndReload(); return; }
+        load();                       // 刷新插件盘点
+        if (!document.getElementById('deps-panel').hidden) loadInstalledDeps();
+        if (res.needs_restart) showToast('有插件含后端改动，需重启服务后生效', true);
+      } catch (err) {
+        box.innerHTML = `<div class="plugin-plan-line warn">安装失败：${esc(err.message)}</div>`;
+        showToast('安装失败', true);
+      }
+    });
+  }
+
   async function checkUpdates() {
     const path = document.getElementById('index-path').value.trim();
     if (!path) { showToast('请填写索引文件路径', true); return; }
@@ -665,6 +778,10 @@
     document.getElementById('btn-deps').addEventListener('click', loadInstalledDeps);
     document.getElementById('btn-align').addEventListener('click', alignAll);
     document.getElementById('btn-check').addEventListener('click', checkUpdates);
+    document.getElementById('btn-scan').addEventListener('click', scanPackages);
+    document.getElementById('scan-dir').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); scanPackages(); }
+    });
     document.getElementById('index-path').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); checkUpdates(); }
     });

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>插件管理 · 管理后台</title>
   <link rel="stylesheet" href="/static/css/style.css?v=14">
-  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=23">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=24">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
 </head>
 <body>
@@ -111,6 +111,26 @@
         </label>
       </div>
       <div id="inspect-result"></div>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>一键扫描安装（插件包 / 依赖组件包）</h3>
+      <p class="settings-desc">
+        指向离线介质解压后的目录（内含 <code>JZToolsHub-插件-*.zip</code> 与
+        <code>JZToolsHub-依赖-*.zip</code>；留空则扫描程序目录、上级目录、桌面与下载）。
+        扫描只读目录、不解压、不写盘；安装按包类型走各自既有流程——
+        插件包：校验 → 备份 → 替换 → 登记（可回滚）；依赖组件包：按组件装入
+        <code>runtime\pylibs</code>，装完即生效、<b>无需重启</b>。
+      </p>
+      <div class="settings-form">
+        <label for="scan-dir">介质目录</label>
+        <div class="form-row">
+          <input type="text" id="scan-dir" class="admin-input"
+                 placeholder="留空 = 程序目录 / 上级目录 / 桌面 / 下载">
+          <button type="button" class="admin-btn primary" id="btn-scan">扫描</button>
+        </div>
+      </div>
+      <div id="scan-result"></div>
     </div>
 
     <div class="settings-card wide">

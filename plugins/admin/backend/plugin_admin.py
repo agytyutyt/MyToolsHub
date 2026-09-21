@@ -1211,3 +1211,325 @@ def batch_apply(base_dir, data_root, index_path, ids, verify_hash=True):
         "applied": sum(1 for r in results if r.get("ok")),
         "failed": sum(1 for r in results if not r.get("ok")),
     }
+
+
+# ==================== 一键扫描安装（插件包 / 依赖组件包） ====================
+# 场景：目标机离线部署时，介质（插件包、依赖组件包）解压在某目录里，逐个双击安装很繁琐。
+# 这里让后台直接扫描目录 → 列出可安装项（含版本比对与 ABI 判定）→ 一键装齐。
+#   · 插件包：复用 inspect_package / apply_package（校验、备份、登记、可回滚全走同一条路）
+#   · 依赖组件包：Python 侧按 install-dep-component.ps1 同口径实现
+#     （按组件清理旧文件 → 覆盖解压 payload → 合并 pylibs/manifest.json → 清空目录），
+#     装完由主体在下次请求时自动补注入 sys.path / DLL 目录（jz_deps.refresh_flags），**无需重启**。
+
+PKG_PLUGIN_RE = re.compile(r"^JZToolsHub-插件-(?P<id>[A-Za-z0-9._-]+)-v(?P<ver>\d+(?:\.\d+)*)\.zip$")
+PKG_COMPONENT_RE = re.compile(r"^JZToolsHub-依赖-(?P<id>[A-Za-z0-9._-]+)-v(?P<ver>\d+(?:\.\d+)*)\.zip$")
+COMPONENT_REL = os.path.join("runtime", "pylibs")
+
+
+def default_scan_dirs(base_dir):
+    """默认扫描目录：程序目录、程序目录的上级、桌面、下载（只返回存在且可读的）。"""
+    base_dir = os.path.abspath(base_dir)
+    home = os.path.expanduser("~")
+    cands = [base_dir, os.path.dirname(base_dir)]
+    for name in ("Desktop", "桌面", "Downloads", "下载"):
+        cands.append(os.path.join(home, name))
+    out, seen = [], set()
+    for d in cands:
+        try:
+            d = os.path.abspath(d)
+        except Exception:
+            continue
+        if d in seen or not os.path.isdir(d):
+            continue
+        seen.add(d)
+        out.append(d)
+    return out
+
+
+def _zip_json(zip_path, entry):
+    """读 zip 内某个 JSON（缺失/不可解析返回 None）。"""
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            name = next((n for n in zf.namelist() if n.replace("\\", "/") == entry), None)
+            if not name:
+                return None
+            return json.loads(zf.read(name).decode("utf-8-sig"))
+    except Exception:
+        return None
+
+
+def _app_abi(base_dir):
+    """主程序的 ABI 契约（python / app 版本），用于组件与插件包的适用性判定。"""
+    vj = read_json(os.path.join(base_dir, "version.json")) or {}
+    return str(vj.get("python") or ""), str(vj.get("app") or "")
+
+
+def _installed_components(base_dir):
+    """已装依赖组件 {id: {version, files, requires_components}}（读 runtime/pylibs/manifest.json）。"""
+    man = read_json(os.path.join(base_dir, COMPONENT_REL, "manifest.json")) or {}
+    out = {}
+    comps = man.get("components") if isinstance(man, dict) else None
+    if isinstance(comps, dict):                 # 单组件简写形态
+        comps = [comps]
+    for c in (comps or []):
+        if isinstance(c, dict) and c.get("id"):
+            out[str(c["id"])] = {"version": str(c.get("version") or ""),
+                                 "files": c.get("files") or [],
+                                 "requires_components": c.get("requires_components") or []}
+    return out
+
+
+def _verdict(cur, new, abi_ok=True, abi_reason="", force=False):
+    """版本比对给出状态：install / uptodate / downgrade / abi / unknown。"""
+    if not abi_ok and not force:
+        return "abi", abi_reason
+    if not new:
+        return "unknown", "包内版本号不可读"
+    if not cur:
+        return "install", "本机未安装"
+    c = semver_cmp(str(new), str(cur))
+    if c is None:
+        return "unknown", "版本号不可比较"
+    if c > 0:
+        return "install", "可升级 %s → %s" % (cur, new)
+    if c == 0:
+        return ("install" if force else "uptodate"), ("同版本重装" if force else "已是最新")
+    return ("install" if force else "downgrade"), ("降级 %s → %s" % (cur, new))
+
+
+def scan_packages(base_dir, data_root=None, dirs=None, max_files=600, force=False):
+    """扫描目录（含一级子目录）里的插件包与依赖组件包，返回可安装清单。
+
+    只读：不写程序目录、不解压到磁盘（只读 zip 内清单）。安装由 install_scanned() 负责。
+    """
+    if dirs is None:
+        dirs = default_scan_dirs(base_dir)
+    app_py, app_ver = _app_abi(base_dir)
+    comps = _installed_components(base_dir)
+    items, seen_paths, scanned = [], set(), 0
+    for root_dir in dirs:
+        if not root_dir or not os.path.isdir(root_dir):
+            continue
+        stack = [(root_dir, 0)]
+        while stack:
+            cur_dir, depth = stack.pop()
+            try:
+                entries = sorted(os.listdir(cur_dir))
+            except OSError:
+                continue
+            for name in entries:
+                full = os.path.join(cur_dir, name)
+                if os.path.isdir(full):
+                    if depth < 1:               # 只看一级子目录（介质常解压成一层）
+                        stack.append((full, depth + 1))
+                    continue
+                if not name.lower().endswith(".zip") or scanned >= max_files:
+                    continue
+                m_pl = PKG_PLUGIN_RE.match(name)
+                m_cp = PKG_COMPONENT_RE.match(name)
+                if not m_pl and not m_cp:
+                    continue
+                if full in seen_paths:
+                    continue
+                seen_paths.add(full)
+                scanned += 1
+                try:
+                    size = os.path.getsize(full)
+                except OSError:
+                    continue
+                if m_pl:
+                    meta = _zip_json(full, "plugin-package.json") or {}
+                    pid = str(meta.get("id") or m_pl.group("id"))
+                    cur_ver = installed_version(base_dir, pid)
+                    abi_ok, abi_reason = True, ""
+                    api_req = meta.get("api_version")
+                    try:
+                        if api_req is not None and jz_deps and int(api_req) > int(jz_deps.PLUGIN_API):
+                            abi_ok = False
+                            abi_reason = "需要更新的主体（plugin_api ≤ %s）" % api_req
+                    except (TypeError, ValueError):
+                        pass
+                    min_app = str(meta.get("min_app_version") or "")
+                    if abi_ok and min_app and app_ver:
+                        cmp_app = semver_cmp(app_ver, min_app)
+                        if cmp_app is not None and cmp_app < 0:
+                            abi_ok = False
+                            abi_reason = "需要主体 ≥ %s（当前 %s）" % (min_app, app_ver)
+                    new_ver = str(meta.get("version") or m_pl.group("ver"))
+                    status, reason = _verdict(cur_ver, new_ver, abi_ok, abi_reason, force)
+                    items.append({
+                        "kind": "plugin", "file": name, "path": full, "id": pid,
+                        "name": display_name(plugin_names(None), pid, meta),
+                        "version": new_ver, "installed": cur_ver,
+                        "status": status, "reason": reason, "size": size,
+                        "requires_restart": bool(meta.get("requires_restart")),
+                    })
+                else:
+                    meta = _zip_json(full, "dep-component.json") or {}
+                    inner = _zip_json(full, "manifest.json") or {}
+                    cs = inner.get("components") if isinstance(inner, dict) else None
+                    if isinstance(cs, dict):
+                        cs = [cs]
+                    entry = (cs or [{}])[0] if cs else {}
+                    cid = str(meta.get("id") or entry.get("id") or m_cp.group("id"))
+                    cur_ver = (comps.get(cid) or {}).get("version") or ""
+                    abi_ok, abi_reason = True, ""
+                    cpy = str(meta.get("python") or entry.get("python") or "")
+                    if cpy and app_py:
+                        mm = lambda v: ".".join(str(v).split(".")[:2])   # noqa: E731
+                        if mm(cpy) != mm(app_py):
+                            abi_ok = False
+                            abi_reason = "为 Python %s 构建（当前主程序 %s）" % (cpy, app_py)
+                    new_ver = str(meta.get("version") or entry.get("version") or m_cp.group("ver"))
+                    status, reason = _verdict(cur_ver, new_ver, abi_ok, abi_reason, force)
+                    need = [r for r in (meta.get("requires_components")
+                                        or entry.get("requires_components") or []) if r not in comps]
+                    items.append({
+                        "kind": "component", "file": name, "path": full, "id": cid,
+                        "name": str(meta.get("name") or entry.get("name") or cid),
+                        "version": new_ver, "installed": cur_ver,
+                        "status": status, "reason": reason, "size": size,
+                        "requires_components": need,
+                    })
+    order = {"install": 0, "abi": 1, "downgrade": 2, "unknown": 3, "uptodate": 4}
+    items.sort(key=lambda x: (order.get(x["status"], 9), x["kind"], x["id"]))
+    return {"dirs": list(dirs), "items": items, "scanned": scanned}
+
+
+def install_component_package(base_dir, zip_path, force=False):
+    """安装依赖组件包（Python 侧，与 install-dep-component.ps1 同口径；无需重启即生效）。"""
+    meta = _zip_json(zip_path, "dep-component.json") or {}
+    inner = _zip_json(zip_path, "manifest.json") or {}
+    cs = inner.get("components") if isinstance(inner, dict) else None
+    if isinstance(cs, dict):
+        cs = [cs]
+    entry = (cs or [None])[0]
+    if not entry or not entry.get("id"):
+        return {"ok": False, "error": "包内缺少组件清单（dep-component.json / manifest.json）"}
+    cid = str(entry["id"])
+    app_py, _app_ver = _app_abi(base_dir)
+    cpy = str(meta.get("python") or entry.get("python") or "")
+    if cpy and app_py:
+        mm = lambda v: ".".join(str(v).split(".")[:2])                   # noqa: E731
+        if mm(cpy) != mm(app_py) and not force:
+            return {"ok": False, "error": "本组件是为 Python %s 构建的，当前主程序内置 Python %s"
+                                          "——请取匹配的组件包" % (cpy, app_py)}
+    pylibs = os.path.join(base_dir, COMPONENT_REL)
+    os.makedirs(pylibs, exist_ok=True)
+    m_path = os.path.join(pylibs, "manifest.json")
+    # ★ 旧登记必须在解压**之前**读：载荷里自带 manifest.json（本组件的单组件清单），
+    #   解压会把它覆盖掉——解压后再读就只能看到本组件，"合并"变成"只剩最后一个组件"。
+    installed_before = _installed_components(base_dir)
+    old_components = []
+    if os.path.isfile(m_path):
+        old_components = [c for c in ((read_json(m_path) or {}).get("components") or [])
+                          if isinstance(c, dict)]
+    # ① 按组件清理上一版文件（旧清单没有 files 时退化为按 provides 顶层名清理）
+    prev = installed_before.get(cid) or {}
+    prev_files = list(prev.get("files") or [])
+    if not prev_files:
+        for pv in (entry.get("provides") or []):
+            prev_files += [pv, "%s.libs" % pv]
+    removed = 0
+    for rel in prev_files:
+        rel = str(rel).lstrip("\\/")
+        if not rel or rel == "manifest.json":
+            continue
+        abs_p = os.path.join(pylibs, rel)
+        if os.path.exists(abs_p):
+            _rm(abs_p)
+            removed += 1
+    # ② 覆盖式解压本组件载荷（只取 payload/pylibs/**）
+    written = 0
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            ok_names, bad = zip_entries_safe(zf)      # PU-2：条目名安全校验（不是条目列表）
+            if not ok_names:
+                return {"ok": False, "error": "包内条目名不安全：%s" % bad}
+            for info in zf.infolist():
+                if info.filename.endswith("/"):
+                    continue
+                rel = info.filename.replace("\\", "/")
+                if not rel.startswith("payload/pylibs/"):
+                    continue
+                tail = rel[len("payload/pylibs/"):]
+                if not tail or tail.endswith("/") or tail.replace("\\", "/") == "manifest.json":
+                    continue                     # 清单由下面的合并步骤统一写，不随载荷覆盖
+                dest = os.path.join(pylibs, *tail.split("/"))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(info) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                written += 1
+    except Exception as e:
+        return {"ok": False, "error": "解压组件载荷失败：%s" % e}
+    # ③ 合并登记（同 id 覆盖、其它组件保留）
+    keep = [c for c in old_components if str(c.get("id")) != cid]
+    merged = {"schema": 1, "kind": "dep-components", "updated_at": now_iso(),
+              "python": str(inner.get("python") or app_py),
+              "platform": str(inner.get("platform") or ""),
+              "components": keep + [entry]}
+    write_json(m_path, merged)
+    # ④ 清空目录（删文件会留下空壳，而"已装组件"是按目录列举的）
+    for cur_dir, sub_dirs, _files in os.walk(pylibs, topdown=False):
+        for d in sub_dirs:
+            p_d = os.path.join(cur_dir, d)
+            try:
+                if not os.listdir(p_d):
+                    os.rmdir(p_d)
+            except OSError:
+                pass
+    after_ids = set(installed_before) | {cid}
+    need = [r for r in (entry.get("requires_components") or []) if r not in after_ids]
+    native = any(str(f).lower().endswith((".pyd", ".dll")) for f in (entry.get("files") or []))
+    return {"ok": True, "kind": "component", "id": cid,
+            "version": str(entry.get("version") or meta.get("version") or ""),
+            "files_written": written, "files_removed": removed,
+            "requires_components_missing": need, "native": native}
+
+
+def install_scanned(base_dir, data_root, files, force=False):
+    """安装扫描结果里的若干项（files 为扫描返回的 path 列表）；逐项返回结果。"""
+    results = []
+    for path in files:
+        name = os.path.basename(path)
+        m_pl = PKG_PLUGIN_RE.match(name)
+        m_cp = PKG_COMPONENT_RE.match(name)
+        if not m_pl and not m_cp:
+            results.append({"file": name, "ok": False, "error": "不是可识别的包名"})
+            continue
+        if not os.path.isfile(path):
+            results.append({"file": name, "ok": False, "error": "文件不存在"})
+            continue
+        if m_cp:
+            try:
+                r = install_component_package(base_dir, path, force=force)
+            except Exception as e:
+                r = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+            r["file"] = name
+            results.append(r)
+            continue
+        # 插件包：走既有校验 + 应用（含备份、登记、回滚点）
+        try:
+            inspected = inspect_package(path, base_dir, data_root, force=force)
+        except Exception as e:
+            results.append({"file": name, "ok": False, "error": "校验出错：%s" % e})
+            continue
+        if not inspected["ok"]:
+            results.append({"file": name, "ok": False, "error": "；".join(inspected["errors"])})
+            continue
+        try:
+            rep = apply_package(base_dir, data_root, inspected)
+        except Exception as e:
+            results.append({"file": name, "ok": False, "error": "应用出错：%s" % e})
+            continue
+        results.append({"file": name, "ok": bool(rep.get("ok")), "kind": "plugin",
+                        "id": inspected["meta"].get("id"),
+                        "version": inspected["meta"].get("version"),
+                        "from_version": inspected.get("from_version"),
+                        "requires_restart": bool(inspected.get("restart_needed")),
+                        "error": rep.get("error")})
+    ok = [r for r in results if r.get("ok")]
+    return {"ok": True, "results": results, "installed": len(ok),
+            "failed": len(results) - len(ok),
+            "restart_pending": [r["id"] for r in list_plugins(base_dir, data_root)
+                                if r.get("restart_pending")]}

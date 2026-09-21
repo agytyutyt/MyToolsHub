@@ -1770,6 +1770,71 @@ def register(app):
         _maybe_auto_restart(res, auto=data.get("auto_restart", True))
         return jsonify(res)
 
+    @app.post("/api/admin/packages/scan")
+    @login_required
+    def admin_api_packages_scan():
+        """扫描介质目录里的插件包与依赖组件包（只读，不安装）。
+
+        目录缺省用 default_scan_dirs()（程序目录 / 上级 / 桌面 / 下载）；
+        管理员也可指定路径（离线部署时介质常解压到 U 盘或某个临时目录）。
+        """
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        raw = (data.get("dir") or "").strip()
+        dirs = None
+        if raw:
+            if not os.path.isdir(raw):
+                return jsonify({"error": "目录不存在或不可读：%s" % raw}), 400
+            dirs = [raw]
+        set_operation("扫描介质目录")
+        try:
+            res = plugin_admin.scan_packages(PROJECT_DIR, jztools_data.get_data_root(),
+                                             dirs=dirs, force=bool(data.get("force")))
+        except Exception as e:
+            return jsonify({"error": "扫描出错：%s" % e}), 500
+        res["default_dirs"] = plugin_admin.default_scan_dirs(PROJECT_DIR)
+        res["suggest"] = [it for it in res["items"] if it["status"] == "install"]
+        return jsonify(res)
+
+    @app.post("/api/admin/packages/install")
+    @login_required
+    def admin_api_packages_install():
+        """安装扫描到的包（插件包 + 依赖组件包）。
+
+        安全：只接受**服务端重新扫描得到**的包路径，不接受前端传来的任意路径
+        （前端把扫描结果里的 path 回传，服务端再扫一次做白名单比对）。
+        """
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可管理插件"}), 403
+        data = request.get_json(silent=True) or {}
+        wanted = [str(x) for x in (data.get("paths") or []) if str(x)]
+        if not wanted:
+            return jsonify({"error": "请先扫描并勾选要安装的包"}), 400
+        raw = (data.get("dir") or "").strip()
+        dirs = [raw] if raw and os.path.isdir(raw) else None
+        set_operation("安装扫描到的包")
+        scan = plugin_admin.scan_packages(PROJECT_DIR, jztools_data.get_data_root(), dirs=dirs)
+        allowed = {it["path"]: it for it in scan["items"]}
+        picked = [p for p in wanted if p in allowed]
+        rejected = [p for p in wanted if p not in allowed]
+        if not picked:
+            return jsonify({"error": "勾选的包不在扫描结果里（请重新扫描后再装）",
+                            "rejected": rejected}), 400
+        try:
+            res = plugin_admin.install_scanned(PROJECT_DIR, jztools_data.get_data_root(),
+                                               picked, force=bool(data.get("force")))
+        except Exception as e:
+            return jsonify({"error": "安装出错：%s" % e}), 500
+        # 依赖组件装完**无需重启**（主体下次请求会自动补注入路径）；插件含后端改动才需要
+        needs_restart = bool(res.get("restart_pending")) or any(
+            r.get("requires_restart") for r in res.get("results", []) if r.get("ok"))
+        res["rejected"] = rejected
+        res["needs_restart"] = needs_restart
+        if needs_restart:
+            _maybe_auto_restart(res, auto=data.get("auto_restart", True))
+        return jsonify(res)
+
     @app.post("/api/admin/plugins/restart")
     @login_required
     def admin_api_plugins_restart():
