@@ -115,7 +115,7 @@ def dep_components_status():
     """
     base = os.path.join(BASE_DIR, "runtime", "pylibs")
     installed = sorted(n for n in (os.listdir(base) if os.path.isdir(base) else [])
-                       if os.path.isdir(os.path.join(base, n)))
+                       if os.path.isdir(os.path.join(base, n)) and not n.startswith("."))
     mods, requires, comps = [], [], []
     try:
         with open(os.path.join(base, "manifest.json"), "r", encoding="utf-8-sig") as f:
@@ -145,6 +145,15 @@ def dep_components_status():
     out["missing_requires"] = [r for r in requires if r not in installed]
     return out
 
+
+# 启动时先应用"暂存中的依赖组件"（服务运行时装组件时文件被占用 → 暂存到 pylibs\.pending\，
+# 此刻进程还没加载任何组件 DLL，覆盖必然成功）。必须在 _setup_dep_components 之前。
+try:
+    _applied_pending = jz_deps.apply_pending_components(BASE_DIR)
+    if _applied_pending:
+        log.info("已应用暂存的依赖组件：%s", "、".join(_applied_pending))
+except Exception:
+    log.exception("应用暂存依赖组件失败（不影响启动，下次再试）")
 
 _setup_dep_components()
 # 把"重新注入依赖组件路径"注册给判定引擎：jz_deps.refresh_flags 在重算插件标记前会先调用它，

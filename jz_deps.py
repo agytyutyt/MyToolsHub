@@ -173,6 +173,89 @@ def _load_component_deps(app_dir):
         return {"packages": {}, "modules": {}, "components": []}
 
 
+# 依赖组件「暂存目录」：服务运行时装组件时，组件自带的 DLL/.pyd 已被映射进进程，
+# 覆盖会 Permission denied（真机实测 msvcp140.dll）→ 先暂存到这里，主体下次启动时应用。
+PENDING_DIR = ".pending"
+
+
+def pending_components(app_dir):
+    """暂存中（待重启生效）的依赖组件 id 列表。"""
+    pend = os.path.join(app_dir, "runtime", "pylibs", PENDING_DIR)
+    if not os.path.isdir(pend):
+        return []
+    try:
+        return sorted(n for n in os.listdir(pend) if os.path.isdir(os.path.join(pend, n)))
+    except OSError:
+        return []
+
+
+def apply_pending_components(app_dir):
+    """应用暂存中的依赖组件；返回已应用的 id 列表。
+
+    由主体在**启动时**调用（早于任何组件 DLL 被加载）：删旧文件 → 就位 payload → 合并清单 →
+    删除暂存目录。失败时保留暂存（下次启动再试）并记录日志，绝不阻塞启动。
+    """
+    import shutil
+    pylibs = os.path.join(app_dir, "runtime", "pylibs")
+    pend = os.path.join(pylibs, PENDING_DIR)
+    if not os.path.isdir(pend):
+        return []
+    applied = []
+    for cid in sorted(os.listdir(pend)):
+        stage = os.path.join(pend, cid)
+        info_path = os.path.join(stage, "entry.json")
+        payload = os.path.join(stage, "payload")
+        if not (os.path.isfile(info_path) and os.path.isdir(payload)):
+            continue
+        try:
+            with open(info_path, "r", encoding="utf-8-sig") as f:
+                info = json.load(f)
+            entry = info.get("entry") or {}
+            for rel in info.get("remove") or []:
+                rel = str(rel).lstrip("\\/")
+                if not rel or rel == "manifest.json":
+                    continue
+                p = os.path.join(pylibs, rel)
+                if os.path.isdir(p):
+                    shutil.rmtree(p, ignore_errors=True)
+                elif os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+            for root, _dirs, files in os.walk(payload):
+                for fn in files:
+                    src = os.path.join(root, fn)
+                    dst = os.path.join(pylibs, os.path.relpath(src, payload))
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copyfile(src, dst)
+            m_path = os.path.join(pylibs, "manifest.json")
+            comps = []
+            if os.path.isfile(m_path):
+                try:
+                    with open(m_path, "r", encoding="utf-8-sig") as f:
+                        comps = (json.load(f) or {}).get("components") or []
+                except Exception:
+                    comps = []
+            keep = [c for c in comps if isinstance(c, dict) and str(c.get("id")) != str(entry.get("id") or cid)]
+            merged = {"schema": 1, "kind": "dep-components", "updated_at": "",
+                      "components": keep + [entry]}
+            with open(m_path, "w", encoding="utf-8", newline="\n") as f:
+                json.dump(merged, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            shutil.rmtree(stage, ignore_errors=True)
+            applied.append(cid)
+            log.info("已应用暂存的依赖组件：%s v%s", cid, entry.get("version"))
+        except Exception:
+            log.exception("应用暂存组件失败（保留暂存，下次启动再试）：%s", cid)
+    try:
+        if os.path.isdir(pend) and not os.listdir(pend):
+            os.rmdir(pend)
+    except OSError:
+        pass
+    return applied
+
+
 def declared_hint(dep):
     """取插件**自己声明**的"缺该依赖时的提示"（manifest.requires[].hint）。
 

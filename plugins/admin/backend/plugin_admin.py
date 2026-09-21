@@ -1040,7 +1040,8 @@ def installed_deps(base_dir):
                     vend_items.append({"id": "%s/%s" % (pid, name), "name": name, "plugin": pid,
                                        "note": "插件自带（版本由插件声明）"})
     groups.append({"id": "vendored", "name": "插件自带（vendor/）", "available": True, "items": vend_items})
-    return {"ok": True, "lock_path": lock.get("path", ""), "groups": groups}
+    return {"ok": True, "lock_path": lock.get("path", ""), "groups": groups,
+            "pending_components": pending_components(base_dir)}
 
 
 def list_plugins(base_dir, data_root, tools_cfg=None):
@@ -1224,6 +1225,8 @@ def batch_apply(base_dir, data_root, index_path, ids, verify_hash=True):
 PKG_PLUGIN_RE = re.compile(r"^JZToolsHub-插件-(?P<id>[A-Za-z0-9._-]+)-v(?P<ver>\d+(?:\.\d+)*)\.zip$")
 PKG_COMPONENT_RE = re.compile(r"^JZToolsHub-依赖-(?P<id>[A-Za-z0-9._-]+)-v(?P<ver>\d+(?:\.\d+)*)\.zip$")
 COMPONENT_REL = os.path.join("runtime", "pylibs")
+# 暂存目录：组件文件被运行中的服务占用时，先放这里，主体下次启动时应用
+PENDING_DIR = ".pending"
 
 
 def default_scan_dirs(base_dir):
@@ -1396,6 +1399,117 @@ def scan_packages(base_dir, data_root=None, dirs=None, max_files=600, force=Fals
     return {"dirs": list(dirs), "items": items, "scanned": scanned}
 
 
+def _locked_files(paths):
+    """返回当前**无法写入**的文件（Windows 上被运行中进程映射的 DLL/.pyd 会拒绝写打开）。
+
+    为什么要探测：组件自带的 VC 运行库与 .pyd 在服务启动后已被映射进进程，
+    后台在服务运行时覆盖它会 Permission denied（真机实测 msvcp140.dll）。
+    探测在**任何写操作之前**做，避免"删了旧的、新的没写进去"的半成品状态。
+    """
+    locked = []
+    for p in paths:
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, "r+b"):
+                pass
+        except OSError:
+            locked.append(p)
+    return locked
+
+
+def _component_payload_files(zip_path):
+    """列出包内 payload/pylibs/** 的相对路径（跳过目录与 manifest.json）。"""
+    out = []
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for info in zf.infolist():
+                if info.filename.endswith("/"):
+                    continue
+                rel = info.filename.replace("\\", "/")
+                if not rel.startswith("payload/pylibs/"):
+                    continue
+                tail = rel[len("payload/pylibs/"):]
+                if not tail or tail == "manifest.json":
+                    continue
+                out.append(tail)
+    except Exception:
+        pass
+    return out
+
+
+def _extract_payload_to(zip_path, dest_dir):
+    """把 payload/pylibs/** 解压到 dest_dir（先解压到临时位置再就位，避免半成品）。"""
+    n = 0
+    with zipfile.ZipFile(zip_path) as zf:
+        ok_names, bad = zip_entries_safe(zf)
+        if not ok_names:
+            raise ValueError("包内条目名不安全：%s" % bad)
+        for info in zf.infolist():
+            if info.filename.endswith("/"):
+                continue
+            rel = info.filename.replace("\\", "/")
+            if not rel.startswith("payload/pylibs/"):
+                continue
+            tail = rel[len("payload/pylibs/"):]
+            if not tail or tail == "manifest.json":
+                continue
+            dest = os.path.join(dest_dir, *tail.split("/"))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with zf.open(info) as src, open(dest, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            n += 1
+    return n
+
+
+def stage_component_package(base_dir, zip_path, entry, cid, locked=(), staged_by="admin-web"):
+    """把组件**暂存**到 pylibs/.pending/<id>/，等主体下次启动时应用。
+
+    返回结构与 install_component_package 一致（ok=True + pending=True + needs_restart=True）。
+    """
+    pylibs = os.path.join(base_dir, COMPONENT_REL)
+    stage = os.path.join(pylibs, PENDING_DIR, cid)
+    _rm(stage)
+    os.makedirs(stage, exist_ok=True)
+    try:
+        n = _extract_payload_to(zip_path, os.path.join(stage, "payload"))
+    except Exception as e:
+        _rm(stage)
+        return {"ok": False, "error": "暂存组件载荷失败：%s" % e}
+    prev = _installed_components(base_dir).get(cid) or {}
+    remove = [str(x).lstrip("\\/") for x in (prev.get("files") or []) if str(x).strip()]
+    if not remove:
+        for pv in (entry.get("provides") or []):
+            remove += [str(pv), "%s.libs" % pv]
+    info = {"schema": 1, "id": cid, "entry": entry, "remove": remove,
+            "staged_by": staged_by, "staged_at": now_iso(),
+            "locked": [os.path.basename(p) for p in locked]}
+    write_json(os.path.join(stage, "entry.json"), info)
+    return {"ok": True, "kind": "component", "id": cid,
+            "version": str(entry.get("version") or ""),
+            "pending": True, "needs_restart": True, "files_staged": n,
+            "locked": info["locked"],
+            "requires_components_missing": [r for r in (entry.get("requires_components") or [])
+                                            if r not in _installed_components(base_dir)]}
+
+
+def pending_components(base_dir):
+    """暂存中（待重启生效）的组件 id 列表，供后台展示。
+
+    实现归框架层 jz_deps（主体启动时也用它来应用暂存），这里只做转发，
+    避免"插件里一份、框架里一份"漂移。
+    """
+    if jz_deps is not None:
+        try:
+            return jz_deps.pending_components(base_dir)
+        except Exception:
+            pass
+    pend = os.path.join(base_dir, COMPONENT_REL, PENDING_DIR)
+    if not os.path.isdir(pend):
+        return []
+    return sorted(n for n in os.listdir(pend) if os.path.isdir(os.path.join(pend, n)))
+
+
 def install_component_package(base_dir, zip_path, force=False):
     """安装依赖组件包（Python 侧，与 install-dep-component.ps1 同口径；无需重启即生效）。"""
     meta = _zip_json(zip_path, "dep-component.json") or {}
@@ -1430,6 +1544,40 @@ def install_component_package(base_dir, zip_path, force=False):
     if not prev_files:
         for pv in (entry.get("provides") or []):
             prev_files += [pv, "%s.libs" % pv]
+    # ② 先解压到临时目录（校验完整），**再做占用预检**——避免"删了旧的、新的没写进去"的半成品
+    tmp = os.path.join(pylibs, PENDING_DIR, "_tmp_%s" % cid)
+    _rm(tmp)
+    os.makedirs(tmp, exist_ok=True)
+    try:
+        written = _extract_payload_to(zip_path, tmp)
+    except Exception as e:
+        _rm(tmp)
+        return {"ok": False, "error": "解压组件载荷失败：%s" % e}
+    if written <= 0:
+        _rm(tmp)
+        return {"ok": False, "error": "包内没有可安装的载荷（payload/pylibs 为空）"}
+    risky = [os.path.join(pylibs, str(r).lstrip("\\/")) for r in prev_files if str(r).strip()]
+    risky += [os.path.join(pylibs, *rel.split("/")) for rel in _component_payload_files(zip_path)]
+    seen, uniq = set(), []
+    for p in _locked_files(risky):
+        k = p.lower()
+        if k not in seen:
+            seen.add(k)
+            uniq.append(p)
+    locked = uniq
+    if locked:
+        # ★ 被运行中的服务占用（组件自带 DLL/.pyd 已映射进进程）→ 暂存，重启时应用
+        _rm(tmp)
+        r = stage_component_package(base_dir, zip_path, entry, cid, locked, staged_by="admin-web")
+        if r.get("ok"):
+            seen_b, names = set(), []
+            for p in locked:
+                b = os.path.basename(p)
+                if b.lower() not in seen_b:
+                    seen_b.add(b.lower())
+                    names.append(b)
+            r["locked"] = names
+        return r
     removed = 0
     for rel in prev_files:
         rel = str(rel).lstrip("\\/")
@@ -1439,29 +1587,19 @@ def install_component_package(base_dir, zip_path, force=False):
         if os.path.exists(abs_p):
             _rm(abs_p)
             removed += 1
-    # ② 覆盖式解压本组件载荷（只取 payload/pylibs/**）
-    written = 0
+    # ③ 就位：把临时目录里的内容搬进 pylibs（此时已确认没有被占用的文件）
     try:
-        with zipfile.ZipFile(zip_path) as zf:
-            ok_names, bad = zip_entries_safe(zf)      # PU-2：条目名安全校验（不是条目列表）
-            if not ok_names:
-                return {"ok": False, "error": "包内条目名不安全：%s" % bad}
-            for info in zf.infolist():
-                if info.filename.endswith("/"):
-                    continue
-                rel = info.filename.replace("\\", "/")
-                if not rel.startswith("payload/pylibs/"):
-                    continue
-                tail = rel[len("payload/pylibs/"):]
-                if not tail or tail.endswith("/") or tail.replace("\\", "/") == "manifest.json":
-                    continue                     # 清单由下面的合并步骤统一写，不随载荷覆盖
-                dest = os.path.join(pylibs, *tail.split("/"))
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                with zf.open(info) as src, open(dest, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-                written += 1
+        for root, _dirs, files in os.walk(tmp):
+            for f in files:
+                src = os.path.join(root, f)
+                rel = os.path.relpath(src, tmp)
+                dst = os.path.join(pylibs, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(src, dst)
     except Exception as e:
-        return {"ok": False, "error": "解压组件载荷失败：%s" % e}
+        return {"ok": False, "error": "组件就位失败（可从依赖组件包重装）：%s" % e}
+    finally:
+        _rm(tmp)
     # ③ 合并登记（同 id 覆盖、其它组件保留）
     keep = [c for c in old_components if str(c.get("id")) != cid]
     merged = {"schema": 1, "kind": "dep-components", "updated_at": now_iso(),
@@ -1483,7 +1621,7 @@ def install_component_package(base_dir, zip_path, force=False):
     native = any(str(f).lower().endswith((".pyd", ".dll")) for f in (entry.get("files") or []))
     return {"ok": True, "kind": "component", "id": cid,
             "version": str(entry.get("version") or meta.get("version") or ""),
-            "files_written": written, "files_removed": removed,
+            "pending": False, "files_written": written, "files_removed": removed,
             "requires_components_missing": need, "native": native}
 
 
@@ -1506,6 +1644,8 @@ def install_scanned(base_dir, data_root, files, force=False):
             except Exception as e:
                 r = {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
             r["file"] = name
+            if r.get("pending"):
+                r["requires_restart"] = True        # 暂存的组件要重启才生效
             results.append(r)
             continue
         # 插件包：走既有校验 + 应用（含备份、登记、回滚点）

@@ -43,6 +43,32 @@ function Remove-EmptyDirs {
         }
     }
 }
+function Test-FileLocked {
+    # 文件是否被占用（写打开失败）——被运行中的服务映射的 DLL/.pyd 会拒绝写访问。
+    # 与 Python 侧 install_component_package 的 open(r+b) 探测同口径。
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $fs = [System.IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
+        $fs.Dispose()
+        return $false
+    } catch {
+        return $true
+    }
+}
+function Get-LockedFiles {
+    # 返回将被覆盖/删除的文件里被占用的那些（只读探测，不做任何写操作）
+    param([string]$Root, [string[]]$RelPaths)
+    $locked = @()
+    foreach ($rel in $RelPaths) {
+        if (-not $rel) { continue }
+        $rel = $rel.TrimStart('\', '/')
+        if (-not $rel -or $rel -eq 'manifest.json') { continue }
+        $p = Join-Path $Root $rel
+        if (Test-FileLocked $p) { $locked += $p }
+    }
+    return $locked
+}
 function Say { param([string]$m = "") Write-Host $m }
 function Warn { param([string]$m) Write-Warning $m }
 function Fail { param([string]$m) Write-Host ""; Write-Host "  [失败] $m" -ForegroundColor Red; exit 1 }
@@ -174,6 +200,18 @@ $metaPath = Join-Path $Source "dep-component.json"
 if (Test-Path -LiteralPath $metaPath) {
     try { $meta = Get-Content -LiteralPath $metaPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch {}
 }
+# 组件 id：从包清单取（dep-component.json 优先，退回 manifest.json 的首个组件）。
+# ★ 必须有值：暂存目录与"合并登记"都按 id 定位（此前 $Id 未定义 → 暂存落到了 .pending\ 根下）。
+$Id = ""
+if ($meta -and $meta.id) { $Id = [string]$meta.id }
+if (-not $Id) {
+    $mfTmp = Join-Path $Source "manifest.json"
+    if (Test-Path -LiteralPath $mfTmp) {
+        try { $Id = [string](@((Get-Content -LiteralPath $mfTmp -Raw -Encoding UTF8 | ConvertFrom-Json).components)[0]).id } catch {}
+    }
+}
+if (-not $Id) { Fail "无法确定组件 id：包内缺少 dep-component.json / manifest.json 的 id 字段" }
+
 # ---- 前置校验：组件与主程序的 Python 版本 / 平台必须一致（C 扩展 ABI 硬约束） ----
 # 主包换 Python 版本后，旧组件里的 .pyd 会加载失败 → 这里在写盘前就拒绝并给出指引。
 if ($meta) {
@@ -232,6 +270,58 @@ if ((Test-Path -LiteralPath $Pylibs) -and -not $Force) {
         exit 0
     }
     Warn "已存在 $Pylibs 但自检未通过，将覆盖安装。"
+}
+
+# ---- 就位前：探测目标文件是否被运行中的服务占用 ----
+# 组件自带的 VC 运行库与 .pyd 在服务启动后已被映射进进程（真机实测 msvcp140.dll 覆盖失败：
+# Permission denied）。此处**先探测再动手**，避免"删了旧的、新的没写进去"的半成品。
+$prevFilesForLock = @()
+$mp0 = Join-Path $Pylibs "manifest.json"
+if (Test-Path -LiteralPath $mp0) {
+    try {
+        $om0 = Get-Content -LiteralPath $mp0 -Raw -Encoding UTF8 | ConvertFrom-Json
+        $prev0 = @(@($om0.components) | Where-Object { [string]$_.id -eq $Id }) | Select-Object -First 1
+        if ($prev0 -and $prev0.files) { $prevFilesForLock = @($prev0.files) }
+    } catch {}
+}
+if ($prevFilesForLock.Count -eq 0) {
+    foreach ($pv in $provideList) { $prevFilesForLock += @($pv, "$pv.libs") }
+}
+$payloadRels = @(Get-ChildItem -LiteralPath $payload -Recurse -File | ForEach-Object {
+    $_.FullName.Substring($payload.Length).TrimStart([char]92) })
+$lockedFiles = @(Get-LockedFiles -Root $Pylibs -RelPaths ($prevFilesForLock + $payloadRels)) | Select-Object -Unique
+if ($lockedFiles.Count -gt 0) {
+    # ★ 暂存：写进 pylibs\.pending\<id>\，主体下次启动时应用（那时还没加载任何组件 DLL）
+    $stage = Join-Path $Pylibs (".pending\" + $Id)
+    Say ""
+    Say ("  检测到本组件的文件正被运行中的服务占用（" + (($lockedFiles | ForEach-Object { Split-Path -Leaf $_ }) -join "、") + "）")
+    Say "  → 改为**暂存**，重启服务后自动生效（不打断当前服务，也不会留下半个组件）"
+    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path (Join-Path $stage "payload") | Out-Null
+    Copy-Item -Path (Join-Path $payload "*") -Destination (Join-Path $stage "payload") -Recurse -Force
+    $removeRels = @($prevFilesForLock | ForEach-Object { ([string]$_).TrimStart('\', '/') } | Where-Object { $_ -and $_ -ne 'manifest.json' })
+    $entryJson = $null
+    $mf = Join-Path $Source "manifest.json"
+    if (Test-Path -LiteralPath $mf) {
+        try { $entryJson = @((Get-Content -LiteralPath $mf -Raw -Encoding UTF8 | ConvertFrom-Json).components)[0] } catch {}
+    }
+    if (-not $entryJson) { Fail "包内缺少组件清单，无法暂存：$mf" }
+    $stageInfo = [ordered]@{
+        schema    = 1
+        id        = $Id
+        entry     = $entryJson
+        remove    = $removeRels
+        staged_by = "install-dep-component.ps1"
+        staged_at = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+        locked    = @($lockedFiles | ForEach-Object { Split-Path -Leaf $_ })
+    }
+    Write-Utf8NoBom (Join-Path $stage "entry.json") (($stageInfo | ConvertTo-Json -Depth 12) + "`n")
+    Say ""
+    Say "==> 已暂存，重启服务后自动生效"
+    Say ("    暂存位置：" + $stage)
+    Say "    生效方式：重启 JZToolsHub 服务（托盘图标 → 退出服务后重新启动，或重启机器）"
+    Say "    说明：服务运行中无法覆盖已加载的 DLL，这是 Windows 的限制，不是组件包的问题。"
+    exit 0
 }
 
 # ---- 安装（纯解压，免管理员；不写注册表、不建快捷方式） ----

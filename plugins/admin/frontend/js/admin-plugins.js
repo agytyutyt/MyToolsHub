@@ -230,7 +230,11 @@
         const na = g.available === false ? '<p class="admin-hint">（本机没有 installed-deps.json：源码开发形态，框架包清单不可核验）</p>' : '';
         return `<div class="deps-group"><h4>${esc(g.name)}</h4>${na}<ul>${rows || '<li class="dep-none">（无）</li>'}</ul>${extra}</div>`;
       }).join('');
-      box.innerHTML = '<h3>已安装依赖</h3>' + parts
+      const pend = (data.pending_components || []);
+      const pendHtml = pend.length
+        ? `<p class="admin-hint warn">已暂存待重启生效的依赖组件：<b>${esc(pend.join('、'))}</b>
+           —— 重启服务（托盘图标 → 退出服务后重新启动）后自动安装完成</p>` : '';
+      box.innerHTML = '<h3>已安装依赖</h3>' + pendHtml + parts
         + `<p class="admin-hint">清单真源：<code>${esc(data.lock_path || 'config/installed-deps.json')}</code>（构建期生成，随主体升级更新）</p>`;
     } catch (err) {
       box.innerHTML = `<p class="admin-empty">读取失败：${esc(err.message)}</p>`;
@@ -670,7 +674,14 @@
         ? `v${esc(p.version || '')}`
         : `${esc(p.installed || '（未安装）')} → ${esc(p.version || '')}`;
       let mark, cls = '', note = '';
-      if (st.done[i]) {
+      if (st.done[i] && st.done[i].pending) {
+        mark = '⏳ 已暂存'; cls = 'warn';
+        const r = st.done[i];
+        const bits = ['重启服务后自动生效'];
+        if (r.files_staged) bits.push(`已暂存 ${r.files_staged} 个文件`);
+        if (r.locked && r.locked.length) bits.push(`被占用：${r.locked.join('、')}`);
+        note = bits.join('；');
+      } else if (st.done[i]) {
         mark = '✅ 已安装'; cls = 'ok';
         const r = st.done[i];
         const bits = [];
