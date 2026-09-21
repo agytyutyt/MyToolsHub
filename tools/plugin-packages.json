@@ -344,28 +344,6 @@
                                                                                }
                                                     }
                                      },
-                     "trajectory-convert":  {
-                                                "version":  "1.1.4",
-                                                "api_version":  1,
-                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.4.zip",
-                                                "sha256":  "09f1bfbe4c32ccefdc70ca111d85c1d2905704ec71edd99da84cd1936ad22e1c",
-                                                "size":  47385,
-                                                "built_at":  "2026-09-21T09:15:40+08:00",
-                                                "code_sha256":  "3aaacdf5fb1c5ca8771a8cd29a09dfd98b33e9b9f102c0600b0be013b1c3ce32",
-                                                "file_count":  6,
-                                                "requires_restart":  true,
-                                                "file_hashes":  {
-                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "b4bf66c6dc73049b",
-                                                                    "plugins/trajectory-convert/backend/routes.py":  "931b263138396a11",
-                                                                    "plugins/trajectory-convert/frontend/index.html":  "f9a8443a7a0299ea",
-                                                                    "plugins/trajectory-convert/manifest.json":  "1743ee9a3e3f5fd7",
-                                                                    "plugins/trajectory-convert/README.md":  "86993259d9fe6f36"
-                                                                },
-                                                "assets":  {
-
-                                                           }
-                                            },
                      "trajectory-sketch":  {
                                                "version":  "1.2.3",
                                                "api_version":  1,
@@ -601,6 +579,28 @@
                                                                                "referenced":  false
                                                                            }
                                               }
-                               }
+                               },
+                     "trajectory-convert":  {
+                                                "version":  "1.1.5",
+                                                "api_version":  1,
+                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.5.zip",
+                                                "sha256":  "442435f9388d3b1ea25c524f308948e34de5974cc46baba3ba926b5a93fb15b5",
+                                                "size":  47753,
+                                                "built_at":  "2026-09-21T13:48:28+08:00",
+                                                "code_sha256":  "1ce9a6c417ce7d112a850850d972b80a73f0186abfad99fe6fb10c5cf2bfea2d",
+                                                "file_count":  6,
+                                                "requires_restart":  true,
+                                                "file_hashes":  {
+                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "b4bf66c6dc73049b",
+                                                                    "plugins/trajectory-convert/backend/routes.py":  "2414282f1b2257dd",
+                                                                    "plugins/trajectory-convert/frontend/index.html":  "f9a8443a7a0299ea",
+                                                                    "plugins/trajectory-convert/manifest.json":  "559dd581c19068c7",
+                                                                    "plugins/trajectory-convert/README.md":  "86993259d9fe6f36"
+                                                                },
+                                                "assets":  {
+
+                                                           }
+                                            }
                  }
 }

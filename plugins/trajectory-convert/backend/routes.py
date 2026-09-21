@@ -53,7 +53,10 @@ BOX_SIZE = 8             # 二维码渲染模块边长（像素）；值越大�
 FRAMERATE = 15
 # 视频编码：使用 avc1(H.264) 保证浏览器 <video> 可直接播放（mp4v 浏览器不支持，
 # 导致 QR 视频流解码插件无法逐帧读取）。openpyxl 环境下 opencv 内置 FFmpeg 支持 avc1。
-VIDEO_FOURCC = "avc1"
+# 视频编码器候选：avc1(H.264) 优先（浏览器 <video> 可直接播放），缺 OpenH264 时退到 mp4v。
+# 只试单一编码器会让"没装 OpenH264 的机器"上视频模式**静默产出坏文件**——
+# cv2.VideoWriter 打不开时 write() 是空操作，不报错（2026-09-21 实测本机无 OpenH264）。
+VIDEO_FOURCC_CANDIDATES = ("avc1", "mp4v")
 FEC_RATIO = 0.1         # 前向纠错比例：额外生成 1/(1-fec_ratio) 帧
 DEFAULT_FIELDS = {
     "time_field": "开始时间",
@@ -561,8 +564,7 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
             img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
             if writer is None:
                 h, w = img.shape[:2]
-                writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*VIDEO_FOURCC),
-                                         FRAMERATE, (w, h))
+                writer = _open_video_writer(out_path, (w, h))
             writer.write(img)
             if progress_cb and (i % 4 == 0 or i == total - 1):
                 progress_cb(i + 1, total, codes[i])
@@ -570,6 +572,20 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
         if writer is not None:
             writer.release()
     return total, k, m
+
+
+def _open_video_writer(out_path, size):
+    """依次尝试编码器候选，返回已打开的 writer；全部失败抛 RuntimeError（可读提示）。"""
+    for fourcc in VIDEO_FOURCC_CANDIDATES:
+        writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc),
+                                 FRAMERATE, size)
+        if writer.isOpened():
+            return writer
+        writer.release()
+    raise RuntimeError(
+        "视频编码器不可用（avc1/mp4v 都打不开）。请安装 OpenH264 运行库后重试，"
+        "或改用「静态二维码」模式。"
+    )
 
 
 def _render_qr_image(data_bytes, version, err, out_path):
