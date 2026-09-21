@@ -601,6 +601,111 @@
                                                 "assets":  {
 
                                                            }
-                                            }
+                                            },
+                     "base64":  {
+                                    "version":  "1.0.0",
+                                    "api_version":  1,
+                                    "file":  "JZToolsHub-插件-base64-v1.0.0.zip",
+                                    "sha256":  "7250fc526f4263a7f6afdff18edcba88ed5f023e3d092e83ae887d1c65dc45a0",
+                                    "size":  25053,
+                                    "built_at":  "2026-09-21T14:56:44+08:00",
+                                    "code_sha256":  "37a077493f12cc68d10f315491ee30dd8f999cb6ca7839a4f3862a63ed3037d1",
+                                    "file_count":  3,
+                                    "requires_restart":  false,
+                                    "file_hashes":  {
+                                                        "plugins/base64/frontend/index.html":  "51e3b303daf7c0a9",
+                                                        "plugins/base64/manifest.json":  "99d9d51d485d4912",
+                                                        "plugins/base64/README.md":  "291005a306d54bfb"
+                                                    },
+                                    "assets":  {
+
+                                               }
+                                },
+                     "color-picker":  {
+                                          "version":  "1.0.0",
+                                          "api_version":  1,
+                                          "file":  "JZToolsHub-插件-color-picker-v1.0.0.zip",
+                                          "sha256":  "1ad1ac3aeb87521ab7bc8eeb70f4e354ba7da3d67aca8404f03d6ddf2ba06219",
+                                          "size":  25071,
+                                          "built_at":  "2026-09-21T14:57:05+08:00",
+                                          "code_sha256":  "3b2316beccba1566c08a20fb807ee48cb6bfd7ee7825c1de1d33f71bd2721fde",
+                                          "file_count":  3,
+                                          "requires_restart":  false,
+                                          "file_hashes":  {
+                                                              "plugins/color-picker/frontend/index.html":  "15dd7777cdebb36f",
+                                                              "plugins/color-picker/manifest.json":  "b4463ab0b4d479fe",
+                                                              "plugins/color-picker/README.md":  "604cb6e4adc608f5"
+                                                          },
+                                          "assets":  {
+
+                                                     }
+                                      },
+                     "json-formatter":  {
+                                            "version":  "1.0.1",
+                                            "api_version":  1,
+                                            "file":  "JZToolsHub-插件-json-formatter-v1.0.1.zip",
+                                            "sha256":  "56545679a31bc82473b135ddeeceab3299b15b93a16f2cab9b07f4348941cf2e",
+                                            "size":  26286,
+                                            "built_at":  "2026-09-21T14:57:07+08:00",
+                                            "code_sha256":  "f8b28043d3daee90a3043f08a294cc41325e00c92b3c35ff674a1e428c1d70d5",
+                                            "file_count":  3,
+                                            "requires_restart":  false,
+                                            "file_hashes":  {
+                                                                "plugins/json-formatter/frontend/index.html":  "5f29ac5100ab41e0",
+                                                                "plugins/json-formatter/manifest.json":  "e4f4e5b7562357e1",
+                                                                "plugins/json-formatter/README.md":  "2dc3bf6c7f59ec21"
+                                                            },
+                                            "assets":  {
+
+                                                       }
+                                        },
+                     "map-marker":  {
+                                        "version":  "1.0.0",
+                                        "api_version":  1,
+                                        "file":  "JZToolsHub-插件-map-marker-v1.0.0.zip",
+                                        "sha256":  "4007a1ab67a14a64f046a53ccd09ecddeba6d5b79abf08a322769f61c6ba8d74",
+                                        "size":  95621,
+                                        "built_at":  "2026-09-21T14:57:09+08:00",
+                                        "code_sha256":  "f6b234bbac50645447f7c3c16a82c5a3dcfdb070ed497969c8b307486d091684",
+                                        "file_count":  4,
+                                        "requires_restart":  false,
+                                        "file_hashes":  {
+                                                            "plugins/map-marker/frontend/index.html":  "fc24945d4da58782",
+                                                            "plugins/map-marker/frontend/jsqr.min.js":  "7c3c379dd1277bce",
+                                                            "plugins/map-marker/manifest.json":  "c2d5cf24aec6fe7f",
+                                                            "plugins/map-marker/README.md":  "32b6e5971aaef033"
+                                                        },
+                                        "assets":  {
+                                                       "frontend/jsqr.min.js":  {
+                                                                                    "h":  "7c3c379dd1277bce",
+                                                                                    "v":  1,
+                                                                                    "referenced":  true
+                                                                                }
+                                                   }
+                                    },
+                     "md5-generator":  {
+                                           "version":  "1.0.0",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-插件-md5-generator-v1.0.0.zip",
+                                           "sha256":  "ebb4b480cce0b2060a9469fa969b2b242cab0b47ef84cecfc4eca39df5f42c06",
+                                           "size":  31252,
+                                           "built_at":  "2026-09-21T14:57:11+08:00",
+                                           "code_sha256":  "0a5873bc86478deef180f1d6a500c59d7f3f6f49e1574666a0b0869ede2e4355",
+                                           "file_count":  4,
+                                           "requires_restart":  false,
+                                           "file_hashes":  {
+                                                               "plugins/md5-generator/frontend/index.html":  "3202bffed582df6b",
+                                                               "plugins/md5-generator/frontend/md5.js":  "448efda5b38a6579",
+                                                               "plugins/md5-generator/manifest.json":  "c339788db9684df1",
+                                                               "plugins/md5-generator/README.md":  "4b9bfd9aa83b227b"
+                                                           },
+                                           "assets":  {
+                                                          "frontend/md5.js":  {
+                                                                                  "h":  "448efda5b38a6579",
+                                                                                  "v":  1,
+                                                                                  "referenced":  true
+                                                                              }
+                                                      }
+                                       }
                  }
 }

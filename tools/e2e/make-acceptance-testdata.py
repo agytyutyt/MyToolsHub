@@ -539,6 +539,12 @@ README_TMPL = """# JZToolsHub 验收测试数据
 | **shared-docs** | `shared-docs/文档正文.txt` | 新建文档 → 粘贴正文 → 保存 | 保存成功、列表可见、详情可读 |
 | shared-docs | 上述文档 → 导入导出 | 导出 docx/xlsx | 可下载；缺 docx/openpyxl 时提示不可用 |
 | **notice-board** | `notice-board/公告正文.txt` | 新建公告 → 保存 | 首页/公告列表可见；停用插件后不再展示 |
+| **base64** | `base64/待编码文本.txt` | 粘贴文本 → 编码 → 再解码 | 解码结果与原文逐字一致（含中文与符号） |
+| **json-formatter** | `json-formatter/待格式化.json` | 粘贴 → 格式化 / 压缩 / 校验 | 格式化后缩进正确；压缩后无多余空白；校验通过 |
+| json-formatter | `json-formatter/待格式化-错误.json` | 粘贴 → 校验 | **报错并指出位置**（缺右括号），不是静默通过 |
+| **md5-generator** | `md5-generator/待校验文本.txt` + `预期值.md` | 粘贴 → 计算 MD5 / HMAC-MD5（密钥 `jz-accept-key`） | 结果与 `预期值.md` 一致（大小写不敏感） |
+| **map-marker** | `map-marker/坐标列表.csv` | 粘贴坐标 → 标点 / 生成移动轨迹 | 地图上出现 10 个点、轨迹连线正确（需高德 Key；无 Key 时提示配置） |
+| **color-picker** | `color-picker/说明.md` | 取色 → 读 HEX/RGB/HSL → 复制 | 三个值互相一致；复制内容正确（交互式，无需文件） |
 
 ## 预生成产物（`--with-codes` 生成）
 
@@ -680,6 +686,39 @@ def build_fixtures():
                 ["8·16系列盗窃案", "2026-08-20", "一大队", 5, "手机6部、现金3万元", "约8万元"]],
                sheet="战果台账", widths={"缴获物品": 30, "涉案价值": 14})
     info.append("case-report：收网简报（五要素齐全）+ 战果台账 xlsx")
+
+    # 纯前端工具插件（无后端）：数据用于粘贴，md5 给出可对照的预期值
+    TOOL_TEXT = ("JZToolsHub 验收测试文本\n"
+                 "包含中文、英文、数字 1234567890 与符号 !@#$%^&*()_+-=[]{}|;:,.\n"
+                 "第二行：用于 base64 编码/解码往返、MD5 计算与校验。\n")
+    write_text("base64/待编码文本.txt", TOOL_TEXT)
+    write_text("md5-generator/待校验文本.txt", TOOL_TEXT)
+    import hashlib as _hl, hmac as _hmac
+    md5_hex = _hl.md5(TOOL_TEXT.encode("utf-8")).hexdigest()
+    hmac_hex = _hmac.new(b"jz-accept-key", TOOL_TEXT.encode("utf-8"), _hl.md5).hexdigest()
+    write_text("md5-generator/预期值.md",
+               "# md5-generator 预期值\n\n文件：`待校验文本.txt`（UTF-8，含结尾换行）\n\n"
+               "| 算法 | 参数 | 预期结果 |\n| --- | --- | --- |\n"
+               "| MD5 | — | `%s` |\n"
+               "| HMAC-MD5 | 密钥 `jz-accept-key` | `%s` |\n\n"
+               "> 页面上算出的值与上表一致才算通过（大小写不敏感）。\n" % (md5_hex, hmac_hex))
+    write_text("json-formatter/待格式化.json",
+               '{"name":"JZToolsHub","version":"2.3.13","tags":["工具","离线"],'
+               '"nested":{"level":1,"items":[{"id":1,"ok":true},{"id":2,"ok":false}]},'
+               '"中文键":"中文值","count":42}')
+    write_text("json-formatter/待格式化-错误.json",
+               '{"name":"缺少右括号","items":[1,2,3}')
+    write_text("map-marker/坐标列表.csv",
+               "编号,经度,纬度,时间\n" + "".join(
+                   "P%02d,%.6f,%.6f,2026-09-18 08:%02d:00\n" % (i, 116.3975 + i * 0.0007,
+                                                                 39.9087 + i * 0.0004, i)
+                   for i in range(1, 11)))
+    write_text("color-picker/说明.md",
+               "# color-picker 测试数据\n\n本插件为交互式取色器，无需输入文件：\n\n"
+               "1. 在取色区选一个颜色，读 HEX / RGB / HSL 三个值；\n"
+               "2. 把 HEX 值粘回输入框，确认三个值互相一致；\n"
+               "3. 点「一键复制」，粘贴到记事本核对。\n")
+    info.append("纯前端工具：base64/md5 文本、json 正误样例、坐标列表、取色器说明（md5 附预期值）")
 
     # shared-docs / notice-board
     write_text("shared-docs/文档正文.txt",

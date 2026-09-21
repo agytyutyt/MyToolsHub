@@ -41,6 +41,12 @@
 | **shared-docs** | `shared-docs/文档正文.txt` | 新建文档 → 粘贴正文 → 保存 | 保存成功、列表可见、详情可读 |
 | shared-docs | 上述文档 → 导入导出 | 导出 docx/xlsx | 可下载；缺 docx/openpyxl 时提示不可用 |
 | **notice-board** | `notice-board/公告正文.txt` | 新建公告 → 保存 | 首页/公告列表可见；停用插件后不再展示 |
+| **base64** | `base64/待编码文本.txt` | 粘贴文本 → 编码 → 再解码 | 解码结果与原文逐字一致（含中文与符号） |
+| **json-formatter** | `json-formatter/待格式化.json` | 粘贴 → 格式化 / 压缩 / 校验 | 格式化后缩进正确；压缩后无多余空白；校验通过 |
+| json-formatter | `json-formatter/待格式化-错误.json` | 粘贴 → 校验 | **报错并指出位置**（缺右括号），不是静默通过 |
+| **md5-generator** | `md5-generator/待校验文本.txt` + `预期值.md` | 粘贴 → 计算 MD5 / HMAC-MD5（密钥 `jz-accept-key`） | 结果与 `预期值.md` 一致（大小写不敏感） |
+| **map-marker** | `map-marker/坐标列表.csv` | 粘贴坐标 → 标点 / 生成移动轨迹 | 地图上出现 10 个点、轨迹连线正确（需高德 Key；无 Key 时提示配置） |
+| **color-picker** | `color-picker/说明.md` | 取色 → 读 HEX/RGB/HSL → 复制 | 三个值互相一致；复制内容正确（交互式，无需文件） |
 
 ## 预生成产物（`--with-codes` 生成）
 
@@ -87,6 +93,7 @@ python tools\e2e\make-acceptance-testdata.py --verify --base http://127.0.0.1:50
 - knowledge-base：通知 docx（含表格）+ 报表 xlsx + 手册 PDF（源 docx 已保留）
 - character-graph：人物档案 docx / pdf（源已保留）/ txt
 - case-report：收网简报（五要素齐全）+ 战果台账 xlsx
+- 纯前端工具：base64/md5 文本、json 正误样例、坐标列表、取色器说明（md5 附预期值）
 - shared-docs / notice-board：正文文本各一份
 - knowledge-base/旧版通知.doc（20 KB）
 - knowledge-base/手册.pdf（71 KB）
