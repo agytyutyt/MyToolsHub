@@ -53,6 +53,28 @@ DEP_COMPONENT_PACKAGES = [
 datas = []
 binaries = []
 hiddenimports = []
+
+# 「依赖组件包」是**纯 Python 包**（requests / pypdf / openpyxl …），它们要用的**标准库**
+# 必须由主包提供：PyInstaller 只收集从入口静态可达的模块，组件里用到的边角标准库会缺，
+# 装到目标机后表现为"组件已装但 import 失败 → 插件仍显示未安装"（2026-09-21 真机实测：
+# requests 缺 http.cookies、pypdf 缺 xml.dom）。这里显式列出组件可能用到的标准库。
+#
+# 验证方式：把 11 个依赖组件全部装进程序目录，跑 `JZToolsHub.exe --check-deps out.json`
+# ——它会对每个组件声明的模块做**真实 import**，全 ok 才算过关（比"文件在不在"可靠）。
+hiddenimports += [
+    # requests（urllib3 / certifi / idna / charset_normalizer 的运行时依赖）
+    "http", "http.client", "http.cookies", "http.cookiejar", "email", "email.utils",
+    "email.parser", "email.message", "urllib", "urllib.request", "urllib.parse",
+    "urllib.error", "urllib.response", "ssl", "socket", "queue", "ipaddress",
+    "netrc", "mimetypes", "calendar", "uuid", "secrets", "hmac", "hashlib",
+    "zlib", "gzip", "bz2", "lzma", "winreg", "decimal", "stringprep",
+    # pypdf / docx / openpyxl / qrcode 等（文档与出码组件）
+    "xml", "xml.dom", "xml.dom.minidom", "xml.etree", "xml.etree.ElementTree",
+    "xml.parsers", "xml.parsers.expat", "html", "html.entities", "difflib",
+    "optparse", "posixpath", "string", "struct", "array", "mmap", "binascii",
+    "filecmp", "pkgutil", "platform", "traceback", "types", "typing",
+]
+
 for _pkg in PACKAGES:
     try:
         _d, _b, _h = collect_all(_pkg)

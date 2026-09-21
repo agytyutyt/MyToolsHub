@@ -286,44 +286,6 @@
                                                                            }
                                               }
                                },
-                     "case-report":  {
-                                         "version":  "1.2.4",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-插件-case-report-v1.2.4.zip",
-                                         "sha256":  "89670599502ec0b987a8d54395cf0136a65211c6992c78a1e6a02eb6b9d8eb6c",
-                                         "size":  70670,
-                                         "built_at":  "2026-09-21T09:15:29+08:00",
-                                         "code_sha256":  "b38c62e459035c5d01778f85e949d2cdb7f183b33ad8bb52549a0bc6c5c4a369",
-                                         "file_count":  13,
-                                         "requires_restart":  true,
-                                         "file_hashes":  {
-                                                             "plugins/case-report/backend/__init__.py":  "b7e584a3a5de752b",
-                                                             "plugins/case-report/backend/category_kb.py":  "677db705699bf264",
-                                                             "plugins/case-report/backend/config.template.json":  "e34f134a2f41170a",
-                                                             "plugins/case-report/backend/llm_client.py":  "89291233953a1d59",
-                                                             "plugins/case-report/backend/org_units.json":  "0c194b037c05984a",
-                                                             "plugins/case-report/backend/parser.py":  "cc3aa0744feda24a",
-                                                             "plugins/case-report/backend/requirements.txt":  "61439031a05ebe34",
-                                                             "plugins/case-report/backend/routes.py":  "cc2dcaf6e9a147e5",
-                                                             "plugins/case-report/frontend/app.js":  "36dd9cb95c2a0723",
-                                                             "plugins/case-report/frontend/index.html":  "4605685ebf46c9eb",
-                                                             "plugins/case-report/frontend/style.css":  "c35252a5218423ca",
-                                                             "plugins/case-report/manifest.json":  "019bb998b571cb01",
-                                                             "plugins/case-report/README.md":  "d11d662bb0f805d5"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "36dd9cb95c2a0723",
-                                                                                "v":  34,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "c35252a5218423ca",
-                                                                                   "v":  27,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    }
-                                     },
                      "character-graph":  {
                                              "version":  "1.1.4",
                                              "api_version":  1,
@@ -378,43 +340,6 @@
                                                                                                       }
                                                         }
                                          },
-                     "file-filter":  {
-                                         "version":  "1.1.4",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-插件-file-filter-v1.1.4.zip",
-                                         "sha256":  "d986a2afdf205cc39980a05f13f15841ed6e7d8cc781c754081a8d566d723fc7",
-                                         "size":  57341,
-                                         "built_at":  "2026-09-21T09:15:33+08:00",
-                                         "code_sha256":  "14dd1d391235d88bef2b5dc75bb94f1739c869802e2bad3711f3370e90ee28a5",
-                                         "file_count":  12,
-                                         "requires_restart":  true,
-                                         "file_hashes":  {
-                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
-                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
-                                                             "plugins/file-filter/backend/config.template.json":  "c01467e004858bec",
-                                                             "plugins/file-filter/backend/core.py":  "34acb3b06ba58760",
-                                                             "plugins/file-filter/backend/llm_client.py":  "7e6aa4a874e9fbcb",
-                                                             "plugins/file-filter/backend/requirements.txt":  "a306e366dd225242",
-                                                             "plugins/file-filter/backend/routes.py":  "1ea95824204eca7e",
-                                                             "plugins/file-filter/frontend/app.js":  "1bb8da7c767a6e95",
-                                                             "plugins/file-filter/frontend/index.html":  "be64c77e9276eb5e",
-                                                             "plugins/file-filter/frontend/style.css":  "92eabfee75d0d072",
-                                                             "plugins/file-filter/manifest.json":  "3d4405c6d5e06132",
-                                                             "plugins/file-filter/README.md":  "eab61c08b84415c8"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "1bb8da7c767a6e95",
-                                                                                "v":  3,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "92eabfee75d0d072",
-                                                                                   "v":  2,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    }
-                                     },
                      "info-transfer":  {
                                            "version":  "1.2.5",
                                            "api_version":  1,
@@ -601,6 +526,81 @@
                                                                                          "referenced":  true
                                                                                      }
                                                           }
-                                           }
+                                           },
+                     "case-report":  {
+                                         "version":  "1.2.5",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-插件-case-report-v1.2.5.zip",
+                                         "sha256":  "b36435bcf4ea744505345bb0c092d9f462cceae1bdd4dfd0b0b051cca0456409",
+                                         "size":  70996,
+                                         "built_at":  "2026-09-21T09:26:43+08:00",
+                                         "code_sha256":  "039d2ff698d03dd7b4d0629d5ee50b0e4118cc419527a32d7053a69503601c56",
+                                         "file_count":  13,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/case-report/backend/__init__.py":  "b7e584a3a5de752b",
+                                                             "plugins/case-report/backend/category_kb.py":  "677db705699bf264",
+                                                             "plugins/case-report/backend/config.template.json":  "e34f134a2f41170a",
+                                                             "plugins/case-report/backend/llm_client.py":  "3fe1ccf010d408cc",
+                                                             "plugins/case-report/backend/org_units.json":  "0c194b037c05984a",
+                                                             "plugins/case-report/backend/parser.py":  "cc3aa0744feda24a",
+                                                             "plugins/case-report/backend/requirements.txt":  "61439031a05ebe34",
+                                                             "plugins/case-report/backend/routes.py":  "cc2dcaf6e9a147e5",
+                                                             "plugins/case-report/frontend/app.js":  "36dd9cb95c2a0723",
+                                                             "plugins/case-report/frontend/index.html":  "4605685ebf46c9eb",
+                                                             "plugins/case-report/frontend/style.css":  "c35252a5218423ca",
+                                                             "plugins/case-report/manifest.json":  "9cf4d60d20eba8f1",
+                                                             "plugins/case-report/README.md":  "d11d662bb0f805d5"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "36dd9cb95c2a0723",
+                                                                                "v":  34,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "c35252a5218423ca",
+                                                                                   "v":  27,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    }
+                                     },
+                     "file-filter":  {
+                                         "version":  "1.1.5",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-插件-file-filter-v1.1.5.zip",
+                                         "sha256":  "9ad5ba404f4ee22d84be009c274b5d7034a38772ecde3d57808c9c0c72e9a3d3",
+                                         "size":  57678,
+                                         "built_at":  "2026-09-21T09:26:44+08:00",
+                                         "code_sha256":  "f0ad8d87283171ef6211500c20ad5c5a76be0c6f8f8ca593c3c70b781d677c02",
+                                         "file_count":  12,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
+                                                             "plugins/file-filter/backend/config.template.json":  "c01467e004858bec",
+                                                             "plugins/file-filter/backend/core.py":  "34acb3b06ba58760",
+                                                             "plugins/file-filter/backend/llm_client.py":  "64bd2eb74a90b181",
+                                                             "plugins/file-filter/backend/requirements.txt":  "a306e366dd225242",
+                                                             "plugins/file-filter/backend/routes.py":  "1ea95824204eca7e",
+                                                             "plugins/file-filter/frontend/app.js":  "1bb8da7c767a6e95",
+                                                             "plugins/file-filter/frontend/index.html":  "be64c77e9276eb5e",
+                                                             "plugins/file-filter/frontend/style.css":  "92eabfee75d0d072",
+                                                             "plugins/file-filter/manifest.json":  "2ac07f001001d99b",
+                                                             "plugins/file-filter/README.md":  "eab61c08b84415c8"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "1bb8da7c767a6e95",
+                                                                                "v":  3,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "92eabfee75d0d072",
+                                                                                   "v":  2,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    }
+                                     }
                  }
 }

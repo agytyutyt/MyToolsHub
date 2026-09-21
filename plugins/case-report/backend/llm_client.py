@@ -10,7 +10,15 @@ OpenAI、DeepSeek、通义千问（兼容模式）、Kimi/Moonshot、智谱、�
 import json
 import re
 
-import requests
+# requests 是**可选**依赖（由「依赖组件包」按需安装）：必须保护性导入——
+# 裸 import 会让缺它时整个插件后端 ModuleNotFoundError，插件直接加载失败，
+# 与"可选依赖缺失 → 仍加载并标注功能降级"的设计相悖（真机实测踩到）。
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except Exception:  # pragma: no cover - 干净机未装依赖组件时
+    requests = None
+    REQUESTS_AVAILABLE = False
 
 # 缺省接入地址与模型（未指定时使用）
 DEFAULT_BASE_URL = "https://api.deepseek.com"
@@ -61,6 +69,8 @@ def chat_json(base_url, api_key, model, system, user, temperature=0.1, timeout=1
 
     base_url 允许以 /chat/completions 结尾（直接使用），否则自动拼接。
     """
+    if not REQUESTS_AVAILABLE:
+        raise LLMError("缺少 requests：大模型辅助解析不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip 后重启服务。")
     url = build_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -104,6 +114,8 @@ def test_connection(base_url, api_key, model, timeout=15):
     推理模型（如 DeepSeek 系）在 max_tokens 较小时会把额度花在
     reasoning_content 上，content 可能为空，但这并不代表不可用。
     """
+    if not REQUESTS_AVAILABLE:
+        raise LLMError("缺少 requests：大模型辅助解析不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip 后重启服务。")
     url = build_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",

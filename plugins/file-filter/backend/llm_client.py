@@ -11,7 +11,15 @@ Kimi / 智谱 / 本地 Ollama 等），与 case-report / character-graph 插件�
 import json
 import re
 
-import requests
+# requests 是**可选**依赖（由「依赖组件包」按需安装）：必须保护性导入——
+# 裸 import 会让缺它时整个插件后端 ModuleNotFoundError，插件直接加载失败，
+# 与"可选依赖缺失 → 仍加载并标注功能降级"的设计相悖（真机实测踩到）。
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except Exception:  # pragma: no cover - 干净机未装依赖组件时
+    requests = None
+    REQUESTS_AVAILABLE = False
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-v4-flash"
@@ -53,6 +61,8 @@ def build_chat_url(base_url):
 
 def chat(base_url, api_key, model, system, user, temperature=0.1, timeout=LLM_TIMEOUT):
     """发送一次 chat/completions 请求，返回文本回复。"""
+    if not REQUESTS_AVAILABLE:
+        raise LLMError("缺少 requests：大模型辅助过滤不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip 后重启服务。")
     url = build_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -89,6 +99,8 @@ def chat(base_url, api_key, model, system, user, temperature=0.1, timeout=LLM_TI
 
 def test_connection(base_url, api_key, model, timeout=15):
     """连通性测试，返回 (ok, detail)。"""
+    if not REQUESTS_AVAILABLE:
+        raise LLMError("缺少 requests：大模型辅助过滤不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip 后重启服务。")
     url = build_chat_url(base_url)
     headers = {
         "Authorization": f"Bearer {api_key}",
