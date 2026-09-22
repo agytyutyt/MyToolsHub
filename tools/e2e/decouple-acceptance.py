@@ -221,9 +221,13 @@ def main():
         else:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    ok = sum(1 for _a, o, _d in RESULTS if o)
-    bad = [a for a, o, _d in RESULTS if not o]
-    print("\n==== 汇总：%d 项通过 / %d 项失败 ====" % (ok, len(RESULTS) - ok))
+    # ★ SKIP（ok=None）是"本次没跑到"（如未找到主包 zip），**不算失败**：
+    #   把 None 并进失败会让报表谎报（曾出现"13 通过 / 2 失败"而实际那 2 条是 SKIP）。
+    ok = sum(1 for _a, o, _d in RESULTS if o is True)
+    bad = [a for a, o, _d in RESULTS if o is False]
+    skip = sum(1 for _a, o, _d in RESULTS if o is None)
+    print("\n==== 汇总：%d 项通过 / %d 项失败 / %d 项跳过（共 %d）===="
+          % (ok, len(bad), skip, len(RESULTS)))
     if bad:
         print("失败项：%s" % "、".join(bad))
         print("提示：AC-1 需要先跑 build-deploy.ps1 产出主包；真机人工部分见 TODO 清单 T20。")
