@@ -58,10 +58,30 @@ def sha_tree(root):
     return out
 
 
+def _decode_ps(b):
+    """解 PowerShell 子进程输出。
+
+    ★ 编码**随控制台代码页变化**：本机默认 GBK，但任何跑过 `chcp 65001` 的批处理
+    （安装器的 .bat 里就有）会把控制台切到 UTF-8，之后子进程就输出 UTF-8。
+    写死一种编码会让"不可卸载""跳过"这类中文断言随机失配（真机上表现为时好时坏）——
+    故两种都试：先 UTF-8（GBK 中文多半不是合法 UTF-8），失败或出现替换字符再按 GBK。
+    """
+    if not b:
+        return ""
+    for enc in ("utf-8", "gbk"):
+        try:
+            text = b.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        if "�" not in text:
+            return text
+    return b.decode("gbk", errors="replace")
+
+
 def run_ps(script, args, cwd=None):
     cmd = PS + [script] + list(args)
     p = subprocess.run(cmd, cwd=cwd, capture_output=True)
-    out = (p.stdout or b"").decode("gbk", errors="replace") + (p.stderr or b"").decode("gbk", errors="replace")
+    out = _decode_ps(p.stdout) + _decode_ps(p.stderr)
     return p.returncode, out
 
 
@@ -179,7 +199,9 @@ def sandbox_flow(tmp, main_ver_old="2.1.2", main_ver_new="2.2.0"):
 
     print("== AC-18 admin 不可卸载 / 可单独升级 ==")
     rc4, out4 = run_ps(installer, ["-Uninstall", "admin", "-InstallDir", app, "-DataRoot", droot])
-    check("AC-18", rc4 != 0 and "不可卸载" in out4, "-Uninstall admin 被拒（退出码 %d）" % rc4)
+    check("AC-18", rc4 != 0 and "不可卸载" in out4,
+          "-Uninstall admin 被拒（退出码 %d）%s" % (rc4, "" if "不可卸载" in out4 else
+                                                "｜实际输出：" + " ".join(out4.split())[-160:]))
     # admin 单独升级到更高版本 → 主包升级不得回退它
     admin_ver_before = json.load(open(os.path.join(app, "plugins", "admin", "manifest.json"),
                                      encoding="utf-8"))["version"]
@@ -190,9 +212,11 @@ def sandbox_flow(tmp, main_ver_old="2.1.2", main_ver_new="2.2.0"):
     json.dump(st, open(state_path, "w", encoding="utf-8"), ensure_ascii=False)
     rc5, out5 = run_ps(os.path.join(src, "install.ps1"),
                        ["-InstallDir", app, "-DataRoot", droot, "-NoRegistry"])
-    check("AC-18", rc5 == 0 and "admin" in out5 and ("跳过" in out5 or "保持现状" in out5),
-          "admin 单独升级到 99.0.0 后，主包升级跳过覆盖（登记版本 %s → 保持）"
-          % json.load(open(state_path, encoding="utf-8"))["plugins"]["admin"]["version"])
+    _ok5 = rc5 == 0 and "admin" in out5 and ("跳过" in out5 or "保持现状" in out5)
+    check("AC-18", _ok5,
+          "admin 单独升级到 99.0.0 后，主包升级跳过覆盖（登记版本 %s → 保持）%s"
+          % (json.load(open(state_path, encoding="utf-8"))["plugins"]["admin"]["version"],
+             "" if _ok5 else "｜实际输出：" + " ".join(out5.split())[-200:]))
     check("AC-18", json.load(open(state_path, encoding="utf-8"))["plugins"]["admin"]["version"] == "99.0.0",
           "登记未被主包改写（admin 版本 %s 保持）" % admin_ver_before)
 

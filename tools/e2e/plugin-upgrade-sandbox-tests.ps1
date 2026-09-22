@@ -106,6 +106,16 @@ function Copy-PluginsSeed {
 #  0. 准备沙箱
 # ============================================================================
 Head "0. 准备沙箱（$T）"
+# ★ 开头先清掉上一次跑留下的"假服务进程"（进程名同为 JZToolsHub）：
+#   若它还在，安装器会判定"服务在运行"→ 尝试停掉再启动，而沙箱里的 JZToolsHub.exe 是空壳文件，
+#   启动会报 "The specified executable is not a valid application" 并中断本次测试
+#   （实测：上一次运行被中断后，紧接着的下一次必在第 3 步失败）。
+$stray = @(Get-Process -Name JZToolsHub -ErrorAction SilentlyContinue)
+if ($stray.Count -gt 0) {
+    Write-Host ("    清理上一次残留的假服务进程：" + $stray.Count + " 个")
+    $stray | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
 if (Test-Path -LiteralPath $T) { Remove-Item -LiteralPath $T -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $App, $Data, $OutDir, $OutVar | Out-Null
 
