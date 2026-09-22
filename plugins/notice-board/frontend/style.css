@@ -14,7 +14,15 @@
   --radius-s: 12px;
   --shadow-1: 0 1px 2px rgba(60, 64, 67, .3), 0 1px 3px 1px rgba(60, 64, 67, .15);
   --shadow-2: 0 1px 3px rgba(60, 64, 67, .3), 0 4px 8px 3px rgba(60, 64, 67, .15);
-}* { box-sizing: border-box; margin: 0; padding: 0; }body {
+}* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* 预留竖向滚动条槽位：内容变高（如展开「⚙️ 管理配置」）时滚动条出现，不再压缩视口宽度，
+   居中定宽容器不会因此左移（实测 1280 视口展开配置面板会左移 8px）。现代内核用 scrollbar-gutter；
+   旧内核（< Chrome 94）回落为常显轨道——同样不左移。 */
+html { scrollbar-gutter: stable; }
+@supports not (scrollbar-gutter: stable) { html { overflow-y: scroll; } }
+
+body {
   font-family: "Google Sans", "Roboto", "Segoe UI", system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--on-surface);

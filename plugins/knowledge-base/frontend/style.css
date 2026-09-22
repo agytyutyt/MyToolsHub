@@ -399,7 +399,9 @@ body {
   .reader-frame { min-width: 520px; }
 }
 .reader-status { text-align: center; color: var(--text-2); padding: 60px 0; font-size: 14px; }
-.reader-container { overflow: auto; }
+/* 阅读器滚动容器同样预留槽位：.paper 居中于其中，文档比阅读区高时滚动条出现会让纸张左移 */
+.reader-container { overflow: auto; scrollbar-gutter: stable; }
+@supports not (scrollbar-gutter: stable) { .reader-container { overflow-y: scroll; } }
 
 /* 纸张样式（文档型渲染通用）—— 不做卡片效果：无边框/投影/圆角，仅保留白色阅读底 */
 .paper {

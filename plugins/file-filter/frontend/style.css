@@ -14,6 +14,12 @@
   --radius: 12px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* 预留竖向滚动条槽位：内容变高（如展开「⚙️ 管理配置」）时滚动条出现，不再压缩视口宽度，
+   居中定宽容器不会因此左移（实测 1280 视口展开配置面板会左移 8px）。现代内核用 scrollbar-gutter；
+   旧内核（< Chrome 94）回落为常显轨道——同样不左移。 */
+html { scrollbar-gutter: stable; }
+@supports not (scrollbar-gutter: stable) { html { overflow-y: scroll; } }
+
 body {
   font-family: "Google Sans", "Roboto", "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
   background: var(--bg);
