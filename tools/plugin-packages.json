@@ -344,77 +344,6 @@
                                                                                }
                                                     }
                                      },
-                     "trajectory-sketch":  {
-                                               "version":  "1.2.3",
-                                               "api_version":  1,
-                                               "file":  "JZToolsHub-插件-trajectory-sketch-v1.2.3.zip",
-                                               "sha256":  "dda76800fe1502a65704e8029066ccd9dad79a900cc6661a73d9e2e5892ca51a",
-                                               "size":  135093,
-                                               "built_at":  "2026-09-21T09:15:42+08:00",
-                                               "code_sha256":  "5bab602dded3e4d09c0379d0839b36d1b5aff8ecb108959de305428203afa8bc",
-                                               "file_count":  46,
-                                               "requires_restart":  true,
-                                               "file_hashes":  {
-                                                                   "plugins/trajectory-sketch/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                   "plugins/trajectory-sketch/backend/bg_image.py":  "57aac66b175892dd",
-                                                                   "plugins/trajectory-sketch/backend/config.template.json":  "fec1f1e81584e0aa",
-                                                                   "plugins/trajectory-sketch/backend/config_store.py":  "13ccee5caee27b88",
-                                                                   "plugins/trajectory-sketch/backend/engine/__init__.py":  "164d370a1641f448",
-                                                                   "plugins/trajectory-sketch/backend/engine/adapter.py":  "9bc6aa1d6524867c",
-                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/__init__.py":  "084fca76c5b22976",
-                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/__init__.py":  "f6170fda6812bc0e",
-                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/cluster.py":  "ffc2b86a6764d9b9",
-                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/report.py":  "c0471ce13540b570",
-                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/staypoint.py":  "1f0c0064c6f4402c",
-                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/trip.py":  "d00513f18e2b5c23",
-                                                                   "plugins/trajectory-sketch/backend/engine/contract.py":  "dab1bba571c74b2a",
-                                                                   "plugins/trajectory-sketch/backend/engine/geo.py":  "dc6303f00163605e",
-                                                                   "plugins/trajectory-sketch/backend/engine/params.py":  "60e9fadcd2552b62",
-                                                                   "plugins/trajectory-sketch/backend/engine/registry.py":  "eec296e7540ff251",
-                                                                   "plugins/trajectory-sketch/backend/engine/selftest.py":  "126f3482b7dc54e2",
-                                                                   "plugins/trajectory-sketch/backend/engine/stats.py":  "7ca83751b763f100",
-                                                                   "plugins/trajectory-sketch/backend/engine/timeutil.py":  "929f7842516ced96",
-                                                                   "plugins/trajectory-sketch/backend/excel_io.py":  "3c0e8a515148c64a",
-                                                                   "plugins/trajectory-sketch/backend/filter_bridge.py":  "c86706e917a2c4fc",
-                                                                   "plugins/trajectory-sketch/backend/filter_local.py":  "3bfdbef7303a94bb",
-                                                                   "plugins/trajectory-sketch/backend/report_store.py":  "9befa809d56dfb6d",
-                                                                   "plugins/trajectory-sketch/backend/requirements.txt":  "8f2b43a9de43b471",
-                                                                   "plugins/trajectory-sketch/backend/routes.py":  "1e47b853f3e3b89e",
-                                                                   "plugins/trajectory-sketch/frontend/app.js":  "2dfb742236a477d4",
-                                                                   "plugins/trajectory-sketch/frontend/icons/_generate.py":  "c7d156252c08d589",
-                                                                   "plugins/trajectory-sketch/frontend/icons/check.svg":  "a60766647cb6b46c",
-                                                                   "plugins/trajectory-sketch/frontend/icons/clock.svg":  "0a37fd8b4223228b",
-                                                                   "plugins/trajectory-sketch/frontend/icons/copy.svg":  "a05eb8c2792b98c6",
-                                                                   "plugins/trajectory-sketch/frontend/icons/download.svg":  "b540300d07c9b189",
-                                                                   "plugins/trajectory-sketch/frontend/icons/filter.svg":  "7b87bcd8c2ce58e0",
-                                                                   "plugins/trajectory-sketch/frontend/icons/gap.svg":  "38343260b55367ef",
-                                                                   "plugins/trajectory-sketch/frontend/icons/quality.svg":  "6dbad2c881c7d795",
-                                                                   "plugins/trajectory-sketch/frontend/icons/report.svg":  "7f8cb1056f277e99",
-                                                                   "plugins/trajectory-sketch/frontend/icons/reset.svg":  "11b027ee9b26a0b3",
-                                                                   "plugins/trajectory-sketch/frontend/icons/route.svg":  "d88999725c2a72db",
-                                                                   "plugins/trajectory-sketch/frontend/icons/settings.svg":  "8388912010bc1f76",
-                                                                   "plugins/trajectory-sketch/frontend/icons/summary.svg":  "19c62eb37575762a",
-                                                                   "plugins/trajectory-sketch/frontend/icons/upload.svg":  "7de692d848f8f6bb",
-                                                                   "plugins/trajectory-sketch/frontend/icons/user.svg":  "73fb2cda25fac55c",
-                                                                   "plugins/trajectory-sketch/frontend/icons/warning.svg":  "3ae86d1c01cecaa1",
-                                                                   "plugins/trajectory-sketch/frontend/index.html":  "218b255df799cfb3",
-                                                                   "plugins/trajectory-sketch/frontend/style.css":  "6a4868b3d9974446",
-                                                                   "plugins/trajectory-sketch/manifest.json":  "74314f48b1499aa3",
-                                                                   "plugins/trajectory-sketch/README.md":  "80ab1e03080d461f"
-                                                               },
-                                               "assets":  {
-                                                              "frontend/app.js":  {
-                                                                                      "h":  "2dfb742236a477d4",
-                                                                                      "v":  2,
-                                                                                      "referenced":  true
-                                                                                  },
-                                                              "frontend/style.css":  {
-                                                                                         "h":  "6a4868b3d9974446",
-                                                                                         "v":  1,
-                                                                                         "referenced":  true
-                                                                                     }
-                                                          }
-                                           },
                      "case-report":  {
                                          "version":  "1.2.5",
                                          "api_version":  1,
@@ -453,65 +382,6 @@
                                                                                }
                                                     }
                                      },
-                     "file-filter":  {
-                                         "version":  "1.1.5",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-插件-file-filter-v1.1.5.zip",
-                                         "sha256":  "9ad5ba404f4ee22d84be009c274b5d7034a38772ecde3d57808c9c0c72e9a3d3",
-                                         "size":  57678,
-                                         "built_at":  "2026-09-21T09:26:44+08:00",
-                                         "code_sha256":  "f0ad8d87283171ef6211500c20ad5c5a76be0c6f8f8ca593c3c70b781d677c02",
-                                         "file_count":  12,
-                                         "requires_restart":  true,
-                                         "file_hashes":  {
-                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
-                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
-                                                             "plugins/file-filter/backend/config.template.json":  "c01467e004858bec",
-                                                             "plugins/file-filter/backend/core.py":  "34acb3b06ba58760",
-                                                             "plugins/file-filter/backend/llm_client.py":  "64bd2eb74a90b181",
-                                                             "plugins/file-filter/backend/requirements.txt":  "a306e366dd225242",
-                                                             "plugins/file-filter/backend/routes.py":  "1ea95824204eca7e",
-                                                             "plugins/file-filter/frontend/app.js":  "1bb8da7c767a6e95",
-                                                             "plugins/file-filter/frontend/index.html":  "be64c77e9276eb5e",
-                                                             "plugins/file-filter/frontend/style.css":  "92eabfee75d0d072",
-                                                             "plugins/file-filter/manifest.json":  "2ac07f001001d99b",
-                                                             "plugins/file-filter/README.md":  "eab61c08b84415c8"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "1bb8da7c767a6e95",
-                                                                                "v":  3,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "92eabfee75d0d072",
-                                                                                   "v":  2,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    }
-                                     },
-                     "trajectory-convert":  {
-                                                "version":  "1.1.5",
-                                                "api_version":  1,
-                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.5.zip",
-                                                "sha256":  "442435f9388d3b1ea25c524f308948e34de5974cc46baba3ba926b5a93fb15b5",
-                                                "size":  47753,
-                                                "built_at":  "2026-09-21T13:48:28+08:00",
-                                                "code_sha256":  "1ce9a6c417ce7d112a850850d972b80a73f0186abfad99fe6fb10c5cf2bfea2d",
-                                                "file_count":  6,
-                                                "requires_restart":  true,
-                                                "file_hashes":  {
-                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "b4bf66c6dc73049b",
-                                                                    "plugins/trajectory-convert/backend/routes.py":  "2414282f1b2257dd",
-                                                                    "plugins/trajectory-convert/frontend/index.html":  "f9a8443a7a0299ea",
-                                                                    "plugins/trajectory-convert/manifest.json":  "559dd581c19068c7",
-                                                                    "plugins/trajectory-convert/README.md":  "86993259d9fe6f36"
-                                                                },
-                                                "assets":  {
-
-                                                           }
-                                            },
                      "base64":  {
                                     "version":  "1.0.0",
                                     "api_version":  1,
@@ -706,6 +576,136 @@
                                                                                "referenced":  false
                                                                            }
                                               }
-                               }
+                               },
+                     "file-filter":  {
+                                         "version":  "1.2.0",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-插件-file-filter-v1.2.0.zip",
+                                         "sha256":  "147f929a9515be929ac3a9a4a85108eadc831755e216d8d593576b4eef566ab3",
+                                         "size":  66764,
+                                         "built_at":  "2026-09-22T13:19:45+08:00",
+                                         "code_sha256":  "ba4cd9c2fa75acec156bb57295cc00f6ae3d7772bf18622fccc1eada29ef0e45",
+                                         "file_count":  12,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
+                                                             "plugins/file-filter/backend/config.template.json":  "c01467e004858bec",
+                                                             "plugins/file-filter/backend/core.py":  "057e19d7c515cb46",
+                                                             "plugins/file-filter/backend/llm_client.py":  "64bd2eb74a90b181",
+                                                             "plugins/file-filter/backend/requirements.txt":  "a306e366dd225242",
+                                                             "plugins/file-filter/backend/routes.py":  "c43e80feaea6b7da",
+                                                             "plugins/file-filter/frontend/app.js":  "ef55e278feb161fe",
+                                                             "plugins/file-filter/frontend/index.html":  "98105f26e52e0e89",
+                                                             "plugins/file-filter/frontend/style.css":  "721d92eced1625e3",
+                                                             "plugins/file-filter/manifest.json":  "c5b9a4a614cd373d",
+                                                             "plugins/file-filter/README.md":  "1c1ed31e5baff5ff"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "ef55e278feb161fe",
+                                                                                "v":  4,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "721d92eced1625e3",
+                                                                                   "v":  4,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    }
+                                     },
+                     "trajectory-sketch":  {
+                                               "version":  "1.2.4",
+                                               "api_version":  1,
+                                               "file":  "JZToolsHub-插件-trajectory-sketch-v1.2.4.zip",
+                                               "sha256":  "40778fe7fd70052c259ef401f7243e6f033e8169d0406e2fb275dfadfe61b16e",
+                                               "size":  136336,
+                                               "built_at":  "2026-09-22T13:20:08+08:00",
+                                               "code_sha256":  "40a00a507cbb258f9841f30933294471a6dc8fc33bea04b26b8ff366f3db739f",
+                                               "file_count":  46,
+                                               "requires_restart":  true,
+                                               "file_hashes":  {
+                                                                   "plugins/trajectory-sketch/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                   "plugins/trajectory-sketch/backend/bg_image.py":  "57aac66b175892dd",
+                                                                   "plugins/trajectory-sketch/backend/config.template.json":  "fec1f1e81584e0aa",
+                                                                   "plugins/trajectory-sketch/backend/config_store.py":  "13ccee5caee27b88",
+                                                                   "plugins/trajectory-sketch/backend/engine/__init__.py":  "164d370a1641f448",
+                                                                   "plugins/trajectory-sketch/backend/engine/adapter.py":  "9bc6aa1d6524867c",
+                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/__init__.py":  "084fca76c5b22976",
+                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/__init__.py":  "f6170fda6812bc0e",
+                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/cluster.py":  "ffc2b86a6764d9b9",
+                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/report.py":  "c0471ce13540b570",
+                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/staypoint.py":  "1f0c0064c6f4402c",
+                                                                   "plugins/trajectory-sketch/backend/engine/algorithms/v2/trip.py":  "d00513f18e2b5c23",
+                                                                   "plugins/trajectory-sketch/backend/engine/contract.py":  "dab1bba571c74b2a",
+                                                                   "plugins/trajectory-sketch/backend/engine/geo.py":  "dc6303f00163605e",
+                                                                   "plugins/trajectory-sketch/backend/engine/params.py":  "60e9fadcd2552b62",
+                                                                   "plugins/trajectory-sketch/backend/engine/registry.py":  "eec296e7540ff251",
+                                                                   "plugins/trajectory-sketch/backend/engine/selftest.py":  "1ec331487fb31776",
+                                                                   "plugins/trajectory-sketch/backend/engine/stats.py":  "7ca83751b763f100",
+                                                                   "plugins/trajectory-sketch/backend/engine/timeutil.py":  "929f7842516ced96",
+                                                                   "plugins/trajectory-sketch/backend/excel_io.py":  "512fa3056f50ae4f",
+                                                                   "plugins/trajectory-sketch/backend/filter_bridge.py":  "c86706e917a2c4fc",
+                                                                   "plugins/trajectory-sketch/backend/filter_local.py":  "3bfdbef7303a94bb",
+                                                                   "plugins/trajectory-sketch/backend/report_store.py":  "9befa809d56dfb6d",
+                                                                   "plugins/trajectory-sketch/backend/requirements.txt":  "8f2b43a9de43b471",
+                                                                   "plugins/trajectory-sketch/backend/routes.py":  "1e47b853f3e3b89e",
+                                                                   "plugins/trajectory-sketch/frontend/app.js":  "2dfb742236a477d4",
+                                                                   "plugins/trajectory-sketch/frontend/icons/_generate.py":  "c7d156252c08d589",
+                                                                   "plugins/trajectory-sketch/frontend/icons/check.svg":  "a60766647cb6b46c",
+                                                                   "plugins/trajectory-sketch/frontend/icons/clock.svg":  "0a37fd8b4223228b",
+                                                                   "plugins/trajectory-sketch/frontend/icons/copy.svg":  "a05eb8c2792b98c6",
+                                                                   "plugins/trajectory-sketch/frontend/icons/download.svg":  "b540300d07c9b189",
+                                                                   "plugins/trajectory-sketch/frontend/icons/filter.svg":  "7b87bcd8c2ce58e0",
+                                                                   "plugins/trajectory-sketch/frontend/icons/gap.svg":  "38343260b55367ef",
+                                                                   "plugins/trajectory-sketch/frontend/icons/quality.svg":  "6dbad2c881c7d795",
+                                                                   "plugins/trajectory-sketch/frontend/icons/report.svg":  "7f8cb1056f277e99",
+                                                                   "plugins/trajectory-sketch/frontend/icons/reset.svg":  "11b027ee9b26a0b3",
+                                                                   "plugins/trajectory-sketch/frontend/icons/route.svg":  "d88999725c2a72db",
+                                                                   "plugins/trajectory-sketch/frontend/icons/settings.svg":  "8388912010bc1f76",
+                                                                   "plugins/trajectory-sketch/frontend/icons/summary.svg":  "19c62eb37575762a",
+                                                                   "plugins/trajectory-sketch/frontend/icons/upload.svg":  "7de692d848f8f6bb",
+                                                                   "plugins/trajectory-sketch/frontend/icons/user.svg":  "73fb2cda25fac55c",
+                                                                   "plugins/trajectory-sketch/frontend/icons/warning.svg":  "3ae86d1c01cecaa1",
+                                                                   "plugins/trajectory-sketch/frontend/index.html":  "218b255df799cfb3",
+                                                                   "plugins/trajectory-sketch/frontend/style.css":  "6a4868b3d9974446",
+                                                                   "plugins/trajectory-sketch/manifest.json":  "d7c0e014bb74661b",
+                                                                   "plugins/trajectory-sketch/README.md":  "9214890b7b6a7829"
+                                                               },
+                                               "assets":  {
+                                                              "frontend/app.js":  {
+                                                                                      "h":  "2dfb742236a477d4",
+                                                                                      "v":  2,
+                                                                                      "referenced":  true
+                                                                                  },
+                                                              "frontend/style.css":  {
+                                                                                         "h":  "6a4868b3d9974446",
+                                                                                         "v":  1,
+                                                                                         "referenced":  true
+                                                                                     }
+                                                          }
+                                           },
+                     "trajectory-convert":  {
+                                                "version":  "1.1.6",
+                                                "api_version":  1,
+                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.6.zip",
+                                                "sha256":  "ff7276d196fdfe097fd6de92f8faf91e479101dfaf59e6c1cac975839fb40e3d",
+                                                "size":  48328,
+                                                "built_at":  "2026-09-22T13:20:23+08:00",
+                                                "code_sha256":  "93c3888500604a66a65d546ff4f75eef64e5ff8388531734c7c4573ec1f8df16",
+                                                "file_count":  6,
+                                                "requires_restart":  true,
+                                                "file_hashes":  {
+                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "b4bf66c6dc73049b",
+                                                                    "plugins/trajectory-convert/backend/routes.py":  "c434416dbf5c1288",
+                                                                    "plugins/trajectory-convert/frontend/index.html":  "f9a8443a7a0299ea",
+                                                                    "plugins/trajectory-convert/manifest.json":  "f00c1b9aa90efd6e",
+                                                                    "plugins/trajectory-convert/README.md":  "bcdd863b26be8fca"
+                                                                },
+                                                "assets":  {
+
+                                                           }
+                                            }
                  }
 }
