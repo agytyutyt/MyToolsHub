@@ -28,6 +28,34 @@ object HistoryStore {
 
     private fun dir(context: Context): File = File(context.filesDir, DIR).apply { mkdirs() }
 
+    /**
+     * 内容指纹（SHA-256）：同一份文档反复入镜时用于连续去重。
+     * 口径 = fmt + name + ext + 数据本体（text 类取原文，excel 按单元格序列化）；
+     * rebuilt 只是还原方式标注，内容等价即同一文档，不参与指纹。
+     * 纯函数，不触上下文，可在 JVM 单测中直接使用。
+     */
+    fun fingerprint(env: Envelope): String {
+        val sb = StringBuilder(env.fmt).append('\u0001').append(env.name).append('\u0001')
+        env.ext?.let { sb.append(it) }
+        sb.append('\u0001')
+        if (env.isExcel) {
+            for (row in env.data as List<*>) {
+                var first = true
+                for (cell in row as List<*>) {
+                    if (!first) sb.append('\u001F')
+                    first = false
+                    sb.append(cell?.toString() ?: "")
+                }
+                sb.append('\u001E')
+            }
+        } else {
+            sb.append(env.textData ?: "")
+        }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(sb.toString().toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
     /** 保存一条识别结果，返回生成的记录（id 同时用作文件名） */
     fun save(context: Context, env: Envelope): HistoryRecord {
         val rec = HistoryRecord(

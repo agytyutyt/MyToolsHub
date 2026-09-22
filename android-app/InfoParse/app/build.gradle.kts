@@ -13,8 +13,8 @@ android {
         applicationId = "com.jztools.infoparse"
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "2.0.0"
+        versionCode = 4
+        versionName = "2.0.1"
     }
 
     // full：全 ABI（含 x86 系，模拟器可用）；lite：仅 arm64-v8a + 中英文资源，真机分发用，体积约减半

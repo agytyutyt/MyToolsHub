@@ -60,6 +60,13 @@ class ScanActivity : AppCompatActivity() {
     /** 重置代数：每次重置 +1，仍在运行的后台解析回调据此作废，避免旧结果回写界面 */
     private val generation = AtomicInteger(0)
 
+    /**
+     * 上一次建档结果的内容指纹：同一文档连续再次识别（返回扫码页时桌面端码面
+     * 仍在轮播/多页码仍在取景框，onResume 清相机去重后会迅速重新凑齐）不再重复
+     * 建档；扫到不同内容后即恢复，主动重扫同一文档的诉求仍走正常建档。
+     */
+    private var lastResultKey: String? = null
+
     private val pendingFile by lazy {
         java.io.File(filesDir, PENDING_FILE)
     }
@@ -108,6 +115,7 @@ class ScanActivity : AppCompatActivity() {
             collector.reset()
             envCollector.reset()
             frameCollector = null
+            lastResultKey = null // 用户主动放弃：解除连续去重，重扫同一内容也正常建档
             pendingFile.delete()
             pendingBox.visibility = View.GONE
             statusView.text = ""
@@ -384,8 +392,15 @@ class ScanActivity : AppCompatActivity() {
         }
     }
 
-    /** 信封 → 写入识别历史 → 结果页（内存单例传递） */
+    /** 信封 → 连续去重校验 → 写入识别历史 → 结果页（内存单例传递） */
     private fun openResult(env: Envelope) {
+        val key = HistoryStore.fingerprint(env)
+        if (key == lastResultKey) {
+            // 同一文档连续再次识别：不重复建档、不再跳结果页
+            statusView.text = "该内容与上次识别相同，已跳过重复记录"
+            return
+        }
+        lastResultKey = key
         HistoryStore.save(this, env)
         ResultStore.current = env
         pendingFile.delete() // 收集完成 → 清除暂存（FR-08）
