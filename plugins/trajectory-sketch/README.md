@@ -21,6 +21,12 @@ JZToolsHub 插件 · L2 前后端一体（A 型源码插件）· 设计文档见
 > `csv`/`xls` 不检测）见 `backend/bg_image.py` 模块文档与
 > `docs/design/轨迹速写插件-设计文档.md` §2；该文件与 `plugins/file-filter/backend/bg_image.py` 是
 > **逐字节相同的双份副本**（规范 B-7 禁止插件间 import），改动须两处同步。
+>
+> **读表不信任工作表 `<dimension>` 声明**：该声明在 OOXML 里只是"提示"，部分工具会写出与实际
+> 内容不符的值（如声明 `A1` 而实际有 A1:A4）。openpyxl 只读模式以它为遍历范围上界，会**只读到
+> 首格**——上传后表现为「只识别第一行第一列」，分析阶段表现为「表格只有表头，没有可分析的数据行」。
+> 现改为清掉声明、按 `sheetData` 实际内容扫描并统一补齐行宽
+> （`backend/excel_io.py` 的 `_reset_dimensions` / `_pad_rows`，两步必须成对）。
 
 ## 2. 依赖
 

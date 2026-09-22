@@ -1,17 +1,22 @@
 /* 文件过滤器 —— 前端逻辑
- * 上传（虚线方框，点击/拖拽）→ 模式与保留字段选择 → 提交过滤（task_id 轮询）→ 结果与下载。
+ * 上传（虚线方框，点击/拖拽）→ 识别字段（胶囊：画删除线的列将被删除，点击可切换保留/删除）
+ * → 后处理规则展示与开关（默认开启）→ 提交过滤（task_id 轮询）→ 结果与下载。
  * 全部动态渲染使用 textContent（F-3 XSS 防护）。
  */
 (function () {
   "use strict";
-  /* v2：保存提示改在配置卡片内（cfgSaveTip）；LLM 已配置判断改用后端 llm_configured 字段 */
+  /* v4：上传后展示识别到的列名 + 硬过滤预判（胶囊 / 删除线 / 点击切换）、后处理规则展示与
+   * 「启用后处理」开关（默认开启）；提交时复用 /preview 的暂存件（staged_id），
+   * 用户反复调整字段不必重复上传文件。 */
 
   var API = "/api/file-filter";
   var $ = function (id) { return document.getElementById(id); };
 
   var state = {
     file: null,
-    config: null,        // {llm, keep_columns, post_rules, can_manage}
+    config: null,        // {llm, keep_columns, post_rules, can_manage, llm_configured}
+    preview: null,       // /preview 响应（staged_id / columns / summary / post_rules / sanitize）
+    chips: [],           // 识别到的列（可点击切换）：见 buildChips
     taskTimer: null,
   };
 
@@ -30,13 +35,14 @@
         $("cfgCard").hidden = false;
         renderAdminPanel();
       }
-      renderKeepChips();
+      renderPostRules();
     }).catch(function (err) {
-      $("keepChips").innerHTML = "";
-      var p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "配置加载失败：" + err.message;
-      $("keepChips").appendChild(p);
+      var list = $("postRulesList");
+      list.innerHTML = "";
+      var li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = "配置加载失败：" + err.message;
+      list.appendChild(li);
     });
   }
 
@@ -83,13 +89,17 @@
     rm.addEventListener("click", clearFile);
     info.appendChild(name);
     info.appendChild(rm);
-    $("filterBtn").disabled = false;
+    resetResult();
+    runPreview();
   }
 
   function clearFile() {
     state.file = null;
+    state.preview = null;
+    state.chips = [];
     $("fileInfo").classList.add("hidden");
     $("filterBtn").disabled = true;
+    renderPreview();
     resetResult();
   }
 
@@ -99,79 +109,280 @@
     return n + " B";
   }
 
-  // ===================== 保留字段勾选 =====================
+  // ===================== 识别（上传预览） =====================
 
-  function renderKeepChips() {
-    var box = $("keepChips");
-    box.innerHTML = "";
-    var keep = (state.config && state.config.keep_columns) || [];
-    if (!keep.length) {
-      var p = document.createElement("p");
-      p.className = "muted";
-      p.textContent = "管理员尚未配置保留字段名单，请联系管理员或进入「管理配置」设定。";
-      box.appendChild(p);
-      return;
-    }
-    keep.forEach(function (name) {
-      var chip = document.createElement("span");
-      chip.className = "chip";
-      chip.dataset.on = "1";
-      chip.textContent = name;
-      chip.title = "点击切换 是否保留";
-      chip.addEventListener("click", function () {
-        chip.dataset.on = chip.dataset.on === "1" ? "0" : "1";
-        chip.classList.toggle("off", chip.dataset.on === "0");
-      });
-      box.appendChild(chip);
+  function runPreview() {
+    if (!state.file) return;
+    state.preview = null;
+    state.chips = [];
+    renderPreview();
+    $("filterBtn").disabled = true;
+    setStatus("识别中…");
+    var fd = new FormData();
+    fd.append("file", state.file);
+    fetchJSON(API + "/preview", { method: "POST", body: fd }).then(function (data) {
+      state.preview = data;
+      state.chips = buildChips(data.columns || []);
+      renderPreview();
+      renderPostRules(data.post_rules);
+      $("filterBtn").disabled = false;
+      setStatus("");
+    }).catch(function (err) {
+      setStatus("无法识别该文件：" + err.message, true);
+      renderPreview();
     });
-    var hint = document.createElement("p");
-    hint.className = "muted";
-    hint.style.marginTop = "6px";
-    hint.textContent = "点击字段可临时启用/停用（不影响管理员配置）；全停用视为使用完整名单。";
-    box.appendChild(hint);
   }
 
-  function selectedKeepColumns() {
-    var chips = $("keepChips").querySelectorAll(".chip");
-    var on = [], anyOff = false;
-    chips.forEach(function (c) {
-      if (c.dataset.on === "1") on.push(c.textContent);
-      else anyOff = true;
+  function buildChips(columns) {
+    var counts = {};
+    columns.forEach(function (c) {
+      var k = nameKey(c.name);
+      counts[k] = (counts[k] || 0) + 1;
     });
-    if (anyOff && on.length) return on;
-    return null; // 使用完整名单
+    return columns.map(function (c) {
+      return {
+        index: c.index,
+        name: c.name,
+        key: nameKey(c.name),
+        keep: !!c.keep,                       // 硬过滤预判：名单里有同名 → 保留
+        matched: c.matched || "",
+        postName: c.post_name || c.name,      // 后处理规则预演后的表头
+        replaceCount: c.replace_count || 0,   // 该列预计替换处数（仅保留的列计入合计）
+        locked: !!c.locked,                   // 空表头列：无法按字段名保留
+        dup: !!c.dup,
+        dupCount: counts[nameKey(c.name)],
+      };
+    });
+  }
+
+  function nameKey(n) {
+    return String(n == null ? "" : n).toLowerCase();   // 与后端"忽略大小写"的同名口径一致
+  }
+
+  function renderPreview() {
+    var box = $("previewChips");
+    box.innerHTML = "";
+    if (!state.chips.length) {
+      $("previewBody").classList.add("hidden");
+      $("previewEmpty").classList.remove("hidden");
+      updatePostSummary();
+      return;
+    }
+    $("previewEmpty").classList.add("hidden");
+    $("previewBody").classList.remove("hidden");
+
+    var nKeep = 0;
+    state.chips.forEach(function (c) {
+      if (c.keep) nKeep += 1;
+      box.appendChild(buildChip(c));
+    });
+
+    var s = state.preview.summary || {};
+    $("previewSummary").textContent =
+      "识别到 " + state.chips.length + " 个字段（" + (state.preview.rows || 0) + " 行数据）："
+      + "预计保留 " + nKeep + " 个、删除 " + (state.chips.length - nKeep) + " 个";
+    $("previewHint").textContent = previewHint();
+    updatePostSummary();
+  }
+
+  function buildChip(c) {
+    var chip = document.createElement("span");
+    chip.className = "chip" + (c.keep ? "" : " off") + (c.locked ? " locked" : "");
+    chip.appendChild(document.createTextNode(c.name || "（第 " + (c.index + 1) + " 列·未命名）"));
+    if (!c.locked && c.postName && c.postName !== c.name) {
+      var alias = document.createElement("span");
+      alias.className = "alias";
+      alias.textContent = "→ " + c.postName;
+      alias.title = "后处理规则会把这一列的表头改成「" + c.postName + "」";
+      chip.appendChild(alias);
+    }
+    if (c.dup && c.dupCount > 1) {
+      var dup = document.createElement("span");
+      dup.className = "dup";
+      dup.textContent = "×" + c.dupCount;
+      chip.appendChild(dup);
+    }
+    if (c.locked) {
+      chip.title = "未命名列（空表头）无法按字段名保留，只能删除";
+    } else {
+      chip.title = c.keep
+        ? (c.matched && c.matched !== c.name ? "保留（匹配保留字段「" + c.matched + "」）— 点击改为删除"
+                                            : "保留 — 点击改为删除")
+        : "删除 — 点击改为保留";
+      chip.addEventListener("click", function () { toggleColumn(c.key); });
+    }
+    return chip;
+  }
+
+  function previewHint() {
+    var mode = currentMode();
+    var parts = [];
+    if (mode === "llm") {
+      parts.push("点击字段可切换保留 / 删除。大模型过滤还会做语义匹配（如「时间」↔「开始时间」）："
+        + "画删除线的字段若与保留字段语义相关仍会被保留，你手动点开的字段一定保留。");
+    } else {
+      parts.push("点击字段可切换保留 / 删除：画删除线的字段会被删除，其余保留。");
+    }
+    if (state.chips.some(function (c) { return c.dup && c.dupCount > 1; })) {
+      parts.push("同名重复列（×N）会一起保留 / 删除。");
+    }
+    if (state.chips.some(function (c) { return c.locked; })) {
+      parts.push("未命名列（空表头）无法按字段名保留，只能删除。");
+    }
+    return parts.join("");
+  }
+
+  function toggleColumn(key) {
+    var anyOn = state.chips.some(function (c) { return c.key === key && c.keep; });
+    state.chips.forEach(function (c) { if (c.key === key) c.keep = !anyOn; });
+    renderPreview();
+  }
+
+  function currentMode() {
+    var el = document.querySelector('input[name="mode"]:checked');
+    return el ? el.value : "hard";
+  }
+
+  function selectedColumns() {
+    var on = [], off = [];
+    state.chips.forEach(function (c) {
+      if (c.locked) return;                    // 空表头列无论如何都删
+      (c.keep ? on : off).push(c.name);
+    });
+    return { on: uniq(on), off: uniq(off) };
+  }
+
+  function uniq(arr) {
+    var seen = {}, out = [];
+    arr.forEach(function (v) { if (!seen[v]) { seen[v] = 1; out.push(v); } });
+    return out;
+  }
+
+  // ===================== 后处理规则展示与开关 =====================
+
+  function bindPostToggle() {
+    $("postToggle").addEventListener("change", function () {
+      updatePostSummary();
+      if ($("postToggle").checked) setStatus("");
+    });
+  }
+
+  function renderPostRules(rules) {
+    if (!rules) {
+      rules = (state.preview && state.preview.post_rules)
+        || (state.config && state.config.post_rules) || [];
+    }
+    var list = $("postRulesList");
+    list.innerHTML = "";
+    if (!rules.length) {
+      var li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = "管理员尚未配置后处理规则（本次不会做文本替换）。";
+      list.appendChild(li);
+      updatePostSummary();
+      return;
+    }
+    rules.forEach(function (r) {
+      var li = document.createElement("li");
+      var p = document.createElement("code");
+      p.textContent = r.pattern;
+      li.appendChild(p);
+      li.appendChild(document.createTextNode(" → "));
+      var v = document.createElement("code");
+      v.textContent = (r.replacement === "" || r.replacement == null) ? "（删除）" : r.replacement;
+      li.appendChild(v);
+      var badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = r.is_regex ? "正则" : "文本";
+      li.appendChild(badge);
+      if (r.enabled === false) {
+        var off = document.createElement("span");
+        off.className = "badge off";
+        off.textContent = "已停用";
+        li.appendChild(off);
+      }
+      list.appendChild(li);
+    });
+    updatePostSummary();
+  }
+
+  function updatePostSummary() {
+    var on = $("postToggle").checked;
+    $("postRulesBox").classList.toggle("off", !on);
+    var box = $("postSummary");
+    if (!on) {
+      box.textContent = "已关闭：本次不改写列名与单元格文本（过滤规则照常生效）。";
+      return;
+    }
+    if (!state.chips.length) {
+      box.textContent = "上传文件后显示预计替换处数。";
+      return;
+    }
+    var n = 0;
+    state.chips.forEach(function (c) { if (c.keep) n += c.replaceCount; });
+    box.textContent = "按当前保留字段预计替换 " + n + " 处（表头 + 单元格，实际以过滤结果为准）。";
   }
 
   // ===================== 过滤提交与轮询 =====================
 
   function bindActions() {
+    bindPostToggle();
     $("filterBtn").addEventListener("click", submitFilter);
     $("resetBtn").addEventListener("click", function () {
       clearFile();
       setStatus("");
     });
+    document.querySelectorAll('input[name="mode"]').forEach(function (el) {
+      el.addEventListener("change", function () {
+        renderPreview();                       // 预判口径随模式变：重写提示文案
+        if (el.value === "llm" && state.config && !state.config.llm_configured
+            && !llmConfigFilled()) {
+          setStatus("提示：大模型未配置，请管理员在「管理配置」中填写 API 信息", true);
+        } else {
+          setStatus("");
+        }
+      });
+    });
   }
 
   function submitFilter() {
     if (!state.file) return;
-    var mode = document.querySelector('input[name="mode"]:checked').value;
+    var mode = currentMode();
     if (mode === "llm" && state.config && !state.config.llm_configured
         && !llmConfigFilled()) {
       setStatus("大模型未配置：请管理员在「管理配置」中填写 API 信息", true);
       return;
     }
+    var picked = selectedColumns();
+    if (!picked.on.length) {
+      setStatus("请至少保留一个字段：点击字段胶囊可切换保留 / 删除", true);
+      return;
+    }
     var fd = new FormData();
-    fd.append("file", state.file);
+    if (state.preview && state.preview.staged_id) {
+      fd.append("staged_id", state.preview.staged_id);   // 复用已上传的暂存件
+    } else {
+      fd.append("file", state.file);
+    }
     fd.append("mode", mode);
-    var cols = selectedKeepColumns();
-    if (cols) fd.append("columns", JSON.stringify(cols));
+    fd.append("columns", JSON.stringify(picked.on));
+    if (picked.off.length) fd.append("exclude", JSON.stringify(picked.off));
+    fd.append("post_process", $("postToggle").checked ? "1" : "0");
+    postFilter(fd, false);
+  }
+
+  function postFilter(fd, retried) {
     $("filterBtn").disabled = true;
-    setStatus("上传中…");
+    setStatus("提交中…");
     resetResult();
     fetch(API + "/filter", { method: "POST", body: fd, credentials: "same-origin" })
       .then(function (resp) {
         return resp.json().then(function (data) {
-          if (!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
+          if (!resp.ok) {
+            var err = new Error(data.error || ("HTTP " + resp.status));
+            err.code = data.code;
+            throw err;
+          }
           return data;
         });
       })
@@ -180,6 +391,14 @@
         pollResult(data.task_id);
       })
       .catch(function (err) {
+        // 暂存过期（超过 30 分钟）：自动改传文件重试一次，用户不必重新选文件
+        if (!retried && err.code === "staged_expired" && state.file) {
+          var fd2 = new FormData();
+          fd2.append("file", state.file);
+          fd.forEach(function (v, k) { if (k !== "staged_id") fd2.append(k, v); });
+          postFilter(fd2, true);
+          return;
+        }
         $("filterBtn").disabled = false;
         setStatus(err.message, true);
       });
@@ -233,7 +452,8 @@
     addLine(stats, "数据行数：", String(task.rows || 0));
     addLine(stats, "保留字段：", String((task.kept || []).length) + " 个");
     addLine(stats, "删除字段：", String((task.removed || []).length) + " 个");
-    addLine(stats, "后处理替换：", String(task.replace_count || 0) + " 处");
+    addLine(stats, "后处理替换：", task.post_enabled === false
+      ? "已关闭（本次不改写文本）" : String(task.replace_count || 0) + " 处");
     if (task.llm_used) addLine(stats, "匹配方式：", "大模型语义匹配");
     if (task.sanitize && task.sanitize.note) {
       addLine(stats, "文档预处理：", task.sanitize.note);
@@ -328,7 +548,6 @@
       x.addEventListener("click", function () {
         state.config.keep_columns.splice(idx, 1);
         renderCfgKeepChips();
-        renderKeepChips();
       });
       chip.appendChild(x);
       box.appendChild(chip);
@@ -349,7 +568,6 @@
     if (state.config.keep_columns.indexOf(name) < 0) state.config.keep_columns.push(name);
     input.value = "";
     renderCfgKeepChips();
-    renderKeepChips();
   }
 
   function buildRuleRow(rule) {
@@ -438,7 +656,7 @@
         state.config = cfg;
         $("cfgApiKey").value = "";
         renderCfgKeepChips();
-        renderKeepChips();
+        renderPostRules();
         tip.textContent = "✓ 配置已保存";
         tip.classList.add("ok");
         setTimeout(function () { tip.classList.add("hidden"); }, 3000);
@@ -479,7 +697,11 @@
     }
     return fetch(url, opts).then(function (resp) {
       return resp.json().then(function (data) {
-        if (!resp.ok) throw new Error((data && data.error) || ("HTTP " + resp.status));
+        if (!resp.ok) {
+          var err = new Error((data && data.error) || ("HTTP " + resp.status));
+          err.code = data && data.code;
+          throw err;
+        }
         return data;
       });
     });

@@ -413,11 +413,13 @@ JZToolsHub/
 ├── test_plugin_admin.py        # 插件包校验/应用/回滚逻辑单测（19 例，含与出包工具的交叉验证）
 ├── test_admin_plugin_manager.py # 后台插件管理页 HTTP 全链路测试
 ├── test_bg_image.py            # 背景图清理单测（17 例，含两份副本一致性断言）
+├── test_xlsx_stale_dimension.py # xlsx 失真 <dimension> 声明回归（14 例，覆盖四个读表插件）
+├── test_filter_preview.py      # 过滤器上传预览/按列开关/后处理开关回归（21 例）
 ├── 一键安装.bat  一键卸载.bat   # 双击入口
 └── README.md  HANDOFF.md
 ```
 
-> 根目录四个 `test_*.py` 用 `python -m unittest <模块名>` 在**仓库根**运行（模块就在根，不是包）。
+> 根目录六个 `test_*.py` 用 `python -m unittest <模块名>` 在**仓库根**运行（模块就在根，不是包）。
 > 插件自带测试在 `plugins/<id>/backend/test_*.py`，端到端脚本在 `tools/e2e/`；
 > 测试脚本**不随包分发**（口径见 `tools/plugin-payload-rules.json`）。
 
@@ -731,7 +733,7 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | 插件 | 关键接口 |
 | --- | --- |
 | knowledge-base | `/status` `/config` `/categories`(CRUD) `/files`(CRUD) `/files/<id>/raw` `/files/<id>/preview` `/files/<id>/download` |
-| file-filter | `/status` `/config` `/config/test` `/filter` `/result/<task>` `/download/<task>` `/apply`（程序化接口） |
+| file-filter | `/status` `/config` `/config/test` `/preview` `/filter` `/result/<task>` `/download/<task>` `/apply`（程序化接口） |
 | trajectory-sketch | `/status` `/config` `/upload` `/analyze` `/result/<task>` `/download/<task>` |
 | shared-docs | `/status` `/documents`(CRUD) `/documents/<id>/content` `/presence` `/rename` `/scope` `/export` `/import` |
 | case-report | `/config` `/config/test` `/status` `/parse` `/result/<task>` `/records`(CRUD) `/aggregate` `/cases` `/months` `/categories` `/export` |
@@ -752,7 +754,7 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | admin | — | 核心（hidden） | cryptography / Flask / openpyxl | 始终加载 | 登录鉴权、会话超时、单位/部门/人员/角色、工具访问拦截、数据目录设置、批量导入导出 |
 | notice-board | office | 前后端 | 无第三方 | 启用（grant_all） | 按单位/部门/人员可见范围发布公告；`home_card()` 动态卡片 |
 | knowledge-base | office | 前后端 | openpyxl / xlrd / python-docx / olefile（旧版格式转换，缺失优雅降级）；LibreOffice 可选 | 启用（grant_all） | 上传 PDF/OFD/Word/Excel/MD（≤20MB）并多级分类；Word/Excel 由 xhr/dhr 引擎按需渲染预览；原件下载 |
-| file-filter | office | 前后端 | openpyxl / xlrd / requests | 启用 | 表格脱敏过滤：硬过滤 / 大模型语义匹配 / 文本与正则后处理；`/apply` 供其他插件复用 |
+| file-filter | office | 前后端 | openpyxl / xlrd / requests | 启用 | 表格脱敏过滤：上传后识别列名（胶囊 + 删除线预判，点胶囊逐列决定保留/删除）+ 后处理规则展示与开关；硬过滤 / 大模型语义匹配 / 文本与正则后处理；`/apply` 供其他插件复用 |
 | trajectory-sketch | office | 前后端 | openpyxl / xlrd / requests | 启用 | 轨迹表 → 字段过滤 → 轨迹分析 → 速写报告；分析引擎为零依赖可插拔包 |
 | shared-docs | office | 前后端 | python-docx / openpyxl / xlrd | 启用 | 多人协作编辑 Word/Excel，乐观锁、在线用户、导入导出 |
 | case-report | office | 前后端 | requests / openpyxl | 启用 | 收网报告 → 大模型五要素抽取 → 键值对台账、跨记录汇总、Excel 导出 |

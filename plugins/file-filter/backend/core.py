@@ -87,6 +87,32 @@ def _read_csv(path):
     raise TableError("无法识别的文件编码（请另存为 UTF-8 或 GBK 编码的 CSV）")
 
 
+def _reset_dimensions(ws):
+    """清掉工作表 ``<dimension>`` 声明，改按 sheetData 实际内容扫描。
+
+    只读模式的遍历范围取自该声明，而它只是"提示"：部分工具会写出与实际内容
+    不符的声明（真实案例：某导出工具写 ``ref="A1"``，实际却有 A1:A4 四行），
+    于是 openpyxl 认为 ``max_row=1``，**只读出首格**——表现为"只识别第一行
+    第一列"或"只有表头没有数据"。``reset_dimensions()``（openpyxl ≥3.0.4）
+    清掉声明后按实际内容扫描，与普通模式取数一致。
+    """
+    if hasattr(ws, "reset_dimensions"):
+        ws.reset_dimensions()
+
+
+def _pad_rows(rows):
+    """把所有行补齐到最大列宽。
+
+    必须与 :func:`_reset_dimensions` **成对使用**：清掉声明后 openpyxl 不再按
+    声明宽度补齐稀疏行（``['onlyA', None, None]`` 会变成 ``['onlyA']``），
+    而下游按列下标取值，故统一补齐为矩形。只做清声明会引入新回归。
+    """
+    width = max((len(r) for r in rows), default=0)
+    if not width:
+        return rows
+    return [r if len(r) == width else r + [None] * (width - len(r)) for r in rows]
+
+
 def _read_xlsx(path):
     if not OPENPYXL_AVAILABLE:
         raise TableError("后端缺少 openpyxl，无法解析 .xlsx，请执行：pip install openpyxl")
@@ -96,7 +122,8 @@ def _read_xlsx(path):
         raise TableError(f"Excel 文件解析失败（{type(e).__name__}）") from e
     try:
         ws = wb.active
-        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+        _reset_dimensions(ws)
+        rows = _pad_rows([list(r) for r in ws.iter_rows(values_only=True)])
     finally:
         wb.close()
     # 去掉末尾全空行
@@ -244,6 +271,33 @@ def post_process(headers, rows, rules):
                 new_row.append(v)
         rows2.append(new_row)
     return headers2, rows2, count
+
+
+def post_process_columns(headers, rows, rules):
+    """逐列预演后处理：返回 ``[(新表头, 该列替换次数)]``，与 headers 一一对应。
+
+    与 :func:`post_process` 同一套规则、同一套计数口径（表头 + 字符串单元格，
+    非字符串单元格原样跳过），区别只在**按列回报**：上传预览要展示「这一列会被
+    改成什么、预计替换多少处」，而用户点一下胶囊就会改变"哪些列参与后处理"，
+    逐列回报让前端直接求和即可，不必为每次点击再问后端。
+
+    ``新表头`` 对无规则时等于原表头（字符串化），前端据此判断是否显示「→ 新名」。
+    """
+    compiled = compile_rules(rules)
+    out = []
+    for i, h in enumerate(headers):
+        count = 0
+        new_header = cell_to_str(h)
+        if compiled:
+            new_header, n = _apply_text(new_header, compiled)
+            count += n
+        for r in rows:
+            v = r[i] if i < len(r) else None
+            if compiled and isinstance(v, str):
+                _, n = _apply_text(v, compiled)
+                count += n
+        out.append((new_header, count))
+    return out
 
 
 # ===================== 表格写出 =====================

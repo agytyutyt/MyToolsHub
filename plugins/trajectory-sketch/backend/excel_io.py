@@ -98,6 +98,32 @@ def read_rows(path: str, filename: str) -> List[List[Any]]:
     return raw
 
 
+def _reset_dimensions(ws) -> None:
+    """清掉工作表 ``<dimension>`` 声明，改按 sheetData 实际内容扫描。
+
+    只读模式的遍历范围取自该声明，而它只是"提示"：部分工具会写出与实际内容
+    不符的声明（真实案例：某导出工具写 ``ref="A1"``，实际却有 A1:A4 四行），
+    于是 openpyxl 认为 ``max_row=1``，**只读出首格**——表现为"只识别第一行
+    第一列"或"只有表头没有数据"。``reset_dimensions()``（openpyxl ≥3.0.4）
+    清掉声明后按实际内容扫描，与普通模式取数一致。
+    """
+    if hasattr(ws, "reset_dimensions"):
+        ws.reset_dimensions()
+
+
+def _pad_rows(rows: List[List[Any]]) -> List[List[Any]]:
+    """把所有行补齐到最大列宽。
+
+    必须与 :func:`_reset_dimensions` **成对使用**：清掉声明后 openpyxl 不再按
+    声明宽度补齐稀疏行（``['onlyA', None, None]`` 会变成 ``['onlyA']``），
+    而下游按列下标取值，故统一补齐为矩形。只做清声明会引入新回归。
+    """
+    width = max((len(r) for r in rows), default=0)
+    if not width:
+        return rows
+    return [r if len(r) == width else r + [None] * (width - len(r)) for r in rows]
+
+
 def _read_xlsx(path: str) -> List[List[Any]]:
     if not OPENPYXL_AVAILABLE:
         raise TableError("后端缺少 openpyxl，无法解析 .xlsx（请执行：pip install openpyxl）")
@@ -107,9 +133,11 @@ def _read_xlsx(path: str) -> List[List[Any]]:
         raise TableError("Excel 文件解析失败（%s）。" % type(exc).__name__)
     try:
         ws = wb.active
-        return [[json_safe(v) for v in row] for row in ws.iter_rows(values_only=True)]
+        _reset_dimensions(ws)
+        rows = [[json_safe(v) for v in row] for row in ws.iter_rows(values_only=True)]
     finally:
         wb.close()
+    return _pad_rows(rows)
 
 
 def _read_xls(path: str) -> List[List[Any]]:

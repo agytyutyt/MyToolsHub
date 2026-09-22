@@ -65,6 +65,35 @@ input:focus { border-color: var(--primary); }
 .chip-add { display: flex; gap: 8px; margin-top: 8px; }
 .chip-add input { flex: 1; max-width: 280px; }
 
+/* 识别到的字段胶囊（可点击切换保留/删除；删除线表示将被删除） */
+.keep-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.keep-chips .chip { cursor: pointer; user-select: none; border: 1px solid transparent; }
+.keep-chips .chip:hover { border-color: var(--primary); }
+.keep-chips .chip.off { background: #f1f3f4; color: var(--muted); text-decoration: line-through; }
+.keep-chips .chip.off:hover { border-color: var(--border); }
+.keep-chips .chip.locked { cursor: not-allowed; opacity: .7; }
+.keep-chips .chip.locked:hover { border-color: transparent; }
+.chip .alias { opacity: .85; font-size: 11px; }
+.chip .dup {
+  background: rgba(0,0,0,.08); border-radius: 8px; padding: 0 5px;
+  font-size: 10px; text-decoration: none;
+}
+.preview-summary { font-size: 13px; margin: 2px 0 6px; }
+.preview-summary b { color: var(--primary-dark); }
+
+/* 后处理规则展示 */
+.check-row { display: flex; gap: 8px; align-items: center; margin: 6px 0; cursor: pointer; }
+.check-row input { accent-color: var(--primary); }
+.rules-list { list-style: none; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.rules-list li { font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rules-list code { max-width: 320px; overflow-wrap: anywhere; }
+.badge {
+  background: var(--primary-bg); color: var(--primary-dark);
+  border-radius: 8px; padding: 0 6px; font-size: 10px;
+}
+.badge.off { background: #f1f3f4; color: var(--muted); }
+#postRulesBox.off { opacity: .55; }
+
 /* 后处理规则表 */
 .rules-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 12px; }
 .rules-table th, .rules-table td {
@@ -74,14 +103,22 @@ input:focus { border-color: var(--primary); }
 .rules-table input[type="text"] { width: 100%; padding: 5px 8px; font-size: 12px; }
 .rules-table .del { color: var(--error); cursor: pointer; font-weight: 700; }
 
-/* 左右布局 */
-.layout { display: flex; gap: 14px; align-items: flex-start; }
-.layout .panel { flex: 1 1 0; min-width: 0; }
+/* 布局：① 上传整行（= 下方两张卡片的宽度）→ ②③ 相邻两栏 */
+.layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.layout .panel { min-width: 0; }
+.layout .panel-wide { grid-column: 1 / -1; }   /* 上传卡片横跨两栏 */
 .panel-title {
   font-size: 13px; font-weight: 700; color: var(--primary-dark);
   margin-bottom: 8px; letter-spacing: .5px;
 }
-@media (max-width: 900px) { .layout { flex-direction: column; } }
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }   /* 窄屏回落单列 */
+}
 
 /* 虚线上传框 */
 .dropzone {
@@ -121,8 +158,6 @@ button:disabled, .btn.disabled { opacity: .5; cursor: not-allowed; }
 .status.ok { color: var(--ok); }
 .result-stats { font-size: 13px; line-height: 1.9; }
 .result-stats b { color: var(--primary-dark); }
-.keep-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
-.keep-chips .chip { cursor: pointer; }
 .tip { font-size: 12px; }
 .tip.ok { color: var(--ok); }
 .tip.err { color: var(--error); }

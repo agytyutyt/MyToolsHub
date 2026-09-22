@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!-- 文件过滤器插件（前端 + Python 后端）
- * 左侧输入区：虚线方框上传 xlsx/xls/csv（≤20MB）+ 过滤模式选择 + 保留字段勾选；
- * 右侧输出区：过滤结果统计与过滤后文件下载。
+ * 布局：① 上传（整行，占下方两张卡片的宽度）→ ② 过滤模式与字段识别 ｜ ③ 过滤结果（两张卡片相邻）
+ *   ② 上传后展示识别到的列名胶囊 + 硬过滤预判：要删的列画删除线，点胶囊可切换保留/删除；
+ *     后处理规则展示 + 「启用后处理」开关（默认开启）
+ *   ③ 保留/删除字段对照、替换处数、后处理是否关闭、文档预处理、下载
  * 后端接口前缀：/api/file-filter
  -->
 <html lang="zh-CN">
@@ -9,20 +11,20 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>文件过滤器</title>
-<link rel="stylesheet" href="./style.css?v=2" />
+<link rel="stylesheet" href="./style.css?v=4" />
 </head>
 <body>
   <div class="page">
     <header class="page-head">
       <h1>🧹 文件过滤器</h1>
-      <p class="subtitle">上传表格 → 删除背景图片 → 字段过滤（硬过滤 / 大模型匹配）→ 文本脱敏后处理 → 下载过滤后文件</p>
+      <p class="subtitle">上传表格 → 删除背景图片 → 识别字段（点胶囊决定保留哪些列）→ 文本脱敏后处理 → 下载过滤后文件</p>
     </header>
 
     <!-- 管理员配置面板（仅管理员可见） -->
     <details class="card config-card" id="cfgCard" hidden>
       <summary>⚙️ 管理配置（保留字段名单 / 后处理规则 / 大模型）</summary>
       <div class="cfg-block">
-        <h3>保留字段名单（硬过滤精确匹配；大模型过滤的语义匹配基准）</h3>
+        <h3>保留字段名单（硬过滤精确匹配；大模型过滤的语义匹配基准；也是上传后「预计保留」的判定依据）</h3>
         <div class="chip-editor" id="cfgKeepChips"></div>
         <div class="chip-add">
           <input id="cfgKeepInput" type="text" placeholder="输入字段名后回车添加，如：时间" />
@@ -64,9 +66,9 @@
     </details>
 
     <div class="layout">
-      <!-- 左侧：输入区 -->
-      <section class="panel">
-        <div class="panel-title">① 上传与设置</div>
+      <!-- ① 上传：整行（占下方两张卡片的宽度） -->
+      <section class="panel panel-wide">
+        <div class="panel-title">① 上传文件</div>
         <div class="card">
           <div class="dropzone" id="dropzone">
             <p>📂 点击或拖拽文件到此处</p>
@@ -75,6 +77,11 @@
           <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
           <div id="fileInfo" class="file-info hidden"></div>
         </div>
+      </section>
+
+      <!-- ② 过滤模式与字段识别（与右侧结果相邻） -->
+      <section class="panel">
+        <div class="panel-title">② 过滤模式与字段识别</div>
         <div class="card">
           <h2>过滤模式</h2>
           <label class="radio-row">
@@ -85,10 +92,25 @@
             <input type="radio" name="mode" value="llm" />
             <span><b>大模型过滤</b> — 通过大模型辅助判断字段的合规性</span>
           </label>
-          <h2>保留字段</h2>
-          <div id="keepChips" class="keep-chips">
-            <p class="muted">加载中…</p>
+
+          <h2>识别到的字段</h2>
+          <p class="muted" id="previewEmpty">上传文件后，这里会列出识别到的列名与过滤预计结果（画删除线的列将被删除）。</p>
+          <div id="previewBody" class="hidden">
+            <p class="preview-summary" id="previewSummary"></p>
+            <div class="keep-chips" id="previewChips"></div>
+            <p class="muted" id="previewHint"></p>
           </div>
+
+          <h2>后处理规则（脱敏）</h2>
+          <label class="check-row" id="postToggleRow">
+            <input type="checkbox" id="postToggle" checked />
+            <span>启用后处理规则<b>（默认开启）</b></span>
+          </label>
+          <div id="postRulesBox">
+            <ul class="rules-list" id="postRulesList"></ul>
+            <p class="muted" id="postSummary"></p>
+          </div>
+
           <div class="row-actions">
             <button id="filterBtn" class="btn primary" disabled>🧹 开始过滤</button>
             <button id="resetBtn" class="btn">重置</button>
@@ -97,9 +119,9 @@
         </div>
       </section>
 
-      <!-- 右侧：输出区 -->
+      <!-- ③ 过滤结果（与左侧「过滤模式与字段识别」相邻） -->
       <section class="panel">
-        <div class="panel-title">② 过滤结果</div>
+        <div class="panel-title">③ 过滤结果</div>
         <div class="card" id="resultEmpty">
           <p class="muted">上传文件并点击「开始过滤」后，这里将展示过滤结果。</p>
         </div>
@@ -118,6 +140,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=3"></script>
+  <script src="./app.js?v=4"></script>
 </body>
 </html>

@@ -248,8 +248,17 @@ def run_excel(path: str) -> None:
         return
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     ws = wb.active
+    # 只读模式的遍历范围取自工作表 <dimension> 声明，而它只是"提示"：部分工具会写出
+    # 与实际内容不符的声明（如声明 A1、实际 A1:A4），此时只读出首格。清掉声明改按
+    # sheetData 实际内容扫描，并补齐行宽（清声明后稀疏行不再按声明宽度补齐）。
+    # 引擎不感知 Excel，故此处内联处理，不引入对 excel_io 的依赖。
+    if hasattr(ws, "reset_dimensions"):
+        ws.reset_dimensions()
     rows = [list(r) for r in ws.iter_rows(values_only=True)]
     wb.close()
+    width = max((len(r) for r in rows), default=0)
+    if width:
+        rows = [r + [None] * (width - len(r)) for r in rows]
     while rows and all(v is None for v in rows[-1]):
         rows.pop()
     res = analyze_rows(rows)
