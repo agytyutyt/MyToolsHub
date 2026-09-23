@@ -44,17 +44,12 @@
     return s.slice(0, 4) + '**********' + s.slice(-4);
   }
 
-  function maskKey(key) {
-    const s = String(key || '');
-    if (!s) return '<span style="color:var(--md-on-surface-variant);">未配置</span>';
-    if (s.length <= 8) return '••••••••';
-    return esc(s.slice(0, 4)) + '…' + esc(s.slice(-4));
-  }
-
+  /* 大模型 Key 状态：服务端**只回掩码**（不回明文，见 routes.py 的 admin_api_users），
+     所以这里只区分"配没配"，不再展示首尾片段（那需要把明文送到浏览器）。 */
   function llmStatus(u) {
     const llm = u.llm || {};
-    if (!llm.api_key) return '<span style="color:var(--md-on-surface-variant);">未配置</span>';
-    return maskKey(llm.api_key);
+    if (!llm.api_key_set) return '<span style="color:var(--md-on-surface-variant);">未配置</span>';
+    return esc(llm.api_key || '••••••••');
   }
 
   function renderList(users) {
@@ -117,6 +112,19 @@
     ).join('');
   }
 
+  /* 组装大模型字段：api_key 只在**填了新值**时才带上——
+     留空（或误填掩码）表示"不修改"，避免把字面量掩码存成 Key（后端同样认这条口径）。 */
+  function llmPayload(wrap) {
+    const out = {
+      format: wrap.querySelector('#f-llm-format').value,
+      base_url: wrap.querySelector('#f-llm-url').value.trim(),
+      model: wrap.querySelector('#f-llm-model').value.trim(),
+    };
+    const key = wrap.querySelector('#f-llm-key').value.trim();
+    if (key && key !== '••••••••') out.api_key = key;
+    return out;
+  }
+
   function openForm(user) {
     const llm = (user && user.llm) || {};
     openModal(user ? '编辑人员' : '新建人员', `
@@ -153,14 +161,25 @@
                  placeholder="18 位居民身份证号" autocomplete="off">
         </div>
         <div class="field" style="margin-top:4px;padding-top:14px;border-top:1px solid var(--md-outline-variant);">
-          <label for="f-llm-url">大模型 Base URL</label>
-          <input class="admin-input" type="text" id="f-llm-url" value="${esc(llm.base_url || '')}"
-                 placeholder="如：https://api.deepseek.com/v1">
+          <label for="f-llm-format">大模型调用格式</label>
+          <select class="admin-input" id="f-llm-format">
+            <option value="openai">OpenAI 兼容（chat/completions）</option>
+            <option value="anthropic">Anthropic Messages（/v1/messages）</option>
+            <option value="ollama">Ollama 本地（/api/chat）</option>
+            <option value="custom">自定义（请求头 / 请求体模板）</option>
+          </select>
+          <span class="field-hint">统一大模型模块支持的调用格式；"自定义"的模板请在首页「⋯ → 大模型设置」中填写</span>
         </div>
         <div class="field">
-          <label for="f-llm-key">大模型 API Key ${user && llm.api_key ? '（已配置，留空保持不变）' : ''}</label>
-          <input class="admin-input" type="password" id="f-llm-key" value="${esc(llm.api_key || '')}"
-                 autocomplete="off" placeholder="留空则保持不变">
+          <label for="f-llm-url">大模型 API 地址（完整接口地址）</label>
+          <input class="admin-input" type="text" id="f-llm-url" value="${esc(llm.base_url || '')}"
+                 placeholder="如：https://api.deepseek.com/chat/completions">
+        </div>
+        <div class="field">
+          <label for="f-llm-key">大模型 API Key${llm.api_key_set ? '（已配置，留空保持不变）' : ''}</label>
+          <input class="admin-input" type="password" id="f-llm-key" value=""
+                 autocomplete="new-password"
+                 placeholder="${llm.api_key_set ? '已保存（••••••••），留空表示不修改' : '留空表示不配置'}">
         </div>
         <div class="field">
           <label for="f-llm-model">模型名称</label>
@@ -174,6 +193,8 @@
       </div>`, (wrap) => {
       const unitSel = wrap.querySelector('#f-unit');
       const deptSel = wrap.querySelector('#f-dept');
+      // 大模型调用格式：回显已保存值（选项是静态的，模板里不便逐个判断 selected）
+      wrap.querySelector('#f-llm-format').value = llm.format || 'openai';
       // 单位切换后刷新部门下拉
       unitSel.addEventListener('change', () => {
         deptSel.innerHTML = deptOptionsHtml(unitSel.value, '');
@@ -187,11 +208,7 @@
           department_id: deptSel.value,
           role: wrap.querySelector('#f-role').value,
           idcard: wrap.querySelector('#f-idcard').value.trim(),
-          llm: {
-            base_url: wrap.querySelector('#f-llm-url').value.trim(),
-            api_key: wrap.querySelector('#f-llm-key').value.trim(),
-            model: wrap.querySelector('#f-llm-model').value.trim(),
-          },
+          llm: llmPayload(wrap),
         };
         if (password) payload.password = password;
         if (!payload.name) { showToast('姓名不能为空', true); return; }

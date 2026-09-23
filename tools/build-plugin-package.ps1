@@ -312,7 +312,7 @@ def top_imports(path):
 stdlib = set(getattr(sys, 'stdlib_module_names', ()))
 # 主体（框架）模块：插件 import 它们是**框架 API 面**（FC-2/FC-3），不是第三方依赖，
 # 故既不并入框架白名单、也不参与 C-4/C-10 判定。
-FRAMEWORK_MODULES = {'jz_api', 'jz_deps', 'jztools_data'}
+FRAMEWORK_MODULES = {'jz_api', 'jz_deps', 'jztools_data', 'jz_llm'}
 # 主程序自身的第三方依赖（app.py / jztools_data.py 直接 import 的库随 exe 一起打包）
 for name in ('app.py', 'jztools_data.py'):
     fp = root / name
@@ -362,7 +362,7 @@ for m, files in sorted(imports.items()):
     if m in fw:
         used_fw.add(m)
         continue
-    # 框架模块（jz_api / jz_deps / jztools_data）是**框架 API 面**（FC-2/FC-3），先放行；
+    # 框架模块（jz_api / jz_deps / jztools_data / jz_llm）是**框架 API 面**（FC-2/FC-3），先放行；
     # 注意顺序：必须早于下面的 jztools_ 判定，否则 jztools_data 会被误判为跨插件 import。
     if m in FRAMEWORK_MODULES:
         continue
@@ -488,7 +488,7 @@ if ($noHint.Count -gt 0) {
 # 需要协作时的正规出口：把能力**提升为主体模块**（如 jz_api 的组织架构门面），或**合并为一个插件**。
 if ($depObj -and $depObj.cross -and @($depObj.cross).Count -gt 0) {
     $msg = "跨插件 import（规范 B-7 禁止，插件之间必须相互独立）：$(@($depObj.cross) -join ', ')`n" +
-           "        修法：① 会话/日志/组织架构等框架能力改从主体模块 jz_api 取用；`n" +
+           "        修法：① 会话/日志/组织架构/大模型等框架能力改从主体模块（jz_api / jz_llm）取用；`n" +
            "              ② 需要另一个插件的能力时，把该能力提升为主体模块，或把两个插件合并为一个；`n" +
            "              ③ 确实只是历史遗留的 HTTP 调用，请在本插件内自带一份实现（见设计文档 §5.4）。"
     if ($SkipChecks) { Warn $msg } else { Die $msg }

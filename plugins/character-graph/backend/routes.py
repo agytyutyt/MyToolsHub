@@ -16,6 +16,7 @@
 # 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
 import jz_api
 import jz_deps
+import jz_llm
 
 _get_session_user = jz_api.get_session_user
 
@@ -35,6 +36,7 @@ import jztools_data
 CONFIG_FILE = jztools_data.get_data_root_file("plugins", "character-graph", "config.json")
 PROMPT_FILE = jztools_data.get_data_root_file("plugins", "character-graph", "prompt.json")
 API_PREFIX = "/api/character-graph"
+PLUGIN_ID = "character-graph"
 
 # 后台分析线程池：限制并发 LLM 任务数，防止大模型调用耗尽资源
 ANALYZE_WORKERS = 2
@@ -46,10 +48,10 @@ TASKS = {}
 TASKS_LOCK = threading.Lock()
 TASK_TTL_SECONDS = 30 * 60  # 任务结果保留 30 分钟
 
-DEFAULT_CONFIG = {
-    "ui": {"api_source": "web"},
-    "llm": {"base_url": "", "api_key": "", "model": ""},
-}
+# 本插件已无自有配置项：提示词由 prompt.json 管理（经 jz_llm），大模型接入信息归
+# 统一大模型模块。历史 config.json 里的 llm 段与 ui.api_source（"网页填 Key"开关）
+# 由 admin 插件的启动迁移收编/清除（见 migrate_plugin_legacy_llm）。
+DEFAULT_CONFIG = {}
 
 DEFAULT_PROMPT = {
     "system": llm_client.DEFAULT_SYSTEM_PROMPT,
@@ -58,7 +60,7 @@ DEFAULT_PROMPT = {
 
 
 def load_config() -> dict:
-    """读取 config.json，缺失键用默认值补齐。"""
+    """读取 config.json（整份原样返回；本插件当前无自有配置项，保留给将来用）。"""
     data = {}
     if os.path.exists(CONFIG_FILE):
         try:
@@ -66,19 +68,7 @@ def load_config() -> dict:
                 data = json.load(f)
         except Exception:
             data = {}
-    ui = data.get("ui") or {}
-    llm = data.get("llm") or {}
-    api_source = ui.get("api_source")
-    if api_source not in ("web", "config"):
-        api_source = "web"
-    return {
-        "ui": {"api_source": api_source},
-        "llm": {
-            "base_url": llm.get("base_url", ""),
-            "api_key": llm.get("api_key", ""),
-            "model": llm.get("model", ""),
-        },
-    }
+    return data if isinstance(data, dict) else {}
 
 
 def save_config(cfg: dict) -> None:
@@ -87,17 +77,11 @@ def save_config(cfg: dict) -> None:
 
 
 def load_prompt() -> dict:
-    data = {}
-    if os.path.exists(PROMPT_FILE):
-        try:
-            with open(PROMPT_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-    return {
-        "system": data.get("system") or DEFAULT_PROMPT["system"],
-        "user_template": data.get("user_template") or DEFAULT_PROMPT["user_template"],
-    }
+    """读取提示词（本插件只"拟定并保存 prompt"，调用由统一大模型模块完成）。
+
+    存放位置与历史版本一致（<数据根>/plugins/character-graph/prompt.json）。
+    """
+    return jz_llm.load_prompt(PLUGIN_ID, DEFAULT_PROMPT)
 
 
 def ensure_config_files() -> None:
@@ -105,8 +89,7 @@ def ensure_config_files() -> None:
     if not os.path.exists(CONFIG_FILE):
         save_config(DEFAULT_CONFIG)
     if not os.path.exists(PROMPT_FILE):
-        with open(PROMPT_FILE, "w", encoding="utf-8") as f:
-            json.dump(DEFAULT_PROMPT, f, ensure_ascii=False, indent=2)
+        jz_llm.save_prompt(PLUGIN_ID, DEFAULT_PROMPT)
 
 
 def set_task(task_id: str, **kwargs) -> None:
@@ -139,10 +122,17 @@ def create_task(filename: str, created_at: float, created_by: str = "") -> str:
 
 
 def _run_analysis(task_id: str, filename: str, raw: bytes,
-                  base_url: str, api_key: str, model: str, prompt: dict) -> None:
-    """后台线程执行：文档解析 + 大模型关系抽取。"""
+                  session, prompt: dict) -> None:
+    """后台线程执行：文档解析 + 大模型关系抽取。
+
+    session 由请求线程 jz_llm.resolve() 取得后传入——后台线程读不到会话，
+    在这里现解析会在"用户各自设置"模式下被误判为未配置（见 jz_llm 模块头部的线程纪律）。
+    """
     try:
         set_task(task_id, status="running")
+
+        if not session.configured():
+            raise ValueError(session.reason or "尚未配置大模型，无法分析文档")
 
         text = document_reader.extract_text(filename, raw)
         if len(text.strip()) < 5:
@@ -151,9 +141,7 @@ def _run_analysis(task_id: str, filename: str, raw: bytes,
         if len(text) > 120000:
             text = text[:120000] + "\n...（文档过长，已截断）"
 
-        graph = llm_client.extract_graph(
-            text, base_url, api_key, model, prompt=prompt
-        )
+        graph = llm_client.extract_graph(text, prompt=prompt, session=session)
         set_task(task_id, status="done", filename=filename, graph=graph)
     except llm_client.LLMError as e:
         # 大模型错误信息为面向用户的业务文案，保留原文
@@ -191,16 +179,13 @@ def _viewer():
         return None
 
 
-def _submit_analysis(filename: str, raw: bytes,
-                     base_url: str, api_key: str, model: str, prompt: dict) -> str:
+def _submit_analysis(filename: str, raw: bytes, session, prompt: dict) -> str:
     """提交后台分析任务，返回 task_id。"""
     user = _viewer()
     task_id = create_task(filename, time.time(),
                           created_by=(user or {}).get("username", ""))
     cleanup_tasks()  # 顺带清理过期任务
-    _analyze_executor.submit(
-        _run_analysis, task_id, filename, raw, base_url, api_key, model, prompt
-    )
+    _analyze_executor.submit(_run_analysis, task_id, filename, raw, session, prompt)
     return task_id
 
 
@@ -213,33 +198,29 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/config")
     def cg_get_config():
-        """读取展示配置。API Key 不回传明文，仅返回掩码（SEC-2/F-4）。"""
-        cfg = load_config()
-        key = cfg["llm"]["api_key"]
-        masked = (key[:3] + "****" + key[-4:]) if len(key) > 8 else ("已设置" if key else "")
+        """读取大模型可用状态。
+
+        统一大模型落地后本插件**不再保存也不回传** API 地址与 Key（SEC-2/F-4）：
+        接入信息由 jz_llm 按模式解析，这里只回"能不能用 + 用的是哪一份"。
+        """
+        session = jz_llm.resolve(PLUGIN_ID)
         return jsonify({
-            "api_source": cfg["ui"]["api_source"],
-            "base_url": cfg["llm"]["base_url"],
-            "api_key_set": bool(key),
-            "api_key_masked": masked,
-            "model": cfg["llm"]["model"],
+            "ok": True,
+            "llm_configured": session.configured(),
+            "llm_source": session.source,
+            "llm_source_label": session.source_label(),
+            "llm_reason": session.reason,
         })
 
     @app.post(f"{API_PREFIX}/config")
     def cg_post_config():
-        """保存展示配置；api_key 留空表示沿用原值，避免明文回显后空写覆盖。"""
-        body = request.get_json(silent=True) or {}
-        merged = load_config()
-        merged["llm"]["base_url"] = (body.get("base_url") or "").strip()
-        new_key = (body.get("api_key") or "").strip()
-        if new_key:
-            merged["llm"]["api_key"] = new_key
-        merged["llm"]["model"] = (body.get("model") or "").strip()
-        save_config(merged)
-        return jsonify({
-            "ok": True,
-            "llm_configured": bool(merged["llm"]["api_key"]),
-        })
+        """兼容占位：统一大模型落地后本插件已无可写配置项。
+
+        不覆盖 config.json 里的历史 llm 段——那段是升级前的旧 Key，
+        jz_llm 在统一配置为空时仍会读它（兼容桥），删掉会让老部署突然不可用。
+        """
+        session = jz_llm.resolve(PLUGIN_ID)
+        return jsonify({"ok": True, "llm_configured": session.configured()})
 
     @app.get(f"{API_PREFIX}/prompt")
     def cg_get_prompt():
@@ -270,20 +251,12 @@ def register(app) -> None:
         if not raw:
             return jsonify({"detail": "文件为空"}), 400
 
-        # 前置校验：先检查是否已配置 API Key，避免提交后白等
-        cfg = load_config()
-        base_url = request.form.get("base_url") or cfg["llm"]["base_url"]
-        api_key = request.form.get("api_key") or cfg["llm"]["api_key"]
-        model = request.form.get("model") or cfg["llm"]["model"]
+        # 前置校验：先看统一大模型是否可用，避免提交后白等（失败原因直接给用户）
+        session = jz_llm.resolve(PLUGIN_ID)
+        if not session.configured():
+            return jsonify({"detail": session.reason or "尚未配置大模型，无法分析文档"}), 400
 
-        if not api_key:
-            return jsonify({
-                "detail": "尚未配置 API Key，请先填写大模型信息（网页模式保存，或编辑 config.json）"
-            }), 400
-
-        task_id = _submit_analysis(
-            safe_name, raw, base_url, api_key, model, load_prompt()
-        )
+        task_id = _submit_analysis(safe_name, raw, session, load_prompt())
         return jsonify({"ok": True, "task_id": task_id})
 
     @app.get(f"{API_PREFIX}/result/<task_id>")

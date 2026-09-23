@@ -139,9 +139,14 @@ MODULE_SPECS = {
              "alias": ["身份证号码", "身份证号", "身份证", "idcard"],
              "hint": "可选，加密存储；留空不修改，填 \"-\" 表示清空。"
                      "请把该列单元格格式设为「文本」：按数字存储时 18 位号码末尾会丢精度（系统会检测并提示）"},
-            {"key": "llm_base_url", "header": "大模型BaseURL", "width": 30, "norm": "halfwidth",
-             "alias": ["大模型baseurl", "大模型地址", "baseurl", "api地址", "llm base url"],
-             "hint": "可选，如 https://api.deepseek.com/v1；留空不修改，填 \"-\" 表示清空"},
+            {"key": "llm_format", "header": "大模型调用格式", "width": 16, "norm": "halfwidth",
+             "alias": ["大模型调用格式", "大模型格式", "调用格式", "llm格式", "llm format"],
+             "hint": "可选，取值：openai（OpenAI 兼容，默认）/ anthropic / ollama / custom；"
+                     "留空不修改"},
+            {"key": "llm_base_url", "header": "大模型API地址", "width": 34, "norm": "halfwidth",
+             "alias": ["大模型api地址", "大模型baseurl", "大模型地址", "baseurl", "api地址", "llm base url"],
+             "hint": "可选，**完整接口地址**，如 https://api.deepseek.com/chat/completions"
+                     "（要填到 chat/completions）；留空不修改，填 \"-\" 表示清空"},
             {"key": "llm_api_key", "header": "大模型APIKey", "width": 26,
              "alias": ["大模型apikey", "apikey", "大模型密钥", "api密钥", "llm api key"],
              "hint": "可选，加密存储；留空不修改（导出时默认留空），填 \"-\" 表示清空"},
@@ -155,7 +160,7 @@ MODULE_SPECS = {
                      "更新时留空不修改，填 \"-\" 表示清空"},
         ],
         "sample": ["zhangsan", "张三", "jz@123456", "管理单位", "管理部门", "办案员",
-                   "", "", "", "", "case-report"],
+                   "", "openai", "", "", "", "case-report"],
         "key_desc": "登录名",
     },
 }
@@ -988,6 +993,7 @@ def _plan_user(work, d, rowno, mode, ctx):
 
     idcard_raw = d.get("idcard")
     llm_fields = {
+        "format": d.get("llm_format"),
         "base_url": d.get("llm_base_url"),
         "api_key": d.get("llm_api_key"),
         "model": d.get("llm_model"),
@@ -1009,6 +1015,7 @@ def _plan_user(work, d, rowno, mode, ctx):
             "role": role_id,
             "permissions": permissions,
             "llm": {
+                "format": _llm_format(llm_fields["format"]),
                 "base_url": _llm_value(llm_fields["base_url"]),
                 "api_key": _deps["encrypt_field"](_llm_value(llm_fields["api_key"])),
                 "model": _llm_value(llm_fields["model"]),
@@ -1049,7 +1056,7 @@ def _plan_user(work, d, rowno, mode, ctx):
         if _deps["decrypt_field"](user.get("idcard")) != new_idcard:
             user["idcard"] = _deps["encrypt_field"](new_idcard)
             changed.append("身份证")
-    u_llm = user.setdefault("llm", {"base_url": "", "api_key": "", "model": ""})
+    u_llm = user.setdefault("llm", {"format": "openai", "base_url": "", "api_key": "", "model": ""})
     for field, raw in llm_fields.items():
         if raw is None or (raw or "") == "":
             continue
@@ -1058,11 +1065,16 @@ def _plan_user(work, d, rowno, mode, ctx):
             if _deps["decrypt_field"](u_llm.get(field, "")) != new_val:
                 u_llm[field] = _deps["encrypt_field"](new_val)
                 changed.append("大模型APIKey")
+        elif field == "format":
+            new_val = _llm_format(raw)
+            if (u_llm.get(field) or "") != new_val:
+                u_llm[field] = new_val
+                changed.append("大模型调用格式")
         else:
             new_val = _llm_value(raw)
             if (u_llm.get(field) or "") != new_val:
                 u_llm[field] = new_val
-                changed.append("大模型BaseURL" if field == "base_url" else "模型名称")
+                changed.append("大模型API地址" if field == "base_url" else "模型名称")
     moved = ""
     if old_dept.get("id") != dept.get("id"):
         old_dept["users"] = [x for x in old_dept.get("users", [])
@@ -1079,6 +1091,12 @@ def _llm_value(raw):
     if raw is None:
         return ""
     return "" if _is_clear(raw) else str(raw).strip()
+
+
+def _llm_format(raw):
+    """大模型调用格式取值：非法/留空一律回落到 openai（与后端其它入口同一口径）。"""
+    val = _llm_value(raw).lower()
+    return val if val in ("openai", "anthropic", "ollama", "custom") else "openai"
 
 
 _PLANNERS = {
@@ -1114,6 +1132,7 @@ def _export_rows(module, cfg, with_sensitive=False):
             dept.get("name", ""),
             role_map.get(user.get("role", ""), user.get("role", "") or ""),
             _deps["decrypt_field"](user.get("idcard")),
+            llm.get("format", "openai"),
             llm.get("base_url", ""),
             _deps["decrypt_field"](llm.get("api_key", "")) if with_sensitive else "",
             llm.get("model", ""),

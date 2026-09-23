@@ -14,7 +14,7 @@
 
   var state = {
     file: null,
-    config: null,        // {llm, keep_columns, post_rules, can_manage, llm_configured}
+    config: null,        // {keep_columns, post_rules, can_manage, llm_configured, llm_reason}
     preview: null,       // /preview 响应（staged_id / columns / summary / post_rules / sanitize）
     chips: [],           // 识别到的列（可点击切换）：见 buildChips
     taskTimer: null,
@@ -335,9 +335,8 @@
     document.querySelectorAll('input[name="mode"]').forEach(function (el) {
       el.addEventListener("change", function () {
         renderPreview();                       // 预判口径随模式变：重写提示文案
-        if (el.value === "llm" && state.config && !state.config.llm_configured
-            && !llmConfigFilled()) {
-          setStatus("提示：大模型未配置，请管理员在「管理配置」中填写 API 信息", true);
+        if (el.value === "llm" && state.config && !state.config.llm_configured) {
+          setStatus("提示：" + (state.config.llm_reason || "大模型未配置"), true);
         } else {
           setStatus("");
         }
@@ -348,9 +347,8 @@
   function submitFilter() {
     if (!state.file) return;
     var mode = currentMode();
-    if (mode === "llm" && state.config && !state.config.llm_configured
-        && !llmConfigFilled()) {
-      setStatus("大模型未配置：请管理员在「管理配置」中填写 API 信息", true);
+    if (mode === "llm" && state.config && !state.config.llm_configured) {
+      setStatus(state.config.llm_reason || "大模型未配置，无法使用大模型过滤", true);
       return;
     }
     var picked = selectedColumns();
@@ -425,11 +423,6 @@
           setStatus(err.message, true);
         });
     }, 1000);
-  }
-
-  function llmConfigFilled() {
-    var b = $("cfgBaseUrl").value.trim(), k = $("cfgApiKey").value.trim();
-    return !!(b && k);
   }
 
   // ===================== 结果展示 =====================
@@ -516,9 +509,6 @@
 
   function renderAdminPanel() {
     var cfg = state.config;
-    $("cfgBaseUrl").value = (cfg.llm && cfg.llm.base_url) || "";
-    $("cfgModel").value = (cfg.llm && cfg.llm.model) || "";
-    $("cfgApiKey").value = ""; // api_key 掩码存储，留空表示不修改
     renderCfgKeepChips();
     renderCfgRules(cfg.post_rules || []);
 
@@ -640,11 +630,6 @@
     tip.classList.remove("hidden", "ok", "err");
     tip.textContent = "保存中…";
     var body = {
-      llm: {
-        base_url: $("cfgBaseUrl").value.trim(),
-        api_key: $("cfgApiKey").value.trim(),   // 留空=不修改
-        model: $("cfgModel").value.trim(),
-      },
       keep_columns: state.config.keep_columns || [],
       post_rules: collectRules(),
     };
@@ -654,7 +639,6 @@
       })
       .then(function (cfg) {
         state.config = cfg;
-        $("cfgApiKey").value = "";
         renderCfgKeepChips();
         renderPostRules();
         tip.textContent = "✓ 配置已保存";
@@ -671,14 +655,8 @@
     var tip = $("cfgTestTip");
     tip.classList.remove("hidden", "ok", "err");
     tip.textContent = "测试中…";
-    fetchJSON(API + "/config/test", {
-      method: "POST",
-      body: JSON.stringify({
-        base_url: $("cfgBaseUrl").value.trim(),
-        api_key: $("cfgApiKey").value.trim(),
-        model: $("cfgModel").value.trim(),
-      }),
-    }).then(function (data) {
+    fetchJSON(API + "/config/test", { method: "POST", body: JSON.stringify({}) })
+      .then(function (data) {
       tip.textContent = data.detail || (data.ok ? "连通正常" : "连接失败");
       tip.classList.add(data.ok ? "ok" : "err");
     }).catch(function (err) {

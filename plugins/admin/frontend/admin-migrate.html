@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<!-- 数据迁移页（仅超级管理员）
+ * 导出：把当前已安装插件的数据按插件分类打包成 .jzdata（整包口令加密）后下载；
+ * 导入：上传 .jzdata + 口令 → 解析预览（不写数据）→ 勾选分段确认导入（覆盖前自动备份）。
+ * 页面内样式写在 <style> 里（项目既有做法）：只服务本页，避免为几行样式递增 admin.css 的 ?v=。
+ -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据迁移 · 管理后台</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=14">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=26">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
+  <style>
+    .mg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+    .mg-grid > * { margin: 0 12px 12px 0; }
+    .mg-sec { display: flex; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--md-outline);
+      border-radius: var(--md-radius-s); background: var(--md-surface); cursor: pointer; }
+    .mg-sec input { margin: 3px 10px 0 0; flex: none; }
+    .mg-sec-name { font-size: 14px; color: var(--md-on-surface); }
+    .mg-sec-meta { font-size: 12px; color: var(--md-on-surface-variant); margin-top: 3px; line-height: 1.6; }
+    .mg-sec-tag { display: inline-block; padding: 1px 7px; margin-left: 6px; border-radius: 999px;
+      font-size: 11px; background: var(--md-surface-container); color: var(--md-on-surface-variant); }
+    .mg-pass { display: flex; align-items: center; }
+    .mg-pass > * + * { margin-left: 10px; }
+    .mg-hint { font-size: 12px; line-height: 1.8; color: var(--md-on-surface-variant); margin-top: 10px; }
+    .mg-hint b { color: var(--md-on-surface); }
+    .mg-report { margin-top: 12px; padding: 12px 14px; border-radius: var(--md-radius-s);
+      background: var(--md-surface-container); font-size: 13px; line-height: 1.9; color: var(--md-on-surface); }
+    .mg-report .ok { color: #188038; }
+    .mg-report .bad { color: var(--md-error); }
+    .mg-report code { font-size: 12px; word-break: break-all; }
+    .mg-file { font-size: 13px; color: var(--md-on-surface-variant); }
+    .mg-actions { margin-top: 14px; display: flex; align-items: center; }
+    .mg-actions > * + * { margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <header class="app-bar">
+    <a href="/" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title" data-suffix=" · 管理后台">JZ 工具箱 · 管理后台</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="user-menu" id="user-slot"></div>
+  </header>
+
+  <main class="admin-content" id="app">
+    <div class="admin-head">
+      <div>
+        <h1>数据迁移</h1>
+        <div class="admin-sub">
+          把当前已安装插件的数据按插件分类打包导出，或从迁移包导入；导出包整包口令加密
+        </div>
+      </div>
+      <a class="admin-btn" href="/admin">← 后台首页</a>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>导出数据</h3>
+      <p class="settings-desc">
+        勾选要带走的数据段，设置一个<b>导出口令</b>后下载 <code>.jzdata</code> 包。
+        包内按插件分类存放（<code>plugins/&lt;插件&gt;/…</code>），<b>整包用口令加密</b>：
+        没有口令连包内文件名都读不到，账号数据里的密码、身份证与大模型 API Key 也不会以可读形式出现。
+      </p>
+      <div id="mg-export-list" class="mg-grid">加载中…</div>
+      <div class="settings-form">
+        <label for="mg-pass">导出口令（至少 8 位）</label>
+        <div class="mg-pass">
+          <input class="admin-input" type="password" id="mg-pass" autocomplete="new-password"
+                 placeholder="请牢记：这是打开数据包的唯一凭据，遗失后无法恢复">
+          <input class="admin-input" type="password" id="mg-pass2" autocomplete="new-password"
+                 placeholder="再输一次">
+        </div>
+        <div class="mg-hint" id="mg-export-hint"></div>
+      </div>
+      <div class="mg-actions">
+        <button type="button" class="admin-btn primary" id="mg-export">导出并下载</button>
+        <button type="button" class="admin-btn" id="mg-reload">重新盘点</button>
+      </div>
+      <div class="mg-report" id="mg-export-report" hidden></div>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>导入数据</h3>
+      <p class="settings-desc">
+        选择 <code>.jzdata</code> 包并输入当时的导出口令 → 先<b>解析预览</b>（此时不写任何数据）→
+        确认要导入的数据段后再执行。覆盖前会把被替换的文件备份到数据根
+        <code>backups/migrate/&lt;时间戳&gt;/</code>，导错可手工回退。
+      </p>
+      <div class="settings-form">
+        <div class="form-row">
+          <input class="admin-input" type="file" id="mg-file" accept=".jzdata">
+          <input class="admin-input" type="password" id="mg-import-pass" autocomplete="off"
+                 placeholder="导出时设置的口令">
+          <button type="button" class="admin-btn" id="mg-inspect">解析预览</button>
+        </div>
+        <div class="mg-hint" id="mg-import-hint"></div>
+      </div>
+      <div id="mg-import-preview" hidden>
+        <div class="mg-hint" id="mg-preview-meta"></div>
+        <div id="mg-import-list" class="mg-grid"></div>
+        <div class="mg-actions">
+          <button type="button" class="admin-btn primary" id="mg-import">确认导入</button>
+          <span class="field-hint">导入「账号与权限数据」会替换现有账号——若当前登录账号不在包内，导入后需要重新登录。</span>
+        </div>
+      </div>
+      <div class="mg-report" id="mg-import-report" hidden></div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/plugin/admin/js/admin-common.js?v=6"></script>
+  <script src="/plugin/admin/js/admin-migrate.js?v=1"></script>
+</body>
+</html>

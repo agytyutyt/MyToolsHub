@@ -1,142 +1,30 @@
-"""文件过滤器 —— OpenAI 兼容大模型客户端与字段语义匹配。
+"""文件过滤器 —— 大模型调用（统一大模型模块的薄适配层）。
 
-可对接任何暴露 /chat/completions 接口的模型服务（OpenAI / DeepSeek / 通义千问 /
-Kimi / 智谱 / 本地 Ollama 等），与 case-report / character-graph 插件同一模式。
+统一大模型（框架模块 ``jz_llm``）落地后，本文件**不再自带 HTTP 调用与 API Key**：
+接入配置（格式 / 地址 / Key / 模型）由 jz_llm 按「管理员统一配置」或「用户各自设置」
+解析，本插件只负责**拟定并保存提示词**，把提示词与参数推给 jz_llm，再把结果回推业务
+逻辑（见 docs/design/统一大模型模块-设计文档.md）。
 
-核心入口 match_columns()：给定表格全部表头与希望保留的字段名单，
-由大模型判断每个表头与名单中哪个字段语义关联（如「时间」↔「开始时间」），
-返回 {表头: 匹配到的保留字段 or ""}。
+核心入口 match_columns()：给定表格全部表头与希望保留的字段名单，由大模型判断每个表头
+与名单中哪个字段语义关联（如「时间」↔「开始时间」），返回 {表头: 匹配到的保留字段 or ""}。
+
+保留本模块的理由：① 插件内既有调用点语义不变；② "模型只能返回名单内的字段"这类
+**防幻觉约束**属于本插件，不该塞进框架。
 """
 
 import json
-import re
 
-# requests 是**可选**依赖（由「依赖组件包」按需安装）：必须保护性导入——
-# 裸 import 会让缺它时整个插件后端 ModuleNotFoundError，插件直接加载失败，
-# 与"可选依赖缺失 → 仍加载并标注功能降级"的设计相悖（真机实测踩到）。
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except Exception:  # pragma: no cover - 干净机未装依赖组件时
-    requests = None
-    REQUESTS_AVAILABLE = False
+import jz_llm
 
-DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-v4-flash"
-
+PLUGIN_ID = "file-filter"
 LLM_TIMEOUT = 120
 
+# 兼容既有调用点：插件各处按 llm_client.LLMError 捕获大模型异常
+LLMError = jz_llm.LLMError
 
-class LLMError(Exception):
-    """大模型调用相关异常，错误信息直接展示给前端用户。"""
-
-
-def parse_model_output(text):
-    """从模型回复中解析 JSON 对象，容忍 markdown 代码围栏。"""
-    if not text:
-        raise LLMError("大模型返回为空")
-    cleaned = text.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{[\s\S]*\}", cleaned)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    raise LLMError("大模型返回的内容不是合法 JSON，请检查模型是否按格式输出")
-
-
-def build_chat_url(base_url):
-    """根据 base_url 拼出 chat/completions 完整地址。"""
-    base = (base_url or DEFAULT_BASE_URL).strip()
-    if base.endswith("/chat/completions"):
-        return base
-    return base.rstrip("/") + "/chat/completions"
-
-
-def chat(base_url, api_key, model, system, user, temperature=0.1, timeout=LLM_TIMEOUT):
-    """发送一次 chat/completions 请求，返回文本回复。"""
-    if not REQUESTS_AVAILABLE:
-        raise LLMError("缺少 requests：大模型辅助过滤不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip 后重启服务。")
-    url = build_chat_url(base_url)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model or DEFAULT_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": temperature,
-        "stream": False,
-    }
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    except requests.RequestException as e:
-        raise LLMError(f"无法连接大模型服务，请检查网络与接口地址（{type(e).__name__}）") from e
-
-    if resp.status_code >= 400:
-        try:
-            detail = json.dumps(resp.json(), ensure_ascii=False)[:300]
-        except Exception:
-            detail = (resp.text or "")[:300]
-        raise LLMError(f"大模型接口返回错误（HTTP {resp.status_code}）：{detail}")
-
-    try:
-        data = resp.json()
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise LLMError("大模型返回结构异常，请检查模型名称是否正确")
-    return content
-
-
-def test_connection(base_url, api_key, model, timeout=15):
-    """连通性测试，返回 (ok, detail)。"""
-    if not REQUESTS_AVAILABLE:
-        raise LLMError("缺少 requests：大模型辅助过滤不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip 后重启服务。")
-    url = build_chat_url(base_url)
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model or DEFAULT_MODEL,
-        "messages": [{"role": "user", "content": "ping"}],
-        "max_tokens": 16,
-        "temperature": 0,
-        "stream": False,
-    }
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    except requests.RequestException as e:
-        return False, f"无法连接大模型服务，请检查网络与接口地址（{type(e).__name__}）"
-    if resp.status_code >= 400:
-        try:
-            detail = json.dumps(resp.json(), ensure_ascii=False)[:300]
-        except Exception:
-            detail = (resp.text or "")[:300]
-        hint = "（请检查 API Key）" if resp.status_code in (401, 403) else ""
-        return False, f"接口返回错误（HTTP {resp.status_code}）{hint}：{detail}"
-    try:
-        data = resp.json()
-        choices = data.get("choices") or []
-        message = choices[0].get("message", {}) if choices else {}
-    except (KeyError, TypeError, ValueError, IndexError):
-        return False, "返回结构异常，请检查 base_url 是否为 OpenAI 兼容接口"
-    if not message:
-        return False, "返回结构异常：未包含 choices[].message"
-    snippet = str(message.get("content") or message.get("reasoning_content") or "").strip()
-    detail = "连通正常，模型可正常响应"
-    if snippet:
-        detail = f"连通正常，模型响应：{snippet[:40]}"
-    return True, detail
+# 依赖标记：统一大模型模块持有 requests 的可用性（插件不再直接 import requests），
+# 这里转发一份供 /status 自检与 jz_deps 刷新沿用（标记名不变，前端零改动）。
+REQUESTS_AVAILABLE = jz_llm.REQUESTS_AVAILABLE
 
 
 # 系统提示词：把表格表头映射到保留字段名单
@@ -153,10 +41,23 @@ MATCH_SYSTEM_PROMPT = """你是数据合规助手。给定「表格现有字段�
    仅字面相似但含义无关的不要关联。"""
 
 
-def match_columns(headers, keep_columns, base_url, api_key, model, timeout=LLM_TIMEOUT):
-    """调用大模型做字段语义匹配。
+# 用户消息模板：{headers} / {keep} 会被替换为实际字段清单（JSON 文本）
+MATCH_USER_TEMPLATE = """表格现有字段：{headers}
+需保留字段名单：{keep}
+请按系统要求输出 JSON。"""
+
+
+def default_prompt() -> dict:
+    """本插件的内置缺省提示词（供 jz_llm.load_prompt 做回退）。"""
+    return {"system": MATCH_SYSTEM_PROMPT, "user_template": MATCH_USER_TEMPLATE}
+
+
+def match_columns(headers, keep_columns, session=None, timeout=LLM_TIMEOUT):
+    """调用统一大模型做字段语义匹配。
 
     headers: 表格表头列表；keep_columns: 需保留字段名单。
+    session: 由调用方在**请求线程**内 jz_llm.resolve(PLUGIN_ID) 取得后传入
+        （后台线程读不到会话，见 jz_llm 模块头部的线程纪律）。
     返回 {表头: 匹配的保留字段原文 or ""}；
     模型返回了名单之外的值时按未匹配（""）处理，防幻觉映射。
     """
@@ -165,13 +66,14 @@ def match_columns(headers, keep_columns, base_url, api_key, model, timeout=LLM_T
     keep = [str(k).strip() for k in (keep_columns or []) if str(k).strip()]
     if not keep:
         raise LLMError("保留字段名单为空，无法匹配（请先在管理配置中设定保留字段）")
-    user = (
-        f"表格现有字段：{json.dumps(headers, ensure_ascii=False)}\n"
-        f"需保留字段名单：{json.dumps(keep, ensure_ascii=False)}\n"
-        "请按系统要求输出 JSON。"
-    )
-    data = parse_model_output(chat(base_url, api_key, model, MATCH_SYSTEM_PROMPT, user,
-                                   temperature=0.1, timeout=timeout))
+    prompt = jz_llm.load_prompt(PLUGIN_ID, default_prompt())
+    user = jz_llm.render(prompt.get("user_template") or MATCH_USER_TEMPLATE, {
+        "headers": json.dumps(headers, ensure_ascii=False),
+        "keep": json.dumps(keep, ensure_ascii=False),
+    })
+    data = jz_llm.chat_json(prompt.get("system") or MATCH_SYSTEM_PROMPT, user,
+                            session=session, plugin_id=PLUGIN_ID,
+                            temperature=0.1, timeout=timeout)
     mappings = data.get("mappings") if isinstance(data, dict) else None
     if not isinstance(mappings, dict):
         raise LLMError("大模型输出缺少 mappings 对象")

@@ -1,9 +1,4 @@
 {
-  "llm": {
-    "base_url": "",
-    "api_key": "",
-    "model": ""
-  },
   "keep_columns": [],
   "post_rules": []
 }

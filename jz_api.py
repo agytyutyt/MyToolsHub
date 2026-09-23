@@ -18,6 +18,13 @@
     暴露 `/api/org/tree`（见 app.py），数据经本模块的 provider 取自 admin——
     "插件调另一个插件"变成"插件调主体提供的框架 API"。
 
+用户级大模型配置（统一大模型模块的账号侧接缝）：
+    "用户各自设置"模式下的接入配置存在账号数据里（admin.json 的 `user.llm`），
+    而账号数据归 admin 插件所有——故由 admin 注册 `get_user_llm` / `save_user_llm`
+    两个 provider，`jz_llm` 与主体路由（/api/llm/*）经本模块取用，
+    既不 import admin 的内部模块，也不另立一份用户配置造成两处不一致。
+    provider 返回/接收的都是**明文** Key（加解密在 admin 侧完成）。
+
 纪律（与 `jztools_data.py` 相同，务必遵守）：
     仅标准库、导入无副作用、**不得 import 任何插件**、避免循环依赖。
     本模块被 app.py 与各插件后端共同 import。
@@ -32,10 +39,13 @@ _PROVIDERS = {
     "session_user": None,   # () -> dict | None
     "set_operation": None,  # (str) -> None
     "org_tree": None,       # () -> list | None
+    "user_llm_get": None,   # (username) -> dict | None
+    "user_llm_save": None,  # (username, dict) -> bool
 }
 
 
-def register_providers(get_session_user=None, set_operation=None, get_org_tree=None):
+def register_providers(get_session_user=None, set_operation=None, get_org_tree=None,
+                       get_user_llm=None, save_user_llm=None):
     """注册框架 API 的实现（只由核心插件 admin 调用）。
 
     允许部分注册（缺省项保持既有实现不变）；重复注册直接覆盖，便于自重启/重载场景。
@@ -46,6 +56,10 @@ def register_providers(get_session_user=None, set_operation=None, get_org_tree=N
         _PROVIDERS["set_operation"] = set_operation
     if get_org_tree is not None:
         _PROVIDERS["org_tree"] = get_org_tree
+    if get_user_llm is not None:
+        _PROVIDERS["user_llm_get"] = get_user_llm
+    if save_user_llm is not None:
+        _PROVIDERS["user_llm_save"] = save_user_llm
     log.debug("框架 API provider 已注册：%s", providers_registered())
 
 
@@ -90,3 +104,31 @@ def get_org_tree():
 def is_logged_in():
     """当前请求是否已登录（get_session_user() 的布尔便捷形式）。"""
     return get_session_user() is not None
+
+
+def get_user_llm(username):
+    """取某账号自己的大模型接入配置（明文 Key）；无 provider / 无该账号返回 None。
+
+    仅供统一大模型模块（jz_llm）与主体路由取用：**不要**在插件里直接读账号数据。
+    """
+    fn = _PROVIDERS["user_llm_get"]
+    if fn is None or not username:
+        return None
+    try:
+        return fn(username)
+    except Exception:
+        return None
+
+
+def save_user_llm(username, config):
+    """保存某账号自己的大模型接入配置（明文 Key 传入，落盘加密由 admin 负责）。
+
+    返回是否保存成功；无 provider 时返回 False（调用方据此给出可读错误）。
+    """
+    fn = _PROVIDERS["user_llm_save"]
+    if fn is None or not username:
+        return False
+    try:
+        return bool(fn(username, config or {}))
+    except Exception:
+        return False

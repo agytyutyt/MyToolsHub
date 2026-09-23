@@ -11,7 +11,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>文件过滤器</title>
-<link rel="stylesheet" href="./style.css?v=5" />
+<link rel="stylesheet" href="./style.css?v=6" />
 </head>
 <body>
   <div class="page">
@@ -44,18 +44,10 @@
           非法正则会在保存时自动跳过。</p>
       </div>
       <div class="cfg-block">
-        <h3>大模型配置（大模型过滤模式使用）</h3>
-        <div class="cfg-grid">
-          <label>API 地址
-            <input id="cfgBaseUrl" type="text" placeholder="https://api.deepseek.com" autocomplete="off" spellcheck="false" />
-          </label>
-          <label>API Key
-            <input id="cfgApiKey" type="password" placeholder="sk-...（留空表示不修改）" autocomplete="new-password" />
-          </label>
-          <label>模型名称
-            <input id="cfgModel" type="text" placeholder="deepseek-v4-flash" autocomplete="off" spellcheck="false" />
-          </label>
-        </div>
+        <h3>大模型（大模型过滤模式使用）</h3>
+        <p class="muted" id="cfgLlmHint">接入信息（格式 / 地址 / Key / 模型）统一在
+          「管理后台 → 大模型设置」维护；若管理员开启了「用户各自设置」，
+          也可在首页右下角「⋯ → 大模型设置」中自行填写。本插件不再单独保存 API Key。</p>
         <div class="row-actions">
           <button id="cfgTestBtn" class="btn secondary" type="button">测试连通</button>
           <button id="cfgSaveBtn" class="btn primary" type="button">保存配置</button>
@@ -140,6 +132,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=4"></script>
+  <script src="./app.js?v=5"></script>
 </body>
 </html>

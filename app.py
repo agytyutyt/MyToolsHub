@@ -17,6 +17,7 @@ from flask import Flask, g, jsonify, render_template, request, send_from_directo
 
 import jz_api
 import jz_deps
+import jz_llm
 import jztools_data
 from jztools_data import get_data_root, get_data_root_dir
 
@@ -790,6 +791,11 @@ def register_plugin_backends(app):
     _plugin_load_errors.clear()
     _plugin_states.clear()
 
+    # 统一大模型模块的依赖标记（REQUESTS_AVAILABLE）也按请求刷新：
+    # 服务运行中装「依赖组件包 requests」后，无需重启即可用上大模型功能
+    # （与各插件 register() 里的 jz_deps.install_refresher 同一机制）。
+    jz_deps.install_refresher(app, jz_llm)
+
     registry = load_registry()
     tools = list(registry.get("tools", []))
 
@@ -940,6 +946,102 @@ def api_org_tree():
         return jsonify({"error": "组织架构数据不可用（核心插件未加载）"}), 503
     jz_api.set_operation("查询组织架构树")
     return jsonify({"ok": True, "tree": tree})
+
+
+# ===================== 统一大模型：框架级设置接口 =====================
+# 主体对插件的稳定契约（FC-5，见 jz_llm.py）。三条接口都在**框架层**（不是某个插件），
+# 因为设置入口在首页右下角 ⋯，属于外壳而非任何插件；账号数据经 jz_api 的 provider
+# 向 admin 插件取用（依赖倒置，插件之间零依赖）。
+# 登录拦截由 admin 的 _enforce_login 兜底（/api/llm/* 不在白名单）；
+# 权限拦截不适用——该前缀不是已注册工具 ID，_enforce_tool_access 会放行。
+
+@app.get("/api/llm/settings")
+def api_llm_settings():
+    """返回当前生效的大模型设置：模式、格式清单、本人配置（脱敏）与生效来源。
+
+    悬浮卡片据此决定是否显示入口（user_mode 为假时整条入口不出现）、
+    回显表单、并提示"当前实际生效的是哪一份配置"。
+    """
+    info = jz_api.get_session_user()
+    if info is None:
+        return jsonify({"error": "未登录或登录已过期"}), 401
+    user_mode = jz_llm.user_mode()
+    username = info.get("username")
+    own = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
+    session = jz_llm.resolve()
+    jz_api.set_operation("查询大模型设置")
+    return jsonify({
+        "ok": True,
+        "mode": jz_llm.mode(),
+        "user_mode": user_mode,
+        "can_self_config": user_mode,
+        "fallback": jz_llm.load_global()["fallback"],
+        "formats": jz_llm.formats_public(),
+        "mine": {
+            "format": own["format"],
+            "url": own["url"],
+            "api_key": jz_llm.mask_key(own["api_key"]),
+            "api_key_set": bool(own["api_key"]),
+            "model": own["model"],
+            "configured": jz_llm.provider_usable(own),
+            "problem": jz_llm.provider_problem(own),
+        },
+        "effective": session.public(),
+    })
+
+
+@app.post("/api/llm/settings")
+def api_llm_settings_save():
+    """保存**本人**的大模型接入配置（仅"用户各自设置"模式开放）。
+
+    请求体：{format, url, api_key, model}；api_key 留空或回传掩码表示不修改已保存的 Key。
+    管理员统一配置模式下直接 403——避免用户以为自己的设置生效了（实际被忽略）。
+    """
+    info = jz_api.get_session_user()
+    if info is None:
+        return jsonify({"error": "未登录或登录已过期"}), 401
+    if not jz_llm.user_mode():
+        return jsonify({"error": "当前由管理员统一配置大模型，个人设置未开放"}), 403
+    data = request.get_json(silent=True) or {}
+    username = info.get("username")
+    current = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
+    provider = jz_llm.normalize_provider(data)
+    if jz_llm.is_mask(provider["api_key"]):
+        provider["api_key"] = current["api_key"]  # 掩码/留空 = 保留原 Key
+    if not jz_api.save_user_llm(username, provider):
+        return jsonify({"error": "保存失败：账号数据不可写（核心插件未加载）"}), 503
+    jz_api.set_operation("保存个人大模型设置")
+    return jsonify({
+        "ok": True,
+        "configured": jz_llm.provider_usable(provider),
+        "problem": jz_llm.provider_problem(provider),
+    })
+
+
+@app.post("/api/llm/test")
+def api_llm_test():
+    """连通性测试：优先测请求体里的这套（表单里刚填、还没保存的），否则测当前生效的。
+
+    请求体：{format, url, api_key, model}（可缺省）；api_key 为掩码/留空时用已保存的。
+    """
+    info = jz_api.get_session_user()
+    if info is None:
+        return jsonify({"error": "未登录或登录已过期"}), 401
+    data = request.get_json(silent=True) or {}
+    username = info.get("username")
+    own = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
+
+    draft = None
+    if any(str(data.get(k) or "").strip() for k in ("url", "model", "format")):
+        draft = jz_llm.normalize_provider(data)
+        if jz_llm.is_mask(draft["api_key"]):
+            # 掩码/留空 = 沿用已保存的 Key：用户模式取本人配置，管理员模式取全局配置
+            draft["api_key"] = own["api_key"] if jz_llm.user_mode() \
+                else jz_llm.load_global()["provider"]["api_key"]
+
+    jz_api.set_operation("测试大模型连通性")
+    ok, detail = jz_llm.test_connection(provider=draft)
+    return jsonify({"ok": ok, "detail": detail})
 
 
 def _current_user_allowlist():

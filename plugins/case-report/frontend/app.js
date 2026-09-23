@@ -102,21 +102,21 @@
     if (dlg) dlg.classList.remove("wide");
   }
 
-  /* ==================== 大模型配置 ==================== */
+  /* ==================== 大模型接入状态 ==================== */
+  /* 接入信息（格式/地址/Key/模型）由统一大模型模块管理，本插件只显示状态：
+     可用 → 绿字；不可用 → 红字并给出该去哪里配（管理员模式/用户模式提示语由后端给）。 */
   function loadConfig() {
     api("/api/case-report/config").then(function (data) {
-      $("#baseUrl").value = data.base_url || "";
-      // 安全：Key 不回传明文，仅展示掩码；输入框留空 = 保存时沿用原值
-      $("#apiKey").value = "";
-      $("#apiKey").placeholder = data.api_key_set
-        ? ("已设置（" + (data.api_key_masked || "****") + "），留空则不修改")
-        : "sk-...";
-      $("#model").value = data.model || "";
       if (data.llm_configured) {
-        $("#configTip").textContent = "✓ 已配置大模型，解析将走大模型";
+        $("#configTip").textContent = "✓ 大模型可用（" + (data.llm_source_label || "") + "）";
+        $("#configTip").className = "tip";
       } else {
-        $("#configTip").textContent = "⚠ 未配置完整大模型，无法解析报告";
+        $("#configTip").textContent = "⚠ 大模型不可用";
+        $("#configTip").className = "tip err";
       }
+      $("#llmHint").textContent = data.llm_configured
+        ? "接入信息由「" + (data.llm_source_label || "") + "」提供；如需修改请到管理后台「大模型设置」，或在首页右下角「⋯ → 大模型设置」中自助填写。"
+        : (data.llm_reason || "尚未配置大模型");
     }).catch(function () {});
   }
 
@@ -126,38 +126,13 @@
     }).catch(function () {});
   }
 
-  function saveConfig() {
-    var btn = $("#saveConfig");
-    btn.disabled = true;
-    postJSON("/api/case-report/config", {
-      base_url: $("#baseUrl").value,
-      api_key: $("#apiKey").value,
-      model: $("#model").value,
-    }).then(function (data) {
-      toast(data.llm_configured ? "配置已保存，解析将走大模型" : "配置已保存，但尚未配置完整，无法解析报告", "ok");
-      $("#configTip").textContent = data.llm_configured ? "✓ 已配置大模型" : "⚠ 未配置完整大模型，无法解析报告";
-      if (data.llm_configured) {
-        $("#apiKey").value = "";
-        $("#apiKey").placeholder = "已设置，留空则不修改";
-      }
-    }).catch(function (e) {
-      toast("保存配置失败：" + e.message, "err");
-    }).then(function () {
-      btn.disabled = false;
-    });
-  }
-
   function testConfig() {
     var btn = $("#testConfig");
     var tip = $("#configTestTip");
     btn.disabled = true;
     tip.textContent = "测试中…";
     tip.className = "tip";
-    postJSON("/api/case-report/config/test", {
-      base_url: $("#baseUrl").value,
-      api_key: $("#apiKey").value,
-      model: $("#model").value,
-    }).then(function (data) {
+    postJSON("/api/case-report/config/test", {}).then(function (data) {
       if (data.ok) {
         tip.textContent = "✓ " + (data.detail || "连通正常");
         tip.className = "tip";
@@ -1142,7 +1117,6 @@
       $("#resultCard").classList.add("hidden");
     });
     $("#saveEntryBtn").addEventListener("click", saveEntry);
-    $("#saveConfig").addEventListener("click", saveConfig);
     $("#testConfig").addEventListener("click", testConfig);
     $("#refreshRecords").addEventListener("click", function () {
       refreshRecords();

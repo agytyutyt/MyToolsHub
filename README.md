@@ -151,7 +151,7 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 | Chrome（或任意现代浏览器） | 外部程序 | 仅影响目标机的浏览体验；目标机自带 Chrome/Edge 即可，确实没有时用「Chrome 离线组件包」装 |
 | libopenh264（`openh264-2.5.0-win64.dll`，**仓库已提供**） | 动态库（随仓库分发） | 仅影响「信息传输」视频链路的 MP4 编码；cv2 自带编码器可用时无需它。缺 DLL 时接口会明确提示手工放置。**来源与许可证见 `docs/guide/离线部署包说明.md` §9** |
 | 高德地图 Key | 前端配置 | 仅影响「地图标点」插件 |
-| 大模型 API（OpenAI 兼容） | 前端配置 | 影响战果录入、人物关系星图、过滤器/轨迹速写的"大模型模式" |
+| 大模型 API（OpenAI 兼容 / Anthropic / Ollama / 自定义） | **统一大模型设置**（管理后台 → 大模型设置，或首页右下角 ⋯ → 大模型设置） | 影响战果录入、人物关系星图、过滤器/轨迹速写的"大模型模式"。接入信息与 Key 全站只存一份（主体模块 `jz_llm`），插件不再各自配置——见 `docs/design/统一大模型模块-设计文档.md` |
 
 > **离线（无外网）部署时，前两项以「独立组件包」按需分发，不随主包**：
 >
@@ -349,12 +349,13 @@ powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id admi
 ```
 JZToolsHub/
 ├── app.py                     # ★ 框架入口：数据根初始化、日志、插件加载、核心路由、压缩/缓存中间件
+├── jz_llm.py                  # ★ 统一大模型：两级配置、四种调用格式、插件只拟定提示词
 ├── jztools_data.py            # ★ 数据根目录管理：双指针解析、旧数据迁移、配置模板同步
 ├── config/
 │   ├── tools.json             # ★ 工具注册清单模板（站点信息 + 分类 + 工具条目）
 │   └── data_root.json         # 数据根目录备份指针（开发机产物，见 §12 注意事项）
 ├── plugins/                   # ★ 插件目录（一切皆插件）
-│   ├── admin/                 #   核心插件：登录鉴权 / 组织人员 / 权限 / 批量导入导出 / 插件管理（插件包升级）
+│   ├── admin/                 #   核心插件：登录鉴权 / 组织人员 / 权限 / 批量导入导出 / 插件管理 / 大模型设置 / 数据迁移
 │   ├── notice-board/          #   公告板（home_card() 动态卡片）
 │   ├── knowledge-base/        #   知识库（Office 预览引擎 vendor 在 backend/vendor/）
 │   ├── file-filter/           #   过滤器（提供 /apply 供其他插件复用）
@@ -371,7 +372,7 @@ JZToolsHub/
 │   ├── index.html  tool.html
 │   ├── css/style.css
 │   ├── icons/                 # Twemoji SVG（无彩色 emoji 字体环境的回退）
-│   └── js/  main.js  tool.js  jz-icon.js
+│   └── js/  main.js  tool.js  jz-icon.js  llm-settings.js（首页 ⋯ → 大模型设置对话框）
 ├── android-app/InfoParse/     # 移动端 APP（Kotlin，信息传输的 Android 离线接收端）
 ├── wheels/                    # ★ 第三方预编译 wheel（zfec，见 §2.3 与 wheels/README.md）
 ├── runtime/                   # 离线运行组件下载目录（Chrome MSI + LibreOffice MSI/裁剪核心包，已 gitignore，约 517MB）
@@ -507,7 +508,26 @@ JZToolsHub/
 
 它还负责：会话密钥持久化、Fernet 加解密（密码 / 身份证 / API Key）、组织架构 CRUD、角色与权限点、数据目录设置，以及单位/部门/人员的批量导入导出（`backend/batch_io.py`，依赖注入挂载，不反向 import `routes.py`）。
 
-### 5.5 插件后端加载机制
+### 5.5 jz_llm.py —— 统一大模型
+
+框架级模块（与 `jz_api` / `jz_deps` / `jztools_data` 同层）：**插件不自带 API Key、不自行发 HTTP**，
+接入配置与调用全部收拢到这里；插件只"拟定并保存提示词"。
+
+| 项 | 说明 |
+| --- | --- |
+| 两种模式 | `admin`（管理员统一配置，全站共用一份）/ `user`（用户各自设置，可在首页右下角 ⋯ 自助填写）；由管理员在「管理后台 → 大模型设置」切换 |
+| 回退策略 | `user` 模式下可勾选"用户未配置时回退全局配置"，避免没配的人完全用不了 |
+| 四种格式 | `openai`（chat/completions）/ `anthropic`（/v1/messages）/ `ollama`（/api/chat）/ `custom`（自定义请求头与请求体模板 + 取值路径） |
+| 地址口径 | **一律填完整接口地址**（OpenAI 兼容填到 `chat/completions`），框架不做路径拼接 |
+| 配置落盘 | 全局 `<数据根>/config/llm.json`；用户配置在 `admin.json` 的 `user.llm`（经 `jz_api` provider 存取）；Key 均 Fernet 加密 |
+| 插件 API | `resolve()` / `chat()` / `chat_json()` / `chat_text()` / `test_connection()` / `load_prompt()` / `save_prompt()` / `render()` / `LLMError` |
+| 框架路由 | `GET/POST /api/llm/settings`、`POST /api/llm/test`（首页「⋯ → 大模型设置」对话框用） |
+| **线程纪律** | 后台任务里读不到会话：**请求线程内** `session = jz_llm.resolve(PLUGIN_ID)`，把 `session` 传进任务，任务里 `chat(..., session=session)` |
+
+完整设计（配置解析顺序、自定义模板占位符、迁移口径、历史配置收编）见 `docs/design/统一大模型模块-设计文档.md`；
+插件侧速查见《插件设计规范.md》§9.4。
+
+### 5.6 插件后端加载机制
 
 ```python
 # app.py::_load_backend_module
@@ -523,7 +543,7 @@ spec = importlib.util.spec_from_file_location(module_name, backend/__init__.py,
 
 > **路由函数必须带插件前缀**（如 `kb_status`、`ts_upload`）：Flask 以 `view_func.__name__` 作为 endpoint，两个插件各写一个 `def status()` 会在启动阶段直接抛 `AssertionError` 导致插件整体加载失败。
 
-### 5.6 首页卡片三级合并
+### 5.7 首页卡片三级合并
 
 ```
 ① home_card()（插件后端可选钩子，请求时求值，可按登录用户返回动态内容）
@@ -696,6 +716,10 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | `POST /api/tools/reorder` | 保存首页布局 `{categories: [分类id…], tools: {分类id: [工具id…]}}` |
 | `GET /api/tools/visibility` | 全部分类与工具及其启用状态（含已隐藏项），**按当前登录用户权限点过滤**（未授权插件不可见，分类仅返回仍含可见工具者） |
 | `POST /api/tools/visibility` | 切换启用 `{type: 'tool'\|'category', id, enabled}`（仅可操作当前用户有权可见的工具 / 分类，无权限返回 403） |
+| `GET /api/org/tree` | 框架级组织架构树（只读；数据经 `jz_api` provider 取自 admin，核心插件未加载时 503） |
+| `GET /api/llm/settings` | 统一大模型：模式、格式清单、**本人**配置（脱敏）与当前生效来源；`can_self_config` 决定首页右下角 ⋯ 是否出现「大模型设置」入口 |
+| `POST /api/llm/settings` | 保存**本人**的大模型接入配置（仅"用户各自设置"模式开放，管理员模式返回 403） |
+| `POST /api/llm/test` | 大模型连通性测试（测表单里这套，缺省测已保存的） |
 
 ### 7.2 登录 / 管理后台（admin 插件）
 
@@ -704,10 +728,14 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | `GET /login`、`POST /api/login`、`POST /api/logout`、`GET /api/session` | 登录闭环（`logout` 是 **POST**） |
 | `GET /api/admin/permission-points` | 全量已注册工具清单（含停用），供人员「权限设置」弹窗勾选权限点；与 `/api/tools/visibility` 解耦，不受当前用户权限点过滤（需人员管理模块权限） |
 | `POST /api/account/password` | 自助改密 `{old_password, new_password}`（新密码 ≥6 位） |
-| `GET /admin`、`GET /admin/<module>` | 后台页面（`unit` / `department` / `user`；`/admin/settings` 与 `/admin/plugins` 仅超管） |
+| `GET /admin`、`GET /admin/<module>` | 后台页面（`unit` / `department` / `user`；`/admin/settings` 与 `/admin/plugins` 仅超管，`/admin/llm` 管理员或超管） |
 | `GET /api/admin/summary` | 后台总览（各模块记录数 + 当前账号可访问性） |
 | `GET /api/admin/org-tree` | 组织架构树（只读，供业务插件选可见范围） |
 | `GET\|POST /api/admin/data-settings` | 查看 / 修改数据根目录（仅超管） |
+| `GET /admin/llm`、`GET\|POST /api/admin/llm-settings` | 统一大模型设置页与读写接口（模式 / 回退 / 全局接入信息；**管理员或超管**）；POST 为**按字段局部更新**（「调用模式」卡改完自动保存，只提交 `mode`/`fallback`；「全局接入配置」卡的保存按钮只提交 `provider`，不影响模式）；`POST /api/admin/llm-test` 连通性测试 |
+| `GET /admin/migrate`、`GET /api/admin/migrate/plan` | 数据迁移页与可导出分段盘点（**仅超管**） |
+| `POST /api/admin/migrate/export` | 导出数据迁移包 `.jzdata`（整包口令加密；`{passphrase, sections[]}` → 直接下载） |
+| `POST /api/admin/migrate/inspect`、`/import` | 上传包 + 口令解析预览（不写数据）→ 按分段确认导入（覆盖前备份到 `backups/migrate/`） |
 | `GET /api/admin/plugins` | 插件盘点：代码版本 / 登记版本 / 待重启 / 备份数 / 数据占用 / 启停（仅超管） |
 | `POST /api/admin/plugins/upload` | 上传插件包（multipart `file`）→ 只读校验 → 返回应用计划（仅超管） |
 | `POST /api/admin/plugins/apply` | 应用上传的包（服务端重新校验 → 备份 → 替换 → 登记；仅超管） |
@@ -823,10 +851,10 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 模板（程序目录 → 数据根目录） | 模式 | 含义 |
 | --- | --- | --- |
 | `config/tools.json` | merge-tools | 新分类/新工具追加，保留用户启停与排序 |
-| `plugins/case-report/backend/config.template.json` | ensure-keys | 只补模板新增键，保留用户 LLM 配置 |
-| `plugins/character-graph/backend/config.template.json` | ensure-keys | 同上（含 `ui.api_source`） |
+| `plugins/case-report/backend/config.template.json` | ensure-keys | 空模板：本插件已无自有配置项（大模型信息归统一配置，提示词归 `prompt.json`） |
+| `plugins/character-graph/backend/config.template.json` | ensure-keys | 空模板：同上（历史 `ui.api_source` 与 `llm` 段已清除） |
 | `plugins/trajectory-sketch/backend/config.template.json` | ensure-keys | 保留管理员自定义的保留字段名单 / 列映射 / 阈值 / 报告文案 |
-| `plugins/file-filter/backend/config.template.json` | ensure-keys | 保留管理员配置（保留字段名单 / 后处理规则 / LLM） |
+| `plugins/file-filter/backend/config.template.json` | ensure-keys | 保留管理员配置（保留字段名单 / 后处理规则）；`llm` 段已清除 |
 
 > 第 2 条门控是**自动发现**的（遍历 `plugins/*/` 下所有 `*.template.json` 算内容指纹），
 > 因此它解决的是"**插件单独升级 / 手工覆盖目录**后新增配置键的自动补入"——这两条路径
@@ -845,7 +873,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 >
 > **提示词（`prompt.json`）不再随版本下发**：模板已删除，提示词由插件内 `llm_client` 的内置默认值
 > 提供（代码即唯一来源）。如需在目标机调整，直接手写 `<数据根>/plugins/<id>/prompt.json` 即可，
-> 插件的 `load_prompt()` 存在即优先读取，且从此不会被版本升级覆盖。
+> 插件经 `jz_llm.load_prompt()` 读取（存在即优先，且从此不会被版本升级覆盖）。
 
 双保险：`install.ps1` 的 `Sync-ConfigTemplates` 在安装时也做等价合并；即使手动替换程序文件夹，app 启动时也会自动同步。
 
@@ -887,6 +915,9 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 卡片点击显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 指向的文件是否存在于 `frontend/` |
 | 登录后接口全部 401 | 会话超时（默认空闲 30 分钟 / 登录满 12 小时）；重新登录 |
 | 轨迹速写提示「过滤器插件不可用」 | 确认 `file-filter` 的 `enabled: true` 并重启服务，再看 `/api/trajectory-sketch/status` 的 `filter_plugin.reason` |
+| 插件说"大模型未配置"但管理员已配 | 看 `GET /api/<插件id>/config` 的 `llm_source`：`user`=用的是本人配置、`global`=回退到管理员配置、空=确实没有可用配置（`llm_reason` 给出该去哪儿配）。若模式为"用户各自设置"且未勾选回退，未配置的用户就会看到这个提示。**插件自有配置已不参与解析**（历史 `llm` 段由启动迁移收编进统一配置后清除） |
+| 用户自助入口（右下角 ⋯）不显示 | 属预期：只有管理员在「管理后台 → 大模型设置」把模式切到**用户各自设置**后才出现；管理员统一配置模式下该选项按需求隐藏 |
+| 大模型连通失败 | 先看提示里的 HTTP 状态：401/403 → Key 不对；404 → 地址不是**完整接口地址**（OpenAI 兼容要填到 `chat/completions`，框架不做路径拼接）；结构异常 → 调用格式选错了（如把 Anthropic 接口按 OpenAI 格式调） |
 | 知识库 Word/Excel 预览样式不对 | 先看 `GET /api/knowledge-base/status` 的 `office_render`：引擎不可用时会**静默回退**到降级渲染。常见原因：`vendor/` 缺失，或 vendor 的 `xhr/__init__.py` 少了一行 `from typing import Optional`（Python ≤3.13 上会导致引擎导入即 `NameError`，详见 `vendor/README.md`）。改了引擎或升级 vendor 后**递增 `routes.py` 的 `PREVIEW_CACHE_VERSION`** 即可自动重渲染旧缓存（无需手工清缓存、无需重启）；排查时也可手工删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` |
 | 装依赖时 zfec 编译失败（`error: [WinError 2]` / 找不到编译器） | `zfec` 没有 Python 3.14 的官方 wheel，不加 `--find-links wheels` 会退化成源码编译。用 `pip install --find-links wheels ...`，或参考 `wheels/README.md` 重建 wheel |
 | 地图标点空白 | 在插件页「⚙️ 配置」中填写有效的高德 Web 服务 Key |

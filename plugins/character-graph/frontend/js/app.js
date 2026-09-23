@@ -503,66 +503,34 @@ function refreshAnalyzeState() {
   $("fileName").textContent = hasFile ? fileInput.files[0].name : "";
 }
 
-/* 配置 */
-const baseUrl = $("baseUrl");
-const apiKey = $("apiKey");
-const model = $("model");
+/* 配置：接入信息（地址/Key/模型）已归统一大模型模块，页面只保留状态展示 */
 const apiFormSection = $("apiFormSection");
 const apiNotice = $("apiNotice");
 
 async function loadConfig() {
+  /* 接入信息（格式/地址/Key/模型）由统一大模型模块管理，本插件只显示状态：
+     可用 → 绿字并注明来源；不可用 → 红字并给出该去哪里配（提示语由后端按模式给）。 */
   try {
     const r = await fetch(API_BASE + "/config");
     const cfg = await r.json();
-
-    /* api_source: web = 页面填写并持久化；config = 隐藏表单，使用配置文件 */
-    if (cfg.api_source === "config") {
-      apiFormSection.style.display = "none";
+    const tip = $("configTip");
+    if (cfg.llm_configured) {
+      tip.textContent = "✓ 大模型可用（" + (cfg.llm_source_label || "") + "）";
+      tip.className = "tip";
+      apiNotice.hidden = true;
+    } else {
+      tip.textContent = "⚠ " + (cfg.llm_reason || "尚未配置大模型");
+      tip.className = "tip err";
       apiNotice.hidden = false;
       apiNotice.textContent =
-        "当前为「配置文件模式」：API 由 config.json 中的 llm 段统一管理，" +
-        "页面无需填写大模型信息。如需改为在网页填写，请编辑 config.json 将 api_source 设为 web。";
-      log("检测到配置文件模式，大模型配置由 config.json 提供", "ok");
-      return;
+        "接入信息由「管理后台 → 大模型设置」统一管理；若管理员开启了「用户各自设置」，" +
+        "也可在首页右下角「⋯ → 大模型设置」中自行填写。";
     }
-
-    /* web 模式：自动读取上次保存的 API 配置（Key 不回传明文，仅掩码提示） */
-    apiFormSection.style.display = "";
-    apiNotice.hidden = true;
-    baseUrl.value = cfg.base_url || "";
-    apiKey.value = "";
-    apiKey.placeholder = cfg.api_key_set
-      ? `已设置（${cfg.api_key_masked || "****"}），留空则不修改`
-      : "sk-...";
-    model.value = cfg.model || "";
-    log("已读取上次保存的大模型配置", "ok");
   } catch (e) {
-    log("读取配置失败", "err");
+    log("读取大模型状态失败", "err");
   }
 }
 loadConfig();
-
-$("saveConfig").addEventListener("click", async () => {
-  const tip = $("configTip");
-  tip.textContent = "保存中…";
-  try {
-    const r = await fetch(API_BASE + "/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        base_url: baseUrl.value.trim(),
-        api_key: apiKey.value.trim(), // 留空 = 沿用已保存的 Key
-        model: model.value.trim(),
-      }),
-    });
-    if (!r.ok) throw new Error((await r.json()).detail || "保存失败");
-    tip.textContent = "✓ 配置已保存";
-    apiKey.value = "";
-    apiKey.placeholder = "已设置，留空则不修改";
-  } catch (e) {
-    tip.textContent = "✗ " + e.message;
-  }
-});
 
 /* 文件选择 / 拖拽 */
 const fileInput = $("fileInput");
@@ -603,9 +571,6 @@ $("analyzeBtn").addEventListener("click", async () => {
 
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("base_url", baseUrl.value.trim());
-  formData.append("api_key", apiKey.value.trim());
-  formData.append("model", model.value.trim());
 
   const btn = $("analyzeBtn");
   btn.disabled = true;

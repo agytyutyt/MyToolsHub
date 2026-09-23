@@ -478,6 +478,164 @@ body.tool-body {
   display: none;
 }
 
+/* ---------- 大模型设置对话框（居中 + 背景调暗/模糊） ----------
+ * 只在管理员把统一大模型设为「用户各自设置」模式时，入口才由 llm-settings.js 注入。
+ * 结构：遮罩（调暗 + 模糊）+ 居中卡片（头部固定 / 主体滚动 / 底部固定）。
+ * ★ 两处刻意写法，改之前先读：
+ *   1) **滚动条放在内层主体**（.llm-card-body），卡片本身只 overflow:hidden——
+ *      卡片自带圆角时，压在卡片上的内部滚动条会盖住右侧两个圆角，看起来像"圆角失效"
+ *      （同类缺陷见 HANDOFF §7.3 第 22 条：滚动条占宽引发的布局/视觉问题）；
+ *   2) z-index 取 66 = 悬浮球（60）之上、轻提示 toast（70）之下——
+ *      保存后的提示条必须能浮在调暗层之上，否则用户看不到"已保存"。 */
+body.llm-card-open {
+  overflow: hidden;                 /* 锁住页面滚动：滚轮只在对话框内生效 */
+}
+
+body.llm-card-open .fab-pop {
+  display: none !important;         /* 打开期间收起悬浮球菜单，避免菜单从遮罩下透出 */
+}
+
+.llm-overlay {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 66;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(32, 33, 36, .45);        /* 与既有 .modal 同一调暗口径 */
+  /* 背景模糊：Chrome ≥76 生效；浏览器基线为 Chrome ≥72，旧内核自动退化为"仅调暗" */
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+.llm-overlay[hidden] {
+  display: none;
+}
+
+.llm-card {
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  max-width: 100%;
+  max-height: 100%;                 /* 不超过遮罩内可用高度（遮罩有 24px 内边距） */
+  background: var(--md-surface);
+  border-radius: var(--md-radius-l);
+  box-shadow: var(--md-shadow-3);
+  overflow: hidden;                 /* 圆角裁切交给卡片，滚动交给内层主体 */
+}
+
+/* 请求体模板是 JSON，允许纵向拉伸（横向拉伸会撑破卡片宽度） */
+.llm-card textarea.admin-input {
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.5;
+}
+
+.llm-card-head {
+  display: flex;
+  align-items: center;
+  padding: 18px 20px 12px;
+}
+
+.llm-card-title {
+  flex: 1;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--md-on-surface);
+}
+
+.llm-card-body {
+  flex: 1 1 auto;
+  min-height: 0;                    /* 不写这条，flex 子项不会收缩、内部滚动条出不来 */
+  overflow-y: auto;
+  padding: 0 20px 4px;
+}
+
+.llm-card-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.llm-card-close:hover {
+  background: var(--md-surface-container);
+}
+
+.llm-card-desc {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--md-on-surface-variant);
+}
+
+.llm-field {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.llm-field > span {
+  display: block;
+  font-size: 13px;
+  color: var(--md-on-surface-variant);
+  margin-bottom: 6px;
+}
+
+.llm-hint {
+  margin: -6px 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--md-on-surface-variant);
+}
+
+.llm-adv {
+  margin: 4px 0 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--md-outline-variant);
+}
+
+.llm-adv[hidden] {
+  display: none;
+}
+
+.llm-card-foot {
+  padding: 12px 20px 18px;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+.llm-card-status {
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--md-on-surface-variant);
+}
+
+.llm-card-status .ok {
+  color: #188038;
+}
+
+.llm-card-status .bad {
+  color: var(--md-error);
+}
+
+.llm-card-actions {
+  display: flex;
+  align-items: center;
+}
+
+.llm-card-actions > * + * {
+  margin-left: 10px;
+}
+
 /* ---------- 浮窗（Modal） ---------- */
 body.modal-open {
   overflow: hidden;

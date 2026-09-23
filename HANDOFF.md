@@ -2,20 +2,48 @@
 
 > 面向没有上下文的接手者：**先读 `docs/README.md`（文档索引 + 覆盖矩阵）与
 > `docs/项目管理手册.md`（改代码 / 开插件 / 移植 / 打包运维 四类场景），再动手改代码。**
-> 最后更新：2026-09-17（**docs 分层重整 + 文档与代码一致性核对**）
+> 最后更新：2026-09-23（**统一大模型模块 `jz_llm` + 后台数据迁移（导出/导入，口令加密）**）
 
 **当前状态（一句话）**：主程序 v2.x 已上线运行；16 个插件全部具备 `manifest.json` 与
 统一 `/api/<id>/` 路由前缀；「信息传输」批次 1–5 已落地（协议 v2 JZ2 二进制帧、压缩器升级、
-拆包重组、pdf/ppt 精简提取、真机四项验收通过），批次 6–10 见 `docs/plan/信息传输优化TODO清单.md`。
+拆包重组、pdf/ppt 精简提取、真机四项验收通过），批次 6–10 见 `docs/plan/信息传输优化TODO清单.md`；
+**统一大模型模块 `jz_llm` 已落地**（主体新增框架模块，插件不再自持 API Key），三个业务插件
+（case-report 1.3.0 / character-graph 1.2.0 / file-filter 1.3.0）已迁移，**待出包与真机验收**。
 
-**最近一轮（2026-09-17）· 文档体系重整**：
-① `docs/` 按 `guide`（交付）/ `design`（设计）/ `eval`（评估）/ `plan`（方案）/ `archive`（归档）
-五层重组，新增唯一索引 `docs/README.md` 与新手入口 `docs/项目管理手册.md`；
-② 9 份已完成/已决/已取代的文档加状态横幅后归档，全仓路径引用同步改写（41 个文件）；
-③ 修掉两处**文档与代码不一致**：配置模板"两处登记"口径（`README.md` §10.2）、
-§2.1/§2.2 的固化快照（改为现取现用）；
-④ 打包口径收口：`docs/eval|plan|archive` 与插件内 `test_*.py` **不再随包**
-（两处脚本同步 + `verify-package.py` 新增断言）。
+**最近一轮（2026-09-23）· 后台数据迁移（导出 / 导入）**：
+① 管理后台新增「数据迁移」页（`/admin/migrate`，**仅超级管理员**）+ 首页卡片：**导出**按分段勾选
+（框架三段：账号与权限 / 统一大模型配置 / 工具启停排序；插件按 `<id>` 各一段）→ 设口令 →
+下载 `.jzdata`；**导入**上传包 + 口令 → 解析预览（不写数据）→ 勾选分段 → 确认导入（覆盖前自动备份）；
+② **安全口径**（需求重点）：**整包口令加密**（PBKDF2-HMAC-SHA256 20 万次派生两把子密钥，
+Fernet 认证加密；无口令连包内文件名都读不到）+ **字段信封**——账号与大模型配置里用**本机密钥**
+加密的密文字段在导出时改封为口令信封（`JZMIG1:`），导入时改封为**目标机**密钥，
+因此①换机器导入后密码/身份证/LLM Key 仍能解开②口令泄露也还需本机密钥才读得出 Key；
+**机器密钥 `config/.admin_key` 永不进包**；识别"哪些字段是密文"靠"能否用本机密钥解开"
+（不维护字段清单，新增密钥字段自动覆盖）；③ 导入逐条**白名单校验**（只允许 `config/<三者>` 与
+`plugins/<已声明插件>/…`）、只写勾选段、内容一致则跳过（幂等）、覆盖前备份到
+`<数据根>/backups/migrate/<时间戳>/`（只留最近 3 份）；④ 导出排除 `.task_cache/`、`out/`、
+`__pycache__`、`*.bak/*.tmp/*.log`、`logs/`、`.staging/`、`backups/`、`.admin_key`、`.app_state.json`；
+⑤ 新增 `test_data_migrate.py` **23 例**（打包口径 / 加密口径（包内无明文 Key 也无本机原密文）/
+**跨机器导入后四类密钥都能用目标机密钥解开** / 导入安全（zip 穿越、只写勾选段、备份保留）/
+HTTP 全链路（含**导出账号→改密码→导入还原→原密码仍能登录**的端到端））；
+全量回归 **149 例全绿**；真实浏览器实测导出（中文文件名正确）与导入全链路（业务数据被替换、
+备份目录可见、导入后本机密钥仍能解开密码哈希）。
+
+**最近一轮（2026-09-23）· 统一大模型模块**：
+① 新增主体模块 `jz_llm.py`（框架级，与 `jz_api`/`jz_deps`/`jztools_data` 同层）：
+**两级配置**（全局 `config/llm.json` / 用户 `admin.json` 的 `user.llm`）× **两种模式**
+（`admin` 管理员统一配置 / `user` 用户各自设置 + 回退开关）× **四种调用格式**
+（openai / anthropic / ollama / custom 模板），插件只"拟定并保存提示词"，
+把 prompt 与参数推给模块、拿回结果（`chat` / `chat_json` / `chat_text`）；
+② 设置入口两处：管理后台新增「大模型设置」页（**管理员或超管**：模式 + 全局接入信息 + 连通测试），
+首页右下角 ⋯ 新增「大模型设置」**居中对话框**（背景调暗 + 模糊；**仅"用户各自设置"模式出现**，管理员模式下该选项按需求隐藏）；
+③ 三个业务插件的 `llm_client.py` 改为**薄适配层**（HTTP 调用/Key/连通测试全部上交），
+插件配置接口不再回传凭据、前端配置卡片改为状态行；提示词文件位置不变（**无数据迁移**）；
+④ **插件侧历史配置已彻底清除**（2026-09-23 收尾）：`jz_llm` 不再回退读插件 `config.json` 的 `llm` 段；
+启动迁移 `migrate_plugin_legacy_llm()` **先收编、再清除**——统一配置为空时把插件那份明文 Key
+搬进 `<数据根>/config/llm.json`（加密落盘），随后删除插件侧 `llm` 段，老部署升级后功能不失效
+而明文副本消失（幂等；见设计文档 §8.1）；
+⑤ 新增 `test_llm_module.py`（45 例）覆盖配置/格式/解析/真实调用（本地桩）/线程纪律/路由/插件联调。
 
 > **本头部只留"当前状态 + 最近一轮"，不再累积流水账。**
 > 历史轮次的详细叙述见 §3「已完成事项」表、各 `docs/design/` 文档的「实施记录」节，
@@ -213,6 +241,9 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-23 | **彻底清除插件侧历史大模型配置 + 用户级配置三条同步链路实测** | 需求（用户口径）：① 把原来插件里面的大模型配置**彻底清除**；② 确认三条同步链路——建号时配的大模型信息用户在自助设置里是否正常显示、用户自改后管理员「人员管理」是否同步、管理员改后用户端是否同步。实现：① **插件侧清零**——三个插件的 `DEFAULT_CONFIG` / `load_config` / `config.template.json` 里的 `llm` 段全部删除（case-report 由此**没有任何自有配置项**，其 `config.json` 与 `load_config`/`save_config`/`CONFIG_FILE` 一并移除；character-graph 连历史 `ui.api_source`（"网页填 Key"开关）一起清掉；file-filter 只留保留字段名单与后处理规则），前端配置卡与文档同步；② **`jz_llm` 兼容桥退场**——删除 `_legacy_provider()` 与 `resolve()` 的第三级，`source` 只剩 `user`/`global`/未配置（插件侧不再有任何可被读取的凭据）；③ **先收编再清除的启动迁移** `migrate_plugin_legacy_llm()`（admin 插件，幂等）——统一配置还没有可用接入信息时，先把插件那份**明文** Key 搬进 `<数据根>/config/llm.json`（加密落盘；历史语义即 OpenAI 兼容，`base_url` 省写时补全为完整接口地址），随后删除插件 `config.json` 里的 `llm` 段；多份重复副本只收编第一份、其余丢弃并记日志；清除失败（文件被占用）保持原样并记 warning，下次启动重试，不留"删了一半"的中间态。本机实测：三个插件的历史 Key 是**同一把**（各存一份明文），迁移后统一配置可用、`llm.json` 里无明文、插件侧无 `llm` 段且幂等。④ **三条同步链路实测**（同一份数据源 `admin.json` 的 `user.llm`，不存在第二处）：**建号时配置 → 用户端**（管理员在「人员管理」表单里给张三配 anthropic/地址/Key/模型 → 张三登录后 ⋯ →「大模型设置」显示的就是这套，Key 只显示"已保存（••••••••）"占位、状态"本人配置可用"）；**用户自改 → 人员管理**（张三改成 deepseek/deepseek-set-by-user/新 Key 保存 → 管理员列表该行掩码随之变化、编辑弹窗回填新值）；**管理员改 → 用户端**（管理员改成 moonshot/kimi-admin-changed、Key 留空 → 张三端立刻看到新地址与模型，且 **Key 被保留**）。⑤ **顺带修掉一个缺陷 + 收口一处明文暴露**：`PUT /api/admin/users/<username>` 原先不认"掩码/留空 = 不修改"（全系统其它入口都认），会把字面量 `••••••••` 当 Key 存下去——用户此后调用一律 401 且原因难查；已按统一口径修正（`jz_llm.is_mask` 判定），与人员弹窗"（已配置，留空保持不变）"的文案终于一致。同时按用户要求**把「人员管理」列表接口改为只回掩码**（`GET /api/admin/users` 原先把用户 API Key 的**明文**回传给浏览器，只靠前端 `maskKey` 遮成 `sk-a…-key`——那是全系统唯一一处明文凭据进浏览器的入口）：现在只回固定掩码 + `api_key_set` 布尔，前端列表单元格显示掩码、编辑弹窗的 Key 字段**不再预填明文**（改留空 + "已保存（••••••••），留空表示不修改"占位），保存时只在管理员真填了新 Key 才提交该字段；落盘密文与真实 Key 不受影响（实测：只改模型、Key 留空保存后，服务端解密出来的仍是原 Key）。验证：`test_llm_module.py` 新增 `test_1_admin_created_llm_visible_to_user` / `test_2_user_save_visible_in_admin_user_list` / `test_3_admin_edit_visible_to_user` / `test_plugin_legacy_llm_migration` 四例（含"只改地址模型、Key 回传掩码 → 保留原 Key"的边界）；全量 **155 例全绿**；真实浏览器按上述三条链路逐步走通（管理端表单建号 → 用户端卡片显示 → 用户端改存 → 管理端列表与弹窗 → 管理端改存 → 用户端显示）。产物：`jz_llm.py`（去兼容桥）、admin `routes.py`（迁移 + 掩码口径修正）、三个插件的 `routes.py` 与 `config.template.json`、`test_llm_module.py`、设计文档 §8.1 改写为"收编与清除"。**待办**：三个插件与 admin 出包（见 §4 T1/M1） |
+| 2026-09-23 | **后台数据迁移：按插件分类打包导出/导入，整包口令加密** | 需求（用户口径）：为后台管理模块添加数据迁移功能——对当前已安装插件做数据导出/导入，导出数据**按插件分类打包保存**，并为用户数据**添加加密功能，防止直接读取数据包获得用户 LLM 的 Key**。实现：① 新增 `plugins/admin/backend/data_migrate.py`（纯逻辑）——包内布局 `manifest.json` + `config/{admin.json,llm.json,tools.json}` + `plugins/<插件id>/…`（**一个插件一段**，段 id `accounts`/`llm`/`tools`/`plugin:<id>`）；② **整包口令加密容器** `.jzdata`（`magic + 迭代次数 + 盐 + Fernet(zip)`；口令经 PBKDF2-HMAC-SHA256 20 万次派生**两把**子密钥：整包密钥 + 字段信封密钥；认证加密，口令错/篡改直接拒绝，不解出半截数据；口令≥8 位且明确"遗失无法恢复"）；③ **字段信封**（本功能的关键）：账号/大模型配置里的密文本来用**本机密钥** `config/.admin_key` 加密，原样打包会导致"换机器解不开"（新机密钥不同，密码与 Key 全成乱码、登录永远失败）且"口令泄露后仍需本机密钥"少一层保护——故导出时把**能用本机密钥解开的字符串**改封为口令信封（`JZMIG1:` 前缀），导入时改封为目标机密钥；**`config/.admin_key` 永不进包**，导入也不改写目标机密钥文件；**识别密文不靠字段清单**（靠"能否用本机密钥解开"），这样插件自己加密的配置与将来新增的密钥字段都自动覆盖（清单法在这仓里吃过亏：插件配置至今留着统一大模型落地前的明文 Key）；④ 导入**逐条白名单校验**（只允许 `config/<框架三者>` 与 `plugins/<已声明插件id>/…`；拒绝绝对路径/盘符/`..`/含冒号，与插件包同一套 zip 安全口径）+ 只写勾选段 + 内容一致跳过（幂等）+ 覆盖前备份到 `<数据根>/backups/migrate/<时间戳>/`（只留最近 3 份）+ 原子写；⑤ 导出排除易变与本机状态：`.task_cache/`、`out/`、`__pycache__/`、`*.tmp/*.bak*/*.pyc/*.log`、`logs/`、`.staging/`、`backups/`、`config/.admin_key`、`config/.app_state.json`（带过去会压制目标机模板同步）、`installed-deps.json`；⑥ 上限：包 300 MB / 解压后 1 GB / 条目 5 万（防误操作与 zip 炸弹）；⑦ 页面 `/admin/migrate`（**仅超管**，与数据目录/插件管理同档）+ 后台首页卡片：导出卡（分段勾选带版本/文件数/体积/路径、两次输入口令、结果区提示包名与"牢记口令"）+ 导入卡（选包+口令 → **解析预览**（来源机器/导出时间/程序版本/各段"将覆盖 N 个文件""含 N 处密钥"）→ 勾选 → 二次确认 → 报告（写入/跳过/备份目录/涉及插件，账号段警示"当前登录账号可能失效"、工具段提示"需重启生效"））；两步导入之间不重复要口令——口令派生的**信封密钥只在服务端内存活 30 分钟**（不回传前端；服务重启则该 token 失效，重新解析即可），上传的包落在 `<数据根>/.staging/migrate/` 且导入后立即删除。验证：新增 `test_data_migrate.py` **23 例**——打包口径（按插件分类/框架三段/排除易变文件/清单字段/未安装插件标注/包内中文段名自描述）、加密口径（口令错/篡改/非本系统文件各有可读报错；**包内无明文 Key、也无本机密钥的原密文**；非密钥 JSON 逐字节保真）、**跨机器导入**（A 机导出→B 机（密钥不同）导入后密码/身份证/用户 LLM Key/全局 LLM Key 都能用 B 机密钥解开，且 B 机密钥文件未被改动）、导入安全（zip 穿越与未声明插件全跳过、只写勾选段、备份+只留最近 3 份、预览不写数据）、HTTP 全链路（匿名 401/非超管 403、口令太短 400、下载名、token 一次性、**导出账号→改密码→导入还原→原密码仍能登录**）；既有 7 个测试文件全绿，合计 **149 例**；真实浏览器实测（隔离数据根）：导出清单与中文文件名（`JZToolsHub-数据迁移-<时间>.jzdata`，修掉"优先取 ASCII filename= 丢掉中文"的解析 bug）、解析预览显示中文段名与覆盖/密钥标注、确认导入后业务数据被替换（`8·16 系列盗窃案` 覆盖本机旧数据）、备份目录可见且存的是导入前内容、**导入后本机密钥仍能解开导入来的密码哈希**。**踩坑**：① 字段信封密钥与容器盐绑定（同口令+同盐才派生同一把）——`encrypt_container()` 只能用于新建包，拿它重封已含信封的包会让字段全部解不开（已在函数 docstring 写明并给出 `read_container_head()` 供二次加工复用同一把密钥）；② 导出下载的中文文件名要走 RFC 5987 的 `filename*=UTF-8''…`，优先匹配 ASCII 的 `filename=` 会丢中文。产物：`data_migrate.py`（新增）、`admin-migrate.html` / `admin-migrate.js`（新增）、路由 5 个 + 后台首页卡片、`test_data_migrate.py`（新增）、设计文档 `docs/design/数据迁移-设计文档.md`（新增）。**待办**：出包（admin 插件）+ 真机演练"整机迁移"（见 §4） |
+| 2026-09-23 | **统一大模型模块 `jz_llm`：框架内置 LLM，插件不再自持 API Key** | 需求（用户口径）：框架本地内置 LLM 能力，建统一的大模型 API/Key 调度接口——插件**只拟定、保存 prompt**，把参数与 prompt 推给 LLM 模块，模块与大模型交互后把数据回推插件；**两种模式由管理员或超管确定**（① 管理员定 API 地址/格式/Key ② 用户单独设置）；用户在主界面**右下角「三个点」**里自助设置（管理员未开启则不显示该选项），点击以**悬浮卡片**展示，界面支持**多种 API 调用格式**，地址须填**完整接口地址**（如 OpenAI 格式要填到 `chat/completions`）。实现：① **主体模块 `jz_llm.py`**（新增，框架级，与 `jz_api`/`jz_deps`/`jztools_data` 同层；仅标准库 + 可选 `requests`，导入无副作用、不 import 任何插件）——两级配置（全局 `<数据根>/config/llm.json`、用户配置在 `admin.json` 的 `user.llm`，Key 均 Fernet 加密）× 两种模式（`admin` / `user` + `fallback` 回退开关）× **四种调用格式**（`openai` / `anthropic` / `ollama` / `custom`：自定义请求头与请求体模板 + 取值路径，占位符 `{{model}} {{system}} {{user}} {{temperature}} {{max_tokens}} {{api_key}} {{messages_json}}`，字符串值按 JSON 字面量转义后替换——提示词里的引号/换行不会把 JSON 打坏）；**地址一律完整接口地址、框架不做路径拼接**（历史"base_url 还是完整地址"两种口径混用是踩坑点：少写 `/v1`、多写一次 `chat/completions` 都会 404 且报错与真实原因无关）；对插件的 API：`resolve()` / `chat()` / `chat_text()` / `chat_json()` / `test_connection()` / `load_prompt()` / `save_prompt()` / `render()` / `LLMError`。② **配置解析顺序**：用户自己配置（user 模式）→ 全局配置（admin 模式，或 user 模式且允许回退）→ 插件历史 `config.json` 的 `llm` 段（**兼容桥**，避免老部署升级后大模型功能一夜失效；**该桥已于同日移除**，见上一行"彻底清除"条目）→ 未配置（`reason` 按模式给出该去哪儿配的可读文案）。③ **线程纪律（本轮最易踩的坑，已写进设计文档与规范 §9.4）**：`resolve()` 要读会话，只能在**请求线程**内调用；插件的大模型调用普遍跑在线程池里，后台线程读不到会话 → 在"用户各自设置"模式下会被**误判为未配置**，故约定"请求线程 resolve → 把 `LLMSession`（不可变快照）传进任务 → 任务里 `chat(..., session=session)`"，`test_llm_module.py` 用一条跨线程用例钉住。④ **设置入口两处**：管理后台新增「大模型设置」页（`/admin/llm`，**管理员或超管**——比数据目录/插件管理的"仅超管"放宽一档，对齐需求"由管理员或超级管理员确定"；含模式切换、回退开关、四种格式的下拉与地址样例、连通测试、状态摘要；**两张卡各存各的**——「调用模式」卡改模式/回退开关即自动保存（无保存按钮），「全局接入配置」卡的「保存接入配置」只提交 `provider`、不影响模式，靠后端 POST 的**按字段局部更新**保证互不覆盖）+ 后台首页卡片；首页右下角既有 ⋯ 悬浮球菜单**动态注入**「💡 大模型设置」项（`static/js/llm-settings.js`：`can_self_config=false` 时什么都不做——"管理员未开启→该选项不显示"由数据驱动，不需要后端渲染开关），点击打开 `.llm-overlay` + `.llm-card` **居中对话框**（背景调暗 `rgba(32,33,36,.45)` + 模糊 `blur(6px)`，与既有 `.modal` 同一调暗口径；三段式：头部固定 / 主体滚动 / 底部固定，按钮与状态不随内容滚走；常驻 DOM + `hidden` 切换；打开时给 body 加 `llm-card-open` 锁页面滚动并收起悬浮球菜单；点遮罩/Esc 关闭；遮罩 z-index 66 取"悬浮球之上、toast 之下"——保存提示必须浮在调暗层之上）。**修掉一个视觉缺陷**：卡片原先自身 `overflow-y: auto`，内部滚动条压住右侧两个圆角（看起来像"圆角失效"）——把滚动交给内层主体、卡片只 `overflow:hidden` 即修好（同类缺陷见 §7.3 第 22 条：滚动条占宽/遮挡引发的视觉问题）。⑤ **依赖倒置**：`jz_api` 新增 `get_user_llm` / `save_user_llm` 两个 provider 槽位，用户级配置由 admin 插件读写（**不另立一份用户配置**——账号数据归 admin，`user.llm` 已在 `admin.json` 里加密、后台可编辑、批量导入导出已覆盖，再开一份会出现"同一用户两处配置"）；`admin.json` 的 `user.llm` 新增 `format` 字段（默认 `openai`，启动迁移 `migrate_admin_llm_format` 补齐老账号），后台人员弹窗与批量导入导出（新增「大模型调用格式」列）同步。⑥ **三个业务插件迁移**（case-report 1.2.6→**1.3.0** / character-graph 1.1.4→**1.2.0** / file-filter 1.2.1→**1.3.0**）：`llm_client.py` 改为**薄适配层**（保留原有函数名，插件内调用点零改动；HTTP 调用、凭据、连通测试全部上交），插件保留的只有**业务提示词与领域约束**（五要素 JSON 约束 / 人物关系自洽过滤 / 字段匹配防幻觉映射）；`GET /api/<id>/config` 只回 `llm_configured` / `llm_source` / `llm_source_label` / `llm_reason`（**不再回传任何凭据字段**），`POST /config` 保留为兼容占位（本插件已无接入信息可写；历史 `llm` 段随后由启动迁移收编并清除），`/config/test` 改测统一配置；前端配置卡片由"地址/Key/模型三输入框"改为一行状态（可用性 + 来源 + 去哪儿改）；file-filter 原先硬编码在函数里的用户消息提为模板常量并接入 `load_prompt`（提示词文件位置**不变**，无数据迁移）；`requests` 可用性转发 `jz_llm.REQUESTS_AVAILABLE`（标记名不变，`/status` 与 `jz_deps` 刷新零改动），`manifest.requires` **保留** `requests` 声明（依赖门控语义不变）。⑦ **构建期**：`tools/build-plugin-package.ps1` 的 `FRAMEWORK_MODULES` 白名单加入 `jz_llm`（C-4/C-10 放行，与 `jz_api` 同一处理）。验证：新增 `test_llm_module.py` **45 例全绿**（配置默认/往返/加密/脱敏/钳制、四种格式请求构造与自定义模板转义、解析顺序与兼容桥、**本地 HTTP 桩**上的真实调用与错误文案、跨线程会话、提示词存取与损坏回退、框架与后台路由（含匿名 401 / 管理员模式个人保存 403 / 非管理员 403 / Key 掩码）、三个插件的 `/config` 口径与"插件调用确实落到统一配置"的联调断言）；既有 6 个测试文件 **126 例全绿**（含正序/逆序两种跑法验证无测试间污染——`TestRoutesAndPlugins` 自建 Flask app 并在 tearDown 清理 `app` 与 `jztools_*` 模块缓存，沙箱型测试 `test_admin_plugin_manager` 依赖"sys.modules 里没有 app"）；出包工具对三个插件跑通 C-4/C-10（仅提示"声明了但实测未 import：requests"，属正常）；**真实浏览器实测**（隔离数据根 + `user` 模式）：首页 ⋯ 菜单出现「大模型设置」、卡片打开后 4 种格式可选、切「自定义」展开高级字段、保存后状态转绿"本人配置可用"且生效来源变为"用户自己配置"、后台 `/admin/llm` 页表单回显与状态摘要正确。**踩坑**：`_extract()` 的路径段可能是 int（内部元组 `("choices", 0, "message", "content")`）而非字符串，`str.isdigit()` 会 AttributeError——由新测试的首次真实调用暴露（单测若只测"构造请求"不测"取值"就会漏掉）；`max_tokens` 填 0/负数按"未设置"处理而不是钳成 1（钳成 1 会让模型只输出一个 token 而用户看不出原因）。产物：主体新增 `jz_llm.py`、框架路由 `/api/llm/*`、`static/js/llm-settings.js`（新增）、`static/css/style.css?v=16`；设计文档 `docs/design/统一大模型模块-设计文档.md`（新增）；规范新增 §9.4 并把 B-7/B-8/§9.3 的"从 `jztools_admin.routes` 导入"旧样板改为 `jz_api` 口径（旧写法出包 C-11 会拦截）；解耦设计文档 §5.1 补 **FC-10** 承诺项。**待办**：三个插件出包 + 目标机验收（见 §4） |
 | 2026-09-22 | **五个插件：展开「管理配置」后整个界面左移（居中定宽容器 + 滚动条占宽）** | 用户报「过滤器、轨迹速写点击『管理配置』后出现滚动条、界面布局向左移动」。根因：插件页用「`max-width` + `margin: 0 auto`」居中容器（`.page` / `.view` / `.paper`），内容变高（展开配置面板、文档比阅读区高）时文档出现竖向滚动条，视口宽度被吃掉 15px（自带 `::-webkit-scrollbar { width: 10px }` 的插件是 10px），居中容器**整体左移半个滚动条宽**——实测 1280 视口展开配置面板：文档宽度 1280→1265、`pageLeft` 40→32（左移 8px）。框架外壳 `body.tool-body { height:100vh; overflow:hidden }` + iframe，滚动条出在**插件自己的文档**里，框架侧无法代修（往 iframe 注入样式会破坏 tool.html 承诺的「框架与插件互不污染」），故修在插件 CSS：`html { scrollbar-gutter: stable; }` + `@supports not (scrollbar-gutter: stable) { html { overflow-y: scroll; } }`（旧内核 < Chrome 94 回落常显轨道，同样不左移——浏览器基线 Chrome ≥72，不能只写 `scrollbar-gutter`）；滚动发生在嵌套滚动容器里时（知识库阅读器 `.reader-container` 内的 `.paper`）加在那个容器上、加 `html` 无效。**按同一缺陷类扫全仓**：5 个插件命中，全部修复——file-filter / trajectory-sketch（用户报的两个）+ case-report / notice-board（同类，主页面同写法）+ knowledge-base（阅读器容器）。验证（真实浏览器 + **对照组**）：file-filter 1280 视口按原操作展开面板位移 0px（关掉预留对照组 8px）、trajectory-sketch 1600 视口点「管理配置」面板打开且位移 0px（对照组 8px）、case-report 对照组 5px（其滚动条 10px 宽）、notice-board 对照组 8px、knowledge-base 用真实类名搭阅读器结构对照组 8px——五处修复后位移全为 0，对照组均能复现（含两种假通过的反面教材：视口太矮导致初始已有滚动条、重建探针元素丢掉内联覆盖）。回归：`test_filter_preview` / `test_xlsx_stale_dimension` / `test_bg_image` / `test_plugin_templates` 共 59 例全绿。产物：五个插件 `style.css?v` 递增（5 / 2 / 28 / 5 / 31）与 manifest 版本递增（file-filter 1.2.0→1.2.1、trajectory-sketch 1.2.4→1.2.5、case-report 1.2.5→1.2.6、notice-board 1.0.2→1.0.3、knowledge-base 1.3.3→1.3.4）。**已出包**（5 个插件包 + 插件集重打，登记与哈希见 `tools/plugin-packages.json`；目标机安装器演算：五个包逐文件哈希全过、各「新增/修改 3 个」= 正好是本次三个文件、**重启判定：不需要（纯前端改动，Ctrl+F5 即可）**）；踩坑清单 §7.3 补第 22 条 |
 | 2026-09-22 | **过滤器：办案员上传后先看「识别到的列名 + 过滤预判」，点胶囊逐列决定，后处理可整体关** | 需求（用户口径）：上传文档后展示识别到的列名与**硬过滤匹配的预计结果**（胶囊展示、要删的字段用**线横穿**），用户**点胶囊自定义这一列是否过滤**；并**展示后处理规则**、由用户决定是否启用（**默认开启**）。实现：① 新接口 `POST /api/file-filter/preview`（**同步**——只读表 + 逐列预演，毫秒~秒级，与轨迹速写 `/upload` 同口径，前端不必实现第二种轮询）：识别全部列名 + 逐列硬过滤预判（`keep/matched`）+ 后处理预判（`post_name/replace_count/locked/dup`），并把上传件**落盘暂存**返回 `staged_id`；② `/filter` 接受 `staged_id`（**复用暂存件，反复调字段不重复上传**，TTL 30 分钟；过期/越权 → 404 + `code=staged_expired`，前端自动改传文件重试一次）、`exclude`（**用户点掉的列，两种模式下最终否决**——大模型认为该保留也删）、`post_process=0`（关掉后处理：本次不改写文本，列过滤照常）；③ 大模型模式补**同名保底**（名单内同名字段直接保留，不把"用户点名要的列"交给模型判断——模型偶发返回空值会造成"明明开着却被删"）；④ `columns` 显式传空数组（字段全关）→ 400「未选择任何保留字段」而**不静默回退**管理员名单（静默回退会让"我明明全删了"变成"怎么全保留了"），完全不传才回退配置（老调用方口径不变）；⑤ `core.post_process_columns()` 逐列预演，与 `post_process()` 同口径（前者按列、后者全表），前端据此在点击胶囊时**实时求和**出"预计替换 N 处"；⑥ 前端 `app.js?v=4` / `style.css?v=4`：布局改为「① 上传文件整行（横跨两栏）＋ ② 过滤模式与字段识别 ｜ ③ 过滤结果 相邻两栏」（`display:grid`，窄屏回落单列），胶囊画删除线 = 将删除、表头会被后处理改名的显示 `→ 新名`、同名重复列标 `×N` 且一起切换、空表头列 `locked` 不给切换；规则明文展示（含「文本/正则」「已停用」徽标）+「启用后处理规则」开关（默认开启）；右侧改为「③ 过滤结果」并标注后处理是否关闭。验证：新增 `test_filter_preview.py` **21 例全绿**（预览识别与预判 / 逐列口径与整表口径一致 / 胶囊开关与 exclude 优先 / 显式空数组报错 / 老流程（直传文件、不传 columns）兼容 / 暂存复用与越权与过期 / 大模型同名保底与 exclude 优先 / 真实样本端到端）；既有 `test_xlsx_stale_dimension.py` 14 例、`test_bg_image.py` 17 例全绿（无回归）；**真实浏览器实测**（临时脚手架 `.workbuddy/tmp/ff_dev_server.py`：隔离数据根 + 假会话，端口 5199）：拖拽上传 → 7 个胶囊 5 条删除线 → 点开「手机号」预计替换处数 1→21 实时更新、点掉「所属单位」→ 提交 → 下载产物逐格核对（表头 = 用户所选 2 列、手机号 `138****1001`）；**关闭后处理再跑一轮** → 手机号 `13800001001` 未改写、结果区标注「已关闭」。产物：manifest 版本 file-filter 1.1.5→1.1.6（失真声明修复）→**1.2.0**（本批次），前端资源戳 style v2→v3 / app v3→v4，`config/tools.json` 卡片描述同步，插件 README 与 `docs/design/过滤器插件-设计文档.md`（§2.2 新增，§5/§6/§8/§9.1 同步）更新（**已出包**：file-filter v1.2.0 插件包 + 插件集重打；哈希与登记见 `tools/plugin-packages.json`，出包流程见 README §3.4） |
 | 2026-09-22 | **过滤器 / 轨迹速写：某些 Excel「只识别第一行第一列」（失真 `<dimension>` 声明）** | 用户报两个插件处理某些表格时「只识别第一行第一列」或「提示只有表头没有数据」。根因：这些文件（第三方导出工具写出）在工作表 XML 里声明 `<dimension ref="A1"/>`，实际却有多行多列——该元素在 OOXML 里只是"提示"（Excel 自身容忍），而 openpyxl 的 `read_only=True` 模式**以它为遍历范围上界**（`max_row=1`），于是只读出首格。同一缺陷 2026-09-18 已在「信息传输」修过（真实案例 `660.xlsx`），当时把另 4 处同类写法留作"待决策"——本次一并修掉：`file-filter/backend/core.py`、`trajectory-sketch/backend/excel_io.py`、`trajectory-sketch/backend/engine/selftest.py`、`trajectory-convert/backend/routes.py`。修法**两步必须成对**：① `ws.reset_dimensions()`（openpyxl ≥3.0.4，`hasattr` 守卫）清掉声明、改按 `sheetData` 实际内容扫描；② 统一补齐行宽——清掉声明后 openpyxl 不再按声明宽度补齐稀疏行（`['onlyA', None, None]` 会变成 `['onlyA']`），而下游按列下标取值，只做①会让列下标左移（轨迹类尤其危险）。B-7 禁止插件间 import → 四个插件各存一份同源实现，不抽公共模块。验证：新增 `test_xlsx_stale_dimension.py`（14 例：五种声明形态 × 四个读表插件与"普通模式基准"逐单元格一致、稀疏行列下标不漂移、声明过大无幽灵行列、两条 HTTP 端到端）；**反向验证**——摘掉 `reset_dimensions` → 12/14 失败，只做①去掉② → 1 例失败（列漂移）；既有 `test_bg_image.py` 17 例、`test_plugin_templates/admin/admin_plugin_manager` 29 例、轨迹引擎自测 43 项全绿；`engine/selftest.py --excel` 对失真文件已能出完整报告（修复前只读到 1 行）。产物：manifest 版本递增 file-filter 1.1.5→1.1.6、trajectory-sketch 1.2.3→1.2.4、trajectory-convert 1.1.5→1.1.6（**已出包**：trajectory-sketch v1.2.4、trajectory-convert v1.1.6 插件包，file-filter 的该修复随 v1.2.0 一并出包——登记见 `tools/plugin-packages.json`）；三份插件 README 补注该行为，踩坑清单 §7.5 第 37 条补 openpyxl 第⑤坑 |
@@ -257,6 +288,24 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | 4 | `config/data_root.json` 移出版本库 | ✅ 已修：`.gitignore` + `git rm --cached`；`git ls-files config` 现只剩 `tools.json` |
 | 5 | 验证 `fmt=file` 端到端 | ⏳ **待真机**：桌面封装 → APP 扫码 → 导出 → 逐字节哈希比对 |
 | 6 | 单插件加载失败隔离 | ✅ 已修：`register_plugin_backends` 内 per-plugin try/except，失败记入 `app._plugin_load_errors` 并告警。实测"两个插件各定义 `def status()`"不再抛异常，仅 plug-b 被隔离，整站正常启动 |
+
+### 统一大模型（2026-09-23 落地，待收尾）
+
+| # | 事项 | 状态 |
+| --- | --- | --- |
+| T1 | 三个插件出包（case-report v1.3.0 / character-graph v1.2.0 / file-filter v1.3.0） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id <id>`（校验已跑通，仅需去 `-NoZip`）；出包后同步 `tools/plugin-packages.json` 与插件集 |
+| T2 | 目标机验收：管理员模式（后台配一次 → 三个插件的大模型功能都可用） | ⏳ **待真机** |
+| T3 | 目标机验收：用户各自设置模式（管理员切换 → 用户端 ⋯ 卡片出现 → 各自填写 → 回退策略生效） | ⏳ **待真机** |
+| T4 | 老部署升级路径：升级后启动迁移**先收编再清除**插件历史 Key，三个插件的大模型功能不失效 | ✅ **已落地并单测覆盖**（`test_plugin_legacy_llm_migration`）；真机升级时留意日志里"已收编 / 已清除"两行 |
+| T5 | 用户级配置三条同步链路（建号时配置→用户端可见；用户改→人员管理可见；管理员改→用户端可见） | ✅ **已实测**（`test_1/2/3_*` 三例 + 真实浏览器走通三条）；顺带修掉「人员管理」把掩码当 Key 存下的缺陷 |
+
+### 数据迁移（2026-09-23 落地，待收尾）
+
+| # | 事项 | 状态 |
+| --- | --- | --- |
+| M1 | admin 插件出包（含数据迁移与统一大模型相关改动） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id admin`（admin 是核心插件，随主包分发，需同步主包版本） |
+| M2 | 真机演练整机迁移：A 机导出 → B 机（干净安装）导入 → 登录、插件数据、大模型 Key 全可用 | ⏳ **待真机**（本机已用单测覆盖跨机器密钥改封） |
+| M3 | 大数据量演练（接近 300 MB 上限时给提示是否够用，见设计文档 §8） | ⏳ 视现场数据量 |
 
 ### P1（功能与质量）
 
@@ -497,7 +546,10 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 ## 8. 插件后端速查表
 
-所有后端插件共用同一套模式：`register(app)` 注册路由；会话取 `from jztools_admin.routes import get_session_user`；日志标记 `set_operation("…")`；数据统一存数据根目录 `plugins/<id>/`。
+所有后端插件共用同一套模式：`register(app)` 注册路由；会话与日志标记经**主体模块**取用
+（`import jz_api` → `jz_api.get_session_user()` / `jz_api.set_operation("…")`；旧写法
+`from jztools_admin.routes import …` 已废弃，出包 C-11 会拦截）；大模型经 `jz_llm` 取用；
+数据统一存数据根目录 `plugins/<id>/`。
 
 | 插件 | 路由前缀 | 长任务机制 | 数据落盘（数据根目录下） |
 | --- | --- | --- | --- |
@@ -505,11 +557,11 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | notice-board | `/api/notice-board` | 无 | `plugins/notice-board/data/*.json`（一公告一文件，RLock 串行化） |
 | knowledge-base | `/api/knowledge-base` | 无后台状态机；预览为**按需同步渲染**（`office_render._RENDER_LOCK` 串行 + `<id>.preview.json` 磁盘缓存，失败 404 前端回退） | `data/{categories.json,files.json}` + `data/files/<id>.<original_ext>` 原件 + `data/files/<id>.dl.<ext>` 异步下载源（可选） + `<id>.docx/.xlsx` 渲染件 + `<id>.preview.json` 预览缓存 |
 | shared-docs | `/api/shared-docs` | 无（全局 RLock） | `plugins/shared-docs/data/*.json`（一文档一文件，历史上限 100） |
-| case-report | `/api/case-report` | ThreadPoolExecutor(2)，TTL 30min | `data/*.json`（一记录一文件）+ `item_categories.json` + `config.json` |
-| character-graph | `/api/character-graph` | ThreadPoolExecutor(2)，TTL 30min | `config.json`（LLM） |
+| case-report | `/api/case-report` | ThreadPoolExecutor(2)，TTL 30min | `data/*.json`（一记录一文件）+ `item_categories.json` + `prompt.json`（提示词）。**已无自有配置**：接入信息归 `jz_llm`，历史 `config.json` 已由启动迁移清除 |
+| character-graph | `/api/character-graph` | ThreadPoolExecutor(2)，TTL 30min | `prompt.json`（提示词）。**已无自有配置**：接入信息归 `jz_llm`，历史 `config.json`（含 `llm` 段与 `ui.api_source`）已由启动迁移清除 |
 | trajectory-convert | `/api/trajectory-convert` | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | `.task_cache/`（mp4/png/zip）+ `config.json`（列名） |
 | qr-video-decode | `/api/qr-video-decode` | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘 |
-| file-filter | `/api/file-filter` | ThreadPoolExecutor(2)，TTL 30min，产物与任务表双清理 | `.task_cache/` + `config.json`；`POST /apply` 为程序化接口 |
+| file-filter | `/api/file-filter` | ThreadPoolExecutor(2)，TTL 30min，产物与任务表双清理 | `.task_cache/` + `config.json`（保留字段名单 / 后处理规则；历史 `llm` 段已由启动迁移清除）+ `prompt.json`（提示词；接入信息归 `jz_llm`）；`POST /apply` 为程序化接口 |
 | trajectory-sketch | `/api/trajectory-sketch` | ThreadPoolExecutor(2)，TTL 30min，上传暂存与产物双清理 | `.task_cache/`（`_upload.<ext>` + `_report.xlsx`）+ `config.json`；引擎在 `backend/engine/`（`selftest.py` 可独立跑） |
 | info-transfer | `/api/info-transfer` | ThreadPoolExecutor(2)，TTL 30min，支持取消 | `.task_cache/`（mp4/png/zip/帧 PNG） |
 

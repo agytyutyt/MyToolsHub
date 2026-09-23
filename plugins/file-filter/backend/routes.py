@@ -25,6 +25,7 @@
 # 见 docs/design/主体与插件解耦-设计文档.md §5.1 FC-3。
 import jz_api
 import jz_deps
+import jz_llm
 
 _get_session_user = jz_api.get_session_user
 _set_operation = jz_api.set_operation
@@ -42,20 +43,16 @@ from flask import jsonify, request, send_file
 
 from . import bg_image, core, llm_client
 
-
-
-try:
-    import requests  # noqa: F401  LLM HTTP 调用依赖
-    REQUESTS_AVAILABLE = True
-except Exception:
-    requests = None
-    REQUESTS_AVAILABLE = False
+# requests 的可用性由统一大模型模块（jz_llm）持有并转发，供 /status 自检与
+# jz_deps 刷新沿用；本插件不再直接 import requests（凭据与 HTTP 调用都归框架）。
+REQUESTS_AVAILABLE = llm_client.REQUESTS_AVAILABLE
 
 import jztools_data
 
 CONFIG_FILE = jztools_data.get_data_root_file("plugins", "file-filter", "config.json")
 TASK_DIR = jztools_data.get_data_root_dir("plugins", "file-filter", ".task_cache")
 API_PREFIX = "/api/file-filter"
+PLUGIN_ID = "file-filter"
 
 FILTER_WORKERS = 2
 _executor = ThreadPoolExecutor(max_workers=FILTER_WORKERS)
@@ -70,7 +67,6 @@ TASK_ID_RE = re.compile(r"^[A-Za-z0-9]+$")
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB（SEC-3）
 
 DEFAULT_CONFIG = {
-    "llm": {"base_url": "", "api_key": "", "model": ""},
     "keep_columns": [],
     "post_rules": [],
 }
@@ -112,15 +108,9 @@ def load_config():
                 data = json.load(f)
         except Exception:
             data = {}
-    llm = data.get("llm") or {}
     keep = data.get("keep_columns")
     rules = data.get("post_rules")
     return {
-        "llm": {
-            "base_url": (llm.get("base_url") or "").strip(),
-            "api_key": (llm.get("api_key") or "").strip(),
-            "model": (llm.get("model") or "").strip(),
-        },
         "keep_columns": [str(k).strip() for k in keep if str(k).strip()] if isinstance(keep, list) else [],
         "post_rules": _sanitize_rules(rules),
     }
@@ -241,10 +231,12 @@ def _clean_task_files():
 
 # ===================== 过滤执行 =====================
 
-def run_filter(headers, rows, mode, keep_columns, post_rules, llm_cfg, exclude=None):
+def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=None):
     """执行过滤 + 后处理，返回 (headers2, rows2, kept, removed, replace_count, llm_used)。
 
     mode: hard / llm；llm 模式失败抛 llm_client.LLMError。
+    session: 统一大模型的接入配置快照，由**请求线程** jz_llm.resolve() 取得后传入
+        （后台线程读不到会话，见 jz_llm 模块头部的线程纪律）。
     exclude: 用户在上传预览里**手动关闭**的列名——两种模式下一律删除（用户决定优先于
         模式自身的判定：大模型认为该保留、但用户点了删除，就删除）。
     """
@@ -252,10 +244,7 @@ def run_filter(headers, rows, mode, keep_columns, post_rules, llm_cfg, exclude=N
     kept, removed = [], []
     llm_used = False
     if mode == "llm":
-        mappings = llm_client.match_columns(
-            headers, keep_columns,
-            llm_cfg.get("base_url"), llm_cfg.get("api_key"), llm_cfg.get("model"),
-        )
+        mappings = llm_client.match_columns(headers, keep_columns, session=session)
         llm_used = True
         keep_idx = []
         keep_fold = {core.clean_text(k).casefold(): core.clean_text(k)
@@ -375,13 +364,16 @@ def _flag(raw, default):
 
 
 def _run_filter_task(task_id, in_path, in_ext, out_path, out_ext, mode, keep, post_rules,
-                     llm_cfg, exclude=None):
-    """后台线程执行：读表 → 过滤 → 后处理 → 写出 → 任务置 done。"""
+                     session, exclude=None):
+    """后台线程执行：读表 → 过滤 → 后处理 → 写出 → 任务置 done。
+
+    session 由请求线程 jz_llm.resolve() 取得后传入（后台线程读不到会话）。
+    """
     try:
         set_task(task_id, status="running")
         headers, rows = core.read_table(in_path, f"input.{in_ext}")
         headers2, rows2, kept, removed, count, llm_used = run_filter(
-            headers, rows, mode, keep, post_rules, llm_cfg, exclude)
+            headers, rows, mode, keep, post_rules, session, exclude)
         core.write_table(out_path, out_ext, headers2, rows2)
         set_task(task_id, status="done",
                  kept=[{"column": c, "matched": m} for c, m in kept],
@@ -420,16 +412,20 @@ def register(app):
                 "xlrd": core.XLRD_AVAILABLE,
                 "requests": REQUESTS_AVAILABLE,
             },
-            "llm_configured": bool(cfg["llm"].get("api_key")),
+            "llm_configured": jz_llm.resolve(PLUGIN_ID).configured(),
         })
 
     @app.get(f"{API_PREFIX}/config")
     def ff_config_get():
         cfg = load_config()
         cfg = json.loads(json.dumps(cfg))  # 深拷贝
-        llm_key = cfg["llm"]["api_key"]
-        cfg["llm"]["api_key"] = _mask(llm_key)
-        cfg["llm_configured"] = bool(llm_key)
+        # 统一大模型落地后本插件**不再保存也不回传** API 地址与 Key（SEC-2/F-4）：
+        # 接入信息由 jz_llm 按模式解析，这里只回"能不能用 + 用的是哪一份"。
+        session = jz_llm.resolve(PLUGIN_ID)
+        cfg["llm_configured"] = session.configured()
+        cfg["llm_source"] = session.source
+        cfg["llm_source_label"] = session.source_label()
+        cfg["llm_reason"] = session.reason
         cfg["can_manage"] = _can_manage(_viewer())
         return jsonify(cfg)
 
@@ -440,16 +436,8 @@ def register(app):
             return jsonify({"error": "仅管理员可修改过滤配置"}), 403
         data = request.get_json(silent=True) or {}
         cfg = load_config()
-        llm = data.get("llm")
-        if isinstance(llm, dict):
-            key = str(llm.get("api_key") or "").strip()
-            if not key or key == "••••••••":
-                key = cfg["llm"]["api_key"]  # 掩码/留空表示不修改
-            cfg["llm"] = {
-                "base_url": str(llm.get("base_url") or "").strip(),
-                "api_key": key,
-                "model": str(llm.get("model") or "").strip(),
-            }
+        # 统一大模型落地后本插件不再接受接入信息，也不覆盖 config.json 里的历史 llm 段：
+        # 那是升级前的旧 Key，jz_llm 在统一配置为空时仍会读它（兼容桥）。
         if "keep_columns" in data:
             keep = data.get("keep_columns")
             cfg["keep_columns"] = [str(k).strip()[:100] for k in keep if str(k).strip()] \
@@ -464,14 +452,9 @@ def register(app):
     def ff_config_test():
         if not _can_manage(_viewer()):
             return jsonify({"error": "仅管理员可测试大模型配置"}), 403
-        data = request.get_json(silent=True) or {}
-        cfg = load_config()
-        base_url = str(data.get("base_url") or cfg["llm"]["base_url"]).strip()
-        api_key = str(data.get("api_key") or "").strip()
-        if not api_key or api_key == "••••••••":
-            api_key = cfg["llm"]["api_key"]
-        model = str(data.get("model") or cfg["llm"]["model"]).strip()
-        ok, detail = llm_client.test_connection(base_url, api_key, model)
+        # 配置入口统一到「管理后台 → 大模型设置」或首页右下角「⋯ → 大模型设置」，
+        # 本接口不再接受表单传入的地址/Key（避免插件侧出现第二处凭据输入）。
+        ok, detail = jz_llm.test_connection(plugin_id=PLUGIN_ID)
         return jsonify({"ok": ok, "detail": detail})
 
     @app.post(f"{API_PREFIX}/preview")
@@ -523,7 +506,7 @@ def register(app):
             "post_rules": cfg["post_rules"],
             "keep_columns": cfg["keep_columns"],
             "sanitize": sanitize,
-            "llm_configured": bool(cfg["llm"].get("api_key")),
+            "llm_configured": jz_llm.resolve(PLUGIN_ID).configured(),
         })
 
     @app.post(f"{API_PREFIX}/filter")
@@ -562,8 +545,10 @@ def register(app):
         cfg, mode, keep = _resolve_params(mode, columns_raw)
         if not keep:
             return jsonify({"error": "保留字段名单为空：请勾选保留字段或联系管理员配置"}), 400
-        if mode == "llm" and not cfg["llm"].get("api_key"):
-            return jsonify({"error": "大模型未配置：请管理员在「管理配置」中填写 API 地址、API Key 与模型名称"}), 400
+        # 必须在请求线程内解析（后台线程读不到会话），见 jz_llm 模块头部的线程纪律
+        session = jz_llm.resolve(PLUGIN_ID)
+        if mode == "llm" and not session.configured():
+            return jsonify({"error": session.reason or "大模型未配置，无法使用大模型过滤"}), 400
 
         task_id = create_task(user)
         cleanup_tasks()
@@ -586,7 +571,7 @@ def register(app):
         set_task(task_id, output_ext=out_ext, original_name=orig, sanitize=sanitize,
                  post_enabled=post_enabled)
         _executor.submit(_run_filter_task, task_id, in_path, ext, out_path, out_ext,
-                         mode, keep, post_rules, cfg["llm"], exclude_raw)
+                         mode, keep, post_rules, session, exclude_raw)
         _set_operation("提交表格过滤任务")
         return jsonify({"task_id": task_id, "mode": mode, "output_ext": out_ext,
                         "sanitize": sanitize, "post_enabled": post_enabled})
@@ -685,7 +670,7 @@ def register(app):
             rows.append(row)
         try:
             headers2, rows2, kept, removed, count, _ = run_filter(
-                headers, rows, mode, keep, post_rules, cfg["llm"], exclude)
+                headers, rows, mode, keep, post_rules, jz_llm.resolve(PLUGIN_ID), exclude)
         except llm_client.LLMError as e:
             return jsonify({"error": f"大模型过滤失败：{e}"}), 502
         except core.TableError as e:
@@ -698,10 +683,3 @@ def register(app):
             "replace_count": count,
             "mode": mode,
         })
-
-
-def _mask(key):
-    """API Key 掩码回传。"""
-    if not key:
-        return ""
-    return "••••••••"

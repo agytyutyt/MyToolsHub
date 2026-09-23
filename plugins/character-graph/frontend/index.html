@@ -17,18 +17,10 @@
       <h1>人物关系立体星图</h1>
       <p class="subtitle">上传文档 → 大模型提取关系 → 3D 展示</p>
 
+      <!-- 大模型接入信息已统一到「管理后台 → 大模型设置」或首页右下角「⋯ → 大模型设置」，
+           本插件不再保存 API 地址与 Key，只显示当前能不能用、用的是哪一份配置。 -->
       <section class="block" id="apiFormSection">
-        <h2>大模型设置</h2>
-        <label>API 地址
-          <input id="baseUrl" type="text" placeholder="https://127.0.0.1/v2/chat/completions" />
-        </label>
-        <label>API Key
-          <input id="apiKey" type="password" placeholder="sk-...（留空表示不修改）" autocomplete="off" />
-        </label>
-        <label>模型名称
-          <input id="model" type="text" placeholder="deepseek-chat" />
-        </label>
-        <button id="saveConfig" class="btn secondary">保存配置</button>
+        <h2>大模型解析（接入信息统一配置）</h2>
         <span id="configTip" class="tip"></span>
       </section>
       <p id="apiNotice" class="notice" hidden></p>
@@ -78,6 +70,6 @@
   </div>
 
   <script src="/static/js/jz-icon.js?v=6"></script>
-  <script type="module" src="js/app.js?v=20260827"></script>
+  <script type="module" src="js/app.js?v=20260923"></script>
 </body>
 </html>

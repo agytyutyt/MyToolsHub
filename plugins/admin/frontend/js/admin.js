@@ -11,12 +11,16 @@
     permission: { icon: '1f6e1.svg', accent: '#FBBC05' },
     settings: { icon: '2699.svg', accent: '#607D8B' },
     plugins: { icon: '1f9e9.svg', accent: '#009688' },
+    llm: { icon: '1f4a1.svg', accent: '#8E24AA' },
+    migrate: { icon: '1f4be.svg', accent: '#455A64' },   // 💾（仓库内已有的 Twemoji 图标）
   };
 
   // 固定文案的模块：卡片不显示"记录数"，改用一句说明
   const MODULE_DESC = {
     settings: '数据根目录与系统配置',
     plugins: '插件包升级 / 回滚 / 批量更新（仅超级管理员）',
+    llm: '统一大模型：调用模式与接入配置',
+    migrate: '数据导出 / 导入（按插件打包、口令加密）',
   };
 
   function hexToRgb(hex) {

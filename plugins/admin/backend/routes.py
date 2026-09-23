@@ -5,7 +5,8 @@
 
 账号存储层级：单位(units) → 部门(departments) → 用户(users)。
 用户字段：登录名 username、密码 password、姓名 name、身份证 idcard、角色 role、
-权限点 permissions（config/tools.json 插件 ID 列表）、大模型配置 llm{base_url, api_key, model}。
+权限点 permissions（config/tools.json 插件 ID 列表）、大模型配置
+llm{format, base_url, api_key, model}（用户"各自设置"模式下由本人自助维护）。
 
 安全：
 - 敏感字段（密码、身份证、大模型 API Key）以 Fernet 对称加密存于 config/admin.json；
@@ -17,22 +18,27 @@
 - config/.admin_key  ：Fernet 加密密钥（已 gitignore，与密文分离）。
 """
 
+import io
 import json
 import os
 import re
 import secrets
+import shutil
 import sys
+import threading
 import time
 import uuid
 from datetime import timedelta
 from functools import wraps
 
 from cryptography.fernet import Fernet
-from flask import g, jsonify, redirect, request, send_from_directory, session, url_for
+from flask import (g, jsonify, redirect, request, send_file, send_from_directory,
+                   session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import jz_api
 import jz_deps
+import jz_llm
 import jztools_data
 # 会话超时默认值（config/admin.json 的 session 节可覆盖）
 SESSION_IDLE_MINUTES = 30    # 空闲超时：连续这么久没有任何请求，自动登出
@@ -98,7 +104,8 @@ def ensure_admin_config():
                                 "idcard": encrypt_field(""),
                                 "role": "role-admin",
                                 "permissions": sorted(_registered_tool_ids()),
-                                "llm": {"base_url": "", "api_key": encrypt_field(""), "model": ""},
+                                "llm": {"format": "openai", "base_url": "",
+                                        "api_key": encrypt_field(""), "model": ""},
                             }
                         ],
                     }
@@ -276,9 +283,101 @@ def migrate_admin_encryption(cfg):
                 llm["api_key"] = encrypt_field(api_key)
                 changed = True
         else:
-            user["llm"] = {"base_url": "", "api_key": encrypt_field(""), "model": ""}
+            user["llm"] = {"format": "openai", "base_url": "",
+                           "api_key": encrypt_field(""), "model": ""}
             changed = True
     return changed
+
+
+def migrate_admin_llm_format(cfg):
+    """给历史账号的 llm 段补上调用格式（统一大模型模块新增字段）。
+
+    统一大模型模块支持多种调用格式（openai / anthropic / ollama / custom），
+    老数据只有 base_url/api_key/model —— 语义上就是 OpenAI 兼容，补 "openai" 即可，
+    不改变既有行为（用户"各自设置"模式下打开设置卡片就能看到并改格式）。
+    """
+    changed = False
+    for _unit, _dept, user in iter_users(cfg):
+        llm = user.get("llm")
+        if isinstance(llm, dict) and not (llm.get("format") or "").strip():
+            llm["format"] = "openai"
+            changed = True
+    return changed
+
+
+def migrate_plugin_legacy_llm():
+    """把插件历史 config.json 里的大模型配置**收编进统一配置，并清除插件侧副本**。
+
+    背景：统一大模型落地前，case-report / character-graph / file-filter 各自在
+    ``<数据根>/plugins/<id>/config.json`` 存了一份 ``llm{base_url,api_key,model}``，
+    Key 是**明文**。统一后这份副本已无读取方（兼容桥本轮一并移除），留着既是明文泄漏面，
+    也会让"Key 到底存在哪"说不清。
+
+    做法（**先收编、再清除**，避免"清掉副本 = 大模型功能直接失效"）：
+      ① 统一配置还没有可用接入信息时，把插件那份搬进 ``<数据根>/config/llm.json``
+         （经 jz_llm.save_global 加密落盘；历史语义就是 OpenAI 兼容）；
+      ② 无论是否收编，都把插件 config.json 里的 ``llm`` 段删除（原子写）。
+    幂等：没有 llm 段的文件不动，重复执行无副作用。返回可读的处理摘要（供日志）。
+    """
+    root = jztools_data.get_data_root()
+    plugins_dir = os.path.join(root, "plugins")
+    if not os.path.isdir(plugins_dir):
+        return None
+
+    candidates = []          # [(pid, llm_dict)]
+    targets = []             # [(path, data)]  含 llm 段、待清除
+    for pid in sorted(os.listdir(plugins_dir)):
+        if not re.match(r"^[A-Za-z0-9_-]+$", pid):
+            continue
+        path = os.path.join(plugins_dir, pid, "config.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        llm = (data or {}).get("llm") if isinstance(data, dict) else None
+        if not isinstance(llm, dict):
+            continue
+        targets.append((path, data))
+        if (llm.get("api_key") or "").strip():
+            candidates.append((pid, llm))
+
+    if not targets:
+        return None
+
+    adopted = ""
+    cfg = jz_llm.load_global()
+    if candidates and not jz_llm.provider_usable(cfg["provider"]):
+        pid, llm = candidates[0]
+        url = str(llm.get("url") or llm.get("base_url") or "").strip()
+        if url and not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"     # 历史允许省写，补全为完整接口地址
+        provider = jz_llm.normalize_provider({
+            "format": "openai", "url": url,
+            "api_key": llm.get("api_key"), "model": llm.get("model"),
+        })
+        if jz_llm.provider_usable(provider):
+            jz_llm.save_global({"mode": cfg["mode"], "fallback": cfg["fallback"],
+                                "provider": provider})
+            adopted = pid
+
+    cleared = []
+    failed = []
+    for path, data in targets:
+        data.pop("llm", None)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+            cleared.append(os.path.basename(os.path.dirname(path)))
+        except OSError as e:
+            failed.append("%s（%s）" % (path, e.strerror or e))
+
+    return {"adopted_from": adopted, "cleared": cleared, "failed": failed,
+            "dropped_duplicates": [p for p, _ in candidates if p != adopted]}
 
 
 def sync_admin_permissions(cfg):
@@ -432,6 +531,58 @@ def get_session_user():
         "super_admin": super_admin,
         "permissions": permissions,
     }
+
+
+def can_manage_llm(info):
+    """是否可维护统一大模型的**全局**配置：超级管理员或管理员角色。
+
+    需求口径是"由管理员或超级管理员确定"（模式 / API 地址 / 格式 / Key），
+    故这里比"仅超级管理员"的敏感操作（数据目录、插件管理）放宽一档，
+    与各业务插件里 _can_manage() 的判定保持一致（同一对角色常量）。
+    """
+    if not info:
+        return False
+    if info.get("super_admin"):
+        return True
+    return info.get("role_id") in ("role-admin",) or info.get("role") == "管理员"
+
+
+# ===================== 用户级大模型配置（统一大模型模块的账号侧接缝） =====================
+# 主体模块 jz_llm 与框架路由 /api/llm/* 需要读写"用户自己的接入配置"，
+# 而账号数据归本插件所有 —— 故经 jz_api 暴露下面两个 provider（依赖倒置），
+# 既不让框架直接改 admin.json，也不另立一份用户配置造成两处不一致。
+# 返回/接收的都是**明文** Key：加解密只在本插件内完成。
+
+def get_user_llm(username):
+    """取某账号自己的大模型接入配置（明文 Key）；账号不存在返回 None。"""
+    cfg = load_admin_config()
+    found = find_user(cfg, username)
+    if found is None:
+        return None
+    llm = found[2].get("llm") or {}
+    return {
+        "format": llm.get("format") or "openai",
+        "url": llm.get("base_url") or "",
+        "api_key": decrypt_field(llm.get("api_key")),
+        "model": llm.get("model") or "",
+    }
+
+
+def save_user_llm(username, config):
+    """保存某账号自己的大模型接入配置（明文 Key 落盘前加密）；账号不存在返回 False。"""
+    cfg = load_admin_config()
+    found = find_user(cfg, username)
+    if found is None:
+        return False
+    user = found[2]
+    llm = user.setdefault("llm", {})
+    config = config or {}
+    llm["format"] = (str(config.get("format") or "").strip() or "openai")
+    llm["base_url"] = str(config.get("url") or "").strip()
+    llm["api_key"] = encrypt_field(str(config.get("api_key") or ""))
+    llm["model"] = str(config.get("model") or "").strip()
+    save_admin_config(cfg)
+    return True
 
 
 def _registered_tool_ids():
@@ -665,6 +816,23 @@ def _register_batch_io(app):
     })
 
 
+def _load_data_migrate():
+    """载入同包 data_migrate 子模块（数据迁移：导出/导入，纯逻辑）。
+
+    优先按包内相对导入加载；极端情况下（模块被单独按路径执行）回退为按文件路径加载。
+    """
+    try:
+        from . import data_migrate  # noqa: WPS433 - 包内相对导入为常规路径
+        return data_migrate
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data_migrate.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_data_migrate", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
 def _load_plugin_admin():
     """载入同包 plugin_admin 子模块（插件包校验 / 应用 / 回滚 / 索引，纯逻辑）。
 
@@ -774,6 +942,22 @@ def register(app):
         save_admin_config(cfg)
     if migrate_admin_encryption(cfg):
         save_admin_config(cfg)
+    if migrate_admin_llm_format(cfg):
+        save_admin_config(cfg)
+    # 插件历史大模型配置：先收编进统一配置（加密），再清除插件侧明文副本（一次性、幂等）
+    _legacy_llm = migrate_plugin_legacy_llm()
+    if _legacy_llm:
+        if _legacy_llm["adopted_from"]:
+            app.logger.info("插件 %s 的历史大模型配置已收编进统一配置（加密存储）",
+                            _legacy_llm["adopted_from"])
+        if _legacy_llm["cleared"]:
+            app.logger.info("已清除 %d 个插件 config.json 中的历史 llm 段：%s",
+                            len(_legacy_llm["cleared"]), "、".join(_legacy_llm["cleared"]))
+        if _legacy_llm["dropped_duplicates"]:
+            app.logger.info("其余插件的历史 llm 段（重复副本）已丢弃：%s",
+                            "、".join(_legacy_llm["dropped_duplicates"]))
+        for bad in _legacy_llm["failed"]:
+            app.logger.warning("清除插件历史大模型配置失败：%s", bad)
     if sync_admin_permissions(cfg):
         save_admin_config(cfg)
     app.config["SECRET_KEY"] = cfg["secret_key"]
@@ -791,6 +975,9 @@ def register(app):
         get_session_user=get_session_user,
         set_operation=set_operation,
         get_org_tree=build_org_tree,
+        # 统一大模型模块的用户级配置接缝（见上方 get_user_llm/save_user_llm 的说明）
+        get_user_llm=get_user_llm,
+        save_user_llm=save_user_llm,
     )
 
     # 全局拦截（注册顺序即执行顺序，必须先超时守卫、再登录拦截）：
@@ -940,6 +1127,20 @@ def register(app):
         modules.append({
             "id": "plugins",
             "name": "插件管理",
+            "count": 0,
+            "allowed": bool(info.get("super_admin")),
+        })
+        # 大模型设置：统一大模型的模式与全局接入配置，管理员 / 超级管理员可见
+        modules.append({
+            "id": "llm",
+            "name": "大模型设置",
+            "count": 0,
+            "allowed": can_manage_llm(info),
+        })
+        # 数据迁移：导出/导入全部数据（按插件分类打包、口令加密），仅超级管理员
+        modules.append({
+            "id": "migrate",
+            "name": "数据迁移",
             "count": 0,
             "allowed": bool(info.get("super_admin")),
         })
@@ -1139,8 +1340,13 @@ def register(app):
                 "idcard": decrypt_field(user.get("idcard")),
                 "permissions": user.get("permissions", []),
                 "llm": {
+                    "format": (user.get("llm") or {}).get("format", "openai"),
                     "base_url": (user.get("llm") or {}).get("base_url", ""),
-                    "api_key": decrypt_field((user.get("llm") or {}).get("api_key")),
+                    # API Key **不回明文**，只回"是否已配置"与固定掩码——与
+                    # /api/llm/settings、插件 /config 同一口径（F-4 / SEC-2：
+                    # 明文凭据不进浏览器；代填/清除走本弹窗或批量导入）。
+                    "api_key": jz_llm.mask_key((user.get("llm") or {}).get("api_key")),
+                    "api_key_set": bool((user.get("llm") or {}).get("api_key")),
                     "model": (user.get("llm") or {}).get("model", ""),
                 },
             })
@@ -1200,6 +1406,9 @@ def register(app):
             "role": role_id,
             "permissions": permissions,
             "llm": {
+                "format": (str(llm.get("format") or "").strip().lower()
+                           if str(llm.get("format") or "").strip().lower() in jz_llm.FORMAT_META
+                           else "openai"),
                 "base_url": (llm.get("base_url") or "").strip(),
                 "api_key": encrypt_field(llm.get("api_key") or ""),
                 "model": (llm.get("model") or "").strip(),
@@ -1239,14 +1448,20 @@ def register(app):
             if perr:
                 return jsonify({"error": perr}), 400
             user["permissions"] = permissions
-        # 大模型配置
+        # 大模型配置（用户"各自设置"模式下由本人自助维护，此处供管理员代填）
         llm = data.get("llm")
         if isinstance(llm, dict):
             u_llm = user.setdefault("llm", {})
+            if "format" in llm:
+                fmt = (llm.get("format") or "").strip().lower()
+                u_llm["format"] = fmt if fmt in jz_llm.FORMAT_META else "openai"
             if "base_url" in llm:
                 u_llm["base_url"] = (llm.get("base_url") or "").strip()
             if "api_key" in llm:
-                u_llm["api_key"] = encrypt_field(llm.get("api_key") or "")
+                # 掩码/留空 = 不修改（与 /api/llm/settings、插件 /config、批量导入同一口径）。
+                # 不这样处理会把字面量 "••••••••" 存成 Key，用户此后调用一律 401 且原因难查。
+                if not jz_llm.is_mask(llm.get("api_key")):
+                    u_llm["api_key"] = encrypt_field(str(llm.get("api_key")).strip())
             if "model" in llm:
                 u_llm["model"] = (llm.get("model") or "").strip()
         # 调整所属单位 / 部门（移动用户）
@@ -1432,6 +1647,279 @@ def register(app):
         if err:
             return jsonify({"error": err}), 400
         return jsonify({"ok": True, "data_root": root, "migrated": moved})
+
+    # ---------------- 统一大模型设置（管理员 / 超级管理员） ----------------
+    # 配置真源在框架模块 jz_llm（<数据根>/config/llm.json），本插件只做**界面与鉴权**：
+    # 模式（管理员统一配置 / 用户各自设置）、全局接入配置、连通测试。
+    # 与 /admin/settings（数据目录）的区别：那一项仅超级管理员，本项管理员亦可（需求口径）。
+
+    @app.get("/admin/llm")
+    @login_required
+    def admin_llm_page():
+        """大模型设置页（管理员 / 超级管理员）。"""
+        info = get_session_user()
+        if not can_manage_llm(info):
+            return redirect(url_for("admin_index"))
+        return send_from_directory(FRONTEND_DIR, "admin-llm.html")
+
+    @app.get("/api/admin/llm-settings")
+    @login_required
+    def admin_api_llm_settings():
+        """读取统一大模型的全局设置（API Key 只回掩码）。"""
+        info = get_session_user()
+        if not can_manage_llm(info):
+            return jsonify({"error": "仅管理员可查看大模型设置"}), 403
+        set_operation("查询大模型设置")
+        cfg = jz_llm.public_global()
+        return jsonify({
+            "ok": True,
+            "mode": cfg["mode"],
+            "fallback": cfg["fallback"],
+            "provider": cfg["provider"],
+            "formats": jz_llm.formats_public(),
+            "requests_available": jz_llm.REQUESTS_AVAILABLE,
+            "user_count": count_users(load_admin_config()),
+        })
+
+    @app.post("/api/admin/llm-settings")
+    @login_required
+    def admin_api_llm_settings_save():
+        """保存统一大模型的全局设置（**按字段局部更新**）。
+
+        请求体：{mode?, fallback?, provider?{format,url,api_key,model,…}}
+        ——只改传进来的字段，未传的保持原值。这样界面上两张卡片可以各存各的：
+        「调用模式」卡改模式即自动保存 {mode} / {fallback}，
+        「全局接入配置」卡的保存按钮只提交 {provider}，不会顺带改动模式。
+        （全量提交也照常工作，向后兼容。）
+        api_key 留空或回传掩码表示不修改已保存的 Key。
+        """
+        info = get_session_user()
+        if not can_manage_llm(info):
+            return jsonify({"error": "仅管理员可修改大模型设置"}), 403
+        data = request.get_json(silent=True) or {}
+        current = jz_llm.load_global()
+
+        mode = current["mode"]
+        if "mode" in data:
+            mode = str(data.get("mode") or "").strip().lower()
+            if mode not in ("admin", "user"):
+                return jsonify({"error": "模式取值非法"}), 400
+
+        fallback = current["fallback"]
+        if "fallback" in data:
+            fallback = data.get("fallback") is not False
+
+        provider = current["provider"]
+        if isinstance(data.get("provider"), dict):
+            provider = jz_llm.normalize_provider(data["provider"])
+            if jz_llm.is_mask(provider["api_key"]):
+                provider["api_key"] = current["provider"]["api_key"]  # 掩码/留空 = 保留原 Key
+
+        jz_llm.save_global({"mode": mode, "fallback": fallback, "provider": provider})
+        set_operation("保存大模型设置")
+        return jsonify({
+            "ok": True,
+            "mode": mode,
+            "fallback": fallback,
+            "configured": jz_llm.provider_usable(provider),
+            "problem": jz_llm.provider_problem(provider),
+        })
+
+    @app.post("/api/admin/llm-test")
+    @login_required
+    def admin_api_llm_test():
+        """连通性测试：测请求体里这套（表单里刚填、还没保存的），缺省测已保存的全局配置。"""
+        info = get_session_user()
+        if not can_manage_llm(info):
+            return jsonify({"error": "仅管理员可测试大模型配置"}), 403
+        data = request.get_json(silent=True) or {}
+        provider = None
+        if any(str(data.get(k) or "").strip() for k in ("url", "model", "format")):
+            provider = jz_llm.normalize_provider(data)
+            if jz_llm.is_mask(provider["api_key"]):
+                provider["api_key"] = jz_llm.load_global()["provider"]["api_key"]
+        set_operation("测试大模型连通性")
+        ok, detail = jz_llm.test_connection(provider=provider)
+        return jsonify({"ok": ok, "detail": detail})
+
+    # ---------------- 数据迁移（导出 / 导入，仅超级管理员） ----------------
+    # 纯逻辑在 data_migrate.py（按插件分类打包 + 口令加密容器 + 密钥字段改封），
+    # 本处只做鉴权、暂存与 HTTP 语义。设计见 docs/design/数据迁移-设计文档.md。
+    # 安全：仅超管（可覆盖全部数据，与数据目录/插件管理同一档）；导出整包口令加密；
+    # 导入逐条白名单校验 + 覆盖前备份；暂存的包本身已加密，落盘不泄漏。
+
+    @app.get("/admin/migrate")
+    @login_required
+    def admin_migrate_page():
+        """数据迁移页（仅超级管理员）。"""
+        if not _plugin_mgr_ok():
+            return redirect(url_for("admin_index"))
+        return send_from_directory(FRONTEND_DIR, "admin-migrate.html")
+
+    def _migrate_labels():
+        """插件中文展示名（tools.json 权威）：迁移分段与预览里都要用。"""
+        try:
+            return {t.get("id"): (t.get("name") or t.get("id"))
+                    for t in load_registry().get("tools", []) if t.get("id")}
+        except Exception:
+            return {}
+
+    def _migrate_app_version():
+        try:
+            return str(jz_deps.read_version_json(PROJECT_DIR).get("app") or "")
+        except Exception:
+            return ""
+
+    @app.get("/api/admin/migrate/plan")
+    @login_required
+    def admin_api_migrate_plan():
+        """导出前的盘点：可导出的分段（框架三段 + 各插件数据段）与体积。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可导出数据"}), 403
+        set_operation("盘点可导出数据")
+        dm = _load_data_migrate()
+        sections = dm.plan_export(jztools_data.get_data_root(), PROJECT_DIR, _migrate_labels())
+        return jsonify({
+            "ok": True,
+            "sections": sections,
+            "data_root": jztools_data.get_data_root(),
+            "app_version": _migrate_app_version(),
+            "totals": {"files": sum(s["files"] for s in sections),
+                       "bytes": sum(s["bytes"] for s in sections)},
+            "min_passphrase": 8,
+        })
+
+    @app.post("/api/admin/migrate/export")
+    @login_required
+    def admin_api_migrate_export():
+        """导出数据迁移包（口令加密的 .jzdata，直接下载）。
+
+        请求体：{passphrase, sections: ["accounts","llm","tools","plugin:<id>",…]}
+        """
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可导出数据"}), 403
+        data = request.get_json(silent=True) or {}
+        sections = data.get("sections")
+        if not isinstance(sections, list) or not sections:
+            return jsonify({"error": "请至少选择一个要导出的数据段"}), 400
+        set_operation("导出数据迁移包")
+        dm = _load_data_migrate()
+        try:
+            blob, manifest = dm.build_package(
+                jztools_data.get_data_root(), PROJECT_DIR, sections,
+                str(data.get("passphrase") or ""), get_fernet(),
+                app_version=_migrate_app_version(), plugin_labels=_migrate_labels())
+        except dm.MigrateError as e:
+            return jsonify({"error": str(e)}), 400
+        except OSError as e:
+            return jsonify({"error": f"导出失败：{e.strerror or e}"}), 500
+        return send_file(io.BytesIO(blob), as_attachment=True,
+                         download_name=dm.default_filename(),
+                         mimetype="application/octet-stream")
+
+    # 迁移包暂存表：token -> {envelope_key, zip_bytes, path, expires}
+    # 口令派生的**信封密钥**只在内存里活 30 分钟（不落盘、不回传前端）：
+    # 这样"解析预览 → 确认导入"两步之间不必让管理员重复输入口令；
+    # 服务重启则该 token 失效，重新解析一次即可（包还在本地，无损失）。
+    _MIGRATE_TTL = 30 * 60
+    _MIGRATE_STAGE = {}
+    _MIGRATE_LOCK = threading.Lock()
+
+    def _migrate_purge_locked():
+        """清掉过期暂存（含磁盘文件）。调用方需已持有 _MIGRATE_LOCK。"""
+        now = time.time()
+        for key in [k for k, v in _MIGRATE_STAGE.items() if v["expires"] < now]:
+            entry = _MIGRATE_STAGE.pop(key, None)
+            if entry and entry.get("path"):
+                try:
+                    os.remove(entry["path"])
+                except OSError:
+                    pass
+
+    @app.post("/api/admin/migrate/inspect")
+    @login_required
+    def admin_api_migrate_inspect():
+        """上传迁移包 + 口令 → 解密校验并返回预览（不写任何数据），返回 token 供导入用。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可导入数据"}), 403
+        file = request.files.get("file")
+        if file is None or not file.filename:
+            return jsonify({"error": "请选择数据迁移包（.jzdata）"}), 400
+        set_operation("解析数据迁移包")
+        dm = _load_data_migrate()
+        stage_dir = os.path.join(jztools_data.get_data_root(), ".staging", "migrate")
+        os.makedirs(stage_dir, exist_ok=True)
+        token = uuid.uuid4().hex
+        path = os.path.join(stage_dir, token + dm.EXT)
+        try:
+            with open(path, "wb") as fp:
+                shutil.copyfileobj(file.stream, fp, 1024 * 1024)
+            size = os.path.getsize(path)
+            if size > dm.MAX_PACKAGE_BYTES:
+                raise dm.MigrateError("数据包超过上限（300 MB）")
+            with open(path, "rb") as fp:
+                blob = fp.read()
+            info = dm.inspect(blob, str(request.form.get("passphrase") or ""),
+                              jztools_data.get_data_root(), _migrate_labels())
+        except dm.MigrateError as e:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return jsonify({"error": str(e)}), 400
+        except OSError as e:
+            return jsonify({"error": f"读取上传文件失败：{e.strerror or e}"}), 500
+
+        with _MIGRATE_LOCK:
+            _migrate_purge_locked()
+            _MIGRATE_STAGE[token] = {
+                "envelope_key": info.pop("envelope_key"),
+                "zip_bytes": info.pop("zip_bytes"),
+                "path": path,
+                "expires": time.time() + _MIGRATE_TTL,
+            }
+        return jsonify({"ok": True, "token": token, "size": size, **info})
+
+    @app.post("/api/admin/migrate/import")
+    @login_required
+    def admin_api_migrate_import():
+        """把解析过的迁移包按勾选分段写入数据根；覆盖前自动备份。"""
+        if not _plugin_mgr_ok():
+            return jsonify({"error": "仅超级管理员可导入数据"}), 403
+        data = request.get_json(silent=True) or {}
+        token = str(data.get("token") or "")
+        sections = data.get("sections")
+        if not isinstance(sections, list) or not sections:
+            return jsonify({"error": "请至少选择一个要导入的数据段"}), 400
+        with _MIGRATE_LOCK:
+            _migrate_purge_locked()
+            entry = _MIGRATE_STAGE.get(token)
+        if not entry:
+            return jsonify({"error": "数据包已过期（暂存 30 分钟），请重新选择文件并解析"}), 400
+        set_operation("导入数据迁移包")
+        dm = _load_data_migrate()
+        backup_root = os.path.join(jztools_data.get_data_root(), "backups", "migrate")
+        try:
+            report = dm.apply_import(entry["zip_bytes"], entry["envelope_key"],
+                                     jztools_data.get_data_root(), set(sections),
+                                     get_fernet(), backup_root=backup_root)
+        except dm.MigrateError as e:
+            return jsonify({"error": str(e)}), 400
+        except OSError as e:
+            return jsonify({"error": f"写入数据失败：{e.strerror or e}"}), 500
+        finally:
+            # 一次性：无论成败都清掉暂存（包已加密，但没必要留着）
+            with _MIGRATE_LOCK:
+                _MIGRATE_STAGE.pop(token, None)
+            try:
+                os.remove(entry["path"])
+            except OSError:
+                pass
+        try:
+            report["purged_backups"] = dm.cleanup_backups(backup_root, keep=3)
+        except Exception:
+            report["purged_backups"] = 0
+        return jsonify({"ok": True, **report})
 
     # ---------------- 插件管理（插件包：上传 / 应用 / 回滚 / 批量升级，仅超级管理员） ----------------
     # 设计：docs/design/插件独立升级方案-设计文档.md §9（阶段二：应用内升级）与 §10（阶段三：共享盘索引）

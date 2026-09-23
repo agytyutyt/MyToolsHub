@@ -366,17 +366,21 @@ class TestLLMMode(Base):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # 大模型模式有"未配置 Key 不进队列"的前置校验（8.5-3）；本组只验匹配与开关，
-        # 故给一份占位 Key，并 monkeypatch 掉真实网络调用。
-        cls.write_config({"llm": {"base_url": "http://127.0.0.1:9/v1",
-                                  "api_key": "sk-test", "model": "test-model"},
-                          "keep_columns": ["姓名", "所属单位"],
-                          "post_rules": list(FIXTURE_RULES)})
+        # 大模型模式有"未配置不进队列"的前置校验（8.5-3）；本组只验匹配与开关。
+        # 统一大模型落地后凭据归框架模块 jz_llm（插件不再保存 Key），
+        # 故这里配置**框架模块**的全局接入信息（仍落在临时数据根内），
+        # 并 monkeypatch 掉真实网络调用。
+        import jz_llm
+        cls.jz_llm = jz_llm
+        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "http://127.0.0.1:9/v1/chat/completions",
+            "api_key": "sk-test", "model": "test-model"}})
 
     @classmethod
     def tearDownClass(cls):
-        cls.write_config({"keep_columns": ["姓名", "所属单位"],
-                          "post_rules": list(FIXTURE_RULES)})
+        # 还原为"未配置"，避免影响后续用例（同一临时数据根内）
+        cls.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "", "api_key": "", "model": ""}})
         super().tearDownClass()
 
     def setUp(self):

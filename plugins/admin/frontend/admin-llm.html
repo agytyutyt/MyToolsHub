@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<!-- 统一大模型设置页（管理员 / 超级管理员）
+ * 配置真源在框架模块 jz_llm（<数据根>/config/llm.json），本页只做界面：
+ * 调用模式（管理员统一配置 / 用户各自设置）、全局接入格式与 API Key、连通测试。
+ * 页面内样式写在 <style> 里（项目既有做法）：只服务本页，避免为几行样式
+ * 递增 admin.css 的 ?v= 而波及 8 个后台页面。
+ -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>大模型设置 · 管理后台</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=14">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=26">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
+  <style>
+    .llm-check { display: flex; align-items: flex-start; font-size: 14px; color: var(--md-on-surface); cursor: pointer; }
+    .llm-check input { margin: 3px 8px 0 0; flex: none; }
+    .llm-adv { margin-top: 4px; padding-top: 14px; border-top: 1px dashed var(--md-outline-variant); }
+    .llm-adv-title { font-size: 13px; font-weight: 500; color: var(--md-on-surface-variant); margin-bottom: 10px; }
+    .llm-status { margin-top: 14px; font-size: 13px; line-height: 1.7; color: var(--md-on-surface-variant); }
+    .llm-status b { color: var(--md-on-surface); font-weight: 500; }
+    .llm-status .ok { color: #188038; }
+    .llm-status .bad { color: var(--md-error); }
+    .llm-actions { margin-top: 16px; display: flex; align-items: center; }
+    .llm-actions > * + * { margin-left: 10px; }
+    .llm-mode-tip { margin-top: 10px; padding: 10px 12px; border-radius: var(--md-radius-s);
+      background: var(--md-surface-container); font-size: 13px; line-height: 1.7; color: var(--md-on-surface-variant); }
+    code.llm-mono { font-size: 12px; word-break: break-all; }
+    .settings-card textarea.admin-input { resize: vertical; min-height: 64px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <header class="app-bar">
+    <a href="/" class="logo">
+      <span class="logo-mark"></span>
+      <span class="logo-title" data-suffix=" · 管理后台">JZ 工具箱 · 管理后台</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="user-menu" id="user-slot"></div>
+  </header>
+
+  <main class="admin-content" id="app">
+    <div class="admin-head">
+      <div>
+        <h1>大模型设置</h1>
+        <div class="admin-sub">
+          统一大模型：全部插件的大模型功能共用这一份接入配置；插件自身不再保存 API Key
+        </div>
+      </div>
+      <a class="admin-btn" href="/admin">← 后台首页</a>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>调用模式</h3>
+      <p class="settings-desc">
+        二选一。<b>更改后立即自动保存</b>，无需点保存按钮（与下方「全局接入配置」各存各的）。
+      </p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="llm-mode">模式</label>
+          <select class="admin-input" id="llm-mode">
+            <option value="admin">管理员统一配置（全体用户共用下面这套）</option>
+            <option value="user">用户各自设置（每人可自行填写）</option>
+          </select>
+          <div class="field-hint">切换后立即生效，无需重启服务。</div>
+        </div>
+        <div class="field">
+          <label>回退策略</label>
+          <label class="llm-check" for="llm-fallback">
+            <input type="checkbox" id="llm-fallback">
+            <span>用户未单独配置时，回退使用下面的全局配置</span>
+          </label>
+          <div class="field-hint">仅「用户各自设置」模式生效；不勾选时未配置的用户会看到"请先设置"的提示。同样改完即自动保存。</div>
+        </div>
+      </div>
+      <div class="llm-mode-tip" id="mode-tip"></div>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>全局接入配置</h3>
+      <p class="settings-desc">
+        <b>地址一律填完整接口地址</b>（如 OpenAI 兼容要填到 <code class="llm-mono">…/chat/completions</code>），
+        系统不做任何路径拼接——少写或多写一段路径都会直接 404。
+        本卡的「保存」<b>只保存下面这套接入信息，不影响上面的调用模式</b>。
+      </p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="llm-format">调用格式</label>
+          <select class="admin-input" id="llm-format"></select>
+          <div class="field-hint" id="format-desc"></div>
+        </div>
+        <div class="field">
+          <label for="llm-url">API 地址（完整接口地址）</label>
+          <input class="admin-input" type="text" id="llm-url" spellcheck="false" placeholder="">
+        </div>
+        <div class="field">
+          <label for="llm-key">API Key <span id="key-state"></span></label>
+          <input class="admin-input" type="password" id="llm-key" autocomplete="new-password"
+                 placeholder="留空表示不修改已保存的 Key">
+        </div>
+        <div class="field">
+          <label for="llm-model">模型名称</label>
+          <input class="admin-input" type="text" id="llm-model" spellcheck="false"
+                 placeholder="如 deepseek-v4-flash / gpt-4o-mini / qwen-plus">
+        </div>
+        <div class="field">
+          <label for="llm-timeout">超时（秒）</label>
+          <input class="admin-input" type="number" id="llm-timeout" min="1" max="3600" placeholder="120">
+        </div>
+        <div class="field">
+          <label for="llm-temp">温度 temperature（可留空）</label>
+          <input class="admin-input" type="number" id="llm-temp" min="0" max="2" step="0.1" placeholder="0.2">
+        </div>
+        <div class="field">
+          <label for="llm-maxtok">最大输出 tokens（可留空）</label>
+          <input class="admin-input" type="number" id="llm-maxtok" min="1" placeholder="留空用服务默认">
+        </div>
+      </div>
+
+      <div class="llm-adv" id="llm-adv" hidden>
+        <div class="llm-adv-title">自定义格式专用（请求头 / 请求体模板 / 取值路径）</div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="llm-headers">额外请求头（JSON 对象，值支持占位符）</label>
+            <input class="admin-input" type="text" id="llm-headers" spellcheck="false"
+                   placeholder='{"Authorization": "Bearer {{api_key}}"}'>
+          </div>
+          <div class="field">
+            <label for="llm-body">请求体模板（JSON，字符串占位符写在引号内）</label>
+            <textarea class="admin-input" id="llm-body" rows="3" spellcheck="false"
+                      placeholder='{"model": "{{model}}", "messages": {{messages_json}}}'></textarea>
+          </div>
+          <div class="field">
+            <label for="llm-text-path">正文取值路径</label>
+            <input class="admin-input" type="text" id="llm-text-path" spellcheck="false"
+                   placeholder="choices.0.message.content">
+          </div>
+          <div class="field">
+            <label for="llm-error-path">错误信息取值路径（可留空）</label>
+            <input class="admin-input" type="text" id="llm-error-path" spellcheck="false"
+                   placeholder="error.message">
+          </div>
+        </div>
+        <div class="field-hint">
+          占位符：<code class="llm-mono">{{model}} {{system}} {{user}} {{temperature}}
+          {{max_tokens}} {{api_key}} {{messages_json}}</code>；取值路径支持
+          <code class="llm-mono">a.b.0.c</code> 与 <code class="llm-mono">a.b[0].c</code> 两种写法。
+        </div>
+      </div>
+
+      <div class="llm-actions">
+        <button type="button" class="admin-btn primary" id="llm-save">保存接入配置</button>
+        <button type="button" class="admin-btn" id="llm-test">测试连通</button>
+        <span class="field-hint" id="save-state"></span>
+      </div>
+      <div class="llm-status" id="llm-status">加载中…</div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/plugin/admin/js/admin-common.js?v=6"></script>
+  <script src="/plugin/admin/js/admin-llm.js?v=3"></script>
+</body>
+</html>

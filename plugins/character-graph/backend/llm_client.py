@@ -1,99 +1,24 @@
-"""OpenAI 兼容的大模型客户端。
+"""人物星图 —— 大模型调用（统一大模型模块的薄适配层）。
 
-可对接任何暴露 /chat/completions 接口的模型服务：
-OpenAI、DeepSeek、通义千问（兼容模式）、Kimi/Moonshot、智谱、
-本地 Ollama 等。
+统一大模型（框架模块 ``jz_llm``）落地后，本文件**不再自带 HTTP 调用与 API Key**：
+接入配置（格式 / 地址 / Key / 模型）由 jz_llm 按「管理员统一配置」或「用户各自设置」
+解析，本插件只负责**拟定并保存提示词**，把提示词与参数推给 jz_llm，再把结果回推业务
+逻辑（见 docs/design/统一大模型模块-设计文档.md）。
 
-调用入口为 extract_graph()：给定文档文本，返回 {characters, relationships}。
+保留本模块的理由：① 插件内既有调用点语义不变；② 人物/关系提示词与"关系必须引用已识别
+人物"这类**领域约束**属于本插件，不该塞进框架。
 """
 
-import json
-import re
+import jz_llm
 
-try:
-    import requests
-    REQUESTS_AVAILABLE = True
-except Exception:
-    requests = None
-    REQUESTS_AVAILABLE = False
+PLUGIN_ID = "character-graph"
 
-# 默认接入地址与模型（未指定时使用）
-DEFAULT_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_MODEL = "gpt-4o-mini"
+# 兼容既有调用点：插件各处按 llm_client.LLMError 捕获大模型异常
+LLMError = jz_llm.LLMError
 
-
-class LLMError(Exception):
-    """大模型调用相关异常，错误信息直接展示给前端用户。"""
-    pass
-
-
-def parse_model_output(text: str) -> dict:
-    """从模型回复中解析 JSON 对象，容忍 markdown 代码围栏。
-
-    依次尝试：去掉 ``` 围栏后整体解析 → 正则抽取最外层大括号。
-    """
-    if not text:
-        raise LLMError("大模型返回为空")
-    cleaned = text.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-    # 兜底：从文本中抽取最外层 JSON 对象
-    match = re.search(r"\{[\s\S]*\}", cleaned)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-    raise LLMError("大模型返回的内容不是合法 JSON，请检查模型是否按格式输出")
-
-
-def chat_json(base_url: str, api_key: str, model: str, system: str, user: str,
-              temperature: float = 0.2, timeout: int = 300) -> dict:
-    """发送一次 chat/completions 请求并解析 JSON 回复。
-
-    base_url 允许以 /chat/completions 结尾（直接使用），否则自动拼接。
-    """
-    base = (base_url or DEFAULT_BASE_URL).strip()
-    if base.endswith("/chat/completions"):
-        url = base
-    else:
-        url = base.rstrip("/") + "/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model or DEFAULT_MODEL,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "temperature": temperature,
-        "stream": False,
-    }
-    try:
-        resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    except requests.RequestException as e:
-        raise LLMError(f"无法连接大模型服务，请检查网络与接口地址（{type(e).__name__}）") from e
-
-    if resp.status_code >= 400:
-        try:
-            detail = resp.json()
-            detail = json.dumps(detail, ensure_ascii=False)[:300]
-        except Exception:
-            detail = (resp.text or "")[:300]
-        raise LLMError(f"大模型接口返回错误（HTTP {resp.status_code}）：{detail}")
-
-    data = resp.json()
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        raise LLMError("大模型返回结构异常，请检查模型名称是否正确")
-    return parse_model_output(content)
+# 依赖标记：统一大模型模块持有 requests 的可用性（插件不再直接 import requests），
+# 这里转发一份供 /status 自检与 jz_deps 刷新沿用（标记名不变，前端零改动）。
+REQUESTS_AVAILABLE = jz_llm.REQUESTS_AVAILABLE
 
 
 # 系统提示词：约束大模型只输出人物与关系的 JSON
@@ -127,19 +52,25 @@ DEFAULT_USER_TEMPLATE = """以下是口供笔录/案卷文档内容（可能被�
 请按照要求的 JSON 格式输出人物及其关系。"""
 
 
-def extract_graph(text: str, base_url: str, api_key: str, model: str,
-                  prompt=None) -> dict:
-    """调用大模型抽取人物关系，返回 {"characters": [...], "relationships": [...]}。
+def default_prompt() -> dict:
+    """本插件的内置缺省提示词（供 jz_llm.load_prompt 做回退）。"""
+    return {"system": DEFAULT_SYSTEM_PROMPT, "user_template": DEFAULT_USER_TEMPLATE}
 
-    prompt 为可选的 prompt 配置字典：{"system": ..., "user_template": ...}。
-    未提供时使用内置默认 prompt。user_template 中的 {document} 会被替换为文档文本。
+
+def extract_graph(text: str, prompt=None, session=None) -> dict:
+    """调用统一大模型抽取人物关系，返回 {"characters": [...], "relationships": [...]}。
+
+    prompt 为可选的 prompt 配置字典：{"system": ..., "user_template": ...}；
+    未提供时使用内置默认。user_template 中的 {document} 会被替换为文档文本。
+    session 由调用方在**请求线程**内 jz_llm.resolve(PLUGIN_ID) 取得后传入。
     返回前会过滤掉引用了未出现人物的关系，保证数据自洽。
     """
     prompt = prompt or {}
     system = prompt.get("system") or DEFAULT_SYSTEM_PROMPT
     template = prompt.get("user_template") or DEFAULT_USER_TEMPLATE
-    user = template.replace("{document}", text)
-    data = chat_json(base_url, api_key, model, system, user)
+    user = jz_llm.render(template, {"document": text})
+    data = jz_llm.chat_json(system, user, session=session,
+                            plugin_id=PLUGIN_ID, timeout=300)
 
     characters = data.get("characters") or []
     relationships = data.get("relationships") or []

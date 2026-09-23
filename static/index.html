@@ -8,7 +8,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JZ 工具箱</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=14">
+  <link rel="stylesheet" href="/static/css/style.css?v=16">
   <link rel="stylesheet" href="/plugin/admin/css/admin.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
 </head>
@@ -42,7 +42,8 @@
   <!-- 页脚（文案来自配置 site.footer） -->
   <footer class="footer" id="footer"></footer>
 
-  <!-- 右下角悬浮球（⋮ 更多）：悬浮展开菜单 → 编辑位置 / 隐藏工具 -->
+  <!-- 右下角悬浮球（⋮ 更多）：悬浮展开菜单 → 编辑位置 / 隐藏工具 / 大模型设置 -->
+  <!-- 「大模型设置」项由 llm-settings.js 按后端模式动态注入：管理员统一配置时该项不出现 -->
   <div class="fab-menu" id="fab-menu">
     <div class="fab-pop" id="fab-pop" role="menu">
       <button type="button" class="fab-pop-item" data-action="edit" id="fab-act-edit"><span data-jz-icon="✏️"></span> 编辑位置</button>
@@ -78,5 +79,6 @@
   <script src="/static/js/jz-icon.js?v=6"></script>
   <script src="/plugin/admin/js/admin-common.js"></script>
   <script src="/static/js/main.js?v=14"></script>
+  <script src="/static/js/llm-settings.js?v=2"></script>
 </body>
 </html>
