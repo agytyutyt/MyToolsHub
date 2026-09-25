@@ -1,121 +1,6 @@
 {
     "schema":  1,
     "packages":  {
-                     "character-graph":  {
-                                             "version":  "1.1.4",
-                                             "api_version":  1,
-                                             "file":  "JZToolsHub-插件-character-graph-v1.1.4.zip",
-                                             "sha256":  "8530912cea659f83870e1fd3a790ff9138da8edebbef7176b0a4c72c52f28c20",
-                                             "size":  312581,
-                                             "built_at":  "2026-09-21T09:15:31+08:00",
-                                             "code_sha256":  "6df33e2632be3becd36320773feda9eac452a5f1ae843e74d5fc9f6b866e4584",
-                                             "file_count":  14,
-                                             "requires_restart":  true,
-                                             "file_hashes":  {
-                                                                 "plugins/character-graph/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                 "plugins/character-graph/backend/config.template.json":  "31b1fe4eb4863ee0",
-                                                                 "plugins/character-graph/backend/document_reader.py":  "d19bf55359427104",
-                                                                 "plugins/character-graph/backend/llm_client.py":  "25e4e47c0e4502c7",
-                                                                 "plugins/character-graph/backend/requirements.txt":  "9c3259181a94dcc0",
-                                                                 "plugins/character-graph/backend/routes.py":  "91de76f04003a6b0",
-                                                                 "plugins/character-graph/frontend/css/style.css":  "1b0b5ed1e059d5e8",
-                                                                 "plugins/character-graph/frontend/index.html":  "4fbce342e108d190",
-                                                                 "plugins/character-graph/frontend/js/app.js":  "b1bb5d29215a242e",
-                                                                 "plugins/character-graph/frontend/js/lib/three/addons/controls/OrbitControls.js":  "4efb547b139666d2",
-                                                                 "plugins/character-graph/frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  "950f61ab8b0a8371",
-                                                                 "plugins/character-graph/frontend/js/lib/three/three.module.js":  "a762b8588c6abf23",
-                                                                 "plugins/character-graph/manifest.json":  "3f90e590598f77a7",
-                                                                 "plugins/character-graph/README.md":  "451833391104e9b5"
-                                                             },
-                                             "assets":  {
-                                                            "frontend/css/style.css":  {
-                                                                                           "h":  "1b0b5ed1e059d5e8",
-                                                                                           "v":  20260814,
-                                                                                           "referenced":  true
-                                                                                       },
-                                                            "frontend/js/app.js":  {
-                                                                                       "h":  "b1bb5d29215a242e",
-                                                                                       "v":  20260827,
-                                                                                       "referenced":  true
-                                                                                   },
-                                                            "frontend/js/lib/three/addons/controls/OrbitControls.js":  {
-                                                                                                                           "h":  "4efb547b139666d2",
-                                                                                                                           "v":  null,
-                                                                                                                           "referenced":  false
-                                                                                                                       },
-                                                            "frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  {
-                                                                                                                            "h":  "950f61ab8b0a8371",
-                                                                                                                            "v":  null,
-                                                                                                                            "referenced":  false
-                                                                                                                        },
-                                                            "frontend/js/lib/three/three.module.js":  {
-                                                                                                          "h":  "a762b8588c6abf23",
-                                                                                                          "v":  null,
-                                                                                                          "referenced":  false
-                                                                                                      }
-                                                        }
-                                         },
-                     "info-transfer":  {
-                                           "version":  "1.2.5",
-                                           "api_version":  1,
-                                           "file":  "JZToolsHub-插件-info-transfer-v1.2.5.zip",
-                                           "sha256":  "8c7832f2c6cab5017149e1507c6f2eaeeea161a290261b16001e5fd54585ecc8",
-                                           "size":  94449,
-                                           "built_at":  "2026-09-21T09:15:34+08:00",
-                                           "code_sha256":  "163568d3f17b402e49f6d9befbbe5d5bee6de2a9468a531392cd8ec5f11996d8",
-                                           "file_count":  6,
-                                           "requires_restart":  true,
-                                           "file_hashes":  {
-                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
-                                                               "plugins/info-transfer/backend/requirements.txt":  "a8c2485222c9aa5f",
-                                                               "plugins/info-transfer/backend/routes.py":  "c339d5121b177ed1",
-                                                               "plugins/info-transfer/frontend/index.html":  "f85ac3f488634577",
-                                                               "plugins/info-transfer/manifest.json":  "a1cc05bbead77314",
-                                                               "plugins/info-transfer/README.md":  "0a71fc7a0c2b9461"
-                                                           },
-                                           "assets":  {
-
-                                                      }
-                                       },
-                     "qr-video-decode":  {
-                                             "version":  "1.1.3",
-                                             "api_version":  1,
-                                             "file":  "JZToolsHub-插件-qr-video-decode-v1.1.3.zip",
-                                             "sha256":  "df897be4df1fd31e62cc1b51908f1187dff94f1f90a6e32e682ff4c85e4e288c",
-                                             "size":  96785,
-                                             "built_at":  "2026-09-21T09:15:36+08:00",
-                                             "code_sha256":  "5fb40521f477aec045cc5f24cf6585a3cc3dd8a9704af5a60011e7887ab3be20",
-                                             "file_count":  9,
-                                             "requires_restart":  true,
-                                             "file_hashes":  {
-                                                                 "plugins/qr-video-decode/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                 "plugins/qr-video-decode/backend/requirements.txt":  "70571a32e94f9d07",
-                                                                 "plugins/qr-video-decode/backend/routes.py":  "ff446c8f08912aa6",
-                                                                 "plugins/qr-video-decode/frontend/app.js":  "219a26dacc395eac",
-                                                                 "plugins/qr-video-decode/frontend/index.html":  "ee1dbe80d35474c9",
-                                                                 "plugins/qr-video-decode/frontend/jsqr.min.js":  "7c3c379dd1277bce",
-                                                                 "plugins/qr-video-decode/frontend/worker.js":  "fc065914260d3144",
-                                                                 "plugins/qr-video-decode/manifest.json":  "52d09318675f2e47",
-                                                                 "plugins/qr-video-decode/README.md":  "e2b69279fc66830d"
-                                                             },
-                                             "assets":  {
-                                                            "frontend/app.js":  {
-                                                                                    "h":  "219a26dacc395eac",
-                                                                                    "v":  7,
-                                                                                    "referenced":  true
-                                                                                },
-                                                            "frontend/jsqr.min.js":  {
-                                                                                         "h":  "7c3c379dd1277bce",
-                                                                                         "v":  1,
-                                                                                         "referenced":  true
-                                                                                     },
-                                                            "frontend/worker.js":  {
-                                                                                       "h":  "fc065914260d3144",
-                                                                                       "v":  null,
-                                                                                       "referenced":  false
-                                                                                   }
-                                                        }
-                                         },
                      "shared-docs":  {
                                          "version":  "1.2.3",
                                          "api_version":  1,
@@ -206,203 +91,6 @@
 
                                                        }
                                         },
-                     "map-marker":  {
-                                        "version":  "1.0.0",
-                                        "api_version":  1,
-                                        "file":  "JZToolsHub-插件-map-marker-v1.0.0.zip",
-                                        "sha256":  "4007a1ab67a14a64f046a53ccd09ecddeba6d5b79abf08a322769f61c6ba8d74",
-                                        "size":  95621,
-                                        "built_at":  "2026-09-21T14:57:09+08:00",
-                                        "code_sha256":  "f6b234bbac50645447f7c3c16a82c5a3dcfdb070ed497969c8b307486d091684",
-                                        "file_count":  4,
-                                        "requires_restart":  false,
-                                        "file_hashes":  {
-                                                            "plugins/map-marker/frontend/index.html":  "fc24945d4da58782",
-                                                            "plugins/map-marker/frontend/jsqr.min.js":  "7c3c379dd1277bce",
-                                                            "plugins/map-marker/manifest.json":  "c2d5cf24aec6fe7f",
-                                                            "plugins/map-marker/README.md":  "32b6e5971aaef033"
-                                                        },
-                                        "assets":  {
-                                                       "frontend/jsqr.min.js":  {
-                                                                                    "h":  "7c3c379dd1277bce",
-                                                                                    "v":  1,
-                                                                                    "referenced":  true
-                                                                                }
-                                                   }
-                                    },
-                     "md5-generator":  {
-                                           "version":  "1.0.0",
-                                           "api_version":  1,
-                                           "file":  "JZToolsHub-插件-md5-generator-v1.0.0.zip",
-                                           "sha256":  "ebb4b480cce0b2060a9469fa969b2b242cab0b47ef84cecfc4eca39df5f42c06",
-                                           "size":  31252,
-                                           "built_at":  "2026-09-21T14:57:11+08:00",
-                                           "code_sha256":  "0a5873bc86478deef180f1d6a500c59d7f3f6f49e1574666a0b0869ede2e4355",
-                                           "file_count":  4,
-                                           "requires_restart":  false,
-                                           "file_hashes":  {
-                                                               "plugins/md5-generator/frontend/index.html":  "3202bffed582df6b",
-                                                               "plugins/md5-generator/frontend/md5.js":  "448efda5b38a6579",
-                                                               "plugins/md5-generator/manifest.json":  "c339788db9684df1",
-                                                               "plugins/md5-generator/README.md":  "4b9bfd9aa83b227b"
-                                                           },
-                                           "assets":  {
-                                                          "frontend/md5.js":  {
-                                                                                  "h":  "448efda5b38a6579",
-                                                                                  "v":  1,
-                                                                                  "referenced":  true
-                                                                              }
-                                                      }
-                                       },
-                     "admin":  {
-                                   "version":  "1.3.7",
-                                   "api_version":  1,
-                                   "file":  "JZToolsHub-插件-admin-v1.3.7.zip",
-                                   "sha256":  "1d83fbeff8bf311c505c17eefa78819c36493608e11afa02914f9c9105a5c028",
-                                   "size":  143375,
-                                   "built_at":  "2026-09-22T07:47:31+08:00",
-                                   "code_sha256":  "ad438f432fc7d9cbefc48605312160eb04deed79ba6c36315e707ea3bbd2c74f",
-                                   "file_count":  25,
-                                   "requires_restart":  true,
-                                   "file_hashes":  {
-                                                       "plugins/admin/backend/__init__.py":  "26b7bb556a0aac8f",
-                                                       "plugins/admin/backend/batch_io.py":  "72454be944a04f9b",
-                                                       "plugins/admin/backend/plugin_admin.py":  "996775901707498a",
-                                                       "plugins/admin/backend/requirements.txt":  "72325eeb9066c58b",
-                                                       "plugins/admin/backend/routes.py":  "d56b685874f4258c",
-                                                       "plugins/admin/frontend/admin.html":  "acb58d0bab001a37",
-                                                       "plugins/admin/frontend/admin-department.html":  "2db9c433588fcf7c",
-                                                       "plugins/admin/frontend/admin-permission.html":  "a108ac899398d97f",
-                                                       "plugins/admin/frontend/admin-plugins.html":  "f3e23a4dbd828187",
-                                                       "plugins/admin/frontend/admin-settings.html":  "e10f097c0d54fab3",
-                                                       "plugins/admin/frontend/admin-unit.html":  "7668973d2c0f28a3",
-                                                       "plugins/admin/frontend/admin-user.html":  "1955b6d964104e15",
-                                                       "plugins/admin/frontend/css/admin.css":  "b344ee92ddd3267e",
-                                                       "plugins/admin/frontend/js/admin.js":  "4c25ca607d1a7fc4",
-                                                       "plugins/admin/frontend/js/admin-common.js":  "fb475014e2ecac99",
-                                                       "plugins/admin/frontend/js/admin-dept.js":  "4c169b703b1ecd97",
-                                                       "plugins/admin/frontend/js/admin-perm.js":  "c8160c81cef92778",
-                                                       "plugins/admin/frontend/js/admin-plugins.js":  "a85a15abaf66e79e",
-                                                       "plugins/admin/frontend/js/admin-settings.js":  "ac54d86425714c81",
-                                                       "plugins/admin/frontend/js/admin-unit.js":  "6eae5071a037c80d",
-                                                       "plugins/admin/frontend/js/admin-user.js":  "8347775879f6c979",
-                                                       "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
-                                                       "plugins/admin/frontend/login.html":  "fc3517ac5e49edb0",
-                                                       "plugins/admin/manifest.json":  "b4752ad9e1b29ef0",
-                                                       "plugins/admin/README.md":  "3584fae888bcdda3"
-                                                   },
-                                   "assets":  {
-                                                  "frontend/css/admin.css":  {
-                                                                                 "h":  "b344ee92ddd3267e",
-                                                                                 "v":  26,
-                                                                                 "referenced":  true
-                                                                             },
-                                                  "frontend/js/admin.js":  {
-                                                                               "h":  "4c25ca607d1a7fc4",
-                                                                               "v":  6,
-                                                                               "referenced":  true
-                                                                           },
-                                                  "frontend/js/admin-common.js":  {
-                                                                                      "h":  "fb475014e2ecac99",
-                                                                                      "v":  6,
-                                                                                      "referenced":  true
-                                                                                  },
-                                                  "frontend/js/admin-dept.js":  {
-                                                                                    "h":  "4c169b703b1ecd97",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/admin-perm.js":  {
-                                                                                    "h":  "c8160c81cef92778",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/admin-plugins.js":  {
-                                                                                       "h":  "a85a15abaf66e79e",
-                                                                                       "v":  null,
-                                                                                       "referenced":  false
-                                                                                   },
-                                                  "frontend/js/admin-settings.js":  {
-                                                                                        "h":  "ac54d86425714c81",
-                                                                                        "v":  null,
-                                                                                        "referenced":  false
-                                                                                    },
-                                                  "frontend/js/admin-unit.js":  {
-                                                                                    "h":  "6eae5071a037c80d",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/admin-user.js":  {
-                                                                                    "h":  "8347775879f6c979",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/login.js":  {
-                                                                               "h":  "3548af57b801173b",
-                                                                               "v":  null,
-                                                                               "referenced":  false
-                                                                           }
-                                              }
-                               },
-                     "trajectory-convert":  {
-                                                "version":  "1.1.6",
-                                                "api_version":  1,
-                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.6.zip",
-                                                "sha256":  "ff7276d196fdfe097fd6de92f8faf91e479101dfaf59e6c1cac975839fb40e3d",
-                                                "size":  48328,
-                                                "built_at":  "2026-09-22T13:20:23+08:00",
-                                                "code_sha256":  "93c3888500604a66a65d546ff4f75eef64e5ff8388531734c7c4573ec1f8df16",
-                                                "file_count":  6,
-                                                "requires_restart":  true,
-                                                "file_hashes":  {
-                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "b4bf66c6dc73049b",
-                                                                    "plugins/trajectory-convert/backend/routes.py":  "c434416dbf5c1288",
-                                                                    "plugins/trajectory-convert/frontend/index.html":  "f9a8443a7a0299ea",
-                                                                    "plugins/trajectory-convert/manifest.json":  "f00c1b9aa90efd6e",
-                                                                    "plugins/trajectory-convert/README.md":  "bcdd863b26be8fca"
-                                                                },
-                                                "assets":  {
-
-                                                           }
-                                            },
-                     "file-filter":  {
-                                         "version":  "1.2.1",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-插件-file-filter-v1.2.1.zip",
-                                         "sha256":  "6f1c4daa15a3459da411512848cf301fc79513850c7fdbe814a9a2a972df277d",
-                                         "size":  67064,
-                                         "built_at":  "2026-09-22T18:41:11+08:00",
-                                         "code_sha256":  "921db5040699a3aa6966f4f591d72cc9d18c7ddff2ab21f7d3f6a2411d4665c1",
-                                         "file_count":  12,
-                                         "requires_restart":  false,
-                                         "file_hashes":  {
-                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
-                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
-                                                             "plugins/file-filter/backend/config.template.json":  "c01467e004858bec",
-                                                             "plugins/file-filter/backend/core.py":  "057e19d7c515cb46",
-                                                             "plugins/file-filter/backend/llm_client.py":  "64bd2eb74a90b181",
-                                                             "plugins/file-filter/backend/requirements.txt":  "a306e366dd225242",
-                                                             "plugins/file-filter/backend/routes.py":  "c43e80feaea6b7da",
-                                                             "plugins/file-filter/frontend/app.js":  "ef55e278feb161fe",
-                                                             "plugins/file-filter/frontend/index.html":  "28141178900c43a3",
-                                                             "plugins/file-filter/frontend/style.css":  "df4175a68b468cb8",
-                                                             "plugins/file-filter/manifest.json":  "ecb20b00ef2f7e87",
-                                                             "plugins/file-filter/README.md":  "1c1ed31e5baff5ff"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "ef55e278feb161fe",
-                                                                                "v":  4,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "df4175a68b468cb8",
-                                                                                   "v":  5,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    }
-                                     },
                      "trajectory-sketch":  {
                                                "version":  "1.2.5",
                                                "api_version":  1,
@@ -474,93 +162,22 @@
                                                                                      }
                                                           }
                                            },
-                     "case-report":  {
-                                         "version":  "1.2.6",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-插件-case-report-v1.2.6.zip",
-                                         "sha256":  "dce8a3f40c034a3fd826b6282562a5cfff5caaddb68896a6cc2ec4d6d8a212a0",
-                                         "size":  71300,
-                                         "built_at":  "2026-09-22T18:41:22+08:00",
-                                         "code_sha256":  "7e5d5f35c19cbead6ba28fbe3bd8468a8ac2e2e4d7474f2d3e1bef1488a966c3",
-                                         "file_count":  13,
-                                         "requires_restart":  false,
-                                         "file_hashes":  {
-                                                             "plugins/case-report/backend/__init__.py":  "b7e584a3a5de752b",
-                                                             "plugins/case-report/backend/category_kb.py":  "677db705699bf264",
-                                                             "plugins/case-report/backend/config.template.json":  "e34f134a2f41170a",
-                                                             "plugins/case-report/backend/llm_client.py":  "3fe1ccf010d408cc",
-                                                             "plugins/case-report/backend/org_units.json":  "0c194b037c05984a",
-                                                             "plugins/case-report/backend/parser.py":  "cc3aa0744feda24a",
-                                                             "plugins/case-report/backend/requirements.txt":  "61439031a05ebe34",
-                                                             "plugins/case-report/backend/routes.py":  "cc2dcaf6e9a147e5",
-                                                             "plugins/case-report/frontend/app.js":  "36dd9cb95c2a0723",
-                                                             "plugins/case-report/frontend/index.html":  "b2abe7ad82d08bbf",
-                                                             "plugins/case-report/frontend/style.css":  "428e4181eb377d94",
-                                                             "plugins/case-report/manifest.json":  "d145e8e017fbef5d",
-                                                             "plugins/case-report/README.md":  "d11d662bb0f805d5"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "36dd9cb95c2a0723",
-                                                                                "v":  34,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "428e4181eb377d94",
-                                                                                   "v":  28,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    }
-                                     },
-                     "notice-board":  {
-                                          "version":  "1.0.3",
-                                          "api_version":  1,
-                                          "file":  "JZToolsHub-插件-notice-board-v1.0.3.zip",
-                                          "sha256":  "e182860d73697ed24e6b97f568275ac298cda86e4e2d9985e8062a8156bd0f26",
-                                          "size":  41332,
-                                          "built_at":  "2026-09-22T18:41:25+08:00",
-                                          "code_sha256":  "233146db9d44a5d4cd43cd0885283b9b0869db3763a781cb94d65c3cd0a4e7bd",
-                                          "file_count":  8,
-                                          "requires_restart":  false,
-                                          "file_hashes":  {
-                                                              "plugins/notice-board/backend/__init__.py":  "921c5aff5a59a039",
-                                                              "plugins/notice-board/backend/requirements.txt":  "f45d6e3e2af5e605",
-                                                              "plugins/notice-board/backend/routes.py":  "82dcccb5297c89d5",
-                                                              "plugins/notice-board/frontend/app.js":  "b79fa62337dfe692",
-                                                              "plugins/notice-board/frontend/index.html":  "3d165266e7d82564",
-                                                              "plugins/notice-board/frontend/style.css":  "009661b42a7a55ad",
-                                                              "plugins/notice-board/manifest.json":  "3b409228720e052c",
-                                                              "plugins/notice-board/README.md":  "40576bed8394454e"
-                                                          },
-                                          "assets":  {
-                                                         "frontend/app.js":  {
-                                                                                 "h":  "b79fa62337dfe692",
-                                                                                 "v":  6,
-                                                                                 "referenced":  true
-                                                                             },
-                                                         "frontend/style.css":  {
-                                                                                    "h":  "009661b42a7a55ad",
-                                                                                    "v":  5,
-                                                                                    "referenced":  true
-                                                                                }
-                                                     }
-                                      },
                      "knowledge-base":  {
-                                            "version":  "1.3.4",
+                                            "version":  "1.3.5",
                                             "api_version":  1,
-                                            "file":  "JZToolsHub-插件-knowledge-base-v1.3.4.zip",
-                                            "sha256":  "3f4b065b2fa71e91e6b7223ec15fb72b5bc94ad0c7c555fc05605b1bcc6e7c43",
-                                            "size":  1287412,
-                                            "built_at":  "2026-09-22T18:41:34+08:00",
-                                            "code_sha256":  "40cb102b11e4cb197b09a40c4fc7848af434596497abeda2c47621aa1b8fdf14",
+                                            "file":  "JZToolsHub-插件-knowledge-base-v1.3.5.zip",
+                                            "sha256":  "22cb82d016904ef2ce213c7c07083d9402fbabfdc40e5cf19896ba65973cea5d",
+                                            "size":  1288628,
+                                            "built_at":  "2026-09-25T11:54:52+08:00",
+                                            "code_sha256":  "8381a553f7a11c08baf5d7d7429d81ef84b461067b246bc2af1b0f704fec2246",
                                             "file_count":  77,
-                                            "requires_restart":  false,
+                                            "requires_restart":  true,
                                             "file_hashes":  {
                                                                 "plugins/knowledge-base/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                "plugins/knowledge-base/backend/doc_convert.py":  "903c1e8522d3f875",
-                                                                "plugins/knowledge-base/backend/office_render.py":  "9fe8c90cf3c2d88e",
+                                                                "plugins/knowledge-base/backend/doc_convert.py":  "b2aaeb77907b8b98",
+                                                                "plugins/knowledge-base/backend/office_render.py":  "56c395f63fba9c10",
                                                                 "plugins/knowledge-base/backend/requirements.txt":  "61b9b1f9e77b0948",
-                                                                "plugins/knowledge-base/backend/routes.py":  "e5d4d5e5c1e6c4db",
+                                                                "plugins/knowledge-base/backend/routes.py":  "222a79c80e385bbe",
                                                                 "plugins/knowledge-base/backend/vendor/dhr/__init__.py":  "fc1b8b2e7f60435f",
                                                                 "plugins/knowledge-base/backend/vendor/dhr/cli.py":  "9fd715af7da4464a",
                                                                 "plugins/knowledge-base/backend/vendor/dhr/ingest.py":  "16c7b25409f0ea84",
@@ -573,7 +190,7 @@
                                                                 "plugins/knowledge-base/backend/vendor/dhr/renderer/css.py":  "7bd983406aa3f958",
                                                                 "plugins/knowledge-base/backend/vendor/dhr/styles.py":  "b3906275f6d84d2c",
                                                                 "plugins/knowledge-base/backend/vendor/dhr/units.py":  "9dbe44ea150fe0f0",
-                                                                "plugins/knowledge-base/backend/vendor/README.md":  "32e7587f3d06fdf6",
+                                                                "plugins/knowledge-base/backend/vendor/README.md":  "d63251cfd332ed9b",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/__init__.py":  "1a59a2ef8c950066",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/cli.py":  "142f38c4f9443756",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/core/__init__.py":  "ed72c4240d9701fa",
@@ -615,9 +232,9 @@
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/numfmt.py":  "ff106f3bb4100034",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/style_dedup.py":  "c79520b78053f0bd",
                                                                 "plugins/knowledge-base/backend/vendor/xhr/style/style_resolver.py":  "ea7376211810aefc",
-                                                                "plugins/knowledge-base/frontend/app.js":  "199a88b3e961e51e",
-                                                                "plugins/knowledge-base/frontend/index.html":  "802e094480d4c9ec",
-                                                                "plugins/knowledge-base/frontend/reader.js":  "5be93e3e357205bc",
+                                                                "plugins/knowledge-base/frontend/app.js":  "c116986570c43900",
+                                                                "plugins/knowledge-base/frontend/index.html":  "2094337f685baae9",
+                                                                "plugins/knowledge-base/frontend/reader.js":  "98247b8f99ad0008",
                                                                 "plugins/knowledge-base/frontend/style.css":  "a64b6deaa479bb7b",
                                                                 "plugins/knowledge-base/frontend/vendor/mammoth/mammoth.browser.min.js":  "f61888233169f48e",
                                                                 "plugins/knowledge-base/frontend/vendor/marked/marked.min.js":  "597e8b9e3a1643f8",
@@ -631,18 +248,18 @@
                                                                 "plugins/knowledge-base/frontend/vendor/purify/purify.min.js":  "9f659d5d2b847b83",
                                                                 "plugins/knowledge-base/frontend/vendor/VENDOR.md":  "973a2ebcc5544b0e",
                                                                 "plugins/knowledge-base/frontend/vendor/xlsx/xlsx.full.min.js":  "0c77a2658dfe38d9",
-                                                                "plugins/knowledge-base/manifest.json":  "77912fce9c2f4458",
-                                                                "plugins/knowledge-base/README.md":  "0befaf0373e84382"
+                                                                "plugins/knowledge-base/manifest.json":  "02a75893e01e2f72",
+                                                                "plugins/knowledge-base/README.md":  "7c201fdc1783e706"
                                                             },
                                             "assets":  {
                                                            "frontend/app.js":  {
-                                                                                   "h":  "199a88b3e961e51e",
-                                                                                   "v":  20,
+                                                                                   "h":  "c116986570c43900",
+                                                                                   "v":  22,
                                                                                    "referenced":  true
                                                                                },
                                                            "frontend/reader.js":  {
-                                                                                      "h":  "5be93e3e357205bc",
-                                                                                      "v":  11,
+                                                                                      "h":  "98247b8f99ad0008",
+                                                                                      "v":  12,
                                                                                       "referenced":  true
                                                                                   },
                                                            "frontend/style.css":  {
@@ -706,6 +323,397 @@
                                                                                                          "referenced":  false
                                                                                                      }
                                                        }
-                                        }
+                                        },
+                     "admin":  {
+                                   "version":  "1.4.0",
+                                   "api_version":  1,
+                                   "file":  "JZToolsHub-插件-admin-v1.4.0.zip",
+                                   "sha256":  "ecaccad4051c291938c6a9148a664c77b1978c6c27f64c62a3f5ad354dfbd295",
+                                   "size":  172938,
+                                   "built_at":  "2026-09-25T11:55:13+08:00",
+                                   "code_sha256":  "2245a63dbfd77020973656fe99966418c181e42635bb8b5e4100acfe83530232",
+                                   "file_count":  28,
+                                   "requires_restart":  true,
+                                   "file_hashes":  {
+                                                       "plugins/admin/backend/__init__.py":  "26b7bb556a0aac8f",
+                                                       "plugins/admin/backend/batch_io.py":  "6ade9e38f145a2be",
+                                                       "plugins/admin/backend/data_migrate.py":  "bc5d1caefe8a2c16",
+                                                       "plugins/admin/backend/plugin_admin.py":  "996775901707498a",
+                                                       "plugins/admin/backend/requirements.txt":  "61b243a19f403736",
+                                                       "plugins/admin/backend/routes.py":  "b3f214a19bbb77f7",
+                                                       "plugins/admin/frontend/admin.html":  "41892ce111d29556",
+                                                       "plugins/admin/frontend/admin-department.html":  "38919e87f7f68969",
+                                                       "plugins/admin/frontend/admin-llm.html":  "b5f3cc2eb9af6b8a",
+                                                       "plugins/admin/frontend/admin-migrate.html":  "b5534c75e290b8a0",
+                                                       "plugins/admin/frontend/admin-plugins.html":  "19c417f4c1ae0259",
+                                                       "plugins/admin/frontend/admin-settings.html":  "060ac0cc257c3034",
+                                                       "plugins/admin/frontend/admin-unit.html":  "1fa723023f19e00d",
+                                                       "plugins/admin/frontend/admin-user.html":  "879aa5f963ea98e1",
+                                                       "plugins/admin/frontend/css/admin.css":  "b344ee92ddd3267e",
+                                                       "plugins/admin/frontend/js/admin.js":  "5bf9f9acddd7ab0c",
+                                                       "plugins/admin/frontend/js/admin-common.js":  "b8090a201282cef9",
+                                                       "plugins/admin/frontend/js/admin-dept.js":  "4c169b703b1ecd97",
+                                                       "plugins/admin/frontend/js/admin-llm.js":  "36527d3ce3baca12",
+                                                       "plugins/admin/frontend/js/admin-migrate.js":  "b09a38697b5e5fca",
+                                                       "plugins/admin/frontend/js/admin-plugins.js":  "a85a15abaf66e79e",
+                                                       "plugins/admin/frontend/js/admin-settings.js":  "ac54d86425714c81",
+                                                       "plugins/admin/frontend/js/admin-unit.js":  "6eae5071a037c80d",
+                                                       "plugins/admin/frontend/js/admin-user.js":  "0c04f3900b6d1f27",
+                                                       "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
+                                                       "plugins/admin/frontend/login.html":  "fc3517ac5e49edb0",
+                                                       "plugins/admin/manifest.json":  "8ec8f46e09b80ced",
+                                                       "plugins/admin/README.md":  "f5e452998bc2e9ef"
+                                                   },
+                                   "assets":  {
+                                                  "frontend/css/admin.css":  {
+                                                                                 "h":  "b344ee92ddd3267e",
+                                                                                 "v":  26,
+                                                                                 "referenced":  true
+                                                                             },
+                                                  "frontend/js/admin.js":  {
+                                                                               "h":  "5bf9f9acddd7ab0c",
+                                                                               "v":  8,
+                                                                               "referenced":  true
+                                                                           },
+                                                  "frontend/js/admin-common.js":  {
+                                                                                      "h":  "b8090a201282cef9",
+                                                                                      "v":  7,
+                                                                                      "referenced":  true
+                                                                                  },
+                                                  "frontend/js/admin-dept.js":  {
+                                                                                    "h":  "4c169b703b1ecd97",
+                                                                                    "v":  null,
+                                                                                    "referenced":  false
+                                                                                },
+                                                  "frontend/js/admin-llm.js":  {
+                                                                                   "h":  "36527d3ce3baca12",
+                                                                                   "v":  null,
+                                                                                   "referenced":  false
+                                                                               },
+                                                  "frontend/js/admin-migrate.js":  {
+                                                                                       "h":  "b09a38697b5e5fca",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   },
+                                                  "frontend/js/admin-plugins.js":  {
+                                                                                       "h":  "a85a15abaf66e79e",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   },
+                                                  "frontend/js/admin-settings.js":  {
+                                                                                        "h":  "ac54d86425714c81",
+                                                                                        "v":  null,
+                                                                                        "referenced":  false
+                                                                                    },
+                                                  "frontend/js/admin-unit.js":  {
+                                                                                    "h":  "6eae5071a037c80d",
+                                                                                    "v":  null,
+                                                                                    "referenced":  false
+                                                                                },
+                                                  "frontend/js/admin-user.js":  {
+                                                                                    "h":  "0c04f3900b6d1f27",
+                                                                                    "v":  null,
+                                                                                    "referenced":  false
+                                                                                },
+                                                  "frontend/js/login.js":  {
+                                                                               "h":  "3548af57b801173b",
+                                                                               "v":  null,
+                                                                               "referenced":  false
+                                                                           }
+                                              }
+                               },
+                     "case-report":  {
+                                         "version":  "1.3.0",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-插件-case-report-v1.3.0.zip",
+                                         "sha256":  "82fb5c477afb6f235c57f9eb070f8f43fee7e05ba91a0cf55abe2e477b4dc58a",
+                                         "size":  71194,
+                                         "built_at":  "2026-09-25T11:55:15+08:00",
+                                         "code_sha256":  "694ea586e88440cfb735aeea62945e492819363c757400fd9bdfe01b72ad531b",
+                                         "file_count":  13,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/case-report/backend/__init__.py":  "b3ce1ce6c9b0507a",
+                                                             "plugins/case-report/backend/category_kb.py":  "677db705699bf264",
+                                                             "plugins/case-report/backend/config.template.json":  "8a80554c91d9fca8",
+                                                             "plugins/case-report/backend/llm_client.py":  "e346ead9d0d5c32d",
+                                                             "plugins/case-report/backend/org_units.json":  "0c194b037c05984a",
+                                                             "plugins/case-report/backend/parser.py":  "cc3aa0744feda24a",
+                                                             "plugins/case-report/backend/requirements.txt":  "3a7bf9da29794206",
+                                                             "plugins/case-report/backend/routes.py":  "64676f0a9a775ed7",
+                                                             "plugins/case-report/frontend/app.js":  "dce994bc6e716f9c",
+                                                             "plugins/case-report/frontend/index.html":  "5f48f6b8c9c69652",
+                                                             "plugins/case-report/frontend/style.css":  "e0004efc5d84dc09",
+                                                             "plugins/case-report/manifest.json":  "36c47026d19c479a",
+                                                             "plugins/case-report/README.md":  "fd503a31b58f8a04"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "dce994bc6e716f9c",
+                                                                                "v":  35,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "e0004efc5d84dc09",
+                                                                                   "v":  29,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    }
+                                     },
+                     "character-graph":  {
+                                             "version":  "1.2.0",
+                                             "api_version":  1,
+                                             "file":  "JZToolsHub-插件-character-graph-v1.2.0.zip",
+                                             "sha256":  "c3a4c32fae04c450c5a09735009426ffca361d55ac780d5706c9511a9f57200b",
+                                             "size":  312548,
+                                             "built_at":  "2026-09-25T11:55:18+08:00",
+                                             "code_sha256":  "cdd349d14831a07b0e34dcc6812db45c7d4bb65da1fde1acf29edd199d3996ee",
+                                             "file_count":  14,
+                                             "requires_restart":  true,
+                                             "file_hashes":  {
+                                                                 "plugins/character-graph/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                 "plugins/character-graph/backend/config.template.json":  "8a80554c91d9fca8",
+                                                                 "plugins/character-graph/backend/document_reader.py":  "ec75d7e1fbeb6d07",
+                                                                 "plugins/character-graph/backend/llm_client.py":  "8f818c8dec3eaf83",
+                                                                 "plugins/character-graph/backend/requirements.txt":  "ea2ca4050efa2fc7",
+                                                                 "plugins/character-graph/backend/routes.py":  "3e239009c34593a3",
+                                                                 "plugins/character-graph/frontend/css/style.css":  "1b0b5ed1e059d5e8",
+                                                                 "plugins/character-graph/frontend/index.html":  "138d47e395c50c14",
+                                                                 "plugins/character-graph/frontend/js/app.js":  "34d923938646b62e",
+                                                                 "plugins/character-graph/frontend/js/lib/three/addons/controls/OrbitControls.js":  "4efb547b139666d2",
+                                                                 "plugins/character-graph/frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  "950f61ab8b0a8371",
+                                                                 "plugins/character-graph/frontend/js/lib/three/three.module.js":  "a762b8588c6abf23",
+                                                                 "plugins/character-graph/manifest.json":  "b78cc977c8154e30",
+                                                                 "plugins/character-graph/README.md":  "d0d8592ec5736e2d"
+                                                             },
+                                             "assets":  {
+                                                            "frontend/css/style.css":  {
+                                                                                           "h":  "1b0b5ed1e059d5e8",
+                                                                                           "v":  20260814,
+                                                                                           "referenced":  true
+                                                                                       },
+                                                            "frontend/js/app.js":  {
+                                                                                       "h":  "34d923938646b62e",
+                                                                                       "v":  20260925,
+                                                                                       "referenced":  true
+                                                                                   },
+                                                            "frontend/js/lib/three/addons/controls/OrbitControls.js":  {
+                                                                                                                           "h":  "4efb547b139666d2",
+                                                                                                                           "v":  null,
+                                                                                                                           "referenced":  false
+                                                                                                                       },
+                                                            "frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  {
+                                                                                                                            "h":  "950f61ab8b0a8371",
+                                                                                                                            "v":  null,
+                                                                                                                            "referenced":  false
+                                                                                                                        },
+                                                            "frontend/js/lib/three/three.module.js":  {
+                                                                                                          "h":  "a762b8588c6abf23",
+                                                                                                          "v":  null,
+                                                                                                          "referenced":  false
+                                                                                                      }
+                                                        }
+                                         },
+                     "file-filter":  {
+                                         "version":  "1.3.0",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-插件-file-filter-v1.3.0.zip",
+                                         "sha256":  "d0f616b90e916c7be5490167fcf19df825bcbd1ac3e749a682458fc7585ed8ba",
+                                         "size":  66824,
+                                         "built_at":  "2026-09-25T11:55:20+08:00",
+                                         "code_sha256":  "07c758bb58c179e7a2fc94b4d70c73a9e20ff09d2897b211adbdf9ff7e311c83",
+                                         "file_count":  12,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
+                                                             "plugins/file-filter/backend/config.template.json":  "9b54530201710460",
+                                                             "plugins/file-filter/backend/core.py":  "85428560fd387c56",
+                                                             "plugins/file-filter/backend/llm_client.py":  "b22e6e59e48ff8ea",
+                                                             "plugins/file-filter/backend/requirements.txt":  "a3aa74f8009365c1",
+                                                             "plugins/file-filter/backend/routes.py":  "7999eb9c8c58231e",
+                                                             "plugins/file-filter/frontend/app.js":  "fc8dfa9ae4f257ef",
+                                                             "plugins/file-filter/frontend/index.html":  "f94d70e06952aea9",
+                                                             "plugins/file-filter/frontend/style.css":  "df4175a68b468cb8",
+                                                             "plugins/file-filter/manifest.json":  "7d3eea56ce5078f1",
+                                                             "plugins/file-filter/README.md":  "04e92d0f8f8678c2"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "fc8dfa9ae4f257ef",
+                                                                                "v":  5,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "df4175a68b468cb8",
+                                                                                   "v":  6,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    }
+                                     },
+                     "info-transfer":  {
+                                           "version":  "1.2.6",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-插件-info-transfer-v1.2.6.zip",
+                                           "sha256":  "b47ba57254e852a94c98413534e2e735f59422ca4665bc3eb710e7ef73779c66",
+                                           "size":  95865,
+                                           "built_at":  "2026-09-25T11:55:22+08:00",
+                                           "code_sha256":  "e1a9a5da24ff9e44f3520d17182a82e5effffe71c9f97e1a33472f593af2fc88",
+                                           "file_count":  6,
+                                           "requires_restart":  true,
+                                           "file_hashes":  {
+                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
+                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
+                                                               "plugins/info-transfer/backend/routes.py":  "bc8077575f5aa127",
+                                                               "plugins/info-transfer/frontend/index.html":  "f85ac3f488634577",
+                                                               "plugins/info-transfer/manifest.json":  "db8cce5486825549",
+                                                               "plugins/info-transfer/README.md":  "ee78e626f9f85a19"
+                                                           },
+                                           "assets":  {
+
+                                                      }
+                                       },
+                     "map-marker":  {
+                                        "version":  "1.0.1",
+                                        "api_version":  1,
+                                        "file":  "JZToolsHub-插件-map-marker-v1.0.1.zip",
+                                        "sha256":  "a2eea0e58f2ec8fb98ffd110ad2c240765702024f16ded84e2bd128ea9a121ff",
+                                        "size":  95148,
+                                        "built_at":  "2026-09-25T11:55:24+08:00",
+                                        "code_sha256":  "851bc4569366766e8a6bed59596a69cf9ce4b44b8934fe50162e014f4e6acd3a",
+                                        "file_count":  4,
+                                        "requires_restart":  false,
+                                        "file_hashes":  {
+                                                            "plugins/map-marker/frontend/index.html":  "b62601cd044f24ad",
+                                                            "plugins/map-marker/frontend/jsqr.min.js":  "7c3c379dd1277bce",
+                                                            "plugins/map-marker/manifest.json":  "33cf2e017979e1f8",
+                                                            "plugins/map-marker/README.md":  "8ea3ed9d5c0017e5"
+                                                        },
+                                        "assets":  {
+                                                       "frontend/jsqr.min.js":  {
+                                                                                    "h":  "7c3c379dd1277bce",
+                                                                                    "v":  1,
+                                                                                    "referenced":  true
+                                                                                }
+                                                   }
+                                    },
+                     "md5-generator":  {
+                                           "version":  "1.0.1",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-插件-md5-generator-v1.0.1.zip",
+                                           "sha256":  "cb3a3d77113fb5290a10959b4cd88011d3102cd3695e3029614a0d2dddc1bbfd",
+                                           "size":  30749,
+                                           "built_at":  "2026-09-25T11:55:46+08:00",
+                                           "code_sha256":  "e59a6709a4c18a13c396e136c3dcd0e9bacdf44c8eb4d5a0d239870718a57bb7",
+                                           "file_count":  4,
+                                           "requires_restart":  false,
+                                           "file_hashes":  {
+                                                               "plugins/md5-generator/frontend/index.html":  "070e9f163d911ac7",
+                                                               "plugins/md5-generator/frontend/md5.js":  "256a01da4039cf1d",
+                                                               "plugins/md5-generator/manifest.json":  "338e39ac370e43c9",
+                                                               "plugins/md5-generator/README.md":  "4b9bfd9aa83b227b"
+                                                           },
+                                           "assets":  {
+                                                          "frontend/md5.js":  {
+                                                                                  "h":  "256a01da4039cf1d",
+                                                                                  "v":  2,
+                                                                                  "referenced":  true
+                                                                              }
+                                                      }
+                                       },
+                     "notice-board":  {
+                                          "version":  "1.0.4",
+                                          "api_version":  1,
+                                          "file":  "JZToolsHub-插件-notice-board-v1.0.4.zip",
+                                          "sha256":  "abe16535fca24c269a072ce504396f6a76384ff2bf35dc16b7ba9dca826250fc",
+                                          "size":  41641,
+                                          "built_at":  "2026-09-25T11:55:48+08:00",
+                                          "code_sha256":  "2034f94281a8e46630fdedbab7697e389a1a195d50cf0f364ffb73a68cf7cf6a",
+                                          "file_count":  8,
+                                          "requires_restart":  true,
+                                          "file_hashes":  {
+                                                              "plugins/notice-board/backend/__init__.py":  "921c5aff5a59a039",
+                                                              "plugins/notice-board/backend/requirements.txt":  "f45d6e3e2af5e605",
+                                                              "plugins/notice-board/backend/routes.py":  "c420c5e92c4d9c64",
+                                                              "plugins/notice-board/frontend/app.js":  "b79fa62337dfe692",
+                                                              "plugins/notice-board/frontend/index.html":  "3d165266e7d82564",
+                                                              "plugins/notice-board/frontend/style.css":  "009661b42a7a55ad",
+                                                              "plugins/notice-board/manifest.json":  "27593c712537ad3f",
+                                                              "plugins/notice-board/README.md":  "ab1c408d0992543b"
+                                                          },
+                                          "assets":  {
+                                                         "frontend/app.js":  {
+                                                                                 "h":  "b79fa62337dfe692",
+                                                                                 "v":  6,
+                                                                                 "referenced":  true
+                                                                             },
+                                                         "frontend/style.css":  {
+                                                                                    "h":  "009661b42a7a55ad",
+                                                                                    "v":  5,
+                                                                                    "referenced":  true
+                                                                                }
+                                                     }
+                                      },
+                     "qr-video-decode":  {
+                                             "version":  "1.1.4",
+                                             "api_version":  1,
+                                             "file":  "JZToolsHub-插件-qr-video-decode-v1.1.4.zip",
+                                             "sha256":  "5caee1db72b04687572a03e83105955f03269dfe7f35284ad6e1ef12ace46c5e",
+                                             "size":  96729,
+                                             "built_at":  "2026-09-25T11:55:50+08:00",
+                                             "code_sha256":  "4d83b9be503178f4aac2e1b274765cc40fcd8770e211f43cb8876366be35cd48",
+                                             "file_count":  9,
+                                             "requires_restart":  true,
+                                             "file_hashes":  {
+                                                                 "plugins/qr-video-decode/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                 "plugins/qr-video-decode/backend/requirements.txt":  "7500853833af2390",
+                                                                 "plugins/qr-video-decode/backend/routes.py":  "fcee297f798c821f",
+                                                                 "plugins/qr-video-decode/frontend/app.js":  "219a26dacc395eac",
+                                                                 "plugins/qr-video-decode/frontend/index.html":  "ee1dbe80d35474c9",
+                                                                 "plugins/qr-video-decode/frontend/jsqr.min.js":  "7c3c379dd1277bce",
+                                                                 "plugins/qr-video-decode/frontend/worker.js":  "fc065914260d3144",
+                                                                 "plugins/qr-video-decode/manifest.json":  "541e7d0a54341a59",
+                                                                 "plugins/qr-video-decode/README.md":  "02ade222414094f2"
+                                                             },
+                                             "assets":  {
+                                                            "frontend/app.js":  {
+                                                                                    "h":  "219a26dacc395eac",
+                                                                                    "v":  7,
+                                                                                    "referenced":  true
+                                                                                },
+                                                            "frontend/jsqr.min.js":  {
+                                                                                         "h":  "7c3c379dd1277bce",
+                                                                                         "v":  1,
+                                                                                         "referenced":  true
+                                                                                     },
+                                                            "frontend/worker.js":  {
+                                                                                       "h":  "fc065914260d3144",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   }
+                                                        }
+                                         },
+                     "trajectory-convert":  {
+                                                "version":  "1.1.7",
+                                                "api_version":  1,
+                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.7.zip",
+                                                "sha256":  "e3f610435cc73a44f8f333cfbe5010ba0516ca5d8909b552630c560951c66185",
+                                                "size":  49154,
+                                                "built_at":  "2026-09-25T11:55:53+08:00",
+                                                "code_sha256":  "0a4c379eab7d44ef2488e9c952a88139b41ad9819bce06a7d65687ac273cce34",
+                                                "file_count":  6,
+                                                "requires_restart":  true,
+                                                "file_hashes":  {
+                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "6e1cb6fa65e2c01c",
+                                                                    "plugins/trajectory-convert/backend/routes.py":  "2c4598a3f19f3046",
+                                                                    "plugins/trajectory-convert/frontend/index.html":  "2a2d3f097f84065f",
+                                                                    "plugins/trajectory-convert/manifest.json":  "e4f1f69ac04c63e1",
+                                                                    "plugins/trajectory-convert/README.md":  "76e0b3c7b37d5bdc"
+                                                                },
+                                                "assets":  {
+
+                                                           }
+                                            }
                  }
 }
