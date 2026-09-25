@@ -13,7 +13,7 @@ r"""生成「验收测试数据」：各插件的测试文件 + 预生成二维�
     python tools\e2e\make-acceptance-testdata.py --verify --base http://127.0.0.1:5000
                                                                     # 对预生成产物做往返校验（推荐）
 
-产物：`testdata\`（**随仓库提交**，约 400 KB：拿到仓库就有经过校验的数据，不必跑生成器；
+产物：`testdata\`（**随仓库提交**，约 540 KB（2026-09-24 实测）：拿到仓库就有经过校验的数据，不必跑生成器；
       发布时另打包为 deploy\JZToolsHub-验收测试数据-v<日期>.zip）
     testdata\README.md              ← 逐插件：文件 → 操作 → 通过口径（验收时照这个走）
     testdata\<插件id>\...           ← 测试文件
@@ -500,7 +500,7 @@ README_TMPL = """# JZToolsHub 验收测试数据
 
 > 用途：配合 `docs\\guide\\干净机器部署验收手册.md` 做功能验收。**所有数据均为虚构测试数据**
 > （身份证号/手机号/单位人员均非真实信息）。
-> 生成脚本：`tools\\e2e\\make-acceptance-testdata.py`（可重新生成）。本目录**随仓库提交**（约 400 KB），
+> 生成脚本：`tools\\e2e\\make-acceptance-testdata.py`（可重新生成）。本目录**随仓库提交**（约 540 KB，2026-09-24 实测），
 > 因此拿到仓库就有经过校验的验收数据；发布介质另见 `deploy\\JZToolsHub-验收测试数据-v<日期>.zip`。
 
 ## 怎么用
@@ -534,7 +534,7 @@ README_TMPL = """# JZToolsHub 验收测试数据
 | knowledge-base | `knowledge-base/旧版通知.doc`、`旧版报表.xls` | 上传 → 预览 | **需装 LibreOffice 离线组件**；未装时给出"安装离线组件"提示而非报错 |
 | **character-graph** | `character-graph/人物档案.docx`、`.pdf`、`.txt` | 上传 → 抽取人物与关系 | 抽出 4 个人名与关系；缺 docx/pypdf 时提示对应格式不可用 |
 | character-graph | 配置 API Key 后重跑 | 用大模型辅助抽取 | 关系更完整；缺 requests 时提示"大模型辅助抽取不可用" |
-| **case-report** | `case-report/收网情况简报.txt` | 粘贴文本 → 解析 → 生成报表 → 导出 | 五要素正确（案件名 1·7 专案 / 时间 / 主办大队 三大队 / 抓获人数 2 / 缴获物品 4 项）；导出 xlsx（缺 openpyxl 时仅 CSV） |
+| **case-report** | `case-report/收网情况简报.txt` | 粘贴文本 → 解析 → 生成报表 → 导出 | 要素正确（案件名 1·7 专案 / 时间 / 主办大队 三大队 / 抓获人数 2 / 缴获物品 4 项）；导出 xlsx（缺 openpyxl 时仅 CSV） |
 | case-report | `case-report/战果台账.xlsx` | 导入台账 | 数据入库、列表可见 |
 | **shared-docs** | `shared-docs/文档正文.txt` | 新建文档 → 粘贴正文 → 保存 | 保存成功、列表可见、详情可读 |
 | shared-docs | 上述文档 → 导入导出 | 导出 docx/xlsx | 可下载；缺 docx/openpyxl 时提示不可用 |
@@ -685,7 +685,7 @@ def build_fixtures():
                [["1·7专案", "2026-09-16", "三大队", 2, "烟叶4.6吨、烟丝2.1吨、私烟600件", "约25万元"],
                 ["8·16系列盗窃案", "2026-08-20", "一大队", 5, "手机6部、现金3万元", "约8万元"]],
                sheet="战果台账", widths={"缴获物品": 30, "涉案价值": 14})
-    info.append("case-report：收网简报（五要素齐全）+ 战果台账 xlsx")
+    info.append("case-report：收网简报（要素齐全）+ 战果台账 xlsx")
 
     # 纯前端工具插件（无后端）：数据用于粘贴，md5 给出可对照的预期值
     TOOL_TEXT = ("JZToolsHub 验收测试文本\n"

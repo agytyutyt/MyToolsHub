@@ -248,7 +248,7 @@
 
     const pickerHtml = () => `
       <div class="batch-tip">
-        支持 <b>.xlsx</b> / <b>.csv</b>，单次最多 3000 行。首次使用请先下载模板，按模板表头填写
+        支持 <b>.xlsx</b> / <b>.xlsm</b> / <b>.csv</b>，单次最多 3000 行。首次使用请先下载模板，按模板表头填写
         （表头行请勿改动，示例行可删除）。
       </div>
       <div class="batch-links">
@@ -377,7 +377,7 @@
         const pick = (f) => {
           if (!f) return;
           if (!/\.(xlsx|xlsm|csv)$/i.test(f.name)) {
-            errEl.textContent = '仅支持 .xlsx / .csv 文件（旧版 .xls 请先另存为 .xlsx）';
+            errEl.textContent = '仅支持 .xlsx / .xlsm / .csv 文件（旧版 .xls 请先另存为 .xlsx）';
             return;
           }
           state.file = f;

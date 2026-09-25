@@ -16,9 +16,9 @@
     "python_packages": [
       {
         "name": "docx",
-        "version": ">=1.0",
+        "version": ">=1.1",
         "required": false,
-        "hint": "缺少 docx：Word 文档预览不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 docx：旧版 .doc 自动转换不可用（.docx 预览由插件自带引擎提供，不受影响）。请安装依赖组件包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "flask",
@@ -30,36 +30,36 @@
         "name": "olefile",
         "version": ">=0.46",
         "required": false,
-        "hint": "缺少 olefile：旧版 Office 解析不可用。请安装依赖包 JZToolsHub-依赖-olefile-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 olefile：旧版 .doc 自动转换的 OLE2 读取不可用。请安装依赖组件包 JZToolsHub-依赖-olefile-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "openpyxl",
         "version": ">=3.1",
         "required": false,
-        "hint": "缺少 openpyxl：Excel 文档预览不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 openpyxl：旧版 .xls 自动转换不可用（.xlsx/.csv 预览不受影响）。请安装依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "xlrd",
         "version": ">=2.0",
         "required": false,
-        "hint": "缺少 xlrd：xls 文档预览不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 xlrd：旧版 .xls 自动转换不可用。请安装依赖组件包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       }
     ],
     "vendored": [
       {
         "name": "dhr",
-        "hint": "缺少 dhr：相关功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+        "hint": "缺少 dhr：Word 渲染引擎缺失（**插件自带**，随本插件的插件包分发）。请重新安装本插件的插件包。"
       },
       {
         "name": "xhr",
-        "hint": "缺少 xhr：相关功能不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+        "hint": "缺少 xhr：Excel 渲染引擎缺失（**插件自带**，随本插件的插件包分发）。请重新安装本插件的插件包。"
       }
     ],
     "external": [
       {
         "id": "libreoffice",
         "required": false,
-        "hint": "缺少 libreoffice：旧版 .doc/.xls 预览（其余格式不受影响）不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+        "hint": "缺少 libreoffice：旧版 .doc/.xls 的样式保真预览不可用（其余格式不受影响）。请在目标机装「离线组件」LibreOffice（双击包内「安装LibreOffice核心组件.bat」）。"
       }
     ]
   }

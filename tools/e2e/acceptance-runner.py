@@ -431,7 +431,7 @@ def f20(cl, ctx):
     return "三种格式均可抽取：" + "、".join(outs)
 
 
-@case("F-22", "F", "case-report：收网简报解析（五要素）",
+@case("F-22", "F", "case-report：收网简报解析（要素）",
       skip="解析依赖大模型 API Key（未配置时任务如实失败）——配置后人工验收")
 def f22(cl, ctx):
     text = read(ctx, "case-report/收网情况简报.txt").decode("utf-8")
@@ -445,7 +445,7 @@ def f22(cl, ctx):
     for key in ("案件名", "时间", "主办大队", "抓获人数", "缴获物品"):
         need(key in blob, "解析结果缺少字段 %s（%s）" % (key, blob[:200]))
     need("三大队" in blob, "主办大队识别不正确")
-    return "五要素齐全，主办大队=三大队"
+    return "要素齐全，主办大队=三大队"
 
 
 @case("F-24", "F", "shared-docs：新建文档 → 列表 → 详情")

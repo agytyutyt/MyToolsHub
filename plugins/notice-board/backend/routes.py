@@ -10,7 +10,8 @@
 - 公告按可见性规则过滤后展示：命中任一目标即可见
   （单位=同单位；部门=同部门且同单位；用户=本人）；超级管理员可见全部。
 
-数据持久化：backend/data/ 下一条公告一个 JSON 文件（一记录一文件），
+数据持久化：<数据根>/plugins/notice-board/data/ 下一条公告一个 JSON 文件（一记录一文件）
+（数据根默认 <用户目录>\\.jztoolshub，经 jztools_data 定位），
 落盘含 created_by / created_by_name / unit_id / department_id 四个归属字段，
 一律取自服务端会话、禁止从请求体接收（规范 9.2 铁律一）。
 targets 仅存服务端生成的标识（类型+ID），展示名由前端经组织树解析。

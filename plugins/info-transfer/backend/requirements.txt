@@ -3,7 +3,7 @@ qrcode>=7.4
 # 直接 pip install 会回退到源码编译（需 MSVC）。安装时请加 --find-links 指向仓库 wheels/：
 #   pip install --find-links wheels -r plugins/info-transfer/backend/requirements.txt
 # 详见 wheels/README.md
-zfec>=1.5
+zfec>=1.6
 opencv-python>=4.7
 numpy>=1.24
 # zxing-cpp：协议 v2（JZ2 二进制帧）二维码解码（返回原始 bytes，二进制载荷无损；

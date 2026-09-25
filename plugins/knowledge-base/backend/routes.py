@@ -11,11 +11,13 @@
   （下载端点专用，权威原件），再保存**渲染件** `<id>.docx/.xlsx`（旧版格式转换产物，
   供预览与前端降级渲染）；
 - **下载**：`GET /files/<id>/download` 以 attachment 附件形式返回**原件**
-  （Word/Excel 下载给原始文档）；全体登录用户可用；
+  （Word/Excel 下载给原始文档）；**配置了「异步下载源」时优先返回下载源**；
+  全体登录用户可用；
 - **Office 预览（阶段 8，替代原 PDF/手绘两套管线）**：docx/doc/xlsx/xls 由
   vendor 的 xhr（Excel）/dhr（Word）双引擎**按需同步渲染**为 HTML——样式还原、
   连续单页不分页、亚秒级完成，结果缓存 `<id>.preview.json`；
-  `GET /files/<id>/preview` 返回 `{kind, html, warnings}`；渲染失败/引擎缺失
+  `GET /files/<id>/preview` 返回 `{kind, html, warnings, truncated, version,
+  generated_at}`；渲染失败/引擎缺失
   返回 404，前端自动回退 mammoth / SheetJS 降级渲染，不阻断任何功能；
   旧版的 pdf_status/html_status 异步状态机、/pdf、/pdf-retry、/preview-retry
   端点全部移除（引擎亚秒级，无需轮询）；

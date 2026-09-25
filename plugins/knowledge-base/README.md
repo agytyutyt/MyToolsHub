@@ -17,7 +17,7 @@
     状态、无需等待）；渲染失败自动回退 mammoth / SheetJS 简化渲染
     （详见下方「Office 预览（xhr/dhr 双引擎）」）。
   - 多级分类管理：新建 / 重命名 / 移动 / 删除（仅空分类可删，同级不重名）
-  - 文档管理：改名 / 移动分类 / 删除（在文件卡片上右键）
+  - 文档管理：点卡片右侧『编辑』按钮打开管理对话框（改名 / 简介 / 归类 / 删除）（与 `frontend/app.js:325`、`:340-343` 一致）
   - 预览为按需渲染 + 磁盘缓存，无后台状态机，无需手动重转（重开阅读页即重试）
 - **全体登录用户**：浏览分类、阅读、选择复制、**下载文档**（配置了异步下载源则下下载源，
   否则下原件；tools.json 中 `grant_all: true`）
@@ -25,14 +25,15 @@
   以悬浮窗形式固定**在内容卡片之外的左侧留白处**（不在卡片内，故不受内容缩放影响）；
   点击跳转（平滑滚动 + 顶部留白）、滚动高亮当前章节、当前项自动保持在面板可视区。
   左侧留白不足（窄屏 / 内容放大到贴边）时自动隐藏，不压正文；标题少于 2 个不出目录。
-- **只读保证**：无任何编辑接口；渲染容器不可编辑；PDF 版仅在线展示，下载一律给原始文档
+- **只读保证**：无任何编辑接口；渲染容器不可编辑；下载给原件；上传时配置了「异步下载源」则给该下载源（见下文）
 
 ## 技术
 
 - 后端：核心功能纯 Python 标准库；**旧版格式转换**依赖
   openpyxl / xlrd / python-docx / olefile（见 `backend/doc_convert.py`）；
-  **Office 预览**用 vendor 双引擎 `backend/vendor/{xhr,dhr}`（原样拷贝自
-  TestWorkSpace/xlsx-html-preview 项目，纯标准库零第三方依赖，来源见其 README.md），
+  **Office 预览**用 vendor 双引擎 `backend/vendor/{xhr,dhr}`（拷贝自
+  TestWorkSpace/xlsx-html-preview 项目，含 vendor/README.md 登记的 5 条编号补丁，
+  升级引擎时需整目录替换后逐条重打；纯标准库零第三方依赖，来源见其 README.md），
   适配层 `backend/office_render.py`。引擎缺失时预览回退前端降级渲染；
   `.xls` 高保真通道与 `.doc` 归一化**可选**依赖外部 LibreOffice（缺失自动走
   xlrd 兜底 / 明确报错回退），其余功能不受影响（优雅降级，B-4）。
@@ -78,7 +79,8 @@
 | PDF | pdfjs-dist 3.11.174（legacy） | 「复制本页」getTextContent |
 | OFD | easyofd 1.2.1（Canvas + 文本选择层） | 「复制本页」GetPageText |
 - **Word .docx（含 .doc 自动转换）** | 服务端 dhr 引擎 HTML → DOMPurify（**降级渲染**：mammoth 1.6.0） | 选择复制 / 复制全文
-- **Excel .xlsx/.xls/.csv（.xls 上传时已转 xlsx）** | 服务端 xhr 引擎 HTML（自带 sheet 页签）→ DOMPurify（**降级渲染**：SheetJS CE 0.18.5） | sheet 表格 TSV 复制 |
+- **Excel .xlsx/.xls（.xls 上传时已转 xlsx）** | 服务端 xhr 引擎 HTML（自带 sheet 页签）→ DOMPurify（**降级渲染**：SheetJS CE 0.18.5） | sheet 表格 TSV 复制 |
+- **CSV .csv** | 前端 SheetJS CE 0.18.5 直读（**无服务端预览**：`/preview` 对 csv 返回 404，服务端引擎只认 `.doc/.docx/.xls/.xlsx`） | sheet 表格 TSV 复制 |
 | Markdown | marked 4.3.0 → DOMPurify | 复制 Markdown 原文 |
 | 纯文本 | 原生 textContent | 选择复制 / 复制全文 |
 
@@ -126,7 +128,7 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 | 现象 | 根因 | 修法 |
 | --- | --- | --- |
 | 中文"莫名加粗"、笔画竖过细 | 多数客户端**没装 仿宋_GB2312**，引擎 fallback 链跳过同类衬线体直落 `Microsoft YaHei`（黑体）。Canvas 像素签名实测墨量：雅黑 138k vs 仿宋 54k，**差约 2.56 倍** | `_patch_font_fallback()`：在目标字体与雅黑之间插入 `"FangSong","仿宋","SimSun"`，优先落回同类衬线体 |
-| 单元格文字"穿模" | ① 引擎给 `<tr>` 写的 `overflow:hidden` 对 `display:table-row` **无效**；② base CSS **未重置 `<p>` 默认 margin**（浏览器 `1em 0`）撑高单元格；③ `td/th` 缺断行规则 | `_patch_table_overflow()` 清除无效属性 + 补 CSS（`p{margin:0}`、`word-break:break-all`、`td>p:only-child{overflow:hidden}`） |
+| 单元格文字"穿模" | ① 引擎给 `<tr>` 写的 `overflow:hidden` 对 `display:table-row` **无效**；② base CSS **未重置 `<p>` 默认 margin**（浏览器 `1em 0`）撑高单元格；③ `td/th` 缺断行规则 | `_patch_table_overflow()` 清除无效 `overflow:hidden` + `_patch_css()` 追加 CSS 重置（`p{margin:0}`、`word-break:break-all`、`td>p:only-child{overflow:hidden}`） |
 
 实测对比（同一 docx）：实际渲染字体 微软雅黑 → **仿宋**；正文字重 → `font-weight:400`；
 精确行高表格行高 49/67/49px → **33/51/33px**。
@@ -139,21 +141,19 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
   生成，无注入面。
 - **覆盖写法**：`仿宋_GB2312` / `仿宋-GB2312` / `仿宋GB2312` / `FangSong_GB2312` /
   `FangSong-GB2312` / `仿宋_GB2312_CN` + 裸 `仿宋`。
-- **回归断言**：`backend/test_routes_preview.py` 第 0b 节 6 项（补链正确性/顺序、tr 清理、
+- **回归断言**：`backend/test_routes_preview.py` 第 0b 节 5 组（补链正确性/顺序、tr 清理、
   CSS 重置、幂等、内容完整性）。改这段代码必须同步跑该测试。
 
 ### LibreOffice（可选）
 
 仅两条窄路径需要：`.xls` 的高保真归一化通道（缺失时自动 xlrd 兜底）、`.doc` 的
-归一化渲染（缺失时该类预览回退降级）。探测顺序：环境变量 `XHR_SOFFICE`（由插件
-`config.json` 的 `office.soffice_path` 或旧键 `pdf.soffice_path` 自动注入）→
-常见安装路径。未安装不影响其它任何功能。
+归一化渲染（缺失时该类预览回退降级）。探测顺序：① 插件 `config.json` 显式配置（`office.soffice_path` 或旧键 `pdf.soffice_path`，经环境变量 `XHR_SOFFICE` 注入）→ ② 进程环境变量 `XHR_SOFFICE` → ③ **随包便携副本** `runtime/libreoffice/**/program/soffice.exe`（离线部署包解包分发，零配置）。未安装不影响其它任何功能。
 
 ## 运维与注意事项（阶段 8 实测沉淀）
 
 - **预览缓存与失效**：`<id>.preview.json` 按「文件 id 不可变」设计为长期缓存，服务端不主动
   失效，但缓存内记有**格式版本号**（`routes.py` 的 `PREVIEW_CACHE_VERSION`）：**引擎渲染行为
-  变化（vendor 打补丁/升级）时必须递增该常量**，旧缓存会在下次打开阅读页时自动重渲染，
+  变化（**任何会改变预览产物的改动**：vendor 补丁/升级、`office_render.py` 的后处理与渲染参数）都必须递增该常量**，旧缓存会在下次打开阅读页时自动重渲染，
   无需手工清缓存、无需重启服务。排查渲染问题时也可手工删除受影响文件的缓存
   （`data/files/<id>.preview.json`，或整批 `*.preview.json`）。删除文档时缓存自动清理。
 - **vendor 引擎升级流程**：① 整目录替换 `backend/vendor/{xhr,dhr}`；② **重打补丁**——按
@@ -178,7 +178,7 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 - **打包 / 依赖**：引擎零 pip 依赖（纯标准库），`JZToolsHub.spec` 的 PACKAGES **无需**
   为 xhr/dhr 加条目；`backend/vendor/` 由 build-deploy.ps1 随 plugins 整树自动进部署包；
   开发机 `backend/config.json` 不会入包（目标机在数据根配置 soffice 路径，升级持久）；
-  `backend/out/` 测试产物已在打包清理清单。打包后验收点与完整说明见 HANDOFF §5.3.1。
+  `backend/out/` 测试产物已在打包清理清单。打包后验收点与完整说明见 HANDOFF §7.4。
 - **上游已知问题**：① `style_table[0]` 缺格染色 bug（已在本插件 vendor 打补丁，上游待同步）；
   ② LibreOffice `.doc→docx` 归一化对微型表格会退化为制表符段落（内容保留，真实链路不走
   此通道）；③ 条件格式色阶/数据条/图标集、Word 公式/SmartArt/图表为占位渲染（上游 V2 项）。
@@ -191,7 +191,7 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 `{kind, html, warnings, truncated}`，按需渲染 + 缓存，失败 404）、
 `/files/<id>/download`（attachment 下载：有异步下载源则下下载源、否则下原件，
 全体登录用户）。`POST /files` 的 multipart 字段：`file`（必填）+ `name` +
-`category_id` + `download_file`（可选，异步下载源）。
+`category_id` + `download_file`（可选，异步下载源）+ `summary`（可选，≤200 字；上传对话框当前不填报）。
 旧版 `/pdf`、`/pdf-retry`、`/preview-retry` 端点已随状态机一并移除。
 
 ## 已知限制
@@ -224,13 +224,14 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 
 | 项 | 内容 |
 | --- | --- |
-| 框架已打包依赖 | `docx` >=1.0、`flask` >=3.0、`olefile` >=0.46、`openpyxl` >=3.1、`xlrd` >=2.0 |
+| 框架已打包依赖 | `flask` >=3.0（必需，随主包） |
+| 依赖组件包（不随主包） | `docx` >=1.1、`olefile` >=0.46、`openpyxl` >=3.1、`xlrd` >=2.0（缺失时**旧版格式自动转换**不可用；Office 预览由插件自带 vendor 引擎提供，不受影响） |
 | 插件自带依赖（`backend/vendor/`） | `dhr`、`xhr` |
 | 外部程序组件 | `libreoffice`（可选） |
-| 能否单独升级 | ✅ 可以——依赖全部落在框架已打包清单或插件目录内（构建期 C-4/C-10 校验） |
+| 能否单独升级 | ✅ 可以——业务依赖走「依赖组件包」，插件不 import 其他插件（构建期 C-4/C-10/C-11 校验） |
 | 升级是否需重启 | 含 `backend/**` 改动**需要**重启（后台/安装器会自动重启，约 5~10 秒）；纯前端改动免重启，Ctrl+F5 即可 |
 
 > 声明真源是 `manifest.json` 的 `requires`（三类依赖：框架包 / 自带 vendor / 外部程序组件）；
 > 出包工具构建期校验「声明 ↔ 实测 import」一致（C-10）。后台「插件管理」按它显示
 > 逐依赖徽标与可运行性：缺**必需**依赖 → 标记不可运行并暂不加载，补齐后重启自动恢复；
-> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-2 / U-4 / U-6。
+> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-7a / U-8。

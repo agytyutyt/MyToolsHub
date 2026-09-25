@@ -92,7 +92,6 @@ DEFAULT_REPORT = {
     "append_summary": True,     # 报告首行附「速写摘要」
     "split_by_day": False,      # 按日分节
     "fill_holes": True,         # 无数据时段显式标注
-    "append_quality": False,    # 报告尾部附数据质量摘要
     "time_formats": [],         # 追加的时间格式（优先于内置格式尝试）
 }
 

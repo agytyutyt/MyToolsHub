@@ -128,7 +128,10 @@
   }
 
   function hmacMd5HexOfBytes(bytes, keyBytes) {
-    return bytesToHex(hmacBytes(utf8Bytes(keyBytes), bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)));
+    /* 密钥按 RFC 2104 处理：字符串先 UTF-8 编码，字节数组直接使用（此前 String() 化会得到十进制文本，密钥 ≥64B 时结果错误） */
+    const key = typeof keyBytes === "string" ? utf8Bytes(keyBytes)
+      : (keyBytes instanceof Uint8Array ? keyBytes : new Uint8Array(keyBytes));
+    return bytesToHex(hmacBytes(key, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)));
   }
 
   const api = {

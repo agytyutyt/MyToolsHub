@@ -19,7 +19,7 @@
         "name": "docx",
         "version": ">=1.0",
         "required": false,
-        "hint": "缺少 docx：Word 导入导出不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 docx：Word 导入导出不可用。请安装依赖组件包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "flask",
@@ -31,13 +31,13 @@
         "name": "openpyxl",
         "version": ">=3.1",
         "required": false,
-        "hint": "缺少 openpyxl：Excel 导入导出不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 openpyxl：Excel 导入导出不可用。请安装依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "xlrd",
         "version": ">=2.0",
         "required": false,
-        "hint": "缺少 xlrd：xls 导入不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 xlrd：xls 导入不可用。请安装依赖组件包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       }
     ]
   }

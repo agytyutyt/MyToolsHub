@@ -14,11 +14,12 @@
   let allUsers = [];
   let userMap = {}; // username -> 完整用户数据（供编辑浮窗回填）
 
+  // 可授权的管理模块。「权限管理」（permission）已并入「人员管理」并在后端 404 屏蔽
+  // （routes.py 的 ADMIN_MODULES 保留该 id 仅为兼容历史数据），故不再提供勾选项。
   const MODULE_OPTIONS = [
     { id: 'unit', name: '单位管理' },
     { id: 'department', name: '部门管理' },
     { id: 'user', name: '人员管理' },
-    { id: 'permission', name: '权限管理' },
   ];
 
   async function load() {

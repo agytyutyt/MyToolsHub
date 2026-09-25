@@ -3,7 +3,7 @@
 #
 # 用途：
 #   把 plugins\<id>\ 打成一个「插件独立升级包」（zip），供目标机离线单独升级该插件，
-#   不必重出约 122 MB 的整包。包结构 / 字段 / 校验规则见
+#   不必重出整个主包（当前体积见 HANDOFF.md §2.2）。包结构 / 字段 / 校验规则见
 #   docs\design\插件独立升级方案-设计文档.md §4、§6。
 #
 # 用法：
@@ -35,14 +35,14 @@ param(
     [switch]$NoRestart,               # 强制标记"不需要重启"
     [string]$Notes = "",              # 人工变更说明文件（缺省用 git 提交记录自动生成）
     [string]$OutDir = "",             # 缺省 <仓库>\deploy\插件包
-    [string]$RegistryFile = "",       # 发布登记文件（缺省 <仓库>	ools\plugin-packages.json；沙箱/CI 可另指）
+    [string]$RegistryFile = "",       # 发布登记文件（缺省 <仓库>\tools\plugin-packages.json；沙箱/CI 可另指）
     [string]$Python = "python",       # 打包机解释器（依赖扫描 / 自测用）
     [string]$Publish = "",            # 发布目录（内网共享盘）：投放 zip + .sha256 + index.json（阶段三）
     [switch]$RunTests,
     [switch]$Strict,                  # 自测失败即中止（缺省仅警告）
     [switch]$SkipChecks,
     [switch]$NoZip,
-    [switch]$Force                    # 允许同号重打（打上 -ForceRepack 标记并告警）
+    [switch]$Force                    # 允许同号重打（打上 force_repack 标记并告警）
 )
 $ErrorActionPreference = "Stop"
 
@@ -178,7 +178,7 @@ if (($manifest.id) -ne $Id) {
     Die "id 不一致（规范 M-3）：参数 -Id=$Id，manifest.json.id=$($manifest.id)。"
 }
 if ((Split-Path -Leaf $srcDir) -ne $Id) {
-    Die "目录名与 id 不一致（规范 S-2/M-3）：目录 $(Split-Path -Leaf $srcDir)，id=$Id。"
+    Die "目录名与 id 不一致（规范 M-3/R-1）：目录 $(Split-Path -Leaf $srcDir)，id=$Id。"
 }
 Say "  插件      ：$Id（$srcDir）"
 

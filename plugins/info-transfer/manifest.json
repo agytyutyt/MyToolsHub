@@ -17,15 +17,15 @@
     "python_packages": [
       {
         "name": "cv2",
-        "version": ">=4.5",
+        "version": ">=4.7",
         "required": false,
-        "hint": "缺少 cv2：视频码流模式（生成 mp4；静态码模式不受影响）不可用。请安装依赖包 JZToolsHub-依赖-cv2-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 cv2：「信息解析」的图片/视频解码与视频码流模式不可用（生成静态码不受影响）。请安装依赖组件包 JZToolsHub-依赖-cv2-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "docx",
-        "version": ">=1.0",
+        "version": ">=1.1",
         "required": false,
-        "hint": "缺少 docx：docx 精简提取不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 docx：docx 精简提取不可用。请安装依赖组件包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "flask",
@@ -37,49 +37,49 @@
         "name": "numpy",
         "version": ">=1.24",
         "required": false,
-        "hint": "缺少 numpy：视频码流模式（生成 mp4；静态码模式不受影响）不可用。请安装依赖包 JZToolsHub-依赖-numpy-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 numpy：「信息解析」的图片/视频解码与视频码流模式不可用（生成静态码不受影响）。请安装依赖组件包 JZToolsHub-依赖-numpy-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "olefile",
         "version": ">=0.46",
         "required": false,
-        "hint": "缺少 olefile：doc 旧版二进制提取不可用。请安装依赖包 JZToolsHub-依赖-olefile-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 olefile：doc 旧版二进制提取不可用。请安装依赖组件包 JZToolsHub-依赖-olefile-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "openpyxl",
         "version": ">=3.1",
         "required": false,
-        "hint": "缺少 openpyxl：xlsx 精简提取不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 openpyxl：xlsx 精简提取不可用。请安装依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "pypdf",
         "version": ">=4.0",
         "required": false,
-        "hint": "缺少 pypdf：pdf 精简提取不可用。请安装依赖包 JZToolsHub-依赖-pypdf-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 pypdf：pdf 精简提取不可用。请安装依赖组件包 JZToolsHub-依赖-pypdf-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "qrcode",
         "version": ">=7.4",
         "required": false,
-        "hint": "缺少 qrcode：全部出码功能不可用。请安装依赖包 JZToolsHub-依赖-qrcode-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 qrcode：全部出码功能不可用。请安装依赖组件包 JZToolsHub-依赖-qrcode-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "xlrd",
         "version": ">=2.0",
         "required": false,
-        "hint": "缺少 xlrd：xls 精简提取不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 xlrd：xls 精简提取不可用。请安装依赖组件包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "zfec",
         "version": ">=1.6",
         "required": false,
-        "hint": "缺少 zfec：纠删码（出码/解码）不可用。请安装依赖包 JZToolsHub-依赖-zfec-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 zfec：纠删码（出码/解码）不可用。请安装依赖组件包 JZToolsHub-依赖-zfec-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "zxingcpp",
-        "version": ">=2.0",
+        "version": ">=2.2",
         "required": false,
-        "hint": "缺少 zxingcpp：视频解码校验不可用。请安装依赖包 JZToolsHub-依赖-zxingcpp-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 zxingcpp：v2 二进制码的解码与校验不可用（v1 文本码不受影响）。请安装依赖组件包 JZToolsHub-依赖-zxingcpp-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       }
     ]
   }

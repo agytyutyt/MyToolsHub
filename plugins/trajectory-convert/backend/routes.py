@@ -1,7 +1,7 @@
 """轨迹转换 —— JZToolsHub 后端插件路由。
 
 功能：读取 Excel 轨迹表（至少含时间 / 经度 / 纬度三列，列名不统一可通过
-插件目录下 config.json 自定义，默认「开始时间 / 经度 / 纬度」），从最早时间
+数据根 plugins/trajectory-convert/config.json 自定义，默认「开始时间 / 经度 / 纬度」），从最早时间
 起按固定时间间隔抽样，若目标时刻无数据则取距离该时刻最近的一条（保留原始
 时间 / 经度 / 纬度），抽样结果封装为 JSON，再经 QR-transfer 协议编码为
 二维码视频流（zfec 前向纠错 + qrcode 渲染 + opencv 写视频）。
@@ -140,7 +140,7 @@ _TASK_DIR = jztools_data.get_data_root_dir("plugins", "trajectory-convert", ".ta
 # ===================== 配置读取 =====================
 
 def load_config():
-    """读取插件目录 config.json 中的字段名默认值。"""
+    """读取数据根 plugins/trajectory-convert/config.json 中的字段名默认值。"""
     cfg = dict(DEFAULT_FIELDS)
     try:
         if os.path.isfile(_CONFIG_PATH):
@@ -229,7 +229,7 @@ def _read_excel_rows(path, filename):
     ext = (filename or path).lower().rsplit(".", 1)[-1]
     if ext == "xlsx":
         if not OPENPYXL_AVAILABLE:
-            raise RuntimeError("后端缺少 openpyxl，无法解析 .xlsx，请执行：pip install openpyxl")
+            raise RuntimeError("后端缺少 openpyxl，无法解析 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         try:
             ws = wb.active
@@ -248,7 +248,7 @@ def _read_excel_rows(path, filename):
         return rows
     if ext == "xls":
         if not XLRD_AVAILABLE:
-            raise RuntimeError("后端缺少 xlrd，无法解析 .xls，请执行：pip install xlrd")
+            raise RuntimeError("后端缺少 xlrd，无法解析 .xls。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-xlrd-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
         book = xlrd.open_workbook(path)
         sheet = book.sheet_by_index(0)
         rows = []
@@ -293,7 +293,7 @@ def _find_header(rows, fields):
     hint = "、".join(f"「{h}」" for h in headers[:10]) or "无"
     raise ValueError(
         f"未能在表格表头中找到字段：{fields['time_field']} / {fields['lng_field']} / "
-        f"{fields['lat_field']}。当前表头：{hint}（可在插件页面或 backend/config.json 自定义字段名）"
+        f"{fields['lat_field']}。当前表头：{hint}（可在数据根 plugins/trajectory-convert/config.json 自定义字段名，经 `jztools_data.get_data_root_file` 定位）"
     )
 
 
@@ -551,9 +551,8 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
                 ("opencv-python(cv2)", CV2_AVAILABLE), ("numpy", NUMPY_AVAILABLE),
             ) if not ok
         ]
-        raise RuntimeError("后端缺少依赖：" + "、".join(missing) + "，请先安装：pip install " + " ".join(
-            n for n in ("qrcode", "zfec", "opencv-python", "numpy")
-        ))
+        raise RuntimeError("后端缺少依赖：" + "、".join(missing) +
+                           "。请管理员在「管理后台 → 插件管理」按依赖徽标安装对应「依赖组件包」（免重启生效）")
 
     err = qrcode_constants.ERROR_CORRECT_L
     payload = len(raw_bytes).to_bytes(SIZE_DATASIZE, BYTE_ORDER) + raw_bytes
@@ -642,7 +641,7 @@ def encode_static_output(payload, version, out_dir, prefix):
     文件命名：{prefix}_01.png（单张）、{prefix}_01.png … {prefix}_NN.png（多张）。
     """
     if not QRCODE_AVAILABLE:
-        raise RuntimeError("后端缺少 qrcode 依赖，请先安装：pip install qrcode")
+        raise RuntimeError("后端缺少 qrcode 依赖。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-qrcode-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     err = qrcode_constants.ERROR_CORRECT_L
     raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     single = os.path.join(out_dir, f"{prefix}_01.png")
@@ -779,7 +778,7 @@ def register(app) -> None:
         if f.filename.lower().rsplit(".", 1)[-1] not in ("xlsx", "xls"):
             return jsonify({"ok": False, "detail": "仅支持 .xlsx / .xls 文件"}), 400
 
-        # 字段名仅从后端配置文件读取（plugins/trajectory-convert/backend/config.json），
+        # 字段名仅从运行配置读取（数据根 plugins/trajectory-convert/config.json，经 jztools_data 定位），
         # 不在页面展示，也不接受前端覆盖。
         cfg = load_config()
 
@@ -947,12 +946,15 @@ def register(app) -> None:
         )
 
 
-# 依赖 → 失效功能 → 修复指引（供 /status 的 missing_deps 与前端横幅使用）
+# 依赖 → 失效功能 → 依赖组件包名（None = 无对应组件包，只能升级主包）
+# 注：包名要与 deploy/依赖组件/JZToolsHub-依赖-<pkg>-v*.zip 的 <pkg> 一致（如 cv2 而非 opencv-python），
+# 否则用户按提示找不到包——历史上这里写死成「OpenCV」且把 qrcode/zfec 判成"无组件"，
+# 两者的组件包其实都存在。
 _DEP_FEATURES = [
-    ("opencv-python(cv2)", CV2_AVAILABLE, "视频码流模式（生成 mp4）", True),
-    ("numpy", NUMPY_AVAILABLE, "视频码流模式（生成 mp4）", True),
-    ("qrcode", QRCODE_AVAILABLE, "全部出码功能", False),
-    ("zfec", ZFEC_AVAILABLE, "全部出码功能（纠删码）", False),
+    ("opencv-python(cv2)", CV2_AVAILABLE, "视频码流模式（生成 mp4）", "cv2"),
+    ("numpy", NUMPY_AVAILABLE, "视频码流模式（生成 mp4）", "numpy"),
+    ("qrcode", QRCODE_AVAILABLE, "全部出码功能", "qrcode"),
+    ("zfec", ZFEC_AVAILABLE, "全部出码功能（纠删码）", "zfec"),
 ]
 
 
@@ -980,14 +982,19 @@ _declared = _declared_requires()
 def _missing_deps():
     """缺失的依赖清单：指出**哪个依赖未满足、会导致什么功能失效、怎么修**。
 
-    cv2/numpy 由「依赖组件包」按需提供（不随主包，见 docs/design/主体与插件解耦-设计文档.md
-    §3.4 / T25）：未装组件时本插件仍可加载，但视频码流模式不可用——这里给出可操作的提示。
+    第三方依赖一律由「依赖组件包」按需提供（不随主包，见 docs/design/主体与插件解耦-设计文档.md
+    §3.4 / T25）：未装组件时本插件仍可加载，仅对应功能不可用——这里给出**可照做**的提示，
+    包名与入口名必须与 `deploy/依赖组件/` 的真实产物一致。
     """
     out = []
-    for name, ok, feature, by_component in _DEP_FEATURES:
+    for name, ok, feature, component in _DEP_FEATURES:
         if ok:
             continue
-        out.append({"name": name, "feature": feature,
-                    "fix": "请安装「依赖组件包」（JZToolsHub-依赖组件-OpenCV-*.zip，解压后双击「安装依赖组件.bat」）" if by_component else "请升级主包或联系维护者"})
+        if component:
+            fix = ("请安装依赖组件包 JZToolsHub-依赖-%s-v*.zip"
+                   "（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。" % component)
+        else:
+            fix = "请升级主包或联系维护者。"
+        out.append({"name": name, "feature": feature, "fix": fix})
     return out
 

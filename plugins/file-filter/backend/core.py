@@ -115,7 +115,7 @@ def _pad_rows(rows):
 
 def _read_xlsx(path):
     if not OPENPYXL_AVAILABLE:
-        raise TableError("后端缺少 openpyxl，无法解析 .xlsx，请执行：pip install openpyxl")
+        raise TableError("后端缺少 openpyxl，无法解析 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as e:
@@ -134,7 +134,7 @@ def _read_xlsx(path):
 
 def _read_xls(path):
     if not XLRD_AVAILABLE:
-        raise TableError("后端缺少 xlrd，无法解析 .xls，请执行：pip install xlrd")
+        raise TableError("后端缺少 xlrd，无法解析 .xls。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-xlrd-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     try:
         book = xlrd.open_workbook(path)
     except Exception as e:
@@ -323,7 +323,7 @@ def _write_csv(path, headers, rows):
 
 def _write_xlsx(path, headers, rows):
     if not OPENPYXL_AVAILABLE:
-        raise TableError("后端缺少 openpyxl，无法生成 .xlsx，请执行：pip install openpyxl")
+        raise TableError("后端缺少 openpyxl，无法生成 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sheet1"

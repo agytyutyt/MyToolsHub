@@ -10,7 +10,7 @@
 - **来源**：`D:\TestWorkSpace\xlsx-html-preview\python\`（xhr/dhr 0.1.0，MIT License，
   pyproject 声明核心链路零第三方依赖；`.xls` 兜底通道用 xlrd，`.doc` 归一化用外部
   LibreOffice——两者都是可选依赖）
-- **拷贝日期**：2026-09-13；除下述四处补丁外未改动引擎源码（升级时整目录替换后需重打这四处补丁）：
+- **拷贝日期**：2026-09-13；除下述编号补丁外未改动引擎源码（**补丁条数以本文件实际编号为准**，升级时整目录替换后需逐条重打）：
 
   1. `xhr/__init__.py` 顶部补 `from typing import Optional`
      —— **上游缺该导入**：第 84 行 `def convert(data: bytes, options: Optional[ConvertOptions] = None)`

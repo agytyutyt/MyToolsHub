@@ -809,7 +809,7 @@
       if (missing.length) {
         var el = $("#deps");
         el.classList.remove("hidden");
-        el.textContent = "提示：未安装 " + missing.join("、") + "，在线编辑不受影响，但导入 / 导出 Office 文件将不可用。请执行：pip install " + missing.join(" ").replace(/（.*?）/g, "");
+        el.textContent = "提示：未安装 " + missing.join("、") + "，在线编辑不受影响，但导入 / 导出 Office 文件将不可用。请管理员在「管理后台 → 插件管理」按依赖徽标安装对应「依赖组件包」（免重启生效）。";
       }
     }).catch(function () {});
   }

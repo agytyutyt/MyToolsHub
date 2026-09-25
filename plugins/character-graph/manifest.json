@@ -8,7 +8,7 @@
     "大模型抽取",
     "3D 可视化",
     ".docx/.pdf",
-    "离线可用"
+    "Three.js 本地渲染"
   ],
   "version": "1.2.0",
   "author": "JZToolsHub 团队",
@@ -19,7 +19,7 @@
         "name": "docx",
         "version": ">=1.0",
         "required": false,
-        "hint": "缺少 docx：人物档案 Word 解析不可用。请安装依赖包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 docx：人物档案 Word 解析不可用。请安装依赖组件包 JZToolsHub-依赖-docx-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "flask",
@@ -31,13 +31,13 @@
         "name": "pypdf",
         "version": ">=4.0",
         "required": false,
-        "hint": "缺少 pypdf：人物档案 PDF 解析不可用。请安装依赖包 JZToolsHub-依赖-pypdf-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 pypdf：人物档案 PDF 解析不可用。请安装依赖组件包 JZToolsHub-依赖-pypdf-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "requests",
         "version": ">=2.31",
         "required": false,
-        "hint": "缺少 requests：大模型辅助抽取不可用。请安装依赖包 JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 requests：大模型辅助抽取不可用。请安装依赖组件包 JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       }
     ]
   }

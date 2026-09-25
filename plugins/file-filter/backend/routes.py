@@ -436,8 +436,9 @@ def register(app):
             return jsonify({"error": "仅管理员可修改过滤配置"}), 403
         data = request.get_json(silent=True) or {}
         cfg = load_config()
-        # 统一大模型落地后本插件不再接受接入信息，也不覆盖 config.json 里的历史 llm 段：
-        # 那是升级前的旧 Key，jz_llm 在统一配置为空时仍会读它（兼容桥）。
+        # 统一大模型落地后本插件不再接受接入信息，也不读取 config.json 里的历史 llm 段：
+        # 该段由启动迁移（migrate_plugin_legacy_llm）收编进统一配置并清除；
+        # jz_llm.resolve() 的 plugin_id 不参与解析（兼容桥已于 2026-09-23 移除），本插件不再读取它。
         if "keep_columns" in data:
             keep = data.get("keep_columns")
             cfg["keep_columns"] = [str(k).strip()[:100] for k in keep if str(k).strip()] \

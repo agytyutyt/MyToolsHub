@@ -88,7 +88,8 @@ def main():
 
     check(z.testzip() is None, "zip CRC 全量校验")
     # 阈值随解耦下调：主包不再携带业务插件（-250 条目）、pandas（-900 条目）、cv2/numpy（-1500 条目）。
-    # 实测 v2.2.0 主包 1095 个文件（解耦前 3031），阈值取 900 用于兜住"打错目录/漏拷"这类事故。
+    # 实测 v2.2.0 主包 1095 个文件（解耦前 3031），当前实测 542 个文件；阈值取 250
+    # 用于兜住"打错目录/漏拷"这类事故。
     check(len(files) > 250, "文件数合理", "%d 文件 / %d 条目" % (len(files), len(names)))
     top = set(n.split("/")[0] for n in names)
     check("JZToolsHub" not in top and "dist" not in top,

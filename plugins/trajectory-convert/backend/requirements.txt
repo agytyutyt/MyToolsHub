@@ -7,4 +7,4 @@ numpy>=1.24
 # 直接 pip install 会回退到源码编译（需 MSVC）。安装时请加 --find-links 指向仓库 wheels/：
 #   pip install --find-links wheels -r plugins/trajectory-convert/backend/requirements.txt
 # 详见 wheels/README.md
-zfec>=1.5
+zfec>=1.6

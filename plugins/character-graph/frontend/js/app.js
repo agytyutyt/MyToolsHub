@@ -417,7 +417,7 @@ function openDetailModal(data) {
           (l) =>
             `<li><span class="rel-dot" style="background:${l.dot}"></span><span class="rel-text">${escapeHtml(
               l.text
-            )}</span><span class="rel-strength">亲密度 ${(l.strength * 100).toFixed(0)}%</span></li>`
+            )}</span><span class="rel-strength">亲密度 ${(((l.strength || 5) / 10) * 100).toFixed(0)}%</span></li>`
         )
         .join("")}</ul>`
     : `<div class="rel-title">关联关系</div><p class="desc">暂无关联关系</p>`;

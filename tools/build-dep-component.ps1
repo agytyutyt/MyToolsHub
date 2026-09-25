@@ -9,7 +9,7 @@
 #   2) 当前 Python 的 site-packages —— 开发机直接取（-From 可显式指定）
 #
 # 产物（OutDir 缺省 deploy\依赖组件\）：
-#   JZToolsHub-依赖组件-<名称>-v<版本>.zip
+#   JZToolsHub-依赖-<Id>-v<版本>.zip（文件名取 $Id，与 manifest 里的依赖名对齐，非显示名）
 #     ├── dep-component.json      # 包清单：id/名称/版本/提供的包与版本/适用主程序版本
 #     ├── manifest.json           # 装到 runtime\pylibs\ 的组件清单（主体与后台读它）
 #     ├── 安装依赖组件.bat         # 双击入口
@@ -17,12 +17,16 @@
 #     ├── 说明.md
 #     └── payload\pylibs\{cv2,numpy,numpy.libs}\…
 param(
-    [string]$Id = "opencv",           # 组件 id（机器可读，进文件名：JZToolsHub-依赖组件-<id>-v<版本>.zip）
+    [string]$Id = "opencv",           # 组件 id（机器可读，进文件名：JZToolsHub-依赖-<id>-v<版本>.zip）
+                                      # ⚠️ 必须与插件 manifest 的 requires.python_packages[].name 一致
+                                      #    （实测产物为 cv2 / numpy / docx / pypdf / zxingcpp …，
+                                      #     不是 PyPI 发行名 opencv-python / python-docx），
+                                      #     否则插件提示的包名与用户手上的文件对不上。
     [string]$Name = "",               # 显示名（缺省取预置表 / 同 id）
     [string]$Packages = "",           # 载荷目录（逗号分隔；缺省取预置表）
     [string]$Provides = "",           # 对外提供的 import 名（缺省=载荷去掉 *.libs 等支撑目录）
     [string]$Requires = "",           # 依赖的其它组件 id（逗号分隔；缺省取 UNITS 表）——写进清单供安装器校验
-    [string]$Affects = "",            # 兼容保留（提示文案已改由插件声明，不再写进依赖包清单）
+    [string]$Affects = "",            # 生效功能描述（缺省取 UNITS 表该组件的 affects；写入清单并在安装成功时回显）
     [string]$Version = "",            # 缺省取首个可导入包的实际版本
     [string]$From = "",
     [string]$OutDir = "",
@@ -51,19 +55,77 @@ $VcRuntimeDlls = @(
 #   提示文案不在这里：缺哪个依赖、影响什么、怎么修，由插件自己声明
 #   （manifest.requires[].hint，见《插件设计规范.md》U-8），框架只原样展示。
 $UNITS = @{
-    "numpy"    = @{ payload = @("numpy", "numpy.libs") }
+    # affects / why / impact 三项供**包内文案**生成（bat 的"用途"行、说明.md 的"为什么要单独装"段），
+    # 也是安装成功后 `JZToolsHub.exe` 回显"完成：本组件已可用（…）"的来源（经 dep-component.json
+    # 的 affects 字段 → <程序目录>\runtime\pylibs\manifest.json）。新登记组件请一并写这三项。
+    "numpy"    = @{
+        payload = @("numpy", "numpy.libs")
+        affects = "桌面端视频码流与图片/视频解码的数值底层（cv2 的运行时依赖）"
+        why     = "它是 cv2 的公共底层，独立成组件才能在「只装 cv2」时给出可照做的提示，而不是报组件损坏"
+        impact  = "cv2 无法 import，桌面端视频码流模式与信息解析的图片/视频解码不可用（生成静态码不受影响）"
+    }
     # cv2 的 Python 绑定在 import 期就要 numpy（实测 "OpenCV bindings requires numpy"）——
     # 组件间依赖必须显式声明，安装器才能在"只装 cv2"时给出可照做的提示，而不是报"组件损坏"。
-    "cv2"      = @{ payload = @("cv2", "cv2.libs"); requires = @("numpy") }
-    "openpyxl" = @{ payload = @("openpyxl", "et_xmlfile") }
-    "docx"     = @{ payload = @("docx", "lxml", "lxml.libs", "typing_extensions.py") }
-    "xlrd"     = @{ payload = @("xlrd") }
-    "olefile"  = @{ payload = @("olefile") }
-    "pypdf"    = @{ payload = @("pypdf") }
-    "qrcode"   = @{ payload = @("qrcode", "colorama") }
-    "zfec"     = @{ payload = @("zfec") }
-    "zxingcpp" = @{ payload = @("zxingcpp", "zxingcpp.libs") }
-    "requests" = @{ payload = @("requests", "urllib3", "certifi", "idna", "charset_normalizer") }
+    "cv2"      = @{
+        payload = @("cv2", "cv2.libs"); requires = @("numpy")
+        affects = "信息传输 / 轨迹转换的视频码流模式（生成 mp4），以及「信息解析」的图片/视频二维码解码"
+        why     = "opencv-python + numpy 压缩后约 60 MB，是主包体积的大头"
+        impact  = "视频码流模式与「信息解析」的图片/视频解码不可用（**生成静态二维码完全不受影响**）"
+    }
+    "openpyxl" = @{
+        payload = @("openpyxl", "et_xmlfile")
+        affects = "过滤器 / 轨迹速写 / 轨迹转换 / 信息传输 / 共享文档 / 知识库 / 战果录入 / 管理后台的 xlsx 读写"
+        why     = "表格读写只在部分场景用到，不必让每台机器都背"
+        impact  = "上述插件的 xlsx 读写与旧版 .xls 自动转换不可用（其余功能不受影响）"
+    }
+    "docx"     = @{
+        payload = @("docx", "lxml", "lxml.libs", "typing_extensions.py")
+        affects = "共享文档与人物档案的 Word 导入导出、知识库旧版 .doc 的自动转换"
+        why     = "python-docx 连带 lxml 体积可观，而只有 Word 场景需要"
+        impact  = "Word 导入导出与旧版 .doc 自动转换不可用（.docx 预览由插件自带引擎提供，不受影响）"
+    }
+    "xlrd"     = @{
+        payload = @("xlrd")
+        affects = "各插件对旧版 .xls 的读取（含信息传输的 xls 精简提取与轨迹类的表格读取）"
+        why     = "只服务 .xls 这一历史格式"
+        impact  = "旧版 .xls 读取不可用（.xlsx / .csv 不受影响）"
+    }
+    "olefile"  = @{
+        payload = @("olefile")
+        affects = "旧版 .doc 的 OLE2 复合文档读取（自动转换链路）"
+        why     = "只服务旧版 .doc 格式"
+        impact  = "旧版 .doc 自动转换不可用"
+    }
+    "pypdf"    = @{
+        payload = @("pypdf")
+        affects = "信息传输的 pdf 精简提取、人物档案的 PDF 解析"
+        why     = "只有 PDF 场景需要"
+        impact  = "PDF 文本提取不可用（其余格式不受影响）"
+    }
+    "qrcode"   = @{
+        payload = @("qrcode", "colorama")
+        affects = "信息传输与轨迹转换的全部出码功能（静态码与视频帧渲染）"
+        why     = "出码是这两个插件的核心能力，但不该让不用它们的机器也背"
+        impact  = "全部出码功能不可用"
+    }
+    "zfec"     = @{
+        payload = @("zfec")
+        affects = "信息传输的纠删码（视频流出码/解码）与「QR 视频流解码」插件"
+        why     = "Python 3.14 无官方 wheel、需预编译，随包会拖累主包且升级小版本要重做"
+        impact  = "视频流纠删码的编码与解码不可用（静态单码不受影响）"
+    }
+    "zxingcpp" = @{
+        payload = @("zxingcpp", "zxingcpp.libs")
+        affects = "信息传输对 v2 二进制码的解码与校验"
+        why     = "带原生扩展，只有二维码解码需要"
+        impact  = "v2 二进制码的解码与校验不可用（v1 文本码不受影响）"
+    }
+    "requests" = @{
+        payload = @("requests", "urllib3", "certifi", "idna", "charset_normalizer")
+        affects = "统一大模型模块 jz_llm 的 HTTP 调用（战果录入 / 人物档案 / 过滤器 / 轨迹速写的大模型辅助）"
+        why     = "只有大模型调用需要"
+        impact  = "所有大模型辅助功能不可用（本地规则与硬过滤不受影响）"
+    }
 }
 
 $ErrorActionPreference = "Stop"
@@ -95,6 +157,14 @@ if (-not $Provides) { $Provides = $Id }        # 单元只"提供"它自己；�
 $pkgList = @($Packages -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($pkgList.Count -eq 0) { Die "-Packages 为空（载荷目录清单缺失）" }
 $provideList = @($Provides -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+
+# 文案解析：优先用 -Affects 显式传入，其次取 UNITS 表的该组件条目，最后给通用兜底。
+# ★ 组件包内的三处文案（bat 两行 + 说明.md 两段）必须**按组件生成**——它们曾硬编码为 cv2
+#   场景（"（opencv-python + numpy）""用途：视频码流模式""却占主包约 60 MB"），
+#   导致 11 个组件里 10 个的包内说明与该组件实际用途相反。
+$affText    = if ($Affects) { $Affects } elseif ($unit -and $unit.affects) { $unit.affects } else { "见本组件说明与《干净机器部署验收手册》§2 的逐组件用途表" }
+$whyText    = if ($unit -and $unit.why) { $unit.why } else { "它只在部分场景被用到，不必让每台机器都随主包背" }
+$impactText = if ($unit -and $unit.impact) { $unit.impact } else { "对应功能不可用，其余功能不受影响" }
 
 # ---- 1. 定位取源 ----
 $cands = @()
@@ -188,7 +258,7 @@ $manifest = [ordered]@{
         packages = $verMap
         modules  = $mods
         provides = @($provideList)
-        affects  = $Affects
+        affects  = $affText
         python   = $pyVer
         platform = "win-amd64"
         vc_runtime = @($vcBundled)
@@ -246,7 +316,7 @@ $pkgMeta = [ordered]@{
     name            = $Name
     version         = $Version
     provides        = @($provideList)
-    affects         = $Affects
+    affects         = $affText
     built_at        = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     built_from      = [ordered]@{ commit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1); source = $srcDir }
     size_bytes      = [long]$totalBytes
@@ -265,8 +335,8 @@ $bat = @"
 @echo off
 chcp 65001 >nul
 title JZToolsHub 依赖组件安装
-echo 正在安装依赖组件「$Name」v$Version（opencv-python + numpy）...
-echo 用途：信息传输 / 轨迹转换的**视频码流模式**（静态码模式不需要本组件）。
+echo 正在安装依赖组件「$Name」v$Version（$($verMap.Keys -join " + ")）...
+echo 用途：$affText。
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-dep-component.ps1"
 echo.
@@ -281,7 +351,7 @@ $notes += "包含：" + (($verMap.GetEnumerator() | ForEach-Object { "$($_.Key) 
 $notes += ""
 $notes += "## 为什么要单独装"
 $notes += ""
-$notes += "本组件只服务：" + $(if ($Affects) { "**$Affects**" } else { "（见插件 README）" }) + "，"
+$notes += "本组件只服务：**$affText**，"
 if ($requireList.Count -gt 0) {
     $notes += "**前置**：本组件需要先安装依赖组件 **" + ($requireList -join "、") + "**" +
               "（它的运行时依赖不并入本包，避免同一份库被重复分发）；"
@@ -290,9 +360,9 @@ if ($requireList.Count -gt 0) {
     $notes += "**服务在运行也能装**：若组件文件正被运行中的服务占用（Windows 不允许覆盖已加载的 DLL），"
     $notes += "安装器会**自动暂存**并提示「重启服务后自动生效」——不会打断当前服务，也不会留下半个组件。"
 }
-$notes += "却占主包约 60 MB。解耦后它们不随主包，改由本组件按需安装——"
-$notes += "不装则：插件照常加载，视频码流模式不可用（**静态二维码模式完全不受影响**），"
-$notes += "后台「插件管理」会把这些插件标为「降级」并指出缺哪个依赖。"
+$notes += "$whyText。解耦后它不随主包，改由本组件按需安装——"
+$notes += "不装则：$impactText。插件本身照常加载，"
+$notes += "后台「插件管理」会把受影响的插件标为「降级」并指出缺哪个依赖。"
 $notes += ""
 $notes += "## 安装"
 $notes += ""
@@ -305,7 +375,7 @@ Write-Utf8NoBom (Join-Path $staging "说明.md") ($notes -join "`n")
 if ($NoZip) { Say ""; Say "==> [-NoZip] 已组装：$staging"; exit 0 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-# 文件名对齐插件包约定：JZToolsHub-依赖组件-<id>-v<版本>.zip（id 机器可读、可容纳多个组件）
+# 文件名约定：JZToolsHub-依赖-<Id>-v<版本>.zip（与 manifest 里的依赖名对齐，见 param 块注释）
 $zipPath = Join-Path $OutDir ("JZToolsHub-依赖-{0}-v{1}.zip" -f $Id, $Version)
 if ((Test-Path -LiteralPath $zipPath) -and -not $Force) { Die "产物已存在：$zipPath（加 -Force 覆盖）" }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }

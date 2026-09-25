@@ -12,13 +12,14 @@
 #       确需同号重打时加 -Force。
 #       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json，并在与基线
 #       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
-#       默认**不**把离线运行组件打进包（主包瘦身，约 100 MB 级）：Chrome 与 LibreOffice
+#       默认**不**把离线运行组件打进包（主包瘦身，约 27 MB 级（以出包产物为准））：Chrome 与 LibreOffice
 #       改由独立的「离线组件包」分发，目标机按需一键安装（见 tools\build-offline-component.ps1
 #       与 docs\guide\LibreOffice核心组件一键安装评估.md）。要出旧式「组件随包」的胖包时加
 #       -WithOfflineRuntime；-SkipOfflineRuntime 为旧开关，现已等价于默认行为（保留仅为兼容）。
 #       LibreOffice 若已生成裁剪核心包（runtime\libreoffice\libreoffice-core.zip，
 #       用 tools\build-libreoffice-core.py 生成），随包时默认「用它替代原始 MSI」，
-#       包内体积由 357.5 MB 降到约 166 MB；仍要随包带完整 MSI 时加 -KeepFullLibreOffice。
+#       包内体积由 357.5 MB 降到约 166 MB；加 -KeepFullLibreOffice 保留包内完整 LibreOffice MSI
+#       （与裁剪核心包并存，包体约 682 MB；默认仅留裁剪核心包）。
 param(
     [string]$Python = "python",
     [string]$DeployName = "JZToolsHub",
@@ -270,7 +271,9 @@ Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留�
 #        其中 libreoffice\libreoffice-core.zip 由 tools\build-libreoffice-core.py 生成（裁剪核心包）
 #   源 B：tools\offline-runtime\    —— 随包脚本与说明（入库，随每版一起更新）
 #   组装后：<AppDir>\runtime\{ manifest.json, README.md, 安装离线组件.bat, setup-offline-runtime.ps1,
+#                              install-libreoffice-core.ps1, 安装LibreOffice核心组件.bat, 卸载LibreOffice核心组件.bat,
 #                              chrome\*.msi, libreoffice\{libreoffice-core.zip,.json} 或 libreoffice\*.msi }
+#   （安装日志-LibreOffice核心.txt 由安装器在目标机运行时生成，不随包）
 #   $offlineSummary 记录随包的离线组件（写进 version.json.offline）；默认瘦包时为空串。
 $offlineSummary = @()
 #   默认**不**组装（主包瘦身）：Chrome 与 LibreOffice 由独立的「离线组件包」分发，

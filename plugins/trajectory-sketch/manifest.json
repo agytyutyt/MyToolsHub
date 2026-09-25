@@ -26,13 +26,19 @@
         "name": "openpyxl",
         "version": ">=3.1",
         "required": false,
-        "hint": "缺少 openpyxl：报告导出与表格读取（xlsx）不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 openpyxl：报告导出与表格读取（xlsx）不可用。请安装依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
+      },
+      {
+        "name": "requests",
+        "version": ">=2.28",
+        "required": false,
+        "hint": "缺少 requests：大模型辅助判断（表头语义关联）不可用，硬过滤不受影响。请安装依赖组件包 JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "xlrd",
         "version": ">=2.0",
         "required": false,
-        "hint": "缺少 xlrd：轨迹表 xls 读取不可用。请安装依赖包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 xlrd：轨迹表 xls 读取不可用。请安装依赖组件包 JZToolsHub-依赖-xlrd-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       }
     ]
   }

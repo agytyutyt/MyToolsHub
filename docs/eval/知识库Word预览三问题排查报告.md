@@ -2,8 +2,10 @@
 
 > **状态：已修复（2026-09-18）**。修复实现见 `plugins/knowledge-base/backend/office_render.py`
 > 的 `_polish_word_html()` 及其子补丁函数；回归断言见
-> `plugins/knowledge-base/backend/test_routes_preview.py` 第 0b 节（6 项）。
-> vendor 保持零改动（B-7 约定）。
+> `plugins/knowledge-base/backend/test_routes_preview.py` 第 0b 节（5 组，①~⑤）。
+> vendor 目录除 vendor/README.md 登记的 5 条编号补丁外不改引擎源码（升级时整目录
+> 替换后逐条重打；相关约束见插件设计规范 S-9/U-2/U-7，勿引 B-7——B-7 是禁止跨插件
+> import 条款）。
 
 ## 1. 结论速览
 

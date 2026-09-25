@@ -87,7 +87,8 @@
   }
 
   // 阅读视图每次打开都重新拉取字节流（Range 缓存由框架处理）
-  // url 为空 = 默认 /raw（渲染件）；word/excel 的 PDF 预览传 /pdf
+  // url 为空 = 默认 /raw（原件字节流）；Word/Excel 走 /preview 的 HTML，
+  // **原 /pdf 端点已随 PDF 管线废弃删除**，不要再引用
   function fetchUrl(file, url) {
     if (!url) url = "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/raw";
     return fetch(url)
@@ -541,7 +542,8 @@
   // ==================== 渲染器：PDF（PDF.js，流式连续布局） ====================
   var pdfState = null;
 
-  // url 为空 = 默认 /raw（渲染件）；word/excel 的 PDF 预览传 /pdf
+  // url 为空 = 默认 /raw（原件字节流）；Word/Excel 走 /preview 的 HTML，
+  // **原 /pdf 端点已随 PDF 管线废弃删除**，不要再引用
   // 流式连续布局：全部页面纵向排列（页间留间隔），占位框按各页比例预留尺寸，
   // 进入视口附近才渲染（IntersectionObserver，Chrome 72 可用）——
   // 大文档不卡首屏；页码指示随滚动更新，‹ › 改为滚动到上/下一页。
@@ -948,7 +950,8 @@
   };
 
   // 需要页码导航的格式（按**实际使用的渲染器**判定，不按扩展名：
-  // word/excel 转出 PDF 后同样需要翻页/缩放）
+  // 仅原生 PDF / OFD 走 pdf.js / EasyOFD 时才有 ‹ › 翻页与页码；
+  // 早先"word/excel 转出 PDF 再翻页"的管线已删除）
   var NAV_FORMATS = { pdf: 1, ofd: 1 };
 
   function render(file, cbs) {

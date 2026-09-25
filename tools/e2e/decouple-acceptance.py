@@ -17,7 +17,7 @@ r"""主体与插件解耦 · 阶段验收（S1）——把 AC 里可自动化的
     python tools\e2e\decouple-acceptance.py --zip <主包zip>  # 指定主包（AC-1）
 
 真机（人工）部分不在本脚本内：托盘常驻、浏览器实际渲染、真实 exe 的服务启停——
-见 `docs/plan/主体与插件解耦-TODO.md` T20 的人工步骤清单。
+见 `docs/archive/主体与插件解耦-TODO.md` 的 T20 人工验收清单（原活清单已归档）。
 """
 import argparse
 import hashlib

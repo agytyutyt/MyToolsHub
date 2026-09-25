@@ -12,7 +12,7 @@
     ],
     "post_rules": [],
     "use_filter_plugin_rules": false,
-    "_comment": "过滤由本插件自带实现（filter_local）：mode 仅支持 hard；use_filter_plugin_rules 为兼容旧配置保留，不再有\"借用过滤器插件规则\"的分支；post_rules 的 pattern/replacement/is_regex/enabled 语义与过滤器插件一致。"
+    "_comment": "过滤由本插件自带实现（filter_local）：mode 支持 hard 与 llm（大模型辅助，接入信息走框架模块 jz_llm，未配置时该选项自动置灰）；use_filter_plugin_rules 为兼容旧配置保留、无实际效果；post_rules 的 pattern/replacement/is_regex/enabled 语义与过滤器插件一致。"
   },
   "schema": {
     "required": [
@@ -128,7 +128,6 @@
     "append_summary": true,
     "split_by_day": false,
     "fill_holes": true,
-    "append_quality": false,
     "time_formats": []
   }
 }

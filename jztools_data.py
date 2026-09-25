@@ -76,8 +76,6 @@ _DATA_SUBDIRS = ("config", "logs", "plugins")
 #   原因：打包脚本 build-deploy.ps1 会删除插件树内所有 config.json（清掉本机含
 #   API Key 的运行时配置），模板若沿用 config.json 命名会被一并删除，导致同步链路
 #   静默失效（实测：部署形态下 6 条登记项一度只剩 tools.json 有效）。
-#   —— 新增带模板配置的插件时，本清单与 install.ps1 的 Sync-ConfigTemplates 两处
-#   必须同时登记且保持一致。
 _TEMPLATE_SYNC = [
     # (程序目录相对路径, 数据根目录相对路径, 模式)
     #

@@ -6,8 +6,9 @@ r"""知识库 —— Office(docx/doc/xlsx/xls) → 只读 HTML 预览渲染（xh
 - Word：LibreOffice → PDF（`pdf_convert.py`，已删除）+ pdf.js 按打印分页渲染；
 - Excel：`xlsx_render.py`（已删除）自实现的手绘 HTML 表格。
 
-现改为上游 `D:\TestWorkSpace\xlsx-html-preview` 的**双引擎**（原样 vendor 在
-`vendor/` 下，零改动拷贝，核心链路纯标准库、零第三方依赖）：
+现改为上游 `D:\TestWorkSpace\xlsx-html-preview` 的**双引擎**（vendor 在 `vendor/`
+下，拷贝自 TestWorkSpace/xlsx-html-preview 项目，含 vendor/README.md 登记的
+5 条编号补丁，升级引擎时需整目录替换后逐条重打；核心链路纯标准库、零第三方依赖）：
 - `xhr`：.xlsx/.xlsm 直读；.xls 自动选通道（LibreOffice 归一化 → xlrd 兜底，
   内容 100% 保留、样式降级并在 warnings 提示）；
 - `dhr`：.docx/.docm 直读；.doc 经 LibreOffice 归一化（不可用时明确报错）。
@@ -220,8 +221,10 @@ def _meta_warnings(result):
 #
 # 背景（2026-09-12/09-18 排查，详见 docs/eval/知识库Word预览三问题排查报告.md）
 # ------------------------------------------------------------------------------
-# 三处显示缺陷全部源自 vendor/dhr 的输出，但按 B-7「vendor 零改动拷贝」约定
-# 不在 vendor 内打补丁（升级要重打），而是对 **渲染产物 HTML** 做后处理：
+# 三处显示缺陷全部源自 vendor/dhr 的输出，但 vendor 目录除 vendor/README.md
+# 登记的 5 条编号补丁外不改引擎源码（升级时整目录替换后逐条重打；相关约束见
+# 插件设计规范 S-9/U-2/U-7，勿引 B-7——B-7 是禁止跨插件 import 条款），
+# 故不在 vendor 内打补丁，而是对 **渲染产物 HTML** 做后处理：
 #
 # 1) 「仿宋_GB2312 笔画竖过细 / 部分文字莫名加粗」
 #    根因：多数客户端（含开发机）**没装 仿宋_GB2312**，引擎 fallback 链跳一格就
@@ -376,7 +379,8 @@ def render_word(data):
     - output="fragment"：`<style>` + `<div class="kbdoc">` 片段，便于嵌入宿主容器；
     - 图片内联 base64（离线内网无外链可图床）；
     - 产物经 `_polish_word_html` 修正三处已知显示缺陷（字体回退/表格穿模），
-      全部在 HTML 后处理层完成，vendor 保持零改动（B-7）。
+      全部在 HTML 后处理层完成，不改 vendor 引擎源码（除 vendor/README.md 登记的
+      5 条编号补丁外；约束见插件设计规范 S-9/U-2/U-7，勿引 B-7）。
     """
     if _dhr is None:
         raise OfficeRenderError("服务器渲染引擎未加载，无法生成 Word 预览")

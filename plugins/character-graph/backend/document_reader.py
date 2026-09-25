@@ -59,7 +59,7 @@ def _extract_docx(raw: bytes) -> str:
         doc = Document(io.BytesIO(raw))
         return "\n".join(p.text for p in doc.paragraphs)
     except ImportError:
-        raise ValueError("读取 .docx 需要安装 python-docx：pip install python-docx")
+        raise ValueError("读取 .docx 需要依赖组件包 python-docx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-docx-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     except Exception:
         # SEC-5：不向前端透出解析库内部异常细节
         raise ValueError("解析 .docx 失败，请确认文件未损坏且为有效的 Word 文档")
@@ -75,7 +75,7 @@ def _extract_pdf(raw: bytes) -> str:
         reader = PdfReader(io.BytesIO(raw))
         return "\n".join((page.extract_text() or "") for page in reader.pages)
     except ImportError:
-        raise ValueError("读取 .pdf 需要安装 pypdf：pip install pypdf")
+        raise ValueError("读取 .pdf 需要依赖组件包 pypdf。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-pypdf-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     except Exception:
         # SEC-5：不向前端透出解析库内部异常细节
         raise ValueError("解析 .pdf 失败，请确认文件未损坏且非扫描件")

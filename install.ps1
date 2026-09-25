@@ -30,6 +30,7 @@ param(
     [string]$InstallDir = "",   # 安装目录；留空时用 %LOCALAPPDATA%\JZToolsHub
     [string]$DataRoot = "",     # 数据根目录；留空时按 .jztoolshub.json 指针自动解析
     [switch]$Rollback,          # 回滚主体：用最近一份主体备份覆盖回升级前（设计文档 §6 / §7 #6）
+    [switch]$NoStart,           # 配合 -Rollback：回滚后不自动启动服务（缺省回滚后自动拉起）
     [string]$BackupFile = ""    # 指定回滚用的主体备份 zip（缺省取最近一份）
 )
 $ErrorActionPreference = "Stop"
@@ -585,7 +586,7 @@ if (-not $NoRegistry) {
 
 Write-Host ""
 Write-Host "==> 安装 / 更新完成。"
-Write-Host "    双击桌面「$AppName」或运行 start.bat 启动（浏览器访问 http://localhost:5000）"
+Write-Host "    双击桌面「$AppName」或运行 start.bat 启动（浏览器访问 http://localhost:5000（默认端口，可用 JZTOOLS_PORT 修改））"
 Write-Host "    默认管理员：admin / admin123（首启自动生成，请登录后尽快改密）"
 Write-Host "    用户数据保存在：$DataRoot"
 Write-Host "    如需卸载：双击「一键卸载.bat」（将同时删除用户数据，可用 -KeepData 保留）"

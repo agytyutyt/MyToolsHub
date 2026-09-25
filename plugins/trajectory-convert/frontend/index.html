@@ -203,7 +203,7 @@
   <div id="dep-warn" class="dep-warn" hidden></div>
 <div class="container">
   <h1>轨迹转换</h1>
-  <p class="subtitle">读取 Excel 轨迹表（时间 / 经度 / 纬度，列名由后端 config.json 配置），按时间间隔抽样并封装为 JSON，再经 QR-transfer 编码生成二维码视频流</p>
+  <p class="subtitle">读取 Excel 轨迹表（时间 / 经度 / 纬度，列名可在数据根 plugins/trajectory-convert/config.json 中自定义），按时间间隔抽样并封装为 JSON，再经 QR-transfer 编码生成二维码视频流</p>
 
   <div class="card">
     <h2>1. 上传 Excel 并设置参数</h2>
@@ -226,8 +226,8 @@
     <div class="switch-row">
       <input type="checkbox" id="staticOnly" class="switch" />
       <div class="switch-tip">
-        <div class="t">仅转换为静态二维码（单张 PNG 图片）</div>
-        <div class="h">开启后不生成视频，直接输出一张包含全部轨迹数据的静态二维码图片；数据过大时应调大二维码版本，或关闭此开关使用二维码视频流</div>
+        <div class="t">静态模式输出二维码 PNG 图片</div>
+        <div class="h">开启后不生成视频，直接输出包含全部轨迹数据的静态二维码图片；数据超过单张容量时自动拆分为多张并打包 ZIP 下载</div>
       </div>
     </div>
 

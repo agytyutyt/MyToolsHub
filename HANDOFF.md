@@ -2,13 +2,37 @@
 
 > 面向没有上下文的接手者：**先读 `docs/README.md`（文档索引 + 覆盖矩阵）与
 > `docs/项目管理手册.md`（改代码 / 开插件 / 移植 / 打包运维 四类场景），再动手改代码。**
-> 最后更新：2026-09-23（**统一大模型模块 `jz_llm` + 后台数据迁移（导出/导入，口令加密）**）
+> 最后更新：2026-09-24（**trajectory-sketch 恢复大模型辅助匹配（接入信息经 `jz_llm`）**；
+> 此前最近一轮为 2026-09-23 的「统一大模型模块 `jz_llm` + 后台数据迁移（导出/导入，口令加密）」）
 
 **当前状态（一句话）**：主程序 v2.x 已上线运行；16 个插件全部具备 `manifest.json` 与
-统一 `/api/<id>/` 路由前缀；「信息传输」批次 1–5 已落地（协议 v2 JZ2 二进制帧、压缩器升级、
-拆包重组、pdf/ppt 精简提取、真机四项验收通过），批次 6–10 见 `docs/plan/信息传输优化TODO清单.md`；
-**统一大模型模块 `jz_llm` 已落地**（主体新增框架模块，插件不再自持 API Key），三个业务插件
-（case-report 1.3.0 / character-graph 1.2.0 / file-filter 1.3.0）已迁移，**待出包与真机验收**。
+统一 `/api/<id>/` 路由前缀；「信息传输」批次 1–4 已落地（协议 v2 JZ2 二进制帧、压缩器升级、
+拆包重组、pdf/ppt 精简提取、真机四项验收通过）；**批次 5（T13–T15）未启动**，批次 6–10 见
+`docs/plan/信息传输优化TODO清单.md`（落地状态一律以该清单的**状态列**为准）；
+**统一大模型模块 `jz_llm` 已落地**（主体新增框架模块，插件不再自持 API Key），四个业务插件
+（case-report 1.3.0 / character-graph 1.2.0 / file-filter 1.3.0 / trajectory-sketch）已接入，
+**待出包与真机验收**（trajectory-sketch 于 2026-09-24 恢复大模型辅助，出包见 §4 T6）。
+
+**最近一轮（2026-09-24）· trajectory-sketch 恢复大模型辅助匹配**：
+① 该插件此前把「大模型辅助匹配（`mode=llm`）」整块移除（理由写在 `filter_bridge` 模块头：
+"该能力依赖「过滤器」插件自己的大模型配置"）——**该前提随统一大模型模块落地已过期**：接入信息
+（格式 / 地址 / Key / 模型）由 `jz_llm` 统一持有（管理后台「大模型设置」或用户「⋯ → 大模型设置」），
+`jz_llm.resolve()` 的 `plugin_id` 只用于日志定位、**不参与解析**，因此本插件既不需要「过滤器」的配置，
+也不产生跨插件耦合（`jz_llm` 是框架 API 面，属规范 B-7 的例外）；
+② 新增 `backend/llm_client.py`（`jz_llm` 的薄适配层，**2026-09-24 恢复**）：只负责两件插件自己的事——
+**拟定提示词**（`jz_llm.load_prompt()`，用户手写 `<数据根>/plugins/trajectory-sketch/prompt.json` 优先、
+内置默认值兜底）与**防幻觉约束**（模型返回值必须落在保留字段名单内，否则按"未匹配"处理）；核心入口
+`match_columns()` 由大模型判断表头与保留字段的语义关联（如「采集起始时刻」↔「开始时间」），
+字面命中名单的列由调用方直接保留、不问模型；`routes.py` 已 import 该模块；
+③ `manifest.requires` 增列 `requests`（**可选依赖**：缺它只是大模型辅助判断不可用、硬过滤不受影响，
+提示语指向依赖组件包）；配置 `filter.mode` 支持 `hard` / `llm`（接入信息未配置时该选项自动置灰）；
+④ 新增 `test_filter_llm.py`（打桩 `jz_llm` 的 `resolve` / `chat_json` / `render` / `load_prompt`）。
+**待办**：**出包**——已发布的 `JZToolsHub-插件-trajectory-sketch-v1.2.5.zip` 与工作区有 **12 个文件不同**
+（`manifest.json` / `README.md` / `backend/{routes.py,filter_local.py,filter_bridge.py,config_store.py,config.template.json,excel_io.py,requirements.txt,engine/__init__.py}` /
+`frontend/{app.js,index.html}`），且工作区多出新增的 `backend/llm_client.py`（`test_filter_llm.py` 属开发期脚本，
+出包规则已排除），而 manifest 版本仍是 1.2.5；出包流程**不会**自动递增版本——需先手工把
+`plugins/trajectory-sketch/manifest.json` 的 version 递增（如 1.2.6）再出包，脚本校验版本必须
+大于上一发布版（见 §4 T6）。
 
 **最近一轮（2026-09-23）· 后台数据迁移（导出 / 导入）**：
 ① 管理后台新增「数据迁移」页（`/admin/migrate`，**仅超级管理员**）+ 首页卡片：**导出**按分段勾选
@@ -83,7 +107,7 @@ HTTP 全链路（含**导出账号→改密码→导入还原→原密码仍能�
 | 操作系统 | **Windows 10 及以上（x64）** | **不支持 Windows 7**（2026-09-14 起取消，3.8 打包支线已删除） |
 | Python | **3.14**（打包与生产唯一基线） | 开发机最低 3.12；3.15 发布后不急于跟进（见 `docs/eval/Python版本选型评估.md` §6） |
 | 浏览器 | **Chrome ≥ 72**（Edge ≥ 79、同内核国产浏览器） | 与 OS 基线**互相独立**：§7.3 的旧浏览器兼容措施不能删 |
-| 网络 | 目标机**可完全无外网** | 主包**默认瘦身**（不含组件，≈122 MB）；Chrome / LibreOffice 以**独立组件包**按需分发，LibreOffice 组件免管理员、对目标机隐身。见 `docs/guide/离线部署包说明.md` |
+| 网络 | 目标机**可完全无外网** | 主包**默认瘦身**（不含组件；体积以出包产物为准，见 §2.2）；Chrome / LibreOffice 以**独立组件包**按需分发，LibreOffice 组件免管理员、对目标机隐身。见 `docs/guide/离线部署包说明.md` |
 | 许可证 | Chrome（专有）/ LibreOffice（MPL-2.0） | 再分发口径与替代方案见 `runtime/README.md` §6 |
 
 > ⚠️ **最容易犯的错：把"取消 Win7"理解成"可以删掉旧浏览器兼容代码"**。两者触发条件不同——
@@ -117,7 +141,7 @@ python app.py
 
 ### 1.5 环境变量
 
-`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 5000，解析失败回落 5000）。
+`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 5000，解析失败回落 5000）、`JZTOOLS_DATA_ROOT`（显式指定数据根；指定时**不读写**指针文件，见 `jztools_data.py:138-152`）、`XHR_SOFFICE`（覆盖 LibreOffice `soffice` 路径，见 `jz_deps.py:359`）。
 
 ---
 
@@ -152,10 +176,9 @@ ls -1t deploy/JZToolsHub-v*.zip | head -3     # 最近 3 个主包产物
 | 离线组件 | **主包不含**（`version.json.offline` 为空串）；Chrome / LibreOffice 由组件包**并列分发** |
 | 体积构成（解耦后） | 主包 zip **≈27 MB**（仅框架依赖 + admin）：`_internal\` 为框架闭包、`plugins\` 只有 admin；业务插件与依赖组件**并列分发**，不再随主包 |
 | 并列分发物 | `deploy\插件包\JZToolsHub-插件-<id>-v<版本>.zip` × **16**（含 5 个纯前端工具插件）；`deploy\插件集\*.zip`（一键装齐）；`deploy\依赖组件\*.zip` × **11**（cv2/numpy/openpyxl/docx/xlrd/olefile/pypdf/qrcode/zfec/zxingcpp/requests） |
-| 验收侧交付物 | `deploy\JZToolsHub-验收测试数据-v<日期>.zip`（各插件测试文件 + 预生成二维码/视频）、`deploy\JZToolsHub-验收测试-v<日期>.zip`（**单文件 exe，目标机无需 Python**）；重置回干净机：`tools\e2e
-eset-clean-machine.ps1` |
+| 验收侧交付物 | `deploy\JZToolsHub-验收测试数据-v<日期>.zip`（各插件测试文件 + 预生成二维码/视频）、`deploy\JZToolsHub-验收测试-v<日期>.zip`（**单文件 exe，目标机无需 Python**）；重置回干净机：`tools\e2e\reset-clean-machine.ps1` |
 | 包内文档 | 根契约四文档 + `docs/README.md` + `docs/guide/` + `docs/design/`（`eval`/`plan`/`archive` 不随包，见 `docs/README.md` §8） |
-| 上线验收 | 解压冒烟：隔离数据根启动 4 s 内 `/` 200、匿名 `/api/*` 401 —— 即 `verify-package.py --smoke` 的断言集 |
+| 上线验收 | 解压冒烟：隔离数据根启动、`/` 200、匿名 `/api/*` 401，并记录实测启动耗时——即 `verify-package.py --smoke` 的断言集 |
 
 **取当前实际值（现取现用，不要抄进文档）**：
 
@@ -186,7 +209,8 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 **为什么移出主包**：v1.8 主包 437.5 MB 里 324.1 MB 是离线组件（Chrome MSI + LibreOffice 核心包），
 而组件只服务于**部分**目标机（有 Office/WPS 且不需要高保真预览的机器根本用不上）。移出后主包降到
-约 122 MB，组件按需安装、可独立升级与卸载，且"装组件"从"安装流程的一部分"变成"用户主动的一次操作"。
+约 122 MB（**当时口径**；后续插件解耦进一步收窄，**当前体积见 §2.2，不复述于此**），
+组件按需安装、可独立升级与卸载，且"装组件"从"安装流程的一部分"变成"用户主动的一次操作"。
 
 **LibreOffice 核心组件的关键性质（本轮实测验证）**：
 
@@ -213,12 +237,17 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 **插件包产物（与主包并列分发，只升级单个插件；出包前置与参数见 README §3.4）**
 
-| 插件 | 包 | 体积 | sha256（前 16 位） | 说明 |
-| --- | --- | --- | --- | --- |
-| admin | `deploy/插件包/JZToolsHub-插件-admin-v1.3.1.zip` | 0.11 MB / 25 文件 | `a719fd33739b9529` | 含"上传即自动重启" + **校验失败逐条提示**；`min_app_version=1.9.0`、`requires_restart=true` |
-| file-filter | `deploy/插件包/JZToolsHub-插件-file-filter-v1.1.0.zip` | 0.05 MB / 12 文件 | `bb1810adf0750c8e` | **文档处理流程前新增「删除背景图片」环节**（识别工作表背景图片并摘除引用/关系/本体）；`requires_restart=true`、`built_from=921746b`（干净戳） |
-| trajectory-sketch | `deploy/插件包/JZToolsHub-插件-trajectory-sketch-v1.1.0.zip` | 0.12 MB / 45 文件 | `cd6494efe2a003a5` | 同上（与 file-filter 同一份 `bg_image.py` 双份副本）；上传即预处理，自检卡片与报告「数据质量」sheet 记录结论；`requires_restart=true`、`built_from=cd73f16`（干净戳） |
-| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v1.2.2.zip` | 1.28 MB / 80 文件 | `9dd54458116e14a3` | **PDF 预览清晰度：画布校到设备像素网格**（居中/A4 小数位置曾致整页重采样，同位置截图锐度 +72%）；含 1.2.1 缩放保持居中 + 百分比可输入；`requires_restart=false`，`built_from=89d10c6`（干净戳） |
+| 插件 | 包名口径 | 说明（相对稳定） |
+| --- | --- | --- |
+| admin | `deploy/插件包/JZToolsHub-插件-admin-v<版本>.zip` | 含"上传即自动重启" + **校验失败逐条提示**；`min_app_version=1.9.0`、`requires_restart=true` |
+| file-filter | `deploy/插件包/JZToolsHub-插件-file-filter-v<版本>.zip` | **文档处理流程前新增「删除背景图片」环节**（识别工作表背景图片并摘除引用/关系/本体）；`requires_restart=true` |
+| trajectory-sketch | `deploy/插件包/JZToolsHub-插件-trajectory-sketch-v<版本>.zip` | 同上（与 file-filter 同一份 `bg_image.py` 双份副本）；上传即预处理，自检卡片与报告「数据质量」sheet 记录结论；`requires_restart=true` |
+| knowledge-base | `deploy/插件包/JZToolsHub-插件-knowledge-base-v<版本>.zip` | Word/Excel 预览画布校到设备像素网格（居中/A4 小数位置曾致整页重采样）；`requires_restart=false` |
+
+> **版本、体积、文件数、sha256 与 `built_from` 随每次出包变化**，一律不写在本表：
+> 以 `deploy/插件包/` 的实际产物与 `tools/plugin-packages.json`（发布登记真源）为准；
+> 插件当前的版本号以各 `plugins/<id>/manifest.json` 为准。
+> 表中的 `min_app_version` / `requires_restart` 以 `tools/plugin-packages.json` 为准，本表数值可能滞后。
 
 发布登记（入库、sha256 冻结值、逐文件哈希）：`tools/plugin-packages.json`；
 随介质分发的索引：`deploy/插件包/index.json`（共享盘批量更新读它）。
@@ -241,9 +270,10 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 | 时间 | 里程碑 | 关键内容 |
 | --- | --- | --- |
+| 2026-09-24 | **全仓「文档 ↔ 代码」一致性核对（111 条）+ 文档层批量回写 + 3 处纯 bug 修复** | 起因（用户口径）：通读全部代码，逐项核对文档与实现是否一致，找出功能描述/参数说明/行为逻辑/使用步骤的不符，以及文档之间、文档与注释、界面文案之间的矛盾。方法与产出：9 组互不重叠的只读审计（每组要求双侧 `文件:行号` 证据）→ 主审复核**全部 P0**（`node --check`、`pytest --collect-only`、zip 解包比对、直接读码）→ 跨文档「同一事实」特征串中心扫描；报告 `docs/archive/20260924文档与代码一致性核对报告.md`（**111 条**：P0 4 / P1 75 / P2 32；其中**需要改代码的仅 6 条**，其余 105 条为文档/注释/界面文案回写）。**本轮已落地**：① 文档层 105 条按「机械批量（脚本单次写入）+ 逐文件回写（按文件切分并行）」全部回写，覆盖根契约四文档、`docs/` 各层、16 份插件 README 与全部界面文案；② 机械批量三类系统性问题——**8 份插件 README 的依赖表**（把「依赖组件包」内的包误写成"框架已打包"）、**11 份 README 的规范依据错引**（`U-2/U-4/U-6` → **`U-7a/U-8`**）、**13 个文件的"五要素"**（真源 `plugins/case-report/backend/parser.py` 的 `FIELD_KEYS` 为 7 项）→ 统一改「要素」；③ **22 处依赖缺失引导**从 `pip install …` 改为「管理后台 → 插件管理」按徽标装依赖组件包（冻结部署的目标机没有 pip 语境，原引导照做无效）；④ **3 处纯 bug 修复**（不动任何行为语义）：`knowledge-base/frontend/app.js` 的 `else if` 无 `if` 语法错误（整插件前端此前**完全失效**，本轮回归发现；`node --check` 现已全仓 0 失败）、`admin-llm.js` 的 `collect()` 笔误（后台「测试连通」按钮此前点了必报错，改为 `collectProvider()`）、`app.js` 暴露 `window.toast`（`reader.js` 的复制提示此前必然 ReferenceError，提示不可达）；⑤ **1 处行为语义修正（用户拍板）**：批量导入的单位/部门「描述」列此前**留空即清空**（与 README/设计文档/模板说明的"留空 = 不修改"相反，用导出的表原样回导会抹掉全部描述）→ 改为「留空 = 不修改；填 `-` 等清空符才清空」（照人员模块已有的正确语义）；⑥ **1 处能力补全（用户拍板）**：用户自助「大模型设置」的 `custom` 四字段（额外请求头/请求体模板/正文取值路径/错误信息取值路径）此前被 `save_user_llm` 静默丢弃（界面报"本人配置可用"、调用必失败）→ 四键在 `save_user_llm`/`get_user_llm` 透传；⑦ **1 处界面纠偏（用户拍板）**：admin 角色编辑里的「权限管理」勾选项移除（该模块已 404 屏蔽并入人员管理，勾了无任何作用；README 侧已改）。⑧ 前端资源戳按 F-2 递增：knowledge-base `app.js?v=21`、admin `admin-llm.js?v=4` / `admin-user.js?v=5`。验证：全量回归 **155 例全绿**；Python 语法 0 失败、18 个 manifest/config JSON 可解析、**全仓前端 JS 语法 0 失败**；两处行为改动另做隔离实测（临时数据根）**14 项断言全绿**（描述列留空/`-`/新值/新增、custom 四键落盘回读、`jz_llm.provider_usable(custom)` 为真、磁盘无明文 Key）；**反向验证**把 65 条原始错误表述当特征串重扫全仓 256 个文件，存活项逐条判定为误报/修后文本/有意保留（eval·plan 决策留痕与归档报告不改）。**待办**：`knowledge-base` 与 `admin` 两个插件需出包（前端与后端均有改动，见 §4 T1）；报告中未落地的 3 项代码侧建议（`build-deploy-local.py` 补 `gen-installed-deps.py` 一步、`build-dep-component.ps1` 包内文案硬编码 cv2、`knowledge-base` manifest 的 `docx` 版本下限）待拍板。详见报告 §3/§5 |
 | 2026-09-23 | **彻底清除插件侧历史大模型配置 + 用户级配置三条同步链路实测** | 需求（用户口径）：① 把原来插件里面的大模型配置**彻底清除**；② 确认三条同步链路——建号时配的大模型信息用户在自助设置里是否正常显示、用户自改后管理员「人员管理」是否同步、管理员改后用户端是否同步。实现：① **插件侧清零**——三个插件的 `DEFAULT_CONFIG` / `load_config` / `config.template.json` 里的 `llm` 段全部删除（case-report 由此**没有任何自有配置项**，其 `config.json` 与 `load_config`/`save_config`/`CONFIG_FILE` 一并移除；character-graph 连历史 `ui.api_source`（"网页填 Key"开关）一起清掉；file-filter 只留保留字段名单与后处理规则），前端配置卡与文档同步；② **`jz_llm` 兼容桥退场**——删除 `_legacy_provider()` 与 `resolve()` 的第三级，`source` 只剩 `user`/`global`/未配置（插件侧不再有任何可被读取的凭据）；③ **先收编再清除的启动迁移** `migrate_plugin_legacy_llm()`（admin 插件，幂等）——统一配置还没有可用接入信息时，先把插件那份**明文** Key 搬进 `<数据根>/config/llm.json`（加密落盘；历史语义即 OpenAI 兼容，`base_url` 省写时补全为完整接口地址），随后删除插件 `config.json` 里的 `llm` 段；多份重复副本只收编第一份、其余丢弃并记日志；清除失败（文件被占用）保持原样并记 warning，下次启动重试，不留"删了一半"的中间态。本机实测：三个插件的历史 Key 是**同一把**（各存一份明文），迁移后统一配置可用、`llm.json` 里无明文、插件侧无 `llm` 段且幂等。④ **三条同步链路实测**（同一份数据源 `admin.json` 的 `user.llm`，不存在第二处）：**建号时配置 → 用户端**（管理员在「人员管理」表单里给张三配 anthropic/地址/Key/模型 → 张三登录后 ⋯ →「大模型设置」显示的就是这套，Key 只显示"已保存（••••••••）"占位、状态"本人配置可用"）；**用户自改 → 人员管理**（张三改成 deepseek/deepseek-set-by-user/新 Key 保存 → 管理员列表该行掩码随之变化、编辑弹窗回填新值）；**管理员改 → 用户端**（管理员改成 moonshot/kimi-admin-changed、Key 留空 → 张三端立刻看到新地址与模型，且 **Key 被保留**）。⑤ **顺带修掉一个缺陷 + 收口一处明文暴露**：`PUT /api/admin/users/<username>` 原先不认"掩码/留空 = 不修改"（全系统其它入口都认），会把字面量 `••••••••` 当 Key 存下去——用户此后调用一律 401 且原因难查；已按统一口径修正（`jz_llm.is_mask` 判定），与人员弹窗"（已配置，留空保持不变）"的文案终于一致。同时按用户要求**把「人员管理」列表接口改为只回掩码**（`GET /api/admin/users` 原先把用户 API Key 的**明文**回传给浏览器，只靠前端 `maskKey` 遮成 `sk-a…-key`——那是全系统唯一一处明文凭据进浏览器的入口）：现在只回固定掩码 + `api_key_set` 布尔，前端列表单元格显示掩码、编辑弹窗的 Key 字段**不再预填明文**（改留空 + "已保存（••••••••），留空表示不修改"占位），保存时只在管理员真填了新 Key 才提交该字段；落盘密文与真实 Key 不受影响（实测：只改模型、Key 留空保存后，服务端解密出来的仍是原 Key）。验证：`test_llm_module.py` 新增 `test_1_admin_created_llm_visible_to_user` / `test_2_user_save_visible_in_admin_user_list` / `test_3_admin_edit_visible_to_user` / `test_plugin_legacy_llm_migration` 四例（含"只改地址模型、Key 回传掩码 → 保留原 Key"的边界）；全量 **155 例全绿**；真实浏览器按上述三条链路逐步走通（管理端表单建号 → 用户端卡片显示 → 用户端改存 → 管理端列表与弹窗 → 管理端改存 → 用户端显示）。产物：`jz_llm.py`（去兼容桥）、admin `routes.py`（迁移 + 掩码口径修正）、三个插件的 `routes.py` 与 `config.template.json`、`test_llm_module.py`、设计文档 §8.1 改写为"收编与清除"。**待办**：三个插件与 admin 出包（见 §4 T1/M1） |
 | 2026-09-23 | **后台数据迁移：按插件分类打包导出/导入，整包口令加密** | 需求（用户口径）：为后台管理模块添加数据迁移功能——对当前已安装插件做数据导出/导入，导出数据**按插件分类打包保存**，并为用户数据**添加加密功能，防止直接读取数据包获得用户 LLM 的 Key**。实现：① 新增 `plugins/admin/backend/data_migrate.py`（纯逻辑）——包内布局 `manifest.json` + `config/{admin.json,llm.json,tools.json}` + `plugins/<插件id>/…`（**一个插件一段**，段 id `accounts`/`llm`/`tools`/`plugin:<id>`）；② **整包口令加密容器** `.jzdata`（`magic + 迭代次数 + 盐 + Fernet(zip)`；口令经 PBKDF2-HMAC-SHA256 20 万次派生**两把**子密钥：整包密钥 + 字段信封密钥；认证加密，口令错/篡改直接拒绝，不解出半截数据；口令≥8 位且明确"遗失无法恢复"）；③ **字段信封**（本功能的关键）：账号/大模型配置里的密文本来用**本机密钥** `config/.admin_key` 加密，原样打包会导致"换机器解不开"（新机密钥不同，密码与 Key 全成乱码、登录永远失败）且"口令泄露后仍需本机密钥"少一层保护——故导出时把**能用本机密钥解开的字符串**改封为口令信封（`JZMIG1:` 前缀），导入时改封为目标机密钥；**`config/.admin_key` 永不进包**，导入也不改写目标机密钥文件；**识别密文不靠字段清单**（靠"能否用本机密钥解开"），这样插件自己加密的配置与将来新增的密钥字段都自动覆盖（清单法在这仓里吃过亏：插件配置至今留着统一大模型落地前的明文 Key）；④ 导入**逐条白名单校验**（只允许 `config/<框架三者>` 与 `plugins/<已声明插件id>/…`；拒绝绝对路径/盘符/`..`/含冒号，与插件包同一套 zip 安全口径）+ 只写勾选段 + 内容一致跳过（幂等）+ 覆盖前备份到 `<数据根>/backups/migrate/<时间戳>/`（只留最近 3 份）+ 原子写；⑤ 导出排除易变与本机状态：`.task_cache/`、`out/`、`__pycache__/`、`*.tmp/*.bak*/*.pyc/*.log`、`logs/`、`.staging/`、`backups/`、`config/.admin_key`、`config/.app_state.json`（带过去会压制目标机模板同步）、`installed-deps.json`；⑥ 上限：包 300 MB / 解压后 1 GB / 条目 5 万（防误操作与 zip 炸弹）；⑦ 页面 `/admin/migrate`（**仅超管**，与数据目录/插件管理同档）+ 后台首页卡片：导出卡（分段勾选带版本/文件数/体积/路径、两次输入口令、结果区提示包名与"牢记口令"）+ 导入卡（选包+口令 → **解析预览**（来源机器/导出时间/程序版本/各段"将覆盖 N 个文件""含 N 处密钥"）→ 勾选 → 二次确认 → 报告（写入/跳过/备份目录/涉及插件，账号段警示"当前登录账号可能失效"、工具段提示"需重启生效"））；两步导入之间不重复要口令——口令派生的**信封密钥只在服务端内存活 30 分钟**（不回传前端；服务重启则该 token 失效，重新解析即可），上传的包落在 `<数据根>/.staging/migrate/` 且导入后立即删除。验证：新增 `test_data_migrate.py` **23 例**——打包口径（按插件分类/框架三段/排除易变文件/清单字段/未安装插件标注/包内中文段名自描述）、加密口径（口令错/篡改/非本系统文件各有可读报错；**包内无明文 Key、也无本机密钥的原密文**；非密钥 JSON 逐字节保真）、**跨机器导入**（A 机导出→B 机（密钥不同）导入后密码/身份证/用户 LLM Key/全局 LLM Key 都能用 B 机密钥解开，且 B 机密钥文件未被改动）、导入安全（zip 穿越与未声明插件全跳过、只写勾选段、备份+只留最近 3 份、预览不写数据）、HTTP 全链路（匿名 401/非超管 403、口令太短 400、下载名、token 一次性、**导出账号→改密码→导入还原→原密码仍能登录**）；既有 7 个测试文件全绿，合计 **149 例**；真实浏览器实测（隔离数据根）：导出清单与中文文件名（`JZToolsHub-数据迁移-<时间>.jzdata`，修掉"优先取 ASCII filename= 丢掉中文"的解析 bug）、解析预览显示中文段名与覆盖/密钥标注、确认导入后业务数据被替换（`8·16 系列盗窃案` 覆盖本机旧数据）、备份目录可见且存的是导入前内容、**导入后本机密钥仍能解开导入来的密码哈希**。**踩坑**：① 字段信封密钥与容器盐绑定（同口令+同盐才派生同一把）——`encrypt_container()` 只能用于新建包，拿它重封已含信封的包会让字段全部解不开（已在函数 docstring 写明并给出 `read_container_head()` 供二次加工复用同一把密钥）；② 导出下载的中文文件名要走 RFC 5987 的 `filename*=UTF-8''…`，优先匹配 ASCII 的 `filename=` 会丢中文。产物：`data_migrate.py`（新增）、`admin-migrate.html` / `admin-migrate.js`（新增）、路由 5 个 + 后台首页卡片、`test_data_migrate.py`（新增）、设计文档 `docs/design/数据迁移-设计文档.md`（新增）。**待办**：出包（admin 插件）+ 真机演练"整机迁移"（见 §4） |
-| 2026-09-23 | **统一大模型模块 `jz_llm`：框架内置 LLM，插件不再自持 API Key** | 需求（用户口径）：框架本地内置 LLM 能力，建统一的大模型 API/Key 调度接口——插件**只拟定、保存 prompt**，把参数与 prompt 推给 LLM 模块，模块与大模型交互后把数据回推插件；**两种模式由管理员或超管确定**（① 管理员定 API 地址/格式/Key ② 用户单独设置）；用户在主界面**右下角「三个点」**里自助设置（管理员未开启则不显示该选项），点击以**悬浮卡片**展示，界面支持**多种 API 调用格式**，地址须填**完整接口地址**（如 OpenAI 格式要填到 `chat/completions`）。实现：① **主体模块 `jz_llm.py`**（新增，框架级，与 `jz_api`/`jz_deps`/`jztools_data` 同层；仅标准库 + 可选 `requests`，导入无副作用、不 import 任何插件）——两级配置（全局 `<数据根>/config/llm.json`、用户配置在 `admin.json` 的 `user.llm`，Key 均 Fernet 加密）× 两种模式（`admin` / `user` + `fallback` 回退开关）× **四种调用格式**（`openai` / `anthropic` / `ollama` / `custom`：自定义请求头与请求体模板 + 取值路径，占位符 `{{model}} {{system}} {{user}} {{temperature}} {{max_tokens}} {{api_key}} {{messages_json}}`，字符串值按 JSON 字面量转义后替换——提示词里的引号/换行不会把 JSON 打坏）；**地址一律完整接口地址、框架不做路径拼接**（历史"base_url 还是完整地址"两种口径混用是踩坑点：少写 `/v1`、多写一次 `chat/completions` 都会 404 且报错与真实原因无关）；对插件的 API：`resolve()` / `chat()` / `chat_text()` / `chat_json()` / `test_connection()` / `load_prompt()` / `save_prompt()` / `render()` / `LLMError`。② **配置解析顺序**：用户自己配置（user 模式）→ 全局配置（admin 模式，或 user 模式且允许回退）→ 插件历史 `config.json` 的 `llm` 段（**兼容桥**，避免老部署升级后大模型功能一夜失效；**该桥已于同日移除**，见上一行"彻底清除"条目）→ 未配置（`reason` 按模式给出该去哪儿配的可读文案）。③ **线程纪律（本轮最易踩的坑，已写进设计文档与规范 §9.4）**：`resolve()` 要读会话，只能在**请求线程**内调用；插件的大模型调用普遍跑在线程池里，后台线程读不到会话 → 在"用户各自设置"模式下会被**误判为未配置**，故约定"请求线程 resolve → 把 `LLMSession`（不可变快照）传进任务 → 任务里 `chat(..., session=session)`"，`test_llm_module.py` 用一条跨线程用例钉住。④ **设置入口两处**：管理后台新增「大模型设置」页（`/admin/llm`，**管理员或超管**——比数据目录/插件管理的"仅超管"放宽一档，对齐需求"由管理员或超级管理员确定"；含模式切换、回退开关、四种格式的下拉与地址样例、连通测试、状态摘要；**两张卡各存各的**——「调用模式」卡改模式/回退开关即自动保存（无保存按钮），「全局接入配置」卡的「保存接入配置」只提交 `provider`、不影响模式，靠后端 POST 的**按字段局部更新**保证互不覆盖）+ 后台首页卡片；首页右下角既有 ⋯ 悬浮球菜单**动态注入**「💡 大模型设置」项（`static/js/llm-settings.js`：`can_self_config=false` 时什么都不做——"管理员未开启→该选项不显示"由数据驱动，不需要后端渲染开关），点击打开 `.llm-overlay` + `.llm-card` **居中对话框**（背景调暗 `rgba(32,33,36,.45)` + 模糊 `blur(6px)`，与既有 `.modal` 同一调暗口径；三段式：头部固定 / 主体滚动 / 底部固定，按钮与状态不随内容滚走；常驻 DOM + `hidden` 切换；打开时给 body 加 `llm-card-open` 锁页面滚动并收起悬浮球菜单；点遮罩/Esc 关闭；遮罩 z-index 66 取"悬浮球之上、toast 之下"——保存提示必须浮在调暗层之上）。**修掉一个视觉缺陷**：卡片原先自身 `overflow-y: auto`，内部滚动条压住右侧两个圆角（看起来像"圆角失效"）——把滚动交给内层主体、卡片只 `overflow:hidden` 即修好（同类缺陷见 §7.3 第 22 条：滚动条占宽/遮挡引发的视觉问题）。⑤ **依赖倒置**：`jz_api` 新增 `get_user_llm` / `save_user_llm` 两个 provider 槽位，用户级配置由 admin 插件读写（**不另立一份用户配置**——账号数据归 admin，`user.llm` 已在 `admin.json` 里加密、后台可编辑、批量导入导出已覆盖，再开一份会出现"同一用户两处配置"）；`admin.json` 的 `user.llm` 新增 `format` 字段（默认 `openai`，启动迁移 `migrate_admin_llm_format` 补齐老账号），后台人员弹窗与批量导入导出（新增「大模型调用格式」列）同步。⑥ **三个业务插件迁移**（case-report 1.2.6→**1.3.0** / character-graph 1.1.4→**1.2.0** / file-filter 1.2.1→**1.3.0**）：`llm_client.py` 改为**薄适配层**（保留原有函数名，插件内调用点零改动；HTTP 调用、凭据、连通测试全部上交），插件保留的只有**业务提示词与领域约束**（五要素 JSON 约束 / 人物关系自洽过滤 / 字段匹配防幻觉映射）；`GET /api/<id>/config` 只回 `llm_configured` / `llm_source` / `llm_source_label` / `llm_reason`（**不再回传任何凭据字段**），`POST /config` 保留为兼容占位（本插件已无接入信息可写；历史 `llm` 段随后由启动迁移收编并清除），`/config/test` 改测统一配置；前端配置卡片由"地址/Key/模型三输入框"改为一行状态（可用性 + 来源 + 去哪儿改）；file-filter 原先硬编码在函数里的用户消息提为模板常量并接入 `load_prompt`（提示词文件位置**不变**，无数据迁移）；`requests` 可用性转发 `jz_llm.REQUESTS_AVAILABLE`（标记名不变，`/status` 与 `jz_deps` 刷新零改动），`manifest.requires` **保留** `requests` 声明（依赖门控语义不变）。⑦ **构建期**：`tools/build-plugin-package.ps1` 的 `FRAMEWORK_MODULES` 白名单加入 `jz_llm`（C-4/C-10 放行，与 `jz_api` 同一处理）。验证：新增 `test_llm_module.py` **45 例全绿**（配置默认/往返/加密/脱敏/钳制、四种格式请求构造与自定义模板转义、解析顺序与兼容桥、**本地 HTTP 桩**上的真实调用与错误文案、跨线程会话、提示词存取与损坏回退、框架与后台路由（含匿名 401 / 管理员模式个人保存 403 / 非管理员 403 / Key 掩码）、三个插件的 `/config` 口径与"插件调用确实落到统一配置"的联调断言）；既有 6 个测试文件 **126 例全绿**（含正序/逆序两种跑法验证无测试间污染——`TestRoutesAndPlugins` 自建 Flask app 并在 tearDown 清理 `app` 与 `jztools_*` 模块缓存，沙箱型测试 `test_admin_plugin_manager` 依赖"sys.modules 里没有 app"）；出包工具对三个插件跑通 C-4/C-10（仅提示"声明了但实测未 import：requests"，属正常）；**真实浏览器实测**（隔离数据根 + `user` 模式）：首页 ⋯ 菜单出现「大模型设置」、卡片打开后 4 种格式可选、切「自定义」展开高级字段、保存后状态转绿"本人配置可用"且生效来源变为"用户自己配置"、后台 `/admin/llm` 页表单回显与状态摘要正确。**踩坑**：`_extract()` 的路径段可能是 int（内部元组 `("choices", 0, "message", "content")`）而非字符串，`str.isdigit()` 会 AttributeError——由新测试的首次真实调用暴露（单测若只测"构造请求"不测"取值"就会漏掉）；`max_tokens` 填 0/负数按"未设置"处理而不是钳成 1（钳成 1 会让模型只输出一个 token 而用户看不出原因）。产物：主体新增 `jz_llm.py`、框架路由 `/api/llm/*`、`static/js/llm-settings.js`（新增）、`static/css/style.css?v=16`；设计文档 `docs/design/统一大模型模块-设计文档.md`（新增）；规范新增 §9.4 并把 B-7/B-8/§9.3 的"从 `jztools_admin.routes` 导入"旧样板改为 `jz_api` 口径（旧写法出包 C-11 会拦截）；解耦设计文档 §5.1 补 **FC-10** 承诺项。**待办**：三个插件出包 + 目标机验收（见 §4） |
+| 2026-09-23 | **统一大模型模块 `jz_llm`：框架内置 LLM，插件不再自持 API Key** | 需求（用户口径）：框架本地内置 LLM 能力，建统一的大模型 API/Key 调度接口——插件**只拟定、保存 prompt**，把参数与 prompt 推给 LLM 模块，模块与大模型交互后把数据回推插件；**两种模式由管理员或超管确定**（① 管理员定 API 地址/格式/Key ② 用户单独设置）；用户在主界面**右下角「三个点」**里自助设置（管理员未开启则不显示该选项），点击以**悬浮卡片**展示，界面支持**多种 API 调用格式**，地址须填**完整接口地址**（如 OpenAI 格式要填到 `chat/completions`）。实现：① **主体模块 `jz_llm.py`**（新增，框架级，与 `jz_api`/`jz_deps`/`jztools_data` 同层；仅标准库 + 可选 `requests`，导入无副作用、不 import 任何插件）——两级配置（全局 `<数据根>/config/llm.json`、用户配置在 `admin.json` 的 `user.llm`，Key 均 Fernet 加密）× 两种模式（`admin` / `user` + `fallback` 回退开关）× **四种调用格式**（`openai` / `anthropic` / `ollama` / `custom`：自定义请求头与请求体模板 + 取值路径，占位符 `{{model}} {{system}} {{user}} {{temperature}} {{max_tokens}} {{api_key}} {{messages_json}}`，字符串值按 JSON 字面量转义后替换——提示词里的引号/换行不会把 JSON 打坏）；**地址一律完整接口地址、框架不做路径拼接**（历史"base_url 还是完整地址"两种口径混用是踩坑点：少写 `/v1`、多写一次 `chat/completions` 都会 404 且报错与真实原因无关）；对插件的 API：`resolve()` / `chat()` / `chat_text()` / `chat_json()` / `test_connection()` / `load_prompt()` / `save_prompt()` / `render()` / `LLMError`。② **配置解析顺序**：用户自己配置（user 模式）→ 全局配置（admin 模式，或 user 模式且允许回退）→ 插件历史 `config.json` 的 `llm` 段（**兼容桥**，避免老部署升级后大模型功能一夜失效；**该桥已于同日移除**，见上一行"彻底清除"条目）→ 未配置（`reason` 按模式给出该去哪儿配的可读文案）。③ **线程纪律（本轮最易踩的坑，已写进设计文档与规范 §9.4）**：`resolve()` 要读会话，只能在**请求线程**内调用；插件的大模型调用普遍跑在线程池里，后台线程读不到会话 → 在"用户各自设置"模式下会被**误判为未配置**，故约定"请求线程 resolve → 把 `LLMSession`（不可变快照）传进任务 → 任务里 `chat(..., session=session)`"，`test_llm_module.py` 用一条跨线程用例钉住。④ **设置入口两处**：管理后台新增「大模型设置」页（`/admin/llm`，**管理员或超管**——比数据目录/插件管理的"仅超管"放宽一档，对齐需求"由管理员或超级管理员确定"；含模式切换、回退开关、四种格式的下拉与地址样例、连通测试、状态摘要；**两张卡各存各的**——「调用模式」卡改模式/回退开关即自动保存（无保存按钮），「全局接入配置」卡的「保存接入配置」只提交 `provider`、不影响模式，靠后端 POST 的**按字段局部更新**保证互不覆盖）+ 后台首页卡片；首页右下角既有 ⋯ 悬浮球菜单**动态注入**「💡 大模型设置」项（`static/js/llm-settings.js`：`can_self_config=false` 时什么都不做——"管理员未开启→该选项不显示"由数据驱动，不需要后端渲染开关），点击打开 `.llm-overlay` + `.llm-card` **居中对话框**（背景调暗 `rgba(32,33,36,.45)` + 模糊 `blur(6px)`，与既有 `.modal` 同一调暗口径；三段式：头部固定 / 主体滚动 / 底部固定，按钮与状态不随内容滚走；常驻 DOM + `hidden` 切换；打开时给 body 加 `llm-card-open` 锁页面滚动并收起悬浮球菜单；点遮罩/Esc 关闭；遮罩 z-index 66 取"悬浮球之上、toast 之下"——保存提示必须浮在调暗层之上）。**修掉一个视觉缺陷**：卡片原先自身 `overflow-y: auto`，内部滚动条压住右侧两个圆角（看起来像"圆角失效"）——把滚动交给内层主体、卡片只 `overflow:hidden` 即修好（同类缺陷见 §7.3 第 22 条：滚动条占宽/遮挡引发的视觉问题）。⑤ **依赖倒置**：`jz_api` 新增 `get_user_llm` / `save_user_llm` 两个 provider 槽位，用户级配置由 admin 插件读写（**不另立一份用户配置**——账号数据归 admin，`user.llm` 已在 `admin.json` 里加密、后台可编辑、批量导入导出已覆盖，再开一份会出现"同一用户两处配置"）；`admin.json` 的 `user.llm` 新增 `format` 字段（默认 `openai`，启动迁移 `migrate_admin_llm_format` 补齐老账号），后台人员弹窗与批量导入导出（新增「大模型调用格式」列）同步。⑥ **三个业务插件迁移**（case-report 1.2.6→**1.3.0** / character-graph 1.1.4→**1.2.0** / file-filter 1.2.1→**1.3.0**）：`llm_client.py` 改为**薄适配层**（保留原有函数名，插件内调用点零改动；HTTP 调用、凭据、连通测试全部上交），插件保留的只有**业务提示词与领域约束**（要素 JSON 约束 / 人物关系自洽过滤 / 字段匹配防幻觉映射）；`GET /api/<id>/config` 只回 `llm_configured` / `llm_source` / `llm_source_label` / `llm_reason`（**不再回传任何凭据字段**），`POST /config` 保留为兼容占位（本插件已无接入信息可写；历史 `llm` 段随后由启动迁移收编并清除），`/config/test` 改测统一配置；前端配置卡片由"地址/Key/模型三输入框"改为一行状态（可用性 + 来源 + 去哪儿改）；file-filter 原先硬编码在函数里的用户消息提为模板常量并接入 `load_prompt`（提示词文件位置**不变**，无数据迁移）；`requests` 可用性转发 `jz_llm.REQUESTS_AVAILABLE`（标记名不变，`/status` 与 `jz_deps` 刷新零改动），`manifest.requires` **保留** `requests` 声明（依赖门控语义不变）。⑦ **构建期**：`tools/build-plugin-package.ps1` 的 `FRAMEWORK_MODULES` 白名单加入 `jz_llm`（C-4/C-10 放行，与 `jz_api` 同一处理）。验证：新增 `test_llm_module.py` **45 例全绿**（配置默认/往返/加密/脱敏/钳制、四种格式请求构造与自定义模板转义、解析顺序与兼容桥、**本地 HTTP 桩**上的真实调用与错误文案、跨线程会话、提示词存取与损坏回退、框架与后台路由（含匿名 401 / 管理员模式个人保存 403 / 非管理员 403 / Key 掩码）、三个插件的 `/config` 口径与"插件调用确实落到统一配置"的联调断言）；既有 6 个测试文件 **126 例全绿**（含正序/逆序两种跑法验证无测试间污染——`TestRoutesAndPlugins` 自建 Flask app 并在 tearDown 清理 `app` 与 `jztools_*` 模块缓存，沙箱型测试 `test_admin_plugin_manager` 依赖"sys.modules 里没有 app"）；出包工具对三个插件跑通 C-4/C-10（仅提示"声明了但实测未 import：requests"，属正常）；**真实浏览器实测**（隔离数据根 + `user` 模式）：首页 ⋯ 菜单出现「大模型设置」、卡片打开后 4 种格式可选、切「自定义」展开高级字段、保存后状态转绿"本人配置可用"且生效来源变为"用户自己配置"、后台 `/admin/llm` 页表单回显与状态摘要正确。**踩坑**：`_extract()` 的路径段可能是 int（内部元组 `("choices", 0, "message", "content")`）而非字符串，`str.isdigit()` 会 AttributeError——由新测试的首次真实调用暴露（单测若只测"构造请求"不测"取值"就会漏掉）；`max_tokens` 填 0/负数按"未设置"处理而不是钳成 1（钳成 1 会让模型只输出一个 token 而用户看不出原因）。产物：主体新增 `jz_llm.py`、框架路由 `/api/llm/*`、`static/js/llm-settings.js`（新增）、`static/css/style.css?v=16`；设计文档 `docs/design/统一大模型模块-设计文档.md`（新增）；规范新增 §9.4 并把 B-7/B-8/§9.3 的"从 `jztools_admin.routes` 导入"旧样板改为 `jz_api` 口径（旧写法出包 C-11 会拦截）；解耦设计文档 §5.1 补 **FC-10** 承诺项。**待办**：三个插件出包 + 目标机验收（见 §4） |
 | 2026-09-22 | **五个插件：展开「管理配置」后整个界面左移（居中定宽容器 + 滚动条占宽）** | 用户报「过滤器、轨迹速写点击『管理配置』后出现滚动条、界面布局向左移动」。根因：插件页用「`max-width` + `margin: 0 auto`」居中容器（`.page` / `.view` / `.paper`），内容变高（展开配置面板、文档比阅读区高）时文档出现竖向滚动条，视口宽度被吃掉 15px（自带 `::-webkit-scrollbar { width: 10px }` 的插件是 10px），居中容器**整体左移半个滚动条宽**——实测 1280 视口展开配置面板：文档宽度 1280→1265、`pageLeft` 40→32（左移 8px）。框架外壳 `body.tool-body { height:100vh; overflow:hidden }` + iframe，滚动条出在**插件自己的文档**里，框架侧无法代修（往 iframe 注入样式会破坏 tool.html 承诺的「框架与插件互不污染」），故修在插件 CSS：`html { scrollbar-gutter: stable; }` + `@supports not (scrollbar-gutter: stable) { html { overflow-y: scroll; } }`（旧内核 < Chrome 94 回落常显轨道，同样不左移——浏览器基线 Chrome ≥72，不能只写 `scrollbar-gutter`）；滚动发生在嵌套滚动容器里时（知识库阅读器 `.reader-container` 内的 `.paper`）加在那个容器上、加 `html` 无效。**按同一缺陷类扫全仓**：5 个插件命中，全部修复——file-filter / trajectory-sketch（用户报的两个）+ case-report / notice-board（同类，主页面同写法）+ knowledge-base（阅读器容器）。验证（真实浏览器 + **对照组**）：file-filter 1280 视口按原操作展开面板位移 0px（关掉预留对照组 8px）、trajectory-sketch 1600 视口点「管理配置」面板打开且位移 0px（对照组 8px）、case-report 对照组 5px（其滚动条 10px 宽）、notice-board 对照组 8px、knowledge-base 用真实类名搭阅读器结构对照组 8px——五处修复后位移全为 0，对照组均能复现（含两种假通过的反面教材：视口太矮导致初始已有滚动条、重建探针元素丢掉内联覆盖）。回归：`test_filter_preview` / `test_xlsx_stale_dimension` / `test_bg_image` / `test_plugin_templates` 共 59 例全绿。产物：五个插件 `style.css?v` 递增（5 / 2 / 28 / 5 / 31）与 manifest 版本递增（file-filter 1.2.0→1.2.1、trajectory-sketch 1.2.4→1.2.5、case-report 1.2.5→1.2.6、notice-board 1.0.2→1.0.3、knowledge-base 1.3.3→1.3.4）。**已出包**（5 个插件包 + 插件集重打，登记与哈希见 `tools/plugin-packages.json`；目标机安装器演算：五个包逐文件哈希全过、各「新增/修改 3 个」= 正好是本次三个文件、**重启判定：不需要（纯前端改动，Ctrl+F5 即可）**）；踩坑清单 §7.3 补第 22 条 |
 | 2026-09-22 | **过滤器：办案员上传后先看「识别到的列名 + 过滤预判」，点胶囊逐列决定，后处理可整体关** | 需求（用户口径）：上传文档后展示识别到的列名与**硬过滤匹配的预计结果**（胶囊展示、要删的字段用**线横穿**），用户**点胶囊自定义这一列是否过滤**；并**展示后处理规则**、由用户决定是否启用（**默认开启**）。实现：① 新接口 `POST /api/file-filter/preview`（**同步**——只读表 + 逐列预演，毫秒~秒级，与轨迹速写 `/upload` 同口径，前端不必实现第二种轮询）：识别全部列名 + 逐列硬过滤预判（`keep/matched`）+ 后处理预判（`post_name/replace_count/locked/dup`），并把上传件**落盘暂存**返回 `staged_id`；② `/filter` 接受 `staged_id`（**复用暂存件，反复调字段不重复上传**，TTL 30 分钟；过期/越权 → 404 + `code=staged_expired`，前端自动改传文件重试一次）、`exclude`（**用户点掉的列，两种模式下最终否决**——大模型认为该保留也删）、`post_process=0`（关掉后处理：本次不改写文本，列过滤照常）；③ 大模型模式补**同名保底**（名单内同名字段直接保留，不把"用户点名要的列"交给模型判断——模型偶发返回空值会造成"明明开着却被删"）；④ `columns` 显式传空数组（字段全关）→ 400「未选择任何保留字段」而**不静默回退**管理员名单（静默回退会让"我明明全删了"变成"怎么全保留了"），完全不传才回退配置（老调用方口径不变）；⑤ `core.post_process_columns()` 逐列预演，与 `post_process()` 同口径（前者按列、后者全表），前端据此在点击胶囊时**实时求和**出"预计替换 N 处"；⑥ 前端 `app.js?v=4` / `style.css?v=4`：布局改为「① 上传文件整行（横跨两栏）＋ ② 过滤模式与字段识别 ｜ ③ 过滤结果 相邻两栏」（`display:grid`，窄屏回落单列），胶囊画删除线 = 将删除、表头会被后处理改名的显示 `→ 新名`、同名重复列标 `×N` 且一起切换、空表头列 `locked` 不给切换；规则明文展示（含「文本/正则」「已停用」徽标）+「启用后处理规则」开关（默认开启）；右侧改为「③ 过滤结果」并标注后处理是否关闭。验证：新增 `test_filter_preview.py` **21 例全绿**（预览识别与预判 / 逐列口径与整表口径一致 / 胶囊开关与 exclude 优先 / 显式空数组报错 / 老流程（直传文件、不传 columns）兼容 / 暂存复用与越权与过期 / 大模型同名保底与 exclude 优先 / 真实样本端到端）；既有 `test_xlsx_stale_dimension.py` 14 例、`test_bg_image.py` 17 例全绿（无回归）；**真实浏览器实测**（临时脚手架 `.workbuddy/tmp/ff_dev_server.py`：隔离数据根 + 假会话，端口 5199）：拖拽上传 → 7 个胶囊 5 条删除线 → 点开「手机号」预计替换处数 1→21 实时更新、点掉「所属单位」→ 提交 → 下载产物逐格核对（表头 = 用户所选 2 列、手机号 `138****1001`）；**关闭后处理再跑一轮** → 手机号 `13800001001` 未改写、结果区标注「已关闭」。产物：manifest 版本 file-filter 1.1.5→1.1.6（失真声明修复）→**1.2.0**（本批次），前端资源戳 style v2→v3 / app v3→v4，`config/tools.json` 卡片描述同步，插件 README 与 `docs/design/过滤器插件-设计文档.md`（§2.2 新增，§5/§6/§8/§9.1 同步）更新（**已出包**：file-filter v1.2.0 插件包 + 插件集重打；哈希与登记见 `tools/plugin-packages.json`，出包流程见 README §3.4） |
 | 2026-09-22 | **过滤器 / 轨迹速写：某些 Excel「只识别第一行第一列」（失真 `<dimension>` 声明）** | 用户报两个插件处理某些表格时「只识别第一行第一列」或「提示只有表头没有数据」。根因：这些文件（第三方导出工具写出）在工作表 XML 里声明 `<dimension ref="A1"/>`，实际却有多行多列——该元素在 OOXML 里只是"提示"（Excel 自身容忍），而 openpyxl 的 `read_only=True` 模式**以它为遍历范围上界**（`max_row=1`），于是只读出首格。同一缺陷 2026-09-18 已在「信息传输」修过（真实案例 `660.xlsx`），当时把另 4 处同类写法留作"待决策"——本次一并修掉：`file-filter/backend/core.py`、`trajectory-sketch/backend/excel_io.py`、`trajectory-sketch/backend/engine/selftest.py`、`trajectory-convert/backend/routes.py`。修法**两步必须成对**：① `ws.reset_dimensions()`（openpyxl ≥3.0.4，`hasattr` 守卫）清掉声明、改按 `sheetData` 实际内容扫描；② 统一补齐行宽——清掉声明后 openpyxl 不再按声明宽度补齐稀疏行（`['onlyA', None, None]` 会变成 `['onlyA']`），而下游按列下标取值，只做①会让列下标左移（轨迹类尤其危险）。B-7 禁止插件间 import → 四个插件各存一份同源实现，不抽公共模块。验证：新增 `test_xlsx_stale_dimension.py`（14 例：五种声明形态 × 四个读表插件与"普通模式基准"逐单元格一致、稀疏行列下标不漂移、声明过大无幽灵行列、两条 HTTP 端到端）；**反向验证**——摘掉 `reset_dimensions` → 12/14 失败，只做①去掉② → 1 例失败（列漂移）；既有 `test_bg_image.py` 17 例、`test_plugin_templates/admin/admin_plugin_manager` 29 例、轨迹引擎自测 43 项全绿；`engine/selftest.py --excel` 对失真文件已能出完整报告（修复前只读到 1 行）。产物：manifest 版本递增 file-filter 1.1.5→1.1.6、trajectory-sketch 1.2.3→1.2.4、trajectory-convert 1.1.5→1.1.6（**已出包**：trajectory-sketch v1.2.4、trajectory-convert v1.1.6 插件包，file-filter 的该修复随 v1.2.0 一并出包——登记见 `tools/plugin-packages.json`）；三份插件 README 补注该行为，踩坑清单 §7.5 第 37 条补 openpyxl 第⑤坑 |
@@ -252,7 +282,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | 2026-09-16 | **过滤器 / 轨迹速写：文档处理流程前新增「删除背景图片」环节** | 两个插件在上传落盘暂存**之前**统一跑一遍 `backend/bg_image.py`（纯标准库，零框架依赖）：识别 `.xlsx` 里嵌入的**工作表背景图片**（Excel「页面布局 → 背景」，即 `xl/worksheets/sheetN.xml` 的 `<picture r:id>` + 对应 Relationship + `xl/media/*` 本体，常被用来夹带水印/机构标识/来源标记），命中即三件套一起摘掉——除这三处外包内部件**逐字节原样搬运**（不重排/不重压/不改时间戳，样式、批注、宏、数据透视表、非背景图片一概不受影响）；图片本体若仍被别处引用（同一张图既当背景又当浮动 logo）只解除背景引用、保留本体。**零风险姿态**：未发现背景图片则原字节返回（连 zip 都不重写）；畸形包/加密包/解压超 256MB/解析异常一律不改写文件、照原样继续流程，原因写进结论 `note`；`csv`（无图片容器）与 `xls`（BIFF 二进制流）不检测并如实说明——两者在本框架里都是"读成二维表 → 重新生成输出"，产物天然不含背景图片。结论落点：`/filter` 与 `/result` 的 `sanitize` 字段、过滤器页面「文档预处理」一行、速写自检卡片「已删背景图片 N 张」标签（悬浮给完整结论）、速写报告「数据质量」sheet 的「源文件预处理」追溯行。B-7 禁止插件间 import → 两个插件各存一份**逐字节相同**的副本，`test_bg_image.py` 断言两份一致防漂移。验证：`test_bg_image.py` 17 项全绿（真实样本 `D:\SQLRewrite\demoData_real.xlsx` 识别删除 1 张 7.2KB / 数据 455 行逐行一致 / zip 结构有效 / 幂等 / 无背景零改写 / 共享图片本体保留 / 多表共用只删一次 / 外部链接 / 加密与畸形包与 zip 炸弹失败不阻断 / csv-xls 说明 / 两份副本一致）+ 两条端到端（`/api/file-filter/filter`、`/api/trajectory-sketch/upload→analyze→download`，临时数据根，断言落盘输入件已无 `<picture>`、报告数据质量 sheet 含「已删除背景图片 1 张」）+ 真实应用浏览器实测（两处 UI 新元素可见、无 JS 报错）。产物：插件包 v1.1.0 ×2（见 §2.2），前端资源戳 app.js v3 / v2，`config/tools.json` 卡片描述同步 |
 | 2026-09-14 | **插件独立升级（阶段二/三）：管理后台「插件管理」+ 共享盘批量更新** | 管理后台新增「插件管理」页（**仅超级管理员**，卡片在后台首页）：① **插件盘点**——代码版本 / 登记版本 / 状态（已启用·已停用·隐藏·待重启·登记不一致）/ 备份数 / 数据占用 / 回滚 / 启停；② **离线升级包**——选 zip → 只读校验 → **计划预览**（新增/修改/未变/删除/保留未知 + 基线说明 + 警示）→ 确认应用（自动备份旧版 → 替换 → **自动停服重启**，页面自动刷新；页面有「应用后自动重启服务」开关，
 关闭时才需要手工点「立即重启服务」）；③ **共享盘批量更新**——填 `index.json` 路径 → 检查更新（逐项给出可升级/受阻原因）→ 勾选 → 批量升级（顺序应用，最后统一重启一次）。服务端 `plugins/admin/backend/plugin_admin.py` 与目标机 `install-plugin.ps1` **同一套校验规则**（包结构/schema/id/逐文件 SHA256/路径安全/体积与条目数上限/版本窗口/min_app/三分法替换），`apply` 时**服务端重新校验**（不信任前端状态，上传文件限定在数据根 `.staging/uploads/`）。新增"待重启"机制：应用后标记 `restart_pending`，`app.py` 在插件后端加载完成后清除；冻结模式自重启 = 分离的 `cmd` 助手轮询 PID → `cd /d <程序目录>` → `start /min <exe>` → `os._exit`。配套：`JZTOOLS_DATA_ROOT` 环境变量（沙箱/受管环境，显式指定时不读写指针）；出包工具 `-Publish <共享目录>`（投递 zip+sha256+index.json）。**修掉三个实测缺陷**：重启判定误把 `manifest.json` 变化算作"需重启"（两侧同步收口为只看 `backend/**`）；三分法基线在"无登记"时退回备份快照会误删用户文件（改为只清 `backend/*.py` 残留）；出包工具生成的 changelog 乱码（PS 5.1 按 GBK 解码 git 的 UTF-8 输出）。验收：`test_admin_plugin_manager.py`（进程内 HTTP 全链路：登录→盘点→上传→计划→应用→回滚→启停→索引→批量升级→重启接口→仓库未被触碰断言）、`test_plugin_admin.py`（19 例 + 与出包工具交叉验证）、PS 沙箱套件 77 项；界面经浏览器实测（含上传应用、待重启横幅、检查更新、批量升级） |
-| 2026-09-14 | **插件独立升级（第四种分发物：插件包）** | 单个插件可在目标机离线独立升级，不必重出整包。开发侧 `tools/build-plugin-package.ps1 -Id <插件id>` 出 `JZToolsHub-插件-<id>-v<版本>.zip`（通常 < 10MB），目标机双击「安装插件.bat」（`tools/plugin-upgrade/install-plugin.ps1`，**免管理员**）：先只读校验（包结构 / 逐文件 SHA256 / 目标机版本 / `min_app_version` / `upgrade_from_min-max`）→ 备份旧版到数据根 `backups\plugins\<id>\` → 三分法替换代码（只删"上次装进去、本版已没有"的文件；磁盘上多出的文件默认保留）→ 登记状态（`config\.app_state.json` 的 `plugins.<id>`：版本 / `code_sha256` / `installed_files` / 备份路径）→ 按需停启服务并冒烟（`/api/tools` + `/api/<id>/status`）。**任何拒绝都发生在第一次写操作之前**；失败前会把本次自己停掉的服务拉起来；`-List` 体检 / `-DryRun` 演算 / `-Rollback` 回滚 / `-Uninstall` 卸载。构建期强制四类校验：**版本递增**、**`?v=N` 递增**（F-2）、**依赖白名单**（框架 `PACKAGES` ∪ 插件 `vendor/`，防"本机能跑、现场 ImportError"）、**运行态数据零夹带**（与整包清理共用 `tools/plugin-payload-rules.json` 一份规则）。同时补上两条链路缺口：① `install.ps1` **插件版本防回退**（整包升级不再把单独升级过的插件静默降级；`-ForcePluginOverwrite` 可强制以主包为准并校正登记）；② `jztools_data.sync_plugin_templates()` **插件级配置模板同步**（按模板内容指纹门控，不受应用版本门控——插件单独升级后新增配置键自动补入数据根，只补缺失键、保留用户已改的值）。验证：沙箱端到端 `tools\e2e\plugin-upgrade-sandbox-tests.ps1`（**77 项断言全绿**：升级 / 四类拒绝 / 回滚 / 全新安装 / 卸载 / 服务运行时停启冒烟 / 整包防回退）+ 单元测试 `test_plugin_templates.py`（7 例全绿）。方案与实施偏差见 `docs/design/插件独立升级方案-设计文档.md`（附录 D）、目标机口径见 `docs/guide/离线部署包说明.md` §11、开发约束见 `插件设计规范.md` §15（U-1~U-6）。**尚未真机演练**：真实 exe 的停启冒烟与真实插件的现场升级（见 §4 待办） |
+| 2026-09-14 | **插件独立升级（第四种分发物：插件包）** | 单个插件可在目标机离线独立升级，不必重出整包。开发侧 `tools/build-plugin-package.ps1 -Id <插件id>` 出 `JZToolsHub-插件-<id>-v<版本>.zip`（通常 < 10MB），目标机双击「安装插件.bat」（`tools/plugin-upgrade/install-plugin.ps1`，**免管理员**）：先只读校验（包结构 / 逐文件 SHA256 / 目标机版本 / `min_app_version` / `upgrade_from_min-max`）→ 备份旧版到数据根 `backups\plugins\<id>\` → 三分法替换代码（只删"上次装进去、本版已没有"的文件；磁盘上多出的文件默认保留）→ 登记状态（`config\.app_state.json` 的 `plugins.<id>`：版本 / `code_sha256` / `installed_files` / 备份路径）→ 按需停启服务并冒烟（`/api/tools` + `/api/<id>/status`）。**任何拒绝都发生在第一次写操作之前**；失败前会把本次自己停掉的服务拉起来；`-List` 体检 / `-DryRun` 演算 / `-Rollback` 回滚 / `-Uninstall` 卸载。构建期强制四类校验：**版本递增**、**`?v=N` 递增**（F-2）、**依赖白名单**（框架 `PACKAGES` ∪ 插件 `vendor/`，防"本机能跑、现场 ImportError"）、**运行态数据零夹带**（与整包清理共用 `tools/plugin-payload-rules.json` 一份规则）。同时补上两条链路缺口：① `install.ps1` **插件版本防回退**（整包升级不再把单独升级过的插件静默降级；`-ForcePluginOverwrite` 可强制以主包为准并校正登记）；② `jztools_data.sync_plugin_templates()` **插件级配置模板同步**（按模板内容指纹门控，不受应用版本门控——插件单独升级后新增配置键自动补入数据根，只补缺失键、保留用户已改的值）。验证：沙箱端到端 `tools\e2e\plugin-upgrade-sandbox-tests.ps1`（**77 项断言全绿**：升级 / 四类拒绝 / 回滚 / 全新安装 / 卸载 / 服务运行时停启冒烟 / 整包防回退）+ 单元测试 `test_plugin_templates.py`（7 例全绿）。方案与实施偏差见 `docs/design/插件独立升级方案-设计文档.md`（附录 D）、目标机口径见 `docs/guide/离线部署包说明.md` §11、开发约束见 `插件设计规范.md` §15（U-1~U-8，含 U-7a）。**尚未真机演练**：真实 exe 的停启冒烟与真实插件的现场升级（见 §4 待办） |
 | 2026-09-18 | **知识库 Word 预览三缺陷修复 + 异步下载源** | ① 三显示缺陷（仿宋_GB2312 缺失回退黑体致"莫名加粗"、`<tr>` 的 `overflow:hidden` 对 table-row 无效致穿模、`<p>` 默认 margin 撑高单元格）在 `office_render._polish_word_html()` 以 **HTML 后处理**修复，**vendor 零改动**，`PREVIEW_CACHE_VERSION` 3→4；② **异步下载源**：上传时可另提供一个下载文档（预览 PDF / 下载 DOC 的典型诉求），落盘 `<id>.dl.<ext>`，`/download` 优先返回它，失败一律降级不阻断；③ 回归 `test_routes_preview.py` 第 0b/4b 节 + 浏览器实测（真实 `showUpload` 源码抽取探针页） |
 | 2026-09-18 | **知识库「异步下载源」开关点不动修复（阶段 11）** | 用户实测反馈开关无响应。根因：`.slider` 是 `position:absolute;inset:0` 覆盖层，它盖住隐藏 `<input>` 且自身既非 `<label>` 也不转发点击，唯一可点是左侧文字的 `<label for=...>`——**用户点的那个"按钮"根本不可点**。修法：整行 `.switch-row` 改 `<label>` 直接包住 input + slider（不依赖 `for=` 指向被遮住的元素）；`style.css?v=29→30`、`app.js?v=19→20`。真实指针点击实测往返正常（点滑块/点文字均切换，开=accent 蓝 + 次级区展开，关=灰 + 收起）。新增 `test_routes_preview.py` 第 6 节静态契约断言（谁把 label 改回 div/span 即失败）。 **教训：首次实现只做了程序化 `.click()` 自测，漏掉了真实交互缺陷——浏览器验证必须用真实指针点击** |
 | 2026-09-18 | **冻结自重启真机失效修复 + 服务启动系统级通知** | 用户真机实测反馈：离线升级插件后"停服成功但永不自动重启"。逐条实测复现根因：**`DETACHED_PROCESS`（无控制台）的 cmd 里 `tasklist` 输出恒为空**（带 `/FI` 过滤与无过滤均 0 字节、退出码还是 0），自重启助手 `jz-restart-<pid>.cmd` 的「轮询 PID」循环要么整体跳过要么永远走不过去，真机上 `start` 行从未执行。**修法：整个 cmd 助手方案废弃**——改为派出 exe 自身以 `--wait-restart <旧PID>` 模式作分离助手（`CREATE_NO_WINDOW|CREATE_NEW_PROCESS_GROUP`），助手在 `app.py __main__` 最顶部截获参数（不初始化数据根/不占端口），用 `OpenProcess/WaitForSingleObject` 内核句柄等待旧进程退出（30s 上限防双实例）→ 宽限 1.5s（端口/句柄回归内核）→ 原程序目录重新拉起；`routes._spawn_self_restart()` 只负责派助手 + `Timer(0.6, os._exit)`（先回 HTTP 再退出，不变）。waitress 监听 socket 自带 `SO_REUSEADDR`（wasyncore `set_reuse_addr`），TIME_WAIT 不阻塞重绑。**同批新增**：服务每次启动（含自动重启拉起的新实例）就绪后经托盘图标 `pystray.Icon.notify()` 弹**系统级气泡通知**（"服务已启动：http://…"，Win10/11 渲染为 toast，零新依赖——pystray 已在打包清单）。验收：① 机制单测 4 例（等待退出→拉起 / 旧进程已死→直接拉起 / spawn 参数与 0.6s Timer / pystray notify 真实调用）；② 既有 29 项回归全绿；③ **真机 E2E**：重打 exe（`build/e2e-dist/`，未动 `deploy/` 与版本号）+ 沙箱数据根隔离，登录→上传含后端插件包→应用 `restarting=true`→旧进程 0.8s 退出→新实例 3.0s 恢复 HTTP，会话跨重启有效；④ 操作中心截图确认"JZ 工具箱 服务已启动"系统通知真实落地（横幅被系统勿扰抑制属正常系统行为，通知入操作中心）。设计文档 §9.3 / 附录 E 已同步改写 |
@@ -284,7 +314,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | --- | --- | --- |
 | 1 | 重新打包并发版 | ✅ **已完成**：`deploy/JZToolsHub-v1.7.zip`；版本 1.6 → 1.7 自动递增，打包解释器 Python 3.14.7；已包含知识库引擎改造、P0 六项修复，并新增随包离线组件 |
 | 2 | 清理/补齐模板同步清单 | ✅ 已修：模板统一改名 `config.template.json`，移除 2 条失效的 `prompt.json` 登记，补齐 case-report / character-graph / file-filter 三个模板。实测同步 **5 / 5 全绿**，4 个运行时 config.json 正确初始化 |
-| 3 | 模板被打包脚本删除 | ✅ 已修：模板改名后不再命中"删 `config.json`"规则（规则为精确名匹配）；`build-deploy.ps1` 新增打包后自检（`*.template.json` 少于 4 个即中止） |
+| 3 | 模板被打包脚本删除 | ✅ 已修：模板改名后不再命中"删 `config.json`"规则（规则为精确名匹配）；`build-deploy.ps1` 新增打包后自检（期望数按核心插件白名单动态计算，当前 `admin` 无模板 → 阈值为 0） |
 | 4 | `config/data_root.json` 移出版本库 | ✅ 已修：`.gitignore` + `git rm --cached`；`git ls-files config` 现只剩 `tools.json` |
 | 5 | 验证 `fmt=file` 端到端 | ⏳ **待真机**：桌面封装 → APP 扫码 → 导出 → 逐字节哈希比对 |
 | 6 | 单插件加载失败隔离 | ✅ 已修：`register_plugin_backends` 内 per-plugin try/except，失败记入 `app._plugin_load_errors` 并告警。实测"两个插件各定义 `def status()`"不再抛异常，仅 plug-b 被隔离，整站正常启动 |
@@ -293,11 +323,12 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 | # | 事项 | 状态 |
 | --- | --- | --- |
-| T1 | 三个插件出包（case-report v1.3.0 / character-graph v1.2.0 / file-filter v1.3.0） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id <id>`（校验已跑通，仅需去 `-NoZip`）；出包后同步 `tools/plugin-packages.json` 与插件集 |
+| T1 | **十二个插件出包**（admin / case-report / character-graph / file-filter / **info-transfer** / **knowledge-base** / **map-marker** / **notice-board** / **qr-video-decode** / **shared-docs** / **trajectory-convert** / **trajectory-sketch**；后 8 个是「版本同号但已发布包内容过时」，见报告 §8.3.1） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id <id>`（前三个校验已跑通，仅需去 `-NoZip`；trajectory-sketch 的差异与版本见 T6）；**admin 与 knowledge-base 是 2026-09-24 一致性核对轮新增的**——admin 改了 `backend/routes.py`（用户 custom 四键透传）、`backend/batch_io.py`（描述列留空语义）、`frontend/js/admin-llm.js` 与 `js/admin-user.js`（测试连通笔误 / 移除权限管理勾选项）、`admin-llm.html` 与 `admin-user.html`（`?v=` 递增）；knowledge-base 改了 `frontend/app.js`（语法错误修复 + 暴露 `window.toast`）与 `frontend/index.html`（`app.js?v=21`）。出包后同步 `tools/plugin-packages.json` 与插件集 |
 | T2 | 目标机验收：管理员模式（后台配一次 → 三个插件的大模型功能都可用） | ⏳ **待真机** |
 | T3 | 目标机验收：用户各自设置模式（管理员切换 → 用户端 ⋯ 卡片出现 → 各自填写 → 回退策略生效） | ⏳ **待真机** |
 | T4 | 老部署升级路径：升级后启动迁移**先收编再清除**插件历史 Key，三个插件的大模型功能不失效 | ✅ **已落地并单测覆盖**（`test_plugin_legacy_llm_migration`）；真机升级时留意日志里"已收编 / 已清除"两行 |
 | T5 | 用户级配置三条同步链路（建号时配置→用户端可见；用户改→人员管理可见；管理员改→用户端可见） | ✅ **已实测**（`test_1/2/3_*` 三例 + 真实浏览器走通三条）；顺带修掉「人员管理」把掩码当 Key 存下的缺陷 |
+| T6 | **trajectory-sketch 出包**（2026-09-24 恢复大模型辅助匹配后，工作区与已发布的 `v1.2.5` 包有 12 个文件不同 + 新增 `backend/llm_client.py`） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id trajectory-sketch`（出包脚本**不会**自动递增版本——需先手工把 `plugins/trajectory-sketch/manifest.json` 的 version 递增（如 1.2.6）再出包，脚本校验版本必须大于上一发布版（`tools/build-plugin-package.ps1:199-214`））；出包后同步 `tools/plugin-packages.json` 与插件集；真机验收随 T2/T3 一起做（`llm` 模式需在目标机配好接入信息） |
 
 ### 数据迁移（2026-09-23 落地，待收尾）
 
@@ -313,7 +344,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | --- | --- |
 | 7 | ~~`file-filter` 的 `def status()` 改为带前缀~~ ✅ **2026-09-14 已修**：8 个路由函数统一 `ff_*` 前缀，`admin` 的 `account_change_password` → `admin_account_password`；实测 11 个插件 136 个 endpoint 全部注册成功 |
 | 8 | 统一前端资源版本号起点与步长（现 case-report 用序号 v34、character-graph 用日期戳、admin 各页同一份 CSS 引用了 v1/v2/v5 三个版本） |
-| 9 | 清理随包分发的开发期文件：`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}`、`trajectory-sketch/frontend/icons/_generate.py`、`map-marker/frontend/*.py` |
+| 9 | 清理随包分发的开发期文件：**仅剩** `trajectory-sketch/frontend/icons/_generate.py`（给 `tools/plugin-payload-rules.json` 补一条 exclude_glob，或把它移出插件目录）；`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}` 与 `map-marker/frontend/*.py` 已由该规则排除，实测包内命中为 0 |
 | 10 | 为 `file-filter`（🧹）补 SVG 回退图标，或统一 SVG 回退为按 codepoint 自动推导（不再维护硬编码映射表） |
 | 11 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
 | 12 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
@@ -322,17 +353,17 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | 15 | 每次发版前校准离线组件版本：Chrome 组件用固定 URL `stable`（内容随 Google 更新而变），冻结的 `sha256` 会随之失配 → 需重跑 `fetch-offline-bundle.py --pin`，或改用带版本号的下载地址。`build-offline-component.ps1` 会在打包前按 `tools/offline-components.json` 校验核心包体积与 sha256 |
 | 15.1 | **插件升级链路真机演练**（第七~八轮交付物的最后一步，全部要真实环境）：① 用真实 `JZToolsHub.exe` 走一次"升级 → 停服 → 替换 → 启动 → 冒烟"（沙箱用假进程/HTTP 桩与测试客户端替代）；② **冻结模式自重启**（`_spawn_self_restart()`）：后台应用含后端的插件包 → 断言响应 `restarting=true`
 → 确认进程真的重启且页面自动恢复（手工路径为点「立即重启服务」）；③ 对某个真实插件做"升版本 → 出包 → 现场升级 → 功能验收 → 回滚"全流程；④ 验证 `install.ps1` 的插件防回退与后台"启用/停用"在真实安装目录下的表现（沙箱已覆盖逻辑，真机确认提示语与权限）。
-  > **2026-09-18 更新**：② 已完成且**过程中发现自重启真机从未生效**（无控制台分离 cmd 里 tasklist 恒输出为空）——已改 `--wait-restart` 内核句柄等待方案并在真机 E2E 通过（见 §3 当日条目与踩坑 45）。①的沙箱替代路径即当日的 E2E。③④ 仍待做。 |
+  > **2026-09-18 更新**：② 已完成且**过程中发现自重启真机从未生效**（无控制台分离 cmd 里 tasklist 恒输出为空）——已改 `--wait-restart` 内核句柄等待方案并在真机 E2E 通过（见 §3 当日条目与 §7.4 的 `DETACHED_PROCESS` 条）。①的沙箱替代路径即当日的 E2E。**①③④ 均已随 2026-09-21 目标机验收关闭**（真实 exe 的安装 / 升级 / 回滚 = D 组与 U 组，其中插件防回退 = U-03；当次记录见 `docs/guide/验收手册.md` §9.1）。 |
 | 15.2 | **共享盘（UNC）实测**：阶段三的索引与包文件读取用本地目录验证过，需在 `\\server\share` 上确认权限、路径含空格/中文、读取延迟与失败提示；另可考虑给包做签名（当前只有 sha256 旁挂 + 索引冻结值） |
-| 16 | **主体与插件解耦**（2026-09-19）：设计已定稿 → `docs/design/主体与插件解耦-设计文档.md`；**活清单已出 → `docs/plan/主体与插件解耦-TODO.md`（S0–S3、T01–T25、AC-1~AC-22 验收口径）**。要点：主包不再内嵌 15 个业务插件（只留核心插件 admin，可单独升级、不可卸载），主体升级因此从机制上不触碰插件；**必须先做 S0**（版本与依赖门控 + `jz_api` 依赖倒置 + 两处遗留跨插件协作修补之一），否则解耦即引入新故障。待办条目状态以该 TODO 清单为准，不在本表复述 |
+| 16 | **主体与插件解耦**（2026-09-19）：设计已定稿 → `docs/design/主体与插件解耦-设计文档.md`；**实施记录与条目状态见 → `docs/design/主体与插件解耦-设计文档.md` §11（实施记录；原活清单已全勾完并归档 → `docs/archive/主体与插件解耦-TODO.md`）**。要点：主包不再内嵌 15 个业务插件（只留核心插件 admin，可单独升级、不可卸载），主体升级因此从机制上不触碰插件；**必须先做 S0**（版本与依赖门控 + `jz_api` 依赖倒置 + 两处遗留跨插件协作修补之一），否则解耦即引入新故障。待办条目状态以该 TODO 清单为准，不在本表复述 |
 
 ### P2（体验与规范）
 
 | # | 事项 |
 | --- | --- |
 | 16 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
-| 17 | 在目标机做一次「全新安装 → 更新 → 卸载」三段式实测 |
-| 18 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 与 `runtime/` 合计约 2.5GB（含 4 个历史版本目录与 12 个旧 zip） |
+| 17 | ~~在目标机做一次「全新安装 → 更新 → 卸载」三段式实测~~ ✅ **2026-09-21 目标机验收已覆盖**（全新安装、插件集与依赖组件安装、卸载 = D 组；升级与回滚 = U 组；当次结果记录见 `docs/guide/验收手册.md` §9.1） |
+| 18 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 与 `runtime/` **合计约 1.2GB**（deploy 385MB / dist 51MB / build 70MB / runtime 682MB，2026-09-24 实测），均已被 gitignore 但占用磁盘与备份 |
 | 19 | 生产部署评估：当前上限约 300 并发（Flask/waitress 单进程线程模型），高负载建议 Gunicorn 多进程 + Nginx 反代 |
 | 20 | 移动端：恢复或彻底移除「重置」功能；`CameraScanner.averageLuminance` 亮度采样保留但无人调用 |
 | 21 | 知识库 `.xls`/`.doc` 每次转换都新建临时 profile（vendor 行为，实测约 30~60s/次）——若该路径调用频繁，考虑在适配层做 profile 复用（历史上曾用 `<数据根>/.lo-profile/` 把冷启动从 37~40s 降到 15~18s） |
@@ -345,11 +376,11 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | --- | --- | --- | --- |
 | A1 | **一切皆插件，连鉴权都是插件** | 框架一经打包不再修改；新功能零代码接入 | `admin` 必须始终加载，否则全站鉴权失效；`register_plugin_backends()` 对它无条件加载 |
 | A2 | **数据与程序目录分离**（数据根目录 + 双指针） | 整体替换程序文件夹升级不丢用户数据 | 插件必须经 `jztools_data` 定位数据，禁止拼绝对路径；`.admin_key` 与 `admin.json` 必须同目录迁移 |
-| A3 | **配置模板同步按版本门控** | 根治"换文件后 prompt 不更新" | 发版必须递增 `-Version`；新增模板要两处登记（`_TEMPLATE_SYNC` + `install.ps1`） |
+| A3 | **配置模板同步按版本门控** | 根治"换文件后 prompt 不更新" | 发版必须递增 `-Version`；新增带模板配置的业务插件只需在 `install.ps1` 的 `$cfgPairs` 登记，应用侧由 `sync_plugin_templates()` 自动发现；`jztools_data._TEMPLATE_SYNC` 仅登记框架级模板 |
 | A4 | **前端 iframe 隔离** | 插件之间、插件与框架互不污染 | 插件前端必须用相对路径；插件不能操作 parent 文档 |
 | A5 | **后端路由统一 `/api/<id>/` 前缀 + 函数名带插件前缀** | 避免多插件路由与 endpoint 冲突 | 新增插件务必重启并确认日志出现「已注册后端插件：\<id\>」 |
 | A6 | **长耗时一律异步任务**（提交即返回 + 轮询） | 不占用 HTTP worker | 有界线程池 + TTL 30 分钟 + 归属校验；前端轮询上限要与后端超时对齐 |
-| A7 | **插件间禁止 import，只走程序化 HTTP 接口** | 解耦，避免卸载连锁崩溃 | 能力复用需提供 `/apply` 类接口并自己处理会话传递 |
+| A7 | **插件间禁止 import 与后端互调** | 解耦，避免卸载连锁崩溃 | 能力复用走『提升为主体模块（如 `jz_llm`）或合并插件』；`/apply` 类程序化接口仅限**前端与外部脚本**调用，不得作为插件间后端依赖（轨迹速写已改为自带 `filter_local` 实现） |
 | A8 | **知识库预览改为按需渲染 + 磁盘缓存** | 引擎亚秒级（首渲染 19~70ms），无需后台状态机 | 文件不可变；缓存内记 `PREVIEW_CACHE_VERSION`——**改引擎/升级 vendor 后递增该常量**（`routes.py`），旧缓存自动重渲染，无需手工删 `<id>.preview.json` |
 | A9 | **轨迹分析引擎做成零依赖可插拔包** | 算法独立演进、可独立自测，不动路由与前端 | 新增算法版本只需在 `engine/algorithms/` 下加目录并注册 |
 | A10 | **移动端完全离线**（仅 CAMERA 权限，禁止 INTERNET） | 业务数据通过二维码光学传输，不落公网 | 任何联网能力都不应被加入 |
@@ -373,12 +404,12 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | 级别 | 问题 |
 | --- | --- |
 | ✅ 已修 | ~~`_TEMPLATE_SYNC` 与 `install.ps1` 登记的 `prompt.json` 模板在仓库中不存在~~ → 已从两处清单移除该 2 条登记；提示词改由 `llm_client` 内置默认值提供（用户手写的 `<数据根>/plugins/<id>/prompt.json` 仍优先且不再被版本覆盖）。复测：清单 5 条、源缺失 0、同步成功 5/5 |
-| ✅ 已修 | ~~`build-deploy.ps1` 删除插件树内所有 `config.json`，会连带删除同步模板~~ → 模板统一改名 `config.template.json`（清理规则为精确名匹配，不再命中），打包后自检 `*.template.json` 数量 < 4 即中止 |
+| ✅ 已修 | ~~`build-deploy.ps1` 删除插件树内所有 `config.json`，会连带删除同步模板~~ → 模板统一改名 `config.template.json`（清理规则为精确名匹配，不再命中），打包后自检 `*.template.json` 数量（期望数按核心插件白名单动态计算，当前 `admin` 无模板 → 阈值为 0） |
 | ✅ 已修 | ~~`config/data_root.json`（含开发机绝对路径）已纳入版本库~~ → 已 `.gitignore` + `git rm --cached`；`git ls-files config` 现只剩 `tools.json` |
 | ✅ 已修 | ~~README 宣称 Python 3.8 为目标环境，而知识库引擎要求 ≥3.10~~ → **两处说法都是错的**。实测：项目自身代码 3.8 可用；引擎在 3.8/3.13 都因 `vendor/xhr/__init__.py` 缺 `from typing import Optional` 而导入即 `NameError`，3.14 靠 PEP 649 侥幸可用。已打补丁 + 统一口径为"最低 3.12 / 打包 3.14" + 取消 Win7（见 `docs/eval/Python版本选型评估.md`） |
 | 低 | `app.py::_EMOJI_ICON_FILES` 提供的 `icon_file` 字段前端无人消费，属冗余维护点；`file-filter` 的 🧹 无任何 SVG 回退 |
 | 低 | `ai` / `design` / `maps` 分类在当前默认配置下无启用工具，首页显示空分类 |
-| 低 | `knowledge-base/backend/` 与 `trajectory-sketch/frontend/icons/`、`map-marker/frontend/` 混入了开发/测试脚本，随包分发 |
+| 低 | 仅 `trajectory-sketch/frontend/icons/_generate.py` 仍随包分发（`knowledge-base/backend/` 与 `map-marker/frontend/` 的开发/测试脚本已被 `tools/plugin-payload-rules.json` 排除，实测包内命中为 0）；清理见 §4 P1 #9 |
 | 低 | `plugins/info-transfer/backend/requirements.txt` 仍列 python-docx / xlrd / olefile（代码中确为可选依赖，用于"精简传输"模式），与部分文档"已移除该依赖"的表述不一致 |
 | 中（**待决策**） | **读表只读"活动工作表"，多工作表文件可能读错表**：四个读表插件（过滤器 / 轨迹速写 / 轨迹转换 / 信息传输）都用 `wb.active`，而它取自文件自身的 `<workbookView activeTab>`。若某文件的活动表是"封面/说明"页（A1 只有一个标题、数据在第 2 张表），插件就会读出 1 行 1 列——**症状与 2026-09-22 修的失真 `<dimension>` 完全一样**（"只识别第一行第一列"）。本次**未改**：改选表口径（读活动表 / 读首张有数据的表 / 合并全部工作表）会改变正规多表文件的既有行为，属产品决策。**排查手法**：`python -c "import openpyxl,sys;wb=openpyxl.load_workbook(sys.argv[1]);print([ (s.title, s.max_row, s.max_column) for s in wb.worksheets], 'active=', wb.active.title)" <文件>` |
 
@@ -389,7 +420,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | 中 | **zfec 无 Python 3.14 官方 wheel**（PyPI 上 1.6.0.0 只到 cp313、最新 1.6.0.1.post0 也只到 cp313），`pip install` 会退化为源码编译，要求构建机装 MSVC。**已缓解**：仓库 `wheels/` 随包提供预编译 wheel，安装时加 `--find-links wheels`；打包脚本已加依赖完整性前置检查。**未彻底解决**：升级 Python 小版本时仍需重做该 wheel（见 `wheels/README.md`） |
 | 中 | `config/data_root.json` 已移出版本库，但**旧克隆**里仍带着开发机路径；若发现数据根指向他人目录，删除该文件即可回落默认 |
 | 低 | 300 并发以上成功率下降（连接排队/拒绝，非应用异常），源于单进程线程模型 |
-| 低 | 工作区构建产物约 1.2GB（`deploy/` 含 3 个历史版本目录与 11 个旧 zip、`dist/` 220MB、`build/` 42MB），均已被 gitignore 但占用磁盘与备份 |
+| 低 | 工作区构建产物占用磁盘与备份（`deploy/` / `dist/` / `build/` / `runtime/`，均已被 gitignore）；**体积构成与实测数字见 §4 P2 #18**（本节不复述，避免两处漂移） |
 | 低 | zip 覆盖安装时旧版独有文件不会被删除（若未来删文件需注意残留） |
 
 ### 6.3 流程类
@@ -425,7 +456,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
            _X = None
    ```
    只写 `except Exception` 或缺裸 import 兜底，会让脚本方式加载的实例永远判定"模块不存在"。
-7. **Werkzeug ≥2.3 的 test_client 会忽略手写 Cookie 头**。插件间"进程内派发"复用彼此接口时，`headers={"Cookie": ...}` 与 `environ_overrides={"HTTP_COOKIE": ...}` 都会被忽略导致 401；唯一可靠做法是 `client.set_cookie(name, value, domain="localhost")` 逐条塞进 jar（见 `trajectory-sketch/backend/filter_bridge.py::_client_with_session`）。
+7. **Werkzeug ≥2.3 的 test_client 会忽略手写 Cookie 头**。插件间"进程内派发"复用彼此接口时（**该跨插件通道已随插件解耦移除**，本条对任何 test_client 内调仍适用），`headers={"Cookie": ...}` 与 `environ_overrides={"HTTP_COOKIE": ...}` 都会被忽略导致 401；唯一可靠做法是 `client.set_cookie(name, value, domain="localhost")` 逐条塞进 jar（见 `trajectory-sketch/backend/filter_bridge.py::_client_with_session`）。
 8. **元数据迁移的幂等判定用「键是否存在」而非取值**：`if rec.get("pdf_size") is None` 会让每次启动都判定需迁移；正确写法 `if "pdf_size" not in rec:`。
 9. **同目录扫描 `.json` 要过滤非记录文件**（如战果录入的 `item_categories.json`），否则把辅助库当"记录"读入导致 undefined。
 10. **`/api/logout` 是 POST 不是 GET**。
@@ -453,47 +484,46 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 ### 7.4 打包 / 安装脚本与本地环境
 
-19. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
-20. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
-21. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1:264` 有守卫，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（`:276`）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
-22. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
+23. **改了安装/卸载逻辑必须改仓库根目录源文件并重新打包**：部署包里的是副本，直接改包内脚本不会回写仓库。
+24. **编码约定**：`install.ps1` 必须 UTF-8 with BOM；`一键安装.bat`/`一键卸载.bat` 必须 GBK/ANSI **且不要加 `chcp 65001`**；两个 .bat **必须 CRLF 换行**（曾因存成 LF 导致 cmd 拼接解析报碎片错误）。脚本写出的 JSON 一律 UTF-8 无 BOM。
+25. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1` 有守卫，见其 `:364-369`，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（install.ps1:380 附近）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
+26. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
     *（2026-09-14 起 `build-deploy.ps1` 已防呆：不传 `-Version` 会自动递增 patch；最终版本号与上一版相同时**直接报错中止**，确需同号重打要显式加 `-Force`。）*
-23. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（< 4 即中止）。
-24. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
-25. **打包解释器必须与基线一致，且依赖必须装齐**（2026-09-14 起脚本已加两道前置检查）：
+27. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（期望数按核心插件白名单动态计算，当前 `admin` 无模板 → 阈值为 0）。
+28. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
+29. **打包解释器必须与基线一致，且依赖必须装齐**（2026-09-14 起脚本已加两道前置检查）：
     - `build-deploy.ps1` 会打印解释器版本，**与基线 3.14 不符时告警**（用 3.8/3.10 打出来的包会缺功能且无人察觉）；
-    - 会逐个 import `JZToolsHub.spec` 里 collect_all 的 14 个库并列出缺失项——**缺库不会让打包失败**，只会产出功能残缺的包，所以必须显式拦截；
-    - `version.json` 现在记录 `{app, schema, commit, built_at, python}`，目标机可据此核对"包是哪个提交、哪个 Python 打的"；
+    - 会逐个 import `build-deploy.ps1` 自带的 14 项依赖自检探针清单所列的库（`build-deploy.ps1:104-105`，与 `JZToolsHub.spec` 的 `PACKAGES` 不是同一份清单）并列出缺失项——**缺库不会让打包失败**，只会产出功能残缺的包，所以必须显式拦截；
+    - `version.json` 现在记录 `{app, schema, commit, built_at, python, offline, plugin_api}`（共 7 字段，写入逻辑见 `build-deploy.ps1:402-412`），目标机可据此核对"包是哪个提交、哪个 Python 打的、是否含离线组件、插件 API 版本"；
     - 其中 **`zfec` 需要 `--find-links wheels`**（无 3.14 官方 wheel），详见 `wheels/README.md`。
-26. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
-27. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
-28. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
-29. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95~130s、解出 1522.6 MB / 19418 文件，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
+30. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
+31. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
+32. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
+33. **LibreOffice 便携部署用 `msiexec /a`，不要 `msiexec /i`**：`/a` 是「管理安装」，**免管理员、不写注册表**，解出的目录可直接运行（2026-09-14 实测 26.8.0：退出码 0、耗时 95~130s、解出 1522.6 MB / 19418 文件，`program\soffice.exe` 就在 `TARGETDIR` 根下）。`/i` 需要管理员且装进 `Program Files`。**解包后的便携目录不要放进仓库 `runtime/`**——它会与 MSI 一起被打进包，体积翻三倍（1.5GB vs 0.36GB）。
     * **`msiexec /a` 会忽略 `ADDLOCAL` 功能选择**：按官方功能表只保留 378 个功能后，仍解出全量 19418 个文件（2026-09-14 实测）。所以"只装核心"只能**先全量解包再裁剪**。该 MSI 的功能划分本身是干净的（`gm_Langpack_*` 356.7 MB、`gm_r_ex_Dictionary_*` 455.2 MB、`gm_r_Files_Images` 71.7 MB），但 `/a` 不认。
     * **裁剪时 `presets\` 绝不能删**：删掉后 soffice 在**全新 user profile** 下报 `Fatal Error: … 安装无法完成`（退出码 77）。极其隐蔽——复用已初始化好的 profile 时裁剪树看起来完全正常，而**应用每次转换用的都是唯一临时 profile**（`xhr`/`dhr` 里都是 `tempfile.mkdtemp`），等于每次都是首次启动，**线上必崩**。`help\` / `readmes\` 反之是安全的（已逐项实测），别和 `presets\` 归成一类一起删。**测裁剪安全性必须每次用全新 profile**，否则结论是假阳性。
     * 落地方案：`tools/build-libreoffice-core.py` 在打包机解包 + 裁剪 + **构建期冒烟测试**（全新 profile 跑一次 CSV→XLSX）→ 产出 `runtime/libreoffice/libreoffice-core.zip`（357.5 MB → 164.5 MB、解包 557.9 MB / 2824 文件），打包时替代原始 MSI（`-KeepFullLibreOffice` 可保留完整版）。详见 `docs/guide/离线部署包说明.md` §3.1。
-30. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。Python 侧用 `subprocess.run()` 则天然等待（`build-libreoffice-core.py` 就是这么调的）。
+34. **调 `msiexec` 必须等它真正结束**：PowerShell 里 `& msiexec.exe ...` 会提前返回（msiexec 是启动安装服务后就退出的壳），必须 `Start-Process -Wait -PassThru` 取 `ExitCode`；`TARGETDIR=<含空格路径>` 要整体加引号。Python 侧用 `subprocess.run()` 则天然等待（`build-libreoffice-core.py` 就是这么调的）。
     * **`.NET Framework` 的 `ZipFile.ExtractToDirectory` 没有 `bool` 覆盖重载**：只有 `(源,目标)` 与 `(源,目标,Encoding)` 两个。传第三个参数 `$true` 会被 PowerShell 绑到 `entryNameEncoding` 上并抛"无法将值 True 转换为类型 System.Text.Encoding"。需要覆盖解压时用逐条 `[IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $path, $true)`。
-31. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
-32. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
-33. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。
+35. **便携 LibreOffice 的探测优先级是三层**：插件配置 `office.soffice_path` > 进程环境变量 `XHR_SOFFICE` > `<程序目录>/runtime/libreoffice/program/soffice.exe`（多套一层时在 `runtime/libreoffice/**` 内有限深度搜索）。改这条链要同时看 `office_render._apply_soffice_env()` 与 vendor 的 `find_soffice()`——vendor **每次调用都读环境变量**，所以配置改动无需重启即生效。
+36. **`install.ps1` 曾把 `version.json` 覆盖成 `{app, schema}`**，抹掉 `build-deploy.ps1` 写进去的 `commit` / `built_at` / `python` / `offline`，导致装完之后再也无法从包内判断代码出自哪个提交。现改为「读旧文件 → 保留未知字段 → 只更新 `app`」。
+37. **离线组件失败绝不能阻断安装**：Chrome 是全机 MSI，没提权必然失败；脚本据此打印手动指引后继续（与「缺依赖插件优雅降级」同一原则）。另外 `install.ps1` 调 `setup-offline-runtime.ps1` **必须走子进程**——那个脚本以 `exit` 结尾，dot-source 会连带终止整个安装流程。
     * **组件已移出主包（2026-09-14 第六轮）**：主包默认不含 Chrome / LibreOffice，`install.ps1` 判断"是否处理离线组件"改为看**源包**里有没有 `runtime\manifest.json`（`$rtCarried = Test-Path (Join-Path $Source "runtime\manifest.json")`），而不是看目标目录——否则旧胖装残留的 `runtime\` 会让瘦包路径误触发。瘦包时只打印一句指引（浏览器用目标机自带 Chrome/Edge；高保真预览去装组件包）。
     * **LibreOffice 组件的一键安装是"纯解压"而非 `msiexec`**：`install-libreoffice-core.ps1` 把 `libreoffice-core.zip` 解到 `<程序目录>\runtime\libreoffice\`（恰好命中应用探测链的第三条路径），**不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"**，因此免管理员且对目标机使用者不可见（目标机 MS Office/WPS 与默认应用不受影响）。脚本最后写一个 `runtime\libreoffice-core.installed.json` 标记；`-Uninstall` 只删该目录与标记。
     * **不要给这个安装器加"注册"类动作**：一旦写 `HKLM`/`HKCR`、建开始菜单项或改文件关联，"对目标机不可见"这条就破了——需求明确要求不影响目标机默认打开方式。
     * **应用侧每次都重新探测 soffice**（`office_render._apply_soffice_env()` 无缓存），所以装/卸组件**无需重启工具箱**即生效；这也意味着不要在该链路上加进程级缓存。
     * `Expand-PayloadZip` 会返回 `$true`，裸调用会在控制台打出 `True` → 调用处用 `$null = Expand-PayloadZip ...` 抑制。
-34. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
-35. **打包前先提交，否则 `version.json` 的 `commit` 指向错误的提交**：`build-deploy.ps1` 记的是**构建那一刻的 HEAD**，工作区若有未提交改动，包内代码其实来自"HEAD + 改动"，事后无法据此定位源码。2026-09-14 已加防护：`git status --porcelain` 非空时把 `commit` 记成 `<sha>-dirty`。**正确姿势是先 commit 再打包**；若已用脏工作区打了包，要么重打，要么手工把 `version.json.commit` 校正为实际对应的提交（v1.7 首版就是后者）。
-36. **只重出 zip 用 `-ZipOnly`**：跳过 PyInstaller 与目录组装，实测约 2 分钟（全量打包约 16 分钟）。**前提是先把新文件复制进 `deploy\JZToolsHub\`**——它不重新组装，只压缩既有目录。另注意变量名不能叫 `$zipOnly`（PowerShell 变量名不分大小写，会与开关参数撞成同一变量）。
-37. **PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号**（`$PSNativeCommandArgumentPassing` 是 PS 7.3+ 才有）：`python -c "<脚本>"` 里只要有 `f"..."` 或 JSON 字面量就会被改坏，报 `File "<string>", line NN` 语法错。**修法：把脚本与参数写成临时文件再传路径**（见 `tools/build-plugin-package.ps1` 的依赖扫描），别内联。
-38. **`$pid` 是 PowerShell 只读自动变量**（当前进程号），拿它当循环变量会抛"无法覆盖变量 PID，因为该变量为只读变量或常量"；若这句在 `try {} catch {}` 里，会**静默跳过整段逻辑**（`install.ps1` 的插件防回退曾因此完全不生效，沙箱测试才暴露）。插件 id 一律用 `$pluginId` 之类的名字。
-40. **PS 5.1 按控制台代码页解码子进程 stdout**：`& git log ...` 抓到的中文提交信息会被按 GBK 解码成乱码（实测 `升级说明.md` 与 `index.json` 的 changelog 变成"鏇存柊…"）。修法：调用前临时 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`，`finally` 里还原（见 `build-plugin-package.ps1`）。
-41. **`display:flex` 会压过 `hidden` 属性**：给元素写了 `display:flex` 后，`el.hidden = true` 不再生效（作者样式优先于 UA 的 `[hidden]{display:none}`），页面会出现"空横幅常驻"。修法：补 `.your-class[hidden] { display: none; }`（见 `admin.css` 的 `.plugin-banner`）。
-42. **写全栈测试的沙箱隔离三件套**：① 数据根用 `JZTOOLS_DATA_ROOT` 显式指定；② 程序目录靠 `sys.path` 指向沙箱副本（`get_base_dir()` 取自模块 `__file__`，所以 `jztools_data` 也必须从沙箱导入——注意先清理 `sys.modules` 里的旧副本）；③ 测试里**断言** `get_base_dir()==沙箱` 且仓库插件目录未被改动。缺第③条时，"测试改到了真实仓库"会静默发生（本轮的 http 全链路测试就是这么防的）。
-43. **`app/` 目录名会与 `app.py` 撞成命名空间包**：把沙箱程序目录命名成 `app` 后，`import app` 拿到的是命名空间包（`__file__ is None`）而不是 `app.py`。沙箱目录改名 `prog` 即可。
-45. **`DETACHED_PROCESS`（无控制台）的 cmd 里 `tasklist` 输出恒为空**（带 `/FI` 过滤与无过滤都是 0 字节、退出码 0）——「分离 cmd 助手轮询 tasklist 等进程退出」这类设计在真机上**静默失效**：循环要么永远走不出去要么被整体跳过（本项目的冻结自重启助手就是这样坏的，实测见 §3 2026-09-18 条目）。同场景对照：`CREATE_NO_WINDOW` 下 tasklist 正常。**任何"等旧进程退出"的逻辑都不要依赖控制台工具**：用内核句柄（`OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject`），既不受控制台影响也不怕 PID 复用。另外给无头脚本做验证时，务必给每一步落 marker 文件插桩——"脚本没产出"只看退出码是定位不到卡在哪一行的。
-39. **"三分法"替换的基线不能用"本次备份快照"**：备份拍的是升级前的**磁盘现状**（含用户/第三方放进插件目录的文件），拿它当"旧版清单"会把用户文件误判成旧版文件删掉。正确基线是**上次由安装器写进去的文件清单**（`install-plugin.ps1` 存进状态登记的 `installed_files`），只有首次由整包安装的插件才退回快照口径。沙箱测试对这个行为有专门断言。
-
+38. **zip 压缩用 `-CompressionLevel Fastest`**：离线包约 700MB，其中 MSI 本身已是压缩格式，`Optimal` 几乎减不了体积却要多花数分钟。
+39. **打包前先提交，否则 `version.json` 的 `commit` 指向错误的提交**：`build-deploy.ps1` 记的是**构建那一刻的 HEAD**，工作区若有未提交改动，包内代码其实来自"HEAD + 改动"，事后无法据此定位源码。2026-09-14 已加防护：`git status --porcelain` 非空时把 `commit` 记成 `<sha>-dirty`。**正确姿势是先 commit 再打包**；若已用脏工作区打了包，要么重打，要么手工把 `version.json.commit` 校正为实际对应的提交（v1.7 首版就是后者）。
+40. **只重出 zip 用 `-ZipOnly`**：跳过 PyInstaller 与目录组装，实测约 2 分钟（全量打包约 16 分钟）。**前提是先把新文件复制进 `deploy\JZToolsHub\`**——它不重新组装，只压缩既有目录。另注意变量名不能叫 `$zipOnly`（PowerShell 变量名不分大小写，会与开关参数撞成同一变量）。
+41. **PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号**（`$PSNativeCommandArgumentPassing` 是 PS 7.3+ 才有）：`python -c "<脚本>"` 里只要有 `f"..."` 或 JSON 字面量就会被改坏，报 `File "<string>", line NN` 语法错。**修法：把脚本与参数写成临时文件再传路径**（见 `tools/build-plugin-package.ps1` 的依赖扫描），别内联。
+42. **`$pid` 是 PowerShell 只读自动变量**（当前进程号），拿它当循环变量会抛"无法覆盖变量 PID，因为该变量为只读变量或常量"；若这句在 `try {} catch {}` 里，会**静默跳过整段逻辑**（`install.ps1` 的插件防回退曾因此完全不生效，沙箱测试才暴露）。插件 id 一律用 `$pluginId` 之类的名字。
+43. **"三分法"替换的基线不能用"本次备份快照"**：备份拍的是升级前的**磁盘现状**（含用户/第三方放进插件目录的文件），拿它当"旧版清单"会把用户文件误判成旧版文件删掉。正确基线是**上次由安装器写进去的文件清单**（`install-plugin.ps1` 存进状态登记的 `installed_files`），只有首次由整包安装的插件才退回快照口径。沙箱测试对这个行为有专门断言。
+44. **PS 5.1 按控制台代码页解码子进程 stdout**：`& git log ...` 抓到的中文提交信息会被按 GBK 解码成乱码（实测 `升级说明.md` 与 `index.json` 的 changelog 变成"鏇存柊…"）。修法：调用前临时 `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)`，`finally` 里还原（见 `build-plugin-package.ps1`）。
+45. **`display:flex` 会压过 `hidden` 属性**：给元素写了 `display:flex` 后，`el.hidden = true` 不再生效（作者样式优先于 UA 的 `[hidden]{display:none}`），页面会出现"空横幅常驻"。修法：补 `.your-class[hidden] { display: none; }`（见 `admin.css` 的 `.plugin-banner`）。
+46. **写全栈测试的沙箱隔离三件套**：① 数据根用 `JZTOOLS_DATA_ROOT` 显式指定；② 程序目录靠 `sys.path` 指向沙箱副本（`get_base_dir()` 取自模块 `__file__`，所以 `jztools_data` 也必须从沙箱导入——注意先清理 `sys.modules` 里的旧副本）；③ 测试里**断言** `get_base_dir()==沙箱` 且仓库插件目录未被改动。缺第③条时，"测试改到了真实仓库"会静默发生（本轮的 http 全链路测试就是这么防的）。
+47. **`app/` 目录名会与 `app.py` 撞成命名空间包**：把沙箱程序目录命名成 `app` 后，`import app` 拿到的是命名空间包（`__file__ is None`）而不是 `app.py`。沙箱目录改名 `prog` 即可。
+48. **`DETACHED_PROCESS`（无控制台）的 cmd 里 `tasklist` 输出恒为空**（带 `/FI` 过滤与无过滤都是 0 字节、退出码 0）——「分离 cmd 助手轮询 tasklist 等进程退出」这类设计在真机上**静默失效**：循环要么永远走不出去要么被整体跳过（本项目的冻结自重启助手就是这样坏的，实测见 §3 2026-09-18 条目）。同场景对照：`CREATE_NO_WINDOW` 下 tasklist 正常。**任何"等旧进程退出"的逻辑都不要依赖控制台工具**：用内核句柄（`OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject`），既不受控制台影响也不怕 PID 复用。另外给无头脚本做验证时，务必给每一步落 marker 文件插桩——"脚本没产出"只看退出码是定位不到卡在哪一行的。
 ### 7.5 第三方库行为
 
 37. **openpyxl 五个坑**：① `read_only=True` 读不到合并单元格（`ReadOnlyWorksheet` 无 `merged_cells`），要处理合并必须用普通模式；② `data_only=True` 对"从未被 Excel 计算过"的公式返回 `None`，判断"是不是公式"要用 `data_only=False` 再加载一遍比对；③ Excel 数字只保留 15 位有效数字，18 位身份证按数字存会被静默改写（必须靠"原始单元格是 float 且 ≥1e15"识别）；④ 拒绝写入 XML 非法控制字符（造测试夹具时别塞，但 CSV 可以携带，解析时要清理）；⑤ **`read_only=True` 以工作表 `<dimension>` 声明为遍历范围上界**，而该声明只是"提示"——第三方工具常写出失真值（如声明 `A1` 而实际 A1:A4），此时**只读到首格**（用户侧表现为「只识别第一行第一列」/「只有表头没有数据」）。取数前必须 `ws.reset_dimensions()`（≥3.0.4，`hasattr` 守卫）**并配套补齐行宽**——清声明后 openpyxl 不再按声明宽度补齐稀疏行，只做前半步会让下游按列下标取值发生列漂移。回归见 `test_xlsx_stale_dimension.py`。
@@ -562,7 +592,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | trajectory-convert | `/api/trajectory-convert` | ThreadPoolExecutor(2)，产物按 mtime TTL 30min 清理 | `.task_cache/`（mp4/png/zip）+ `config.json`（列名） |
 | qr-video-decode | `/api/qr-video-decode` | ThreadPoolExecutor(2)，结果仅存内存 | 无落盘 |
 | file-filter | `/api/file-filter` | ThreadPoolExecutor(2)，TTL 30min，产物与任务表双清理 | `.task_cache/` + `config.json`（保留字段名单 / 后处理规则；历史 `llm` 段已由启动迁移清除）+ `prompt.json`（提示词；接入信息归 `jz_llm`）；`POST /apply` 为程序化接口 |
-| trajectory-sketch | `/api/trajectory-sketch` | ThreadPoolExecutor(2)，TTL 30min，上传暂存与产物双清理 | `.task_cache/`（`_upload.<ext>` + `_report.xlsx`）+ `config.json`；引擎在 `backend/engine/`（`selftest.py` 可独立跑） |
+| trajectory-sketch | `/api/trajectory-sketch` | ThreadPoolExecutor(2)，TTL 30min，上传暂存与产物双清理 | `.task_cache/`（`_upload.<ext>` + `_report.xlsx`）+ `config.json`（过滤/表结构/分析/报告；`filter.mode` 支持 `hard`/`llm`）+ `prompt.json`（提示词）；**大模型辅助匹配经 `jz_llm`**（2026-09-24 恢复，无自有接入信息）；引擎在 `backend/engine/`（`selftest.py` 可独立跑） |
 | info-transfer | `/api/info-transfer` | ThreadPoolExecutor(2)，TTL 30min，支持取消 | `.task_cache/`（mp4/png/zip/帧 PNG） |
 
 **异步任务三件套**（新插件抄这里）：`POST /api/<id>/<action>` 立即返回 `task_id` → 后台线程池执行 → `GET /api/<id>/result/<task_id>` 轮询 `{status: pending|running|done|error}`。任务表加锁、结果 TTL 30 分钟、任务归属校验（创建者或超管可见）。
@@ -572,7 +602,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 ## 9. 移动端 APP（android-app/InfoParse）
 
 > 功能/协议/构建运行的"说明书"版本在 README「信息传输与移动端 APP（Android）」章节；**协议权威定义在仓库根目录《移动端APP.md》**（改协议必须同步它）。
-> 注：本目录**已纳入版本管理**（63 个文件），早前文档"未纳入版本管理"的表述已过时。
+> 注：本目录**已纳入版本管理**（文件数**现取现用**：`git ls-files android-app | wc -l`，2026-09-24 实测 70），早前文档"未纳入版本管理"的表述已过时。
 
 ### 9.1 定位与技术栈
 
@@ -598,16 +628,19 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 ### 9.3 构建命令（离线，可复制）
 
-项目**没有可用的 gradle wrapper**（只有 `gradle/wrapper/gradle-wrapper.properties`），用本机 Gradle 发行版直接构建：
+**wrapper 已入库**（`gradlew` / `gradlew.bat` / `gradle/wrapper/gradle-wrapper.jar` 与 `properties` 均被 git 跟踪，
+jar 必须随源码走），用标准入口 `.\gradlew.bat` 构建（在 `android-app/InfoParse/` 目录内；口径同 `InfoParse-APP打包手册.md` §0/§1）：
 
-```bash
-export JAVA_HOME="C:/Users/yfjz/.jdks/jbr-21.0.11"    # JBR 21；不要用 JBR 25，gradle 8.7 不支持
-export GRADLE_USER_HOME="D:/GradleHome"
-"D:/GradleHome/wrapper/dists/gradle-8.7-bin/bhs2wmbdwecv87pi65oeuq5iu/gradle-8.7/bin/gradle" \
-  -p "D:/JZToolsHub/android-app/InfoParse" :app:assembleDebug :app:testDebugUnitTest --console=plain --offline
+```powershell
+$env:JAVA_HOME = "C:\Users\yfjz\.jdks\jbr-21.0.11"   # JBR 21；不要用 JBR 25，gradle 8.7 不支持
+$env:GRADLE_USER_HOME = "D:\GradleHome"              # 发行版与缓存（机器环境变量已设）
+cd D:\JZToolsHub\android-app\InfoParse
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest --console=plain --offline
 ```
 
-- SDK：`D:/Android/Sdk`（`local.properties` 已指向）；产物 `app/build/outputs/apk/debug/app-debug.apk`（约 37MB）。
+> 升级 Gradle 版本用 `.\gradlew.bat wrapper --gradle-version <x>`，**别手改** `gradle-wrapper.properties`。
+
+- SDK：`D:/Android/Sdk`（`local.properties` 已指向）；产物 `app/build/outputs/apk/<flavor>/<buildType>/InfoParse-<versionName>-<buildType>.apk`（flavor 化后**按 variant 分目录、文件名带版本号**，由 `app/build.gradle.kts` 对全 variant 设的 `outputFileName` 决定；lite 的 versionName 自带 `-lite` 后缀。`apk/debug/app-debug.apk` 是 flavor 化之前的老路径）。
 - 正式签名：`android-app/InfoParse/release.keystore`（alias `infoparse`，密码 `infoparse2024`）。**升级包必须用同一 keystore**，否则用户无法覆盖安装。
 - release 构建有 `lintVitalRelease` 卡点：**资源只在 `values-night` 声明、base values 没有同名项时 release 直接失败**（debug 不报）。
 - adb：`D:/Android/Sdk/platform-tools/adb.exe`（不在 PATH）；崩溃排查第一步 `adb logcat -b crash -d`。
@@ -675,7 +708,7 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
 只改这里**）↔ `install.ps1`（插件版本防回退）↔ `jztools_data.sync_plugin_templates()`
 + `docs/design/插件独立升级方案-设计文档.md` + `docs/guide/离线部署包说明.md` §11 + `插件设计规范.md` §15。
 **管理后台那条链（第八轮新增）**：`plugins/admin/backend/plugin_admin.py`（校验/应用/回滚/索引核心）
-↔ `plugins/admin/backend/routes.py`（9 个超管接口 + 页面 + 自重启）
+↔ `plugins/admin/backend/routes.py`（13 个超管 API + 页面 + 自重启）
 ↔ `plugins/admin/frontend/{admin-plugins.html,js/admin-plugins.js,css/admin.css}`（页面）
 ↔ `jztools_data.py`（待重启标记 / `JZTOOLS_DATA_ROOT`）↔ `app.py`（启动时清除标记）。
 改完**必须跑**：`python -m unittest test_plugin_admin test_admin_plugin_manager`（含"仓库未被触碰"断言）。
@@ -720,7 +753,7 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | 我要做的事 | 去哪 |
 | --- | --- |
 | 打包主包 / 校验 / 上线自测 | `docs/guide/打包部署手册.md` |
-| 出插件包 / 目标机单插件升级 | `docs/guide/打包部署手册.md` §3.4 |
+| 出插件包 / 目标机单插件升级 | 根 README §3.4 |
 | 下载离线组件、重建 LibreOffice 核心包 | `docs/guide/离线部署包说明.md` §3 |
 | 重建 zfec wheel（换 Python 小版本后） | `wheels/README.md`、`tools/build-zfec-wheel.py` |
 | 打 Android APP 包 | `android-app/InfoParse/InfoParse-APP打包手册.md` |
@@ -736,7 +769,7 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | 契约层 | `README.md` / `HANDOFF.md`（本文件）/ `插件设计规范.md` / `移动端APP.md` | 总览、交接状态、开发铁律、协议权威定义 |
 | 流程 | `docs/项目管理手册.md` | 改代码 / 开插件 / 移植 / 打包运维 四类场景（新手入口） |
 | 交付层 | `docs/guide/` | 打包部署手册、离线部署包说明、LibreOffice 组件评估、干净机器部署验收手册 |
-| 设计层 | `docs/design/` | 8 份功能/插件设计文档 |
+| 设计层 | `docs/design/` | 功能/插件设计文档（份数以 `docs/README.md` §2 为准） |
 | 评估层 | `docs/eval/` | 信息传输总纲、Python 选型、热插拔路线、手搓引擎 |
 | 方案层 | `docs/plan/` | 信息传输 TODO 清单、主体与插件解耦 TODO 清单（活清单）与实施方案 |
 | 归档层 | `docs/archive/` | 已完成 / 已决 / 已取代，只作留证 |

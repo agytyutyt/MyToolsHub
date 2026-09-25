@@ -25,7 +25,7 @@
         "name": "zfec",
         "version": ">=1.6",
         "required": false,
-        "hint": "缺少 zfec：视频流解码（纠删码）不可用。请安装依赖包 JZToolsHub-依赖-zfec-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 zfec：视频流解码（纠删码）不可用。请安装依赖组件包 JZToolsHub-依赖-zfec-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       }
     ]
   }

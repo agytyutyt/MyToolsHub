@@ -2,7 +2,7 @@
 
 > 用途：配合 `docs\guide\干净机器部署验收手册.md` 做功能验收。**所有数据均为虚构测试数据**
 > （身份证号/手机号/单位人员均非真实信息）。
-> 生成脚本：`tools\e2e\make-acceptance-testdata.py`（可重新生成）。本目录**随仓库提交**（约 400 KB），
+> 生成脚本：`tools\e2e\make-acceptance-testdata.py`（可重新生成）。本目录**随仓库提交**（约 540 KB / 548589 字节，2026-09-24 实测），
 > 因此拿到仓库就有经过校验的验收数据；发布介质另见 `deploy\JZToolsHub-验收测试数据-v<日期>.zip`。
 
 ## 怎么用
@@ -36,7 +36,7 @@
 | knowledge-base | `knowledge-base/旧版通知.doc`、`旧版报表.xls` | 上传 → 预览 | **需装 LibreOffice 离线组件**；未装时给出"安装离线组件"提示而非报错 |
 | **character-graph** | `character-graph/人物档案.docx`、`.pdf`、`.txt` | 上传 → 抽取人物与关系 | 抽出 4 个人名与关系；缺 docx/pypdf 时提示对应格式不可用 |
 | character-graph | 配置 API Key 后重跑 | 用大模型辅助抽取 | 关系更完整；缺 requests 时提示"大模型辅助抽取不可用" |
-| **case-report** | `case-report/收网情况简报.txt` | 粘贴文本 → 解析 → 生成报表 → 导出 | 五要素正确（案件名 1·7 专案 / 时间 / 主办大队 三大队 / 抓获人数 2 / 缴获物品 4 项）；导出 xlsx（缺 openpyxl 时仅 CSV） |
+| **case-report** | `case-report/收网情况简报.txt` | 粘贴文本 → 解析 → 生成报表 → 导出 | 要素正确（案件名 1·7 专案 / 时间 / 主办大队 三大队 / 抓获人数 2 / 缴获物品 4 项）；导出 xlsx（缺 openpyxl 时仅 CSV） |
 | case-report | `case-report/战果台账.xlsx` | 导入台账 | 数据入库、列表可见 |
 | **shared-docs** | `shared-docs/文档正文.txt` | 新建文档 → 粘贴正文 → 保存 | 保存成功、列表可见、详情可读 |
 | shared-docs | 上述文档 → 导入导出 | 导出 docx/xlsx | 可下载；缺 docx/openpyxl 时提示不可用 |
@@ -92,7 +92,7 @@ python tools\e2e\make-acceptance-testdata.py --verify --base http://127.0.0.1:50
 - trajectory-convert/sketch：轨迹表 60 点（xlsx + xls）
 - knowledge-base：通知 docx（含表格）+ 报表 xlsx + 手册 PDF（源 docx 已保留）
 - character-graph：人物档案 docx / pdf（源已保留）/ txt
-- case-report：收网简报（五要素齐全）+ 战果台账 xlsx
+- case-report：收网简报（要素齐全）+ 战果台账 xlsx
 - 纯前端工具：base64/md5 文本、json 正误样例、坐标列表、取色器说明（md5 附预期值）
 - shared-docs / notice-board：正文文本各一份
 - knowledge-base/旧版通知.doc（20 KB）

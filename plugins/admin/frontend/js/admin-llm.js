@@ -193,7 +193,7 @@
   async function test() {
     let payload;
     try {
-      payload = collect().provider;
+      payload = collectProvider();
     } catch (err) {
       showToast(err.message, true);
       return;

@@ -10,14 +10,22 @@ r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<Deploy
 
 与 build-deploy.ps1 的对应关系（行为逐一复刻，勿擅自改口径）：
   §3.1   dist\JZToolsHub\*（exe + _internal）
-  §3.2   static/ plugins/ wheels/ tools/ + docs/README.md + docs/guide/ + docs/design/
-         + README/HANDOFF/插件设计规范/移动端APP
-         + config\tools.json + install.ps1 + 一键安装.bat + 一键卸载.bat
+  §3.2   static/ + docs/guide/ + docs/design/（COPY_DIRS）
+         + docs/README.md + README.md + HANDOFF.md + 插件设计规范.md + 移动端APP.md
+         + install.ps1 + 一键安装.bat + 一键卸载.bat（COPY_FILES）
+         + plugins/<核心插件白名单>（CORE_PLUGINS，当前仅 admin）+ tools/plugin-upgrade
+         + config\tools.json（收窄为「site + 分类骨架 + 核心插件条目」）
          复制与清理均按 tools\plugin-payload-rules.json（与「插件包」共用同一份真源）
+         ★ plugins / wheels / tools **不再整目录随包**：plugins 只拷核心插件白名单、
+           tools 只拷 plugin-upgrade（目标机离线装插件）、wheels 不随包（无运行时消费方）
          ★ docs 分层随包（2026-09-17）：只带「交付层 guide + 设计层 design + 索引」，
            内部层 docs/eval（一次性评估）、docs/plan（活清单）、docs/archive（历史留证）
            不随包 —— 口径与 build-deploy.ps1 §3.2 一致，改一处要两处一起改
-  §3.2.1 模板自检：*.template.json >= 4，否则中止（模板被误删是历史事故）
+  §3.2.1 模板自检：包内 *.template.json 数 >= 核心插件白名单内实有数，否则中止
+         （期望值按 CORE_PLUGINS 动态累计，当前 admin 无模板 → 期望 0；
+           硬编码 4 会在主包收窄后直接误报中止）
+  §3.2.3 已安装依赖清单：调 tools\gen-installed-deps.py 生成 config\installed-deps.json
+         （插件依赖判定的真源，也是 verify-package.py 的 REQUIRED 之一 —— 缺它校验必失败）
   §3.3   logs/
   §3.4   version.json（UTF-8 **无 BOM**，Python json.load 遇 BOM 会报错）
   §4     start.bat（**GBK**，即 PowerShell 的 -Encoding Default）
@@ -249,6 +257,25 @@ def main():
                     "tools": [t for t in tpl_obj.get("tools", []) if t.get("id") in CORE_PLUGINS]}
         with open(os.path.join(app, "config", "tools.json"), "w", encoding="utf-8", newline="") as f:
             f.write(json.dumps(narrowed, ensure_ascii=False, indent=2))
+
+    # ---- §3.2.3 已安装依赖清单 ----
+    # 插件依赖判定的真源：冻结 exe 现场没有 pip、_internal 的 .dist-info 也不保证完整，
+    # 故在构建期采集一次（发行包名→版本 + import 名→发行包名）随主包分发；后台据此展示
+    # 「已安装依赖」并与插件 manifest.requires 比对。gen-installed-deps.py 由 --out 反推
+    # 冻结目录 <程序目录>\_internal，故必须在 dist 拷贝之后调用。
+    # ★ 不做这一步时：干净部署目录上 verify-package.py 会在 REQUIRED 处直接失败；
+    #   已有部署目录只是靠上一次完整打包的旧文件蒙对——重建 dist 后还会因
+    #   「清单包集合 ↔ _internal 实际随包集合」交叉断言失败（报错指向清单内容，难定位）。
+    gen_deps = os.path.join(ROOT, "tools", "gen-installed-deps.py")
+    if args.check_only:
+        print("  [计划] 生成 config\\installed-deps.json（%s）" % os.path.relpath(gen_deps, ROOT))
+    else:
+        deps_out = os.path.join(app, "config", "installed-deps.json")
+        rc = subprocess.call([sys.executable, gen_deps, "--out", deps_out])
+        if rc != 0:
+            raise SystemExit("生成已安装依赖清单失败（tools/gen-installed-deps.py，退出码 %d）" % rc)
+        stats["added"].append("config/installed-deps.json")
+
     cleanup_plugins(app, rules, stats, args.check_only)
 
     # ---- §3.2.1 模板自检 ----

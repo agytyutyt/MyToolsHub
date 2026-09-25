@@ -36,7 +36,7 @@ PACKAGES = [
 #   ★ 本清单同样是「插件依赖白名单」的一部分：出包工具 C-4 允许插件声明这些包，
 #     但要求目标机装了对应依赖组件（缺则插件降级，提示"安装依赖组件包"）。
 DEP_COMPONENT_PACKAGES = [
-    # 由「依赖组件包」按需提供、**不随主包**（组件划分见 tools/dep-components.json）：
+    # 由「依赖组件包」按需提供、**不随主包**（组件划分见 tools/build-dep-component.ps1（$UNITS 预置表）与 tools/offline-components.json）：
     #   numpy      → numpy, numpy.libs                （cv2/pandas 的公共底层）
     #   opencv     → cv2                              （视频码流）
     #   office     → openpyxl, docx, lxml, xlrd, olefile, pypdf（+ et-xmlfile / typing_extensions）

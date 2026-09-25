@@ -565,6 +565,12 @@ def get_user_llm(username):
         "url": llm.get("base_url") or "",
         "api_key": decrypt_field(llm.get("api_key")),
         "model": llm.get("model") or "",
+        # 自定义格式（custom）的四个模板字段——不透传会让"用户自助设置"下的
+        # custom 配置在保存后被静默丢弃（界面报可用、调用必失败）。
+        "headers": llm.get("headers") if isinstance(llm.get("headers"), dict) else {},
+        "body": llm.get("body") or "",
+        "text_path": llm.get("text_path") or "",
+        "error_path": llm.get("error_path") or "",
     }
 
 
@@ -581,6 +587,11 @@ def save_user_llm(username, config):
     llm["base_url"] = str(config.get("url") or "").strip()
     llm["api_key"] = encrypt_field(str(config.get("api_key") or ""))
     llm["model"] = str(config.get("model") or "").strip()
+    headers = config.get("headers")
+    llm["headers"] = headers if isinstance(headers, dict) else {}
+    llm["body"] = str(config.get("body") or "")
+    llm["text_path"] = str(config.get("text_path") or "").strip()
+    llm["error_path"] = str(config.get("error_path") or "").strip()
     save_admin_config(cfg)
     return True
 

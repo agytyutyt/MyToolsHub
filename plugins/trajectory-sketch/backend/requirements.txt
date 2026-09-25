@@ -1,3 +1,8 @@
-openpyxl>=3.0
+# 开发机安装：pip install -r plugins/trajectory-sketch/backend/requirements.txt
+# 注意：目标机上这些库由「依赖组件包」提供，不随主包（见 plugins/trajectory-sketch/README.md §依赖）。
+openpyxl>=3.1
 xlrd>=2.0
-requests>=2.25
+# requests 供「大模型辅助匹配」使用——实际 HTTP 调用由框架模块 jz_llm 发起，
+# 本插件不直接 import 它，但功能是否可用取决于它在不在（与 file-filter/case-report/
+# character-graph 三个同类插件的声明口径一致，见《插件设计规范》U-7/U-8）。
+requests>=2.28

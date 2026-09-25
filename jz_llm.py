@@ -149,7 +149,8 @@ def is_mask(value):
 
 # 全局配置文件的密钥复用 admin 的 config/.admin_key：
 # 一把钥匙管本机所有落盘密文（admin.json 的密码/身份证/用户 Key 与 llm.json 的全局 Key），
-# 少一把钥匙就少一处备份遗漏。本模块**只读**该文件，不参与它的轮换。
+# 少一把钥匙就少一处备份遗漏。本模块与 admin 共用同一把，只在文件缺失时按同一格式
+# 生成、不参与它的轮换。
 _KEY_FILE_PARTS = ("config", ".admin_key")
 
 _fernet_lock = threading.Lock()
@@ -636,8 +637,8 @@ def _http_error_detail(resp, error_path=""):
 def _post(provider, system, user, messages, timeout):
     """发起一次请求，返回 (响应 JSON 或原文, 取到的正文文本)。"""
     if not REQUESTS_AVAILABLE:
-        raise LLMError("缺少 requests：大模型功能不可用。请安装依赖包 "
-                       "JZToolsHub-依赖-requests-v*.zip 后重启服务。")
+        raise LLMError("缺少 requests：大模型功能不可用。请安装依赖组件包 "
+                       "JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。")
     if not (provider.get("url") or "").strip():
         raise LLMError("尚未配置大模型 API 地址")
 
@@ -748,8 +749,8 @@ def test_connection(session=None, provider=None, plugin_id=None, timeout=15):
         if problem:
             return False, problem
         if not REQUESTS_AVAILABLE:
-            return False, ("缺少 requests：大模型功能不可用。请安装依赖包 "
-                           "JZToolsHub-依赖-requests-v*.zip 后重启服务。")
+            return False, ("缺少 requests：大模型功能不可用。请安装依赖组件包 "
+                           "JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。")
         method, url, headers, body, text_paths, error_path = _build_request(
             provider, "", "ping", None, timeout)
         # 探测请求尽量小：限制输出长度，避免真的花掉一次完整推理

@@ -122,7 +122,7 @@ acceptance-runner.exe --app-dir "%LOCALAPPDATA%\JZToolsHub"   # 额外跑 R-06�
 - `--app-dir` 不填时会**自动探测**（注册表 InstallLocation → `%LOCALAPPDATA%\JZToolsHub`）。
 - 测试数据默认读 exe 旁的 `testdata\`。
 
-## 覆盖范围（27 条）
+## 覆盖范围（32 条，含 5 条按条件跳过）
 
 | 组 | 内容 |
 | --- | --- |

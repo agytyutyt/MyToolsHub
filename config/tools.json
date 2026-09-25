@@ -40,7 +40,7 @@
     {
       "id": "json-formatter",
       "name": "JSON 格式化",
-      "description": "对 JSON 进行格式化、压缩与校验，错误定位一键修复。",
+      "description": "对 JSON 进行格式化、压缩与校验，语法错误自动定位提示。",
       "category": "dev",
       "enabled": false,
       "order": 1
@@ -48,7 +48,7 @@
     {
       "id": "base64",
       "name": "Base64 编解码",
-      "description": "对文本进行 Base64 编码与解码，支持 UTF-8 中文，实时双向转换。",
+      "description": "对文本进行 Base64 编码与解码，支持 UTF-8 中文，点击按钮即得结果。",
       "category": "dev",
       "enabled": false,
       "order": 2
@@ -56,7 +56,7 @@
     {
       "id": "color-picker",
       "name": "取色器",
-      "description": "选择颜色，实时生成 HEX、RGB、HSL 等多种格式并一键复制。",
+      "description": "取色并转换为 HEX / RGB / HSL 格式。",
       "category": "design",
       "enabled": false,
       "order": 3
@@ -81,7 +81,7 @@
       "id": "map-marker",
       "name": "地图标点",
       "description": "基于高德地图，输入经纬度在地图上标点，支持二维码识别、批量导入、按时间生成移动轨迹。",
-      "category": "office",
+      "category": "maps",
       "enabled": false,
       "order": 3
     },
@@ -96,7 +96,7 @@
     {
       "id": "trajectory-convert",
       "name": "轨迹转换",
-      "description": "读取轨迹，压缩、封装，编码生成二维码视频流，支持EXCEL表格。",
+      "description": "读取轨迹，封装，编码生成二维码视频流，支持EXCEL表格。",
       "category": "dev",
       "enabled": true,
       "order": 1
@@ -104,7 +104,7 @@
     {
       "id": "shared-docs",
       "name": "共享文档",
-      "description": "多人共同编辑 Word 与 Excel 文档，实时同步、在线用户、版本冲突提示，支持导入/导出 .docx / .xlsx。",
+      "description": "多人共同编辑 Word 与 Excel 文档，实时同步、在线用户、版本冲突提示，支持导入 .docx / .xlsx / .xls，导出 .docx / .xlsx。",
       "category": "office",
       "enabled": true,
       "order": 2
@@ -112,7 +112,7 @@
     {
       "id": "case-report",
       "name": "战果录入",
-      "description": "输入公安某部门某案件的收网情况报告，自动提取时间/主办大队/案件名/抓获人数/缴获物品，以键值对 JSON 本地化存档。",
+      "description": "输入公安某部门某案件的收网情况报告，大模型自动提取案件名/时间/主办大队/抓获人数/缴获物品/涉案价值，生成战果报表，以键值对 JSON 本地化存档。",
       "category": "office",
       "enabled": true,
       "order": 3
@@ -120,7 +120,7 @@
     {
       "id": "info-transfer",
       "name": "信息传输",
-      "description": "把文字、txt、markdown、word、excel 封装为二维码（静态图片或动态视频流，可设定二维码版本）；解析二维码先识别文档格式，再还原纯数据内容（不含样式与宏）。",
+      "description": "把文字、文档、表格、演示、PDF 等常见格式封装为二维码/视频传输；精简模式还原纯文本内容，原件模式（fmt=file）可原样还原文件（含样式与宏）。",
       "category": "office",
       "enabled": true,
       "order": 5
@@ -128,7 +128,7 @@
     {
       "id": "notice-board",
       "name": "公告板",
-      "description": "暂无最新公告。",
+      "description": "单位与部门公告的发布与查看。",
       "category": "office",
       "enabled": true,
       "order": 1,
@@ -137,7 +137,7 @@
     {
       "id": "knowledge-base",
       "name": "知识库",
-      "description": "在线阅读 PDF / OFD / Word / Excel / Markdown 文档，分级分类管理，仅阅读与复制（只读）。",
+      "description": "在线阅读 PDF / OFD / Word / Excel / Markdown 文档，分级分类管理，支持在线阅读（含纯文本 / CSV）、复制与下载（不可在线编辑）。",
       "category": "office",
       "enabled": true,
       "order": 6,
@@ -154,7 +154,7 @@
     {
       "id": "trajectory-sketch",
       "name": "轨迹速写",
-      "description": "上传原始轨迹表（Excel，自动删除文档里的背景图片），先调用过滤器插件完成字段过滤（默认硬过滤，可切换大模型辅助），再做轨迹分析并生成速写报告：停留点、出行段、报告正文与数据质量，可下载 Excel。",
+      "description": "上传原始轨迹表（Excel，自动删除文档里的背景图片），字段过滤由插件自带实现（默认硬过滤，可切换大模型辅助），与过滤器插件零依赖，再做轨迹分析并生成速写报告：停留点、出行段、报告正文与数据质量，可下载 Excel。",
       "category": "office",
       "enabled": true,
       "order": 8

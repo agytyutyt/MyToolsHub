@@ -126,7 +126,7 @@ def _pad_rows(rows: List[List[Any]]) -> List[List[Any]]:
 
 def _read_xlsx(path: str) -> List[List[Any]]:
     if not OPENPYXL_AVAILABLE:
-        raise TableError("后端缺少 openpyxl，无法解析 .xlsx（请执行：pip install openpyxl）")
+        raise TableError("后端缺少 openpyxl，无法解析 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     try:
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except Exception as exc:
@@ -142,7 +142,7 @@ def _read_xlsx(path: str) -> List[List[Any]]:
 
 def _read_xls(path: str) -> List[List[Any]]:
     if not XLRD_AVAILABLE:
-        raise TableError("后端缺少 xlrd，无法解析 .xls（请执行：pip install xlrd）")
+        raise TableError("后端缺少 xlrd，无法解析 .xls。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-xlrd-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     try:
         book = xlrd.open_workbook(path)
     except Exception as exc:
@@ -208,7 +208,7 @@ def write_report_workbook(path: str, result: Dict[str, Any],
     有内容时写进「数据质量」sheet，让报告的来源链路可追溯。
     """
     if not OPENPYXL_AVAILABLE:
-        raise TableError("后端缺少 openpyxl，无法生成报告（请执行：pip install openpyxl）")
+        raise TableError("后端缺少 openpyxl，无法生成报告。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     wb = openpyxl.Workbook()
 

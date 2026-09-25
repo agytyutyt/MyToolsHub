@@ -34,14 +34,13 @@
   文件字节经 base64 封装——样式、宏、图片、表格等与原文件完全一致（还原字节一致）；
   base64 文本再做一轮压缩试压（v1 zlib；v2 起 zlib 与 LZMA2/xz 试压取更小者，zip=1/flags 标注）：
   OLE 类（doc/ppt/xls）与文本类源文件可缩 4–12×，已压缩容器（docx/xlsx/jpg）自动保持原样；
-  解析端按 `zip=1` 解压与 fmt 无关，网页端与 APP（≥v1.7）天然兼容；
+  解析端按 `zip=1` 解压与 fmt 无关，网页端与 APP（APK ≥ 2.0.1，对应《移动端APP.md》v1.7 能力）天然兼容；
   可选「拆包重组」（rebuild，v2 专属）：docx/xlsx/xlsm/pptx/zip 先解包为连续流再压缩
   （mode=rebuild 标注），还原端重建 zip——**内容等价、非字节一致**，体积更小时才启用。
 - 输出形式（可设定二维码版本 1-40）：
   - **静态二维码**：单张装得下输出 1 张 PNG；装不下自动拆分为多张
     （首页带文档格式/文件名，续页带页码；可单张预览、下载，多张打包 ZIP）；
-  - **动态二维码流**：QR-transfer 协议（zfec 前向纠错），与「轨迹转换」
-    「QR 视频流解码」插件协议互通；
+  - **动态二维码流**：QR-transfer 协议（zfec 前向纠错），v1 互通；v2（JZ2 二进制帧）需对方另行适配（见本文件 §协议 v2 末条）；
     默认**相机传输模式**：每张二维码同步落盘为逐帧 PNG（`/frame/<task_id>/<n>`），
     网页端以 **JS 定时轮播**展示（滑动窗口预载，只常驻 5 张解码位图，绕开浏览器
     视频管线，杜绝丢帧"追赶"与标签页 OOM），APP 扫码自动识别视频流，
@@ -83,7 +82,7 @@
   **`name` 为完整原始文件名（含扩展名）**；
 - `word` / `excel`：精简传输（v3 起重新生成；旧二维码同样兼容）：
   `data` 为逐段文本 / 二维数组，`name` 不含扩展名；
-- `ext`：精简传输声明的原始文件后缀名（docx / doc / xlsx / xlsm / xls / csv / txt / md / markdown），
+- `ext`：精简传输声明的原始文件后缀名（docx / doc / xlsx / xlsm / xls / csv / txt / md / markdown / ppt / pdf），
   旧二维码与粘贴文字无此字段；
 - `zip`：v1.7 起的数据压缩标记（v1.8 起对 `fmt=file` 原件同样生效）。data 经
   zlib 压缩（level 9）后 base64 承载，消除 JSON 语法与重复文本冗余
@@ -107,7 +106,7 @@
 
 ```
 magic "JZ2"(3B) | ver(1B) | flags(1B) | seg_i(3B) | seg_n(3B) | meta_len(2B) | body_len(4B) | crc32(4B)
-flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，预留）| bit3=帧类型（0=信封帧 1=FEC share 帧）
+flags bit0-1=压缩算法（0=none 1=zlib 2=xz；`_compress_best` 取 zlib/xz 更小者）| bit2=mode（0=原样 1=重建，**已生效**：`fmt=file` 走 rebuild 分支）| bit3=帧类型（0=信封帧 1=FEC share 帧）
 ```
 
 - **信封帧**（静态码直接承载）：`meta = fmt(1B)+orig_len(4B)+name_len(2B)+name+ext_len(1B)+ext`，
@@ -120,9 +119,10 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
   （≥1200 次随机位翻转注入回归通过）；`orig_len` 二次校验解压后长度；
 - **双协议自适应**：解码端按 `b"JZ2"` 魔数判别——v2 帧走新解析，否则按 v1 JSON
   文本解析；旧码、外部插件 v1 流（轨迹转换）零回归（T01 47/47 全绿）；
-- **解码依赖**：v2 二进制码解码优先 zxing-cpp（`pip install zxing-cpp`，返回原始
-  bytes 无损）；cv2 对二进制 byte 模式码不可靠，仅作 v1 文本回退。依赖已登记
-  `JZToolsHub.spec` 的 PACKAGES 与插件 requirements；
+- **解码依赖**：v2 二进制码解码优先 zxing-cpp（返回原始 bytes 无损）；cv2 对二进制
+  byte 模式码不可靠，仅作 v1 文本回退。`zxing-cpp` 属「依赖组件包」`JZToolsHub-依赖-zxingcpp-v*.zip`
+  （**不随主包**；缺失时 v2 二进制码解不出，请在「管理后台 → 插件管理」按依赖徽标安装），
+  声明见 `manifest.json` 的 `requires` 与插件 requirements；
 - **前端无改动**：本插件网页端无本地解码（解析在后端），v2 自动生效。
   「QR 视频流解码」插件（jsQR worker）如需消费 v2 流另行适配（读 `binaryData`）。
 
@@ -132,10 +132,12 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
 | --- | --- | --- |
 | GET | /status | 依赖自检（qrcode/zfec/cv2/numpy/openpyxl/docx/zxing/协议版本） |
 | GET | /formats | 可封装文件格式清单（内置 SUPPORTED_FORMATS） |
-| POST | /encode | multipart：file 或 text + mode(static/video) + qr_version + raw(0/1) + frame_repeat(帧，仅 video，默认 5) + video_file(0/1，默认 0=只产帧、需时再生成 MP4) → task_id |
+| GET | /ping | 存活探针（返回 `{"ok": true}`） |
+| POST | /encode | multipart：file 或 text + mode(static/video) + qr_version + raw(0/1) + frame_repeat(帧，仅 video，默认 5) + video_file(0/1，默认 0=只产帧、需时再生成 MP4) + rebuild(0/1，v2 专属拆包重组，见 §协议 v2) → task_id |
 | GET | /task/<id> | 封装任务轮询（含 fmt / ext / note / estimate 预估码数·耗时·页数；视频流另含 frame_count / frame_repeat / video_status(none·building·done·error·canceled) / video_progress / video_size） |
 | POST | /encode/<id>/video | 按需把帧序列编码为 MP4（幂等；生成期间任务主状态保持 done，进度见 video_status/video_progress） |
-| GET | /download/<id> | 下载产物（PNG / ZIP / MP4；视频未生成时返回 409 引导先按需生成） |
+| POST | /encode/<id>/cancel | 请求停止封装任务（设置取消标志、编码循环在检查点协同终止；幂等友好——任务已结束或不存在时返回 ok=false，结束态为 409） |
+| GET | /download/<id> | 下载产物（PNG / ZIP / MP4；视频未生成时返回 409 引导先按需生成）。带文件名的变体 `GET /download/<id>/<filename>` 等价（前端按任务实际产物名调用） |
 | GET | /image/<id>/<n> | 静态二维码单张预览 |
 | GET | /frame/<id>/<n> | 相机传输模式单帧码图（JS 轮播用，带 max-age 缓存） |
 | POST | /decode | multipart：file + type(image/zip/video)，图片同步、视频异步 |
@@ -146,16 +148,17 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
 
 | 项 | 内容 |
 | --- | --- |
-| 框架已打包依赖 | `cv2` >=4.5（可选）、`docx` >=1.0、`flask` >=3.0、`numpy` >=1.24（可选）、`olefile` >=0.46、`openpyxl` >=3.1、`pypdf` >=4.0、`qrcode` >=7.4（可选）、`xlrd` >=2.0、`zfec` >=1.6（可选）、`zxingcpp` >=2.0 |
+| 框架已打包依赖 | `flask` >=3.0 |
+| 依赖组件包（不随主包，缺失时对应功能降级） | `cv2` >=4.7（可选）、`docx` >=1.1、`numpy` >=1.24（可选）、`olefile` >=0.46、`openpyxl` >=3.1、`pypdf` >=4.0、`qrcode` >=7.4（可选）、`xlrd` >=2.0、`zfec` >=1.6（可选）、`zxingcpp` >=2.2 |
 | 插件自带依赖（`backend/vendor/`） | 无 |
 | 外部程序组件 | 无 |
-| 能否单独升级 | ✅ 可以——依赖全部落在框架已打包清单或插件目录内（构建期 C-4/C-10 校验） |
+| 能否单独升级 | ✅ 可以——依赖落在「框架已打包清单 / 依赖组件包（按需安装，缺失则对应功能降级）/ 插件目录」内（构建期 C-4/C-10 校验） |
 | 升级是否需重启 | 含 `backend/**` 改动**需要**重启（后台/安装器会自动重启，约 5~10 秒）；纯前端改动免重启，Ctrl+F5 即可 |
 
 > 声明真源是 `manifest.json` 的 `requires`（三类依赖：框架包 / 自带 vendor / 外部程序组件）；
 > 出包工具构建期校验「声明 ↔ 实测 import」一致（C-10）。后台「插件管理」按它显示
 > 逐依赖徽标与可运行性：缺**必需**依赖 → 标记不可运行并暂不加载，补齐后重启自动恢复；
-> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-2 / U-4 / U-6。
+> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-7a / U-8。
 
 ## 已知限制
 
@@ -167,14 +170,14 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
 - `.xls`/`.xlsm` 精简传输还原为 `.xlsx`（APP 端重建现代工作簿），
   `.csv` 精简传输还原为 `.csv` 文本；
 - 精简传输与原件传输均启用 zlib 试压（zip=1）：压缩不划算的小数据与
-  不可压缩数据保持未压缩形态；解析端需 v1.7+ APP 或最新网页端（均自动兼容旧码）；
+  不可压缩数据保持未压缩形态；解析端需 APK ≥ 2.0.1（对应《移动端APP.md》v1.7 能力）或最新网页端（均自动兼容旧码）；
 - 单码载荷预留 10% 安全余量（PAYLOAD_SAFETY=0.9）：满容量高熵载荷在部分
-  解码器下不稳定，码数相应增加约 11% 以换取识别可靠性；
+  解码器下不稳定，码数相应增加约 11% 以换取识别可靠性；该余量适用于 v2/视频路径，
+  降级 v1 静态路径（PROTOCOL_V2=False）为固定 -16B，无 0.9 系数；
 - 原件传输 base64 约 +33%，但 zlib 试压对 OLE/文本类源文件可省 4–12×；
   静态二维码拆分上限 200 张，超过时任务在发码前快速失败并提示
   调大二维码版本或改用视频流（/task 的 estimate 字段提供预估页数/码数/耗时）；
   20MB 上传上限不变；
-- 静态二维码自动拆分上限 200 张，超过请调大二维码版本或改用视频流；
 - 每码重复帧数可设（默认 5 帧 ≈ 0.33 秒/码，范围 1-30 帧）：帧数越多越易扫、全程越久；
   下限 1 帧（≈0.067 秒/码）为极限速度，仅适合高帧率抓拍/视频回放解码——手机摄像头
   实拍时每码只能采到 1~2 个分析帧，识别率显著下降，**日常建议 ≥3 帧**（≈0.2 秒/码）。
@@ -182,7 +185,7 @@ flags bit0-1=压缩算法（0=none 1=zlib）| bit2=mode（0=原样 1=重建，�
   只增加编码耗时与播放总时长；
 - MP4 属**按需产物**：未生成时「下载」按钮会先触发编码再下载，产物缓存 30 分钟 TTL
   （帧序列被清理后需重新封装）；
-- 手机摄像头扫描屏幕视频流时：调高屏幕亮度、放大预览、避免反光，APP 端使用「视频流采集」入口；
+- 手机摄像头扫描屏幕视频流时：调高屏幕亮度、放大预览、避免反光，APP 端使用「导入视频」入口；
 - 长码流（数百码以上）播放采用滑动窗口预载：窗口外帧按需重取，弱网下表现为整体
   变慢（绝不跳码），单码等待超过约 0.3 秒才跳过该码（采集端靠 FEC 冗余兜底）；
 - 任务产物缓存 30 分钟 TTL 自动清理（数据根目录 `plugins/info-transfer/.task_cache/`）。

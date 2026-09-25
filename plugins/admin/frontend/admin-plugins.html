@@ -120,7 +120,7 @@
         <code>JZToolsHub-依赖-*.zip</code>；留空则扫描程序目录、上级目录、桌面与下载）。
         扫描只读目录、不解压、不写盘；安装按包类型走各自既有流程——
         插件包：校验 → 备份 → 替换 → 登记（可回滚）；依赖组件包：按组件装入
-        <code>runtime\pylibs</code>，装完即生效、<b>无需重启</b>。
+        <code>runtime\pylibs</code>，装完即生效、<b>无需重启</b>（组件文件被占用时会先暂存，重启服务后自动生效）。
       </p>
       <div class="settings-form">
         <label for="scan-dir">介质目录</label>

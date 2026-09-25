@@ -33,6 +33,8 @@
     if (snackbarTimer) clearTimeout(snackbarTimer);
     snackbarTimer = setTimeout(function () { el.className = "snackbar"; }, duration || 2600);
   }
+  // reader.js 等兄弟脚本按 window.toast 取用（本文件是 IIFE，不暴露则复制提示不可达）
+  window.toast = toast;
 
   // ==================== API 封装（401 跳登录） ====================
   function api(method, url, opts) {
@@ -236,11 +238,10 @@
   }
 
   // ==================== 文件列表 ====================
-  // silent=true 时不弹错误提示（轮询静默刷新用）
+  // silent=true 时不弹错误提示（供静默刷新调用；PDF 异步状态机与列表轮询已随阶段 8 移除）
   function loadFiles(silent) {
     var url = "/files?";
-    if (state.currentCat === "root") url += "category=root&";
-    else if (state.currentCat !== "all") url += "category=" + encodeURIComponent(state.currentCat) + "&";
+    if (state.currentCat !== "all") url += "category=" + encodeURIComponent(state.currentCat) + "&";
     if (state.q) url += "q=" + encodeURIComponent(state.q) + "&";
     return api("GET", url).then(function (data) {
       state.files = sortFiles(data.items || []);
@@ -557,10 +558,12 @@
             if (data && data.converted_from) {
               toast("上传成功：已自动将 ." + data.converted_from + " 转换为 ." +
                     (data.item && data.item.ext ? data.item.ext : ""), false, 3600);
-            } else if (data && data.download_error) {
+            }
+            if (data && data.download_error) {
               // 下载源校验失败不阻断上传，但要明确告知它没生效（否则用户以为配上了）
               toast("上传成功，但异步下载源未生效：" + data.download_error, true, 4200);
-            } else {
+            }
+            if (!data || (!data.converted_from && !data.download_error)) {
               toast("上传成功");
             }
             return loadFiles();
@@ -653,7 +656,7 @@
   // ==================== 阅读视图切换 ====================
   // 转换提示条：展示"该文档由旧版格式自动转换而来"，用户可关闭；
   // 关闭状态存于内存（同一次会话内不再重复弹出），不落本地存储（每次打开仍是新会话观感）。
-  // 优先级：PDF 生成中 > PDF 生成失败（已降级）> 旧版格式转换提示。
+  // 当前仅一类文案：旧版格式转换提示（f.converted），无其他优先级分支。
   var noticeClosed = {};
 
   function showReaderNotice(f) {
@@ -744,13 +747,13 @@
     $("btn-download").title = f.has_download_source
       ? "下载异步下载源文档（." + (f.download_ext || "") + "）"
       : "下载原始文档";
-    // 提示条：PDF 生成中 / 生成失败 / 旧版格式转换（本次会话内关闭过则不再弹）
+    // 提示条：旧版格式自动转换（本次会话内关闭过则不再弹；PDF 生成中/生成失败提示已随 /pdf 端点移除）
     showReaderNotice(f);
     $("btn-copy").disabled = true;
     $("reader-pager").className = "pager hidden";
     $("zoom-input").value = "100%";   // 每次打开重置内容缩放（PDF 就绪后回调会刷新为实际比例）
     window.KBReader.render(f, readerCbs());
-    // 仍在生成 PDF：轮询等待，就绪后自动重渲染切到 PDF 视图
+    // 打开即渲染（预览为按需同步渲染，无轮询等待；/pdf 与"就绪后重渲染切 PDF 视图"已移除）
     window.scrollTo(0, 0);
   }
 

@@ -147,20 +147,20 @@
       banner.hidden = false;
       banner.className = 'banner err';
       banner.textContent = '后端缺少依赖：' + missing.join(' / ') +
-        '。请在服务器执行 pip install -r plugins/trajectory-sketch/backend/requirements.txt 后重启服务。';
+        '。请管理员在「管理后台 → 插件管理」按依赖徽标的提示安装对应「依赖组件包」（免重启生效）。';
       return;
     }
     if (!flt.available) {
       banner.hidden = false;
       banner.className = 'banner err';
-      banner.textContent = '「过滤器」插件不可用（' + s(flt.reason) +
-        '）。本插件的字段过滤依赖该插件，请联系管理员在首页启用「过滤器」后重启服务。';
+      banner.textContent = '字段过滤能力不可用（' + s(flt.reason) + '）。请联系维护者。';
       return;
     }
     banner.hidden = false;
     banner.className = 'banner ok';
-    banner.textContent = '依赖齐备；已连接「过滤器」插件（字段过滤由其执行）；当前算法版本 ' +
-      s(st.algo) + '。';
+    banner.textContent = '依赖齐备；字段过滤由本插件自带实现完成；大模型辅助' +
+      (flt.llm ? '已配置' : '未配置（可在「大模型设置」中启用）') +
+      '；当前算法版本 ' + s(st.algo) + '。';
     if (st.config_warnings && st.config_warnings.length) {
       banner.className = 'banner';
       banner.textContent += ' 配置提醒：' + st.config_warnings.join('；');
@@ -274,7 +274,7 @@
       var t = chips[i].firstChild ? chips[i].firstChild.nodeValue : '';
       if (t) { cols.push(t); }
     }
-    var note = '将提交给「过滤器」的字段条目：' + (cols.join('、') || '（空）') +
+    var note = '过滤时使用的字段条目：' + (cols.join('、') || '（空）') +
       '（保存后自动展开为别名全集）';
     $('cfgKeepExpand').textContent = note;
   }
@@ -437,8 +437,8 @@
       for (var j = 0; j < radios.length; j++) { radios[j].checked = radios[j].value === 'hard'; }
     }
     $('modeHint').textContent = up.llm_configured
-      ? '大模型辅助可用于表头语义关联（如「开始时间」↔「时间」）；开关切换只影响最终分析时执行的过滤，上方自检为硬过滤预演。'
-      : '「过滤器」插件尚未配置大模型，大模型辅助不可用；请在过滤器插件页面完成 API 地址 / Key / 模型配置。';
+      ? '大模型辅助可用于表头语义关联（如「采集起始时刻」↔「开始时间」）；开关切换只影响最终分析时执行的过滤，上方自检为硬过滤预演。'
+      : '尚未配置大模型，大模型辅助不可用；请管理员在「管理后台 → 大模型设置」填写接入信息（用户各自设置模式下见首页右下角「⋯」），刷新本页即可启用。';
     $('llmRow').className = 'mode-row' + (up.llm_configured ? '' : ' disabled');
 
     $('analyzeBtn').disabled = !up.schema.can_analyze;

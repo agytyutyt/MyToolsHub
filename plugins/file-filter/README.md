@@ -24,8 +24,8 @@
   - 预判口径 = 硬过滤（字段名精确匹配）+ 后处理逐列预演；**大模型过滤**会在提交后追加语义匹配，
     故大模型模式下页面提示"实际保留可能更多"。未命名列（空表头）无法按字段名保留，不给切换。
 - **两种过滤模式**
-  - **硬过滤**：只保留与保留字段名单精确匹配的字段（规整后比较：去 BOM/空白、全角转半角、忽略大小写），其余列删除。
-  - **大模型过滤**：提取表格全部字段（标题），交由大模型判断与名单字段的语义关联（如「时间」↔「开始时间」，字段名不必完全一致），匹配保留、其余删除。需管理员配置 OpenAI 兼容 API。**名单内同名字段直接保留**（用户点名要的列不交给模型判断，避免模型偶发返回空值时"明明开着却被删"）。
+  - **硬过滤**：只保留与保留字段名单精确匹配的字段（规整后比较：去 BOM、全角空格转半角、去首尾空白、忽略大小写），其余列删除。
+  - **大模型过滤**：提取表格全部字段（标题），交由大模型判断与名单字段的语义关联（如「时间」↔「开始时间」，字段名不必完全一致），匹配保留、其余删除。需在「大模型设置」配置接入信息（格式不限，支持管理员统一配置或用户各自配置）。**名单内同名字段直接保留**（用户点名要的列不交给模型判断，避免模型偶发返回空值时"明明开着却被删"）。
 - **按列开关（用户决定优先于模式判定）**：页面上每个列名胶囊都可点击切换——**点开的列一定保留**
   （即使不在管理员名单里），**点掉的列一定删除**（即使大模型认为该保留）。同名重复列会一起切换
   （过滤按字段名匹配，同名必然同判），页面上以 `×N` 标出。
@@ -57,26 +57,27 @@
 页面顶部「⚙️ 管理配置」面板：
 
 1. **保留字段名单**：硬过滤的精确匹配基准、大模型过滤的语义匹配基准、上传预览「预计保留」的判定依据。
-2. **后处理规则**：`查找内容 / 替换为（留空=删除）/ 正则开关 / 启用开关`，多条按顺序执行；非法正则保存时自动跳过。
-3. **大模型配置**：API 地址 / API Key / 模型名称（OpenAI 兼容 /chat/completions），支持连通测试。
+2. **后处理规则**：`查找内容 / 替换为（留空=删除）/ 正则开关 / 启用开关`，多条按顺序执行；**非法正则在过滤执行时自动跳过**（保存不做正则校验，规则仍留在列表里）。
+3. **大模型接入**：接入信息（格式 / API 地址 / Key / 模型名称）由「管理后台 → 大模型设置」/ 首页右下角「⋯ → 大模型设置」统一维护（归主体模块 `jz_llm`），**本插件不再接受也不保存接入信息**；面板里的「大模型连通测试」测的就是这份统一配置。
 
-配置保存在数据根目录 `plugins/file-filter/config.json`（含 API Key，已 gitignore）。
+配置保存在数据根目录 `plugins/file-filter/config.json`（**只含保留字段名单与后处理规则，不含任何密钥**；已 gitignore）。
 
 ## 接口（前缀 `/api/file-filter`）
 
 | 接口 | 方法 | 说明 | 权限 |
 | --- | --- | --- | --- |
 | `/status` | GET | 依赖自检（openpyxl/xlrd/requests）+ LLM 是否已配置 | 登录 |
-| `/config` | GET | 读配置（api_key 掩码） | 登录 |
+| `/config` | GET | 读配置（返回 `llm_configured` / `llm_source` / `llm_source_label` / `llm_reason` 状态，不回传 Key） | 登录 |
 | `/config` | POST | 保存配置 | 管理员 |
 | `/config/test` | POST | 大模型连通测试 | 管理员 |
 | `/preview` | POST | multipart `file` → **同步**返回 `staged_id` / `columns`（每列 `name/keep/matched/post_name/replace_count/locked/dup`）/ `summary` / `post_rules` / `rows` / `sanitize`；上传件同时暂存供 `/filter` 复用 | 登录 |
 | `/filter` | POST | multipart：`file` **或** `staged_id`（复用预览暂存件）+ `mode`(hard/llm) + `columns`（JSON 数组，可选缺省用配置）+ `exclude`（JSON 数组，手动关闭的列，可选）+ `post_process`(1/0，缺省 1)，异步返回 `task_id` + `sanitize` | 登录 |
-| `/result/<task_id>` | GET | 轮询：`status / kept / removed / replace_count / rows / llm_used / post_enabled / sanitize / download`（任务归属校验：创建者或超管） | 创建者/超管 |
+| `/result/<task_id>` | GET | 轮询：恒有 `task_id / status`；`status=done` 时另有 `kept / removed / replace_count / rows / llm_used / post_enabled / sanitize / download / filename / output_ext`；`status=error` 时另有 `detail`（任务归属校验：创建者或超管） | 创建者/超管 |
 | `/download/<task_id>` | GET | 下载过滤后文件 | 创建者/超管 |
-| `/apply` | POST | **程序化调用接口（供其他插件）**：JSON `{rows, mode, columns?, exclude?, post_rules?, post_process?}` → `{rows, kept, removed, replace_count}`；同步、不落盘 | 登录 |
+| `/apply` | POST | **程序化调用接口（供其他插件）**：JSON `{rows, mode, columns?, exclude?, post_rules?, post_process?}` → `{rows, kept, removed, replace_count, mode}`；`kept` 元素为 `{column, matched}`（`matched` 是命中的真实表头），`mode` 回显实际生效的过滤模式；同步、不落盘 | 登录 |
 
-> `columns` 显式传空数组（用户把字段全关了）→ 400「未选择任何保留字段」，**不静默回退**管理员名单；
+> `columns` 显式传空数组（用户把字段全关了）→ 400「未选择任何保留字段」，**不静默回退**管理员名单
+> （该行为仅限 `/filter` 端点；`/apply` 对显式空数组仍回退到配置默认，属既有契约）；
 > 完全不传 `columns`（老调用方）才回退配置。`staged_id` 过期/越权 → 404 + `code=staged_expired`
 > （前端据此自动改传文件重试一次）。
 
@@ -98,23 +99,24 @@ resp = requests.post(
     },
     cookies=request.cookies,       # 透传当前请求会话
 )
-data = resp.json()  # {"rows": [[表头],[数据]...], "kept": [...], "removed": [...], "replace_count": N}
+data = resp.json()  # {"rows": [[表头],[数据]...], "kept": [{"column": "字段名", "matched": "命中的真实表头"}], "removed": [...], "replace_count": N, "mode": "hard"|"llm"}
 ```
 
 ## 依赖与升级
 
 | 项 | 内容 |
 | --- | --- |
-| 框架已打包依赖 | `flask` >=3.0、`openpyxl` >=3.1、`requests` >=2.31（可选）、`xlrd` >=2.0 |
+| 框架已打包依赖 | `flask` >=3.0（必需，随主包） |
+| 依赖组件包（不随主包） | `openpyxl` >=3.1、`xlrd` >=2.0、`requests` >=2.31（可选：缺失时 xlsx/xls 读写或大模型辅助不可用） |
 | 插件自带依赖（`backend/vendor/`） | 无 |
 | 外部程序组件 | 无 |
-| 能否单独升级 | ✅ 可以——依赖全部落在框架已打包清单或插件目录内（构建期 C-4/C-10 校验） |
+| 能否单独升级 | ✅ 可以——业务依赖走「依赖组件包」，插件不 import 其他插件（构建期 C-4/C-10/C-11 校验） |
 | 升级是否需重启 | 含 `backend/**` 改动**需要**重启（后台/安装器会自动重启，约 5~10 秒）；纯前端改动免重启，Ctrl+F5 即可 |
 
 > 声明真源是 `manifest.json` 的 `requires`（三类依赖：框架包 / 自带 vendor / 外部程序组件）；
 > 出包工具构建期校验「声明 ↔ 实测 import」一致（C-10）。后台「插件管理」按它显示
 > 逐依赖徽标与可运行性：缺**必需**依赖 → 标记不可运行并暂不加载，补齐后重启自动恢复；
-> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-2 / U-4 / U-6。
+> 缺**可选**依赖 → 照常加载但标注功能降级。规范依据：《插件设计规范》§15 U-7a / U-8。
 
 ## 依赖检查
 

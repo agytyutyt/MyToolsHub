@@ -16,7 +16,7 @@
 
 ``rows``
     二维表，首行为表头；单元格可为 str / int / float / datetime。通常是
-    「过滤器」插件 ``POST /api/file-filter/apply`` 返回的 ``rows``。
+    本插件过滤实现 ``filter_local.apply_filter`` 返回的 ``rows``。
 
 ``params``
     插件配置（``config.json``）或已规范化的参数 dict；``None`` 表示全用默认值。

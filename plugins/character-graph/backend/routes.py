@@ -216,8 +216,10 @@ def register(app) -> None:
     def cg_post_config():
         """兼容占位：统一大模型落地后本插件已无可写配置项。
 
-        不覆盖 config.json 里的历史 llm 段——那段是升级前的旧 Key，
-        jz_llm 在统一配置为空时仍会读它（兼容桥），删掉会让老部署突然不可用。
+        不覆盖 config.json 里的历史 llm 段——那段是升级前的旧 Key，**已不再被读取**：
+        该段由启动迁移（migrate_plugin_legacy_llm）收编进统一配置后清除副本；
+        jz_llm.resolve() 的 plugin_id 只用于日志定位、不参与解析
+        （兼容桥已于 2026-09-23 移除）。
         """
         session = jz_llm.resolve(PLUGIN_ID)
         return jsonify({"ok": True, "llm_configured": session.configured()})

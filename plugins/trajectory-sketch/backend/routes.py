@@ -4,14 +4,15 @@
 流程（详见 ``docs/design/轨迹速写插件-设计文档.md`` §2）：
 
      /upload   上传轨迹表 → **删除背景图片**（预处理，见 bg_image.py）→ 暂存
-    ① 字段自检  调「过滤器」插件（默认硬过滤）→ 列映射自检
+    ① 字段自检  本插件自带过滤（固定硬过滤预演）→ 列映射自检
     ② /analyze  用户确认（可切大模型辅助）→ 异步：过滤 → 轨迹分析引擎 → 报告工作簿
     ③ /result   轮询进度与结果
     ④ /download 下载 5 个 sheet 的速写报告 .xlsx
 
 接口前缀：``/api/trajectory-sketch``（规范 B-2）。
-与其他插件的关系：**只通过 HTTP 调用** 过滤器插件的 ``/api/file-filter/apply``（B-7），
-不 import 任何其他插件的后端模块；轨迹分析全部在插件自带引擎内完成（引擎零框架依赖）。
+与其他插件的关系：**不 import 任何其他插件的后端模块**（B-7）。字段过滤与后处理由本插件
+自带的 ``filter_local`` 完成；大模型辅助匹配走**框架模块** ``jz_llm``（见 ``llm_client``，
+属 FC-2/FC-3 框架 API 面，不构成跨插件依赖）；轨迹分析全部在插件自带引擎内完成。
 """
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ import jz_deps
 _get_session_user = jz_api.get_session_user
 _set_operation = jz_api.set_operation
 
-from . import bg_image, config_store, excel_io, filter_bridge, report_store
+from . import bg_image, config_store, excel_io, filter_bridge, llm_client, report_store
 from .engine import analyze_rows, available_algorithms, normalize_params, resolve_columns
 from .engine.contract import AnalysisError
 
@@ -118,7 +119,7 @@ def _self_check(filtered_rows: List[List[Any]], cfg: Dict[str, Any]) -> Dict[str
 
 
 def _filter_meta(res: Dict[str, Any], mode: str) -> Dict[str, Any]:
-    # 以**实际生效**的模式为准：请求 llm 时会回退为 hard（见 filter_local 模块头）
+    # 以**实际生效**的模式为准（filter_local 会把非法/缺失的 mode 归一为 hard）
     return {
         "mode": res.get("mode") or mode,
         "warning": res.get("warning") or "",
@@ -134,8 +135,12 @@ def _filter_meta(res: Dict[str, Any], mode: str) -> Dict[str, Any]:
 # --------------------------------------------------------------------------
 
 def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
-                  cookie: str, host_url: str) -> None:
-    """后台线程：过滤 → 分析 → 写报告 → 置 done。"""
+                  cookie: str, host_url: str, session: Any = None) -> None:
+    """后台线程：过滤 → 分析 → 写报告 → 置 done。
+
+    ``session`` 是**请求线程**取好的大模型接入配置快照（mode=llm 时必需）——
+    后台线程读不到会话，见 ``jz_llm`` 模块头的线程纪律。
+    """
     try:
         report_store.set_task(task_id, status="running", step="字段过滤")
         cfg = config_store.load_config()
@@ -151,7 +156,7 @@ def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
             return
         res = filter_bridge.apply_filter(app, raw_rows, mode=mode, columns=keep_cols,
                                          post_rules=post_rules, cookie=cookie,
-                                         host_url=host_url)
+                                         host_url=host_url, session=session)
         filtered = res.get("rows") or []
         meta = _filter_meta(res, mode)
 
@@ -203,7 +208,7 @@ def _report_filename() -> str:
 def register(app):
     # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
     # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
-    jz_deps.install_refresher(app, globals(), excel_io, filter_bridge)
+    jz_deps.install_refresher(app, globals(), excel_io, filter_bridge, llm_client)
     global _app_ref
     _app_ref = app
 
@@ -216,7 +221,10 @@ def register(app):
         deps = {
             "openpyxl": excel_io.OPENPYXL_AVAILABLE,
             "xlrd": excel_io.XLRD_AVAILABLE,
-            "requests": filter_bridge.REQUESTS_AVAILABLE,
+            # 大模型调用由框架模块 jz_llm 发起，requests 由它持有；这里如实转发，
+            # 缺失时指向「依赖组件包」而不是笼统报"后端缺少依赖"（2026-09-24 修正：
+            # 旧实现硬编码 False，导致插件页常驻红色误报且重装不消失）。
+            "requests": llm_client.REQUESTS_AVAILABLE,
         }
         cfg = config_store.load_config()
         params = normalize_params(config_store.engine_config(cfg))
@@ -266,7 +274,7 @@ def register(app):
             if "use_filter_plugin_rules" in flt:
                 cfg["filter"]["use_filter_plugin_rules"] = bool(flt.get("use_filter_plugin_rules"))
             if not cfg["filter"]["keep_columns"]:
-                return jsonify({"error": "保留字段名单不能为空——它是「调用过滤器插件」的依据"}), 400
+                return jsonify({"error": "保留字段名单不能为空——它是字段过滤的依据"}), 400
 
         schema = data.get("schema")
         if isinstance(schema, dict):
@@ -418,17 +426,20 @@ def register(app):
             return jsonify({"error": "保留字段名单在自检之后被修改过，请重新上传表格以刷新自检结果。"}), 409
 
         # 前置校验（8.5-3）：避免无效任务排入队列
-        if mode == "llm" and not stage.get("llm_configured"):
-            return jsonify({"error": "大模型辅助过滤需要「过滤器」插件已配置大模型："
-                                     "请管理员在过滤器插件页面完成 API 地址 / Key / 模型配置，"
-                                     "或改用硬过滤。"}), 400
-        st = filter_bridge.filter_status(_app_ref)
-        if not st["available"]:
-            return jsonify({"error": "过滤器插件不可用（%s）" % st["reason"]}), 503
+        # mode=llm 时在**请求线程**取一次接入配置快照：既做前置校验，也供后台线程使用
+        # （后台线程读不到会话——这是"用户各自设置"模式下失败的主因，见 jz_llm 模块头）。
+        session = None
+        if mode == "llm":
+            session = filter_bridge.llm_session()
+            if not session.configured():
+                return jsonify({"error": "大模型辅助过滤需要先配置大模型：请管理员在"
+                                         "「管理后台 → 大模型设置」填写接入信息，"
+                                         "或改用硬过滤。"}), 400
 
         report_store.cleanup()
         task_id = report_store.create_task(staged_id, _viewer(), mode)
-        _executor.submit(_run_analysis, _app_ref, task_id, stage, mode, _cookie(), _host_url())
+        _executor.submit(_run_analysis, _app_ref, task_id, stage, mode,
+                         _cookie(), _host_url(), session)
         _set_operation("提交轨迹速写任务")
         return jsonify({"task_id": task_id, "mode": mode})
 
@@ -479,7 +490,7 @@ def register(app):
 
 
 def _filter_llm_configured() -> bool:
-    """过滤器插件是否已配置大模型（经其公开接口 /config 查询，不读它的配置文件）。"""
+    """大模型辅助是否可用（交接给 filter_bridge → 框架模块 jz_llm；**请求线程内调用**）。"""
     try:
         return filter_bridge.filter_llm_configured(_app_ref)
     except Exception:

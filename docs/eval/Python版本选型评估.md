@@ -12,7 +12,7 @@
 | --- | --- |
 | 接口契约 | §3 推荐方案（基线固定 3.14、最低 3.12、取消 Win7 支线） |
 | 实现路径 | §2 三版本逐项影响、§5 zfec 编译链路；实测命令见 §7 附录 |
-| 当前实现状态 | §3 推荐方案**已执行**（含 vendor 一行 bug 补丁、`HANDOFF.md` / `README.md` 口径统一）；§5 zfec 已落库 `wheels/` |
+| 当前实现状态 | §3 推荐方案**已执行**（含 vendor 一行 bug 补丁、`HANDOFF.md` / `README.md` 口径统一）；**例外：§3.2「状态页暴露版本」未落地（2026-09-24 核对，见该行注）**；§5 zfec 已落库 `wheels/` |
 | 后续优化方向 | §6 升级节奏建议（3.15 发布后不急于跟进）；复核触发条件见该节 |
 
 > **覆盖范围**：Python 版本基线的**全部实测依据**：三版本对照、取消 Win7 的连带影响、zfec 无 wheel 的打包硬伤
@@ -194,7 +194,7 @@ from __future__ import annotations
 | **不要引入 3.10** | 明确排除 | 71 天后 EOL，且对引擎问题毫无帮助 |
 | **删除 3.8 支线** | 移除 README/HANDOFF 中"需兼容 Win7 时必须用 3.8 打包"的表述与 `-Python` 的 3.8 示例；`.bat`/`install.ps1` 无 Win7 专用代码，无需改动 | Win7 已取消，保留该支线只会让人误以为还有第二条受支持路径 |
 | **打包脚本增强** | `build-deploy.ps1` 增加解释器版本校验与记录 | 现在 `-Python` 默认取 PATH 上的 `python`，**无版本校验**；建议：① `version.json` 追加 `python` 字段（记录打包解释器版本）；② 与基线 3.14 不符时告警（防止有人用 PATH 上的 3.8 打出"功能残缺但没人发现"的包）。与已有的 `commit` / `built_at` 字段一脉相承 |
-| **状态页暴露版本** | `GET /api/knowledge-base/status` 增加 `python_version` 与引擎 `version` | 现在引擎不可用时只看到 `office_render.available=false`，排查者难以判断是"缺引擎""Python 太旧"还是"vendor 未打补丁" |
+| **状态页暴露版本** | `GET /api/knowledge-base/status` 增加 `python_version` 与引擎 `version` | 现在引擎不可用时只看到 `office_render.available=false`，排查者难以判断是"缺引擎""Python 太旧"还是"vendor 未打补丁"　▶ **未落地（待办）**：2026-09-24 核对 `plugins/knowledge-base/backend/routes.py:428-434` 的 `kb_status` 只返回 `dependencies` / `convert_legacy` / `office_render` / `office_preview`，尚无 `python_version` 与引擎 `version` |
 | **解决 zfec 依赖** | 见 §5：产出预编译 wheel 或明确 MSVC 前置条件 | 这是当前 3.14 链路上**唯一必须本地编译**的依赖，是打包可复现性与未来升级的头号风险 |
 
 ### 3.3 落地清单

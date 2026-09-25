@@ -1,8 +1,9 @@
 """战果录入 —— JZToolsHub 后端插件路由。
 
-功能：输入公安某部门对某案件的「收网情况报告」，抽取五要素
-（案件名 / 时间 / 主办大队 / 抓获人数 / 缴获物品），
-以「键值对」JSON 的形式本地化存档（backend/data/ 下，一记录一文件）。
+功能：输入公安某部门对某案件的「收网情况报告」，抽取要素
+（案件名 / 时间 / 主办大队 / 主办人 / 抓获人数 / 涉案价值 / 缴获物品），
+以「键值对」JSON 的形式本地化存档（<数据根>/plugins/case-report/data/ 下，一记录一文件，
+数据根默认 <用户目录>\\.jztoolshub）。
 
 缴获物品：除保留原文摘要外，逐项拆分为 {category, name, quantity, unit}
 单列存储；类似物品（如电脑/笔记本）归为统一战果类别，可跨记录按
@@ -165,7 +166,7 @@ def _normalize_unit(dept, units=None):
 
 
 def normalize_fields(raw, now=None):
-    """只保留五要素，trim 长度，抓获人数转阿拉伯数字/整数，时间补全整日期。
+    """只保留要素，trim 长度，抓获人数转阿拉伯数字/整数，时间补全整日期。
 
     支持以下自动补充：
     - 时间字段为空时填入当前日期（YYYY年M月D日）；
@@ -570,12 +571,15 @@ def register(app) -> None:
 
     @app.post(f"{API_PREFIX}/config")
     def cr_post_config():
-        """保存插件自身配置。
+        """保存插件自身配置——**兼容占位**：本插件已无任何可写配置项。
 
-        统一大模型落地后本插件没有可写配置项了（提示词由 prompt.json 管理、
-        接入信息归 jz_llm），本接口保留为**兼容占位**：既不接受也不覆盖
-        config.json 里的历史 llm 段——那段是升级前的旧 Key，jz_llm 在统一配置
-        为空时仍会读它（兼容桥），删掉会让老部署突然不可用。
+        统一大模型落地后：提示词由 `<数据根>/plugins/case-report/prompt.json` 管理
+        （经 jz_llm），接入信息归 jz_llm。本接口**不接受任何字段**，仅回当前状态
+        （保留路由是为了旧前端调用不 404）。
+
+        注：历史 `config.json` 里的 llm 段**已不再被读取**——jz_llm.resolve() 的
+        plugin_id 只用于日志定位、不参与解析（兼容桥已于 2026-09-23 移除；
+        历史 Key 由 admin 的 migrate_plugin_legacy_llm 收编进统一配置后清除副本）。
         """
         _set_operation("保存战果录入配置")
         session = jz_llm.resolve(PLUGIN_ID)
@@ -915,7 +919,7 @@ def register(app) -> None:
 
     @app.put(f"{API_PREFIX}/records/<rid>")
     def cr_update(rid):
-        """编辑台账记录：可修改 fields（五要素）/ source_text / items（物品明细）。
+        """编辑台账记录：可修改 fields（要素）/ source_text / items（物品明细）。
         仅录入人本人或超级管理员可操作；保存时同步学习「物品名→类别」。
         body：{fields?, source_text?, items?}，缺省字段保持不变。"""
         _set_operation("编辑战果记录")
@@ -929,7 +933,7 @@ def register(app) -> None:
                 return jsonify({"ok": False, "detail": "记录不存在或无权访问"}), 404
             if not _record_manageable(user, rec):
                 return jsonify({"ok": False, "detail": "仅录入人本人或管理员可编辑"}), 403
-            # 字段：仅接收五要素，缺省保留原值
+            # 字段：仅接收要素，缺省保留原值
             if body.get("fields") is not None:
                 fields = normalize_fields(body.get("fields"))
                 if not any(fields.get(k) for k in FIELD_KEYS):
@@ -982,8 +986,8 @@ def register(app) -> None:
 
         过滤参数与 /records 一致：scope / case / month / from / to / dept / user
         （month / from / to 均按战果时间 fields.时间 过滤）。
-        导出的记录包含：案件名 / 时间 / 主办大队 / 主办人 / 抓获人数 / 缴获物品 /
-        缴获明细 / 录入人 / 所属部门 / 入库时间 / 原始报告。
+        导出的记录包含：案件名 / 时间 / 主办大队 / 主办人 / 抓获人数 / 涉案价值 /
+        缴获物品 / 缴获明细 / 录入人 / 所属部门 / 入库时间 / 原始报告。
         """
         _set_operation("导出战果台账")
         user = _cr_viewer()
@@ -993,7 +997,7 @@ def register(app) -> None:
         if scope == "all" and not user.get("super_admin"):
             return jsonify({"ok": False, "detail": "无权查看全部战果"}), 403
         if not OPENPYXL_AVAILABLE:
-            return jsonify({"ok": False, "detail": "缺少 openpyxl，无法导出 Excel（pip install openpyxl）"}), 500
+            return jsonify({"ok": False, "detail": "缺少 openpyxl，无法导出 Excel。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）"}), 500
         case_name = parser.normalize_case_name(request.args.get("case") or "")
         recs = scoped_records(user, scope)
         recs = _filter_by_period(recs,

@@ -1,7 +1,8 @@
 """共享文档 —— JZToolsHub 后端插件路由。
 
 功能：支持多用户共同编辑 Word（.docx）与 Excel（.xlsx）文档：
-- 文档以 JSON 文件保存在插件目录 data/ 下，每个文档一个文件；
+- 文档以 JSON 文件保存在 <数据根>/plugins/shared-docs/data/ 下（默认 <用户目录>\\.jztoolshub），
+  每个文档一个文件；
 - 内容带版本号（乐观锁）：保存时携带 base_version，版本冲突返回 409，
   由前端提示用户「放弃本地修改」或「覆盖保存」，避免互相静默覆盖丢内容；
 - 在线协作：客户端定时心跳上报「正在编辑」，后端维护在线用户列表；
@@ -337,7 +338,7 @@ def _add_runs(paragraph, runs):
 def export_word(doc):
     """blocks → .docx 字节流。返回 (BytesIO, 文档名)。"""
     if not DOCX_AVAILABLE:
-        raise RuntimeError("后端缺少 python-docx，无法导出 .docx，请执行：pip install python-docx")
+        raise RuntimeError("后端缺少 python-docx，无法导出 .docx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-docx-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     d = Document()
     style = d.styles["Normal"]
     style.font.name = "Times New Roman"
@@ -366,7 +367,7 @@ def export_word(doc):
 def import_word(file_storage):
     """.docx → blocks。返回 {"blocks": [...]}。"""
     if not DOCX_AVAILABLE:
-        raise RuntimeError("后端缺少 python-docx，无法导入 .docx，请执行：pip install python-docx")
+        raise RuntimeError("后端缺少 python-docx，无法导入 .docx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-docx-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     file_storage.seek(0)
     d = Document(file_storage)
     blocks = []
@@ -412,7 +413,7 @@ def _cell_value(v):
 def export_excel(doc):
     """rows → .xlsx 字节流。返回 (BytesIO, 文档名)。"""
     if not OPENPYXL_AVAILABLE:
-        raise RuntimeError("后端缺少 openpyxl，无法导出 .xlsx，请执行：pip install openpyxl")
+        raise RuntimeError("后端缺少 openpyxl，无法导出 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Sheet1"
@@ -451,7 +452,7 @@ def import_excel(file_storage, filename):
     file_storage.seek(0)
     if ext == "xlsx":
         if not OPENPYXL_AVAILABLE:
-            raise RuntimeError("后端缺少 openpyxl，无法导入 .xlsx，请执行：pip install openpyxl")
+            raise RuntimeError("后端缺少 openpyxl，无法导入 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
         wb = openpyxl.load_workbook(file_storage, data_only=True)
         try:
             ws = wb.active
@@ -461,7 +462,7 @@ def import_excel(file_storage, filename):
         return {"rows": rows}
     # .xls 走 xlrd（不支持直接从流读取，落临时文件）
     if not XLRD_AVAILABLE:
-        raise RuntimeError("后端缺少 xlrd，无法导入 .xls，请执行：pip install xlrd")
+        raise RuntimeError("后端缺少 xlrd，无法导入 .xls。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-xlrd-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     import tempfile
     tmp = tempfile.NamedTemporaryFile(suffix=".xls", delete=False)
     try:

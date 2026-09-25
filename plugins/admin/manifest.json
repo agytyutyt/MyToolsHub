@@ -11,7 +11,11 @@
     "人员管理",
     "权限管理",
     "工具访问控制",
-    "批量导入导出"
+    "批量导入导出",
+    "数据目录管理",
+    "插件管理",
+    "大模型设置",
+    "数据迁移"
   ],
   "version": "1.4.0",
   "author": "JZToolsHub 团队",
@@ -35,7 +39,7 @@
         "name": "openpyxl",
         "version": ">=3.1",
         "required": false,
-        "hint": "缺少 openpyxl：批量导入导出（xlsx，缺失时仅剩 CSV）不可用。请安装依赖包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖包.bat」）后重启服务。"
+        "hint": "缺少 openpyxl：批量导入导出（xlsx，缺失时仅剩 CSV）不可用。请安装依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "werkzeug",

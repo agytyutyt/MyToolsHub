@@ -4,33 +4,38 @@
 > ⚠️ **引擎路线已变更**：本文 §3 选型的「LibreOffice → PDF 预览」已于 **2026-09-13 被弃用**，
 > 现行为服务端 **vendor 双引擎（`dhr`=Word / `xhr`=Excel）按需同步渲染为 HTML**（亚秒级、无后台状态机、
 > 磁盘缓存 `<id>.preview.json`）；上传时不再生成 PDF（历史 `.pdf` 产物已废弃、阅读端不消费）。
-> **仍现行的部分**：§5 数据模型变更、§6 API 设计、§8 前端实现、§9 安全清单、§10 性能策略、原件下载路径。
+> **仍现行的部分**：原件下载路径与权限决策，以及 §9/§10 中的 **SEC-10 子进程、B-8 日志、9.2 铁律、XSS** 等条目。
+> **§9/§10 中凡引用 `/pdf`、`/pdf-retry`、`pdf_error` / `pdf_engine` 与「列表轮询」的表述均已废止**
+> （`backend/routes.py:20-21`：旧版 `pdf_status` / `html_status` 异步状态机与 `/pdf`、`/pdf-retry`、`/preview-retry` 端点全部移除，
+> 引擎亚秒级、无需轮询；现行为 `GET /files/<id>/preview` 按需同步渲染，见《知识库插件-设计文档》§6 与插件 README）。
 > **现行权威落点**：`plugins/knowledge-base/README.md`（接口与行为）、`docs/design/知识库插件-设计文档.md`（设计契约）。
 
 | 文档属性 | 内容 |
 | --- | --- |
 | 文档版本 | v1.2（2026-09-11）+ 2026-09-17 状态标注 + 2026-09-18 阶段 9 / 阶段 10 / 阶段 11 |
 | 适用插件 | `knowledge-base`（知识库） |
-| 文档状态 | **全部阶段（0~5）已完成**：含真实 LibreOffice（25.8.7）环境下的端到端验证 |
+| 文档状态 | **全部阶段（0~11）已完成**：含真实 LibreOffice（25.8.7）环境下的端到端验证（阶段清单见 §12 TODO 与 §16~§18） |
 | 实施记录 | §13（本轮实施落地与踩坑） |
 | 关联文档 | 《docs/design/知识库插件-设计文档.md》（本方案的基线，下称「原设计」）、《插件设计规范.md》（B-1~B-8、SEC-1~6、F-1~F-7、8.5 异步任务、9.2 归属铁律）、《HANDOFF.md》§7 踩坑 / §7.5 速查表 |
 
 | 四段覆盖 | 落点 |
 | --- | --- |
-| 接口契约 | §5 数据模型变更、§6 API 设计（现行接口索引到 `plugins/knowledge-base/README.md`） |
+| 接口契约 | `plugins/knowledge-base/README.md`（**现行接口唯一真源**）；§5 数据模型变更（其中 PDF 相关字段已作废）、§6 API 设计（其中的 `/pdf`、`/pdf-retry` **已删除**） |
 | 实现路径 | §7 后端实现细化、§8 前端实现细化；适配层 `backend/office_render.py` + `backend/doc_convert.py` |
 | 当前实现状态 | §13 关键决策速查、§15 实施落地与实测踩坑；**引擎已于 2026-09-13 换成 xhr/dhr 双引擎**（见文首横幅） |
 | 后续优化方向 | §11 风险与预案；预览体验相关后续方向见 `HANDOFF.md` §4 |
 
 > **覆盖范围**：知识库「预览与文档下载」的设计演进：数据模型、API、前端、安全、性能，以及引擎替换的决策记录
 > ｜**不覆盖**：**该插件的接口与已知限制 → `plugins/knowledge-base/README.md`**；插件整体设计 → `docs/design/知识库插件-设计文档.md`
-> ｜**随包**：是 ｜**最后核对**：2026-09-18
+> ｜**随包**：是 ｜**最后核对**：2026-09-25
 
 ---
 
 ## 0. 一页速览（接手者先读这里）
 
 **要做什么**：知识库上传 Word（doc/docx）与 Excel（xls/xlsx）后，服务端把文档**转成 PDF 用于在线阅读**（保留原文档样式）；**原件与 PDF 双份保存**；**全部类型文件提供下载**，其中 Word/Excel 的下载给的是**原始文档**（不是 PDF）。
+
+> ⚠️ 上述「转成 PDF 用于在线阅读 / 原件与 PDF 双份保存」为**已弃用原方案**描述；现行实现为服务端 xhr/dhr 双引擎**按需渲染 HTML**（Word/Excel 走 `GET /preview` 返回 HTML），不再生成 PDF、不再双份保存，详见 `plugins/knowledge-base/README.md` 与 `docs/design/知识库插件-设计文档.md`。
 
 **核心方案**：
 
@@ -49,6 +54,8 @@
 ### 1.1 需求
 
 1. **Word（.doc/.docx）**：用户上传后服务端转换为 PDF，在线阅读展示 PDF（保留原文档样式，解决 mammoth 渲染丢样式的问题）。
+
+> ⚠️ 此条为**已弃用原方案**（Word→PDF 预览）描述；现行 Word 预览改由 dhr 引擎**按需渲染 HTML**（`GET /preview`），不再生成 PDF，Excel 同理改由 xhr 引擎（详见 `plugins/knowledge-base/README.md`「Office 预览」）。
 2. **Excel（.xls/.xlsx）**：对**有数据的部分**转换为 PDF（展示原文档样式，解决 SheetJS 渲染无列宽/边框/合并样式的问题）。
 3. **双份保存**：上传后同时保存**原始文档**与 **PDF 版本**。
 4. **下载功能**：各类型文档均提供下载；其中 **Word/Excel 下载链接给原始文档**（非 PDF 版）；PDF/OFD/MD/TXT/CSV 下载给文件本身。
@@ -190,6 +197,8 @@ POST /files（管理员上传）
 
 ## 5. 数据模型变更（files.json）
 
+> ⚠️ 本节描述的 PDF 管线已于 2026-09-13 被 xhr/dhr HTML 渲染取代，**已删除** `/pdf` 与 `/pdf-retry` 端点与状态机（见 `plugins/knowledge-base/README.md`）。
+
 ```jsonc
 {
   "id": "f-xxxxxxxx",
@@ -219,6 +228,8 @@ POST /files（管理员上传）
 ---
 
 ## 6. API 设计（前缀 `/api/knowledge-base`，B-2 合规）
+
+> ⚠️ 本节描述的 PDF 管线已于 2026-09-13 被 xhr/dhr HTML 渲染取代，**已删除** `/pdf` 与 `/pdf-retry` 端点与状态机（见 `plugins/knowledge-base/README.md`）。
 
 | 方法 | 路径 | 权限 | 变更 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -330,6 +341,8 @@ def _pdf_task(fid):
 
 ## 8. 前端实现细化
 
+> ⚠️ 本节描述的 PDF 管线已于 2026-09-13 被 xhr/dhr HTML 渲染取代，**已删除** `/pdf` 与 `/pdf-retry` 端点与状态机（见 `plugins/knowledge-base/README.md`）。
+
 > 版本纪律（F-2）：本轮 `index.html` 引用改为 `style.css?v=20`、`reader.js?v=4`、`app.js?v=14`（当前 v19 / v3 / v13）。
 > 图标纪律：新增按钮用**内联单色 SVG**（currentColor，stroke 2，16px），**不用 emoji**（HANDOFF §4 emoji 字体坑 + 工作记忆约定）。
 
@@ -382,13 +395,13 @@ def _pdf_task(fid):
 
 | 规范 | 落实 |
 | --- | --- |
-| SEC-1 目录穿越 | `<id>` 白名单正则不变；`/pdf`、`/download` 与 `/raw` 同款校验；三件套路径仅由 `id + 白名单扩展名` 拼出 |
+| SEC-1 目录穿越 | `<id>` 白名单正则不变；`/download` 与 `/raw` 同款校验；落盘路径仅由 `id + 白名单扩展名` 拼出（原文并列的 `/pdf` **已废止**，随端点删除） |
 | SEC-3 上传 | 白名单/20MB/服务端 ID 重命名不变；原件落盘同样走 `_file_path` 二次校验 |
-| SEC-4 匿名 | 框架全局拦截；`/pdf`、`/download` 第一步 `get_session_user()`，401 |
-| SEC-5 泄漏 | 转换异常统一转 `pdf_error` 用户可读文案，不回堆栈；`/pdf` 未就绪与不存在同为 404 |
+| SEC-4 匿名 | 框架全局拦截；`/download` 第一步 `get_session_user()`，401（`/pdf` **已废止**） |
+| SEC-5 泄漏 | 转换/渲染异常统一转用户可读文案，不回堆栈；`/preview` 渲染失败与不存在同为 404（原 `pdf_error` 字段与 `/pdf` 未就绪判定**已废止**） |
 | SEC-10 子进程 | soffice 调用参数列表化，禁止 `shell=True`；`src_path` 由服务端 ID 生成，不含用户输入 |
-| B-4 依赖自检 | `/status` 报告 `pdf_engine`；无引擎优雅降级（上传不阻断、阅读走降级链） |
-| B-8 日志 | 不自落日志；写操作 `set_operation("上传知识库文件"/"下载知识库文件"/"重试PDF转换")` |
+| B-4 依赖自检 | `/status` 报告依赖与 vendor 引擎可用性（原 `pdf_engine` 字段**已废止**）；无引擎优雅降级（上传不阻断、阅读走降级链） |
+| B-8 日志 | 不自落日志；写操作 `set_operation("上传知识库文件"/"下载知识库文件"/"删除知识库文件")`（原「重试PDF转换」随 `/pdf-retry` **已废止**） |
 | 9.2 铁律 | 归属字段 session 取值不变；下载/阅读为全站公共资源（原设计 §3.3 既定） |
 | XSS | `original_name` 插值一律 `textContent`/转义；下载文件名由 Flask `download_name` 处理，不经手拼 header |
 
@@ -399,8 +412,8 @@ def _pdf_task(fid):
 ## 10. 性能策略
 
 1. **异步转换**：上传请求零转换耗时；转换串行（线程池 1 + 模块锁），服务器 CPU 峰值可控。
-2. **转换缓存即落盘**：PDF 一次生成永久复用，`/pdf` 端点 `send_file(conditional=True)` 自带 ETag/Range/304。
-3. **前端零新增库**：阅读复用 pdf.js；列表轮询 3s × 最多 60s，无 pending 即停。
+2. **（已废止）** 原「PDF 一次生成永久复用，`/pdf` 端点 `send_file(conditional=True)` 自带 ETag/Range/304」随 `/pdf` 一并移除；现行预览为 `/preview` **按需同步渲染** + 磁盘缓存 `<id>.preview.json`（首次请求渲染、后续命中缓存）。
+3. **（已废止）** 原「列表轮询 3s × 最多 60s，无 pending 即停」的异步状态机已随 `/pdf` 移除（引擎亚秒级，无需轮询）；阅读端复用 pdf.js 渲染 PDF 原件不变。
 4. **降级链免费**：无引擎时与现状体验完全一致，无额外开销。
 5. 磁盘：word/excel 类约 2~3 倍占用；`MAX_FILES=2000` × 20MB 上限下可控（运维层面如有压力，遗留项提供「清理降级件」开关）。
 
@@ -778,7 +791,7 @@ def _pdf_task(fid):
 ### 15.3 已知坑（已留痕在 HANDOFF §7）
 
 - 解包 LibreOffice 启动会打 stderr `Could not find platform independent libraries <prefix>`，可忽略；设置 `URE_BOOTSTRAP`/`SAL_*` 环境变量**不改善**耗时（实测 17.5s vs 17.8s 基线）。
-- 隔离测试必须复制引擎 config 到临时数据根；`/files?category=root` 只返回已归类文件，未分类文件用 `category=all`。
+- 隔离测试必须复制引擎 config 到临时数据根；category 取分类 id，或 `all`/不传表示全量；未分类文件目前没有独立筛选入口（`all` 会一并返回）。
 - 浏览器自动化：`agent-browser screenshot` 路径用正斜杠；批量点击用 `find text` 绕开 `eval` 的引号歧义；登录 + 全流程要在**同一次 `batch`** 内。
 
 ---
@@ -797,8 +810,10 @@ agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库W
 
 ### 16.2 决策：后处理而非改 vendor
 
-三处缺陷全在 vendor 输出层，但按 **B-7「vendor 零改动拷贝」**约定不在 vendor 内打补丁
-（升级要重打、易漏）。改为在 `office_render.render_word()` 出口做 **HTML 后处理**
+三处缺陷全在 vendor 输出层，但 vendor 目录除 vendor/README.md 登记的 5 条编号补丁外
+不改引擎源码（升级时整目录替换后逐条重打；相关约束见插件设计规范 S-9/U-2/U-7，
+勿引 B-7——B-7 是禁止跨插件 import 条款），故本批补丁不做在 vendor 内（升级要重打、
+易漏）。改为在 `office_render.render_word()` 出口做 **HTML 后处理**
 （`_polish_word_html`），与既有 5 条 vendor 补丁互不影响。
 
 ### 16.3 实现
@@ -824,7 +839,7 @@ agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库W
 ### 16.5 验证与留痕
 
 - 实测对比：字体 微软雅黑 → **仿宋**；正文字重 `font-weight:400`；表格行高 49/67/49px → **33/51/33px**。
-- 回归断言：`backend/test_routes_preview.py` 第 0b 节 6 项（补链正确性/顺序、tr 清理、
+- 回归断言：`backend/test_routes_preview.py` 第 0b 节 5 组（①~⑤：补链正确性/顺序、tr 清理、
   CSS 重置、幂等、内容完整性）；边界用例（6 种写法 + 裸仿宋 + 已修链 + 无 `style` 块 + 空串/None）全过。
 - 同步：`plugins/knowledge-base/README.md`（新增「Word 产物后处理补丁」小节 + 排查路径提醒）、
   `docs/eval/知识库Word预览三问题排查报告.md`（状态改已修复）。
@@ -873,7 +888,7 @@ agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库W
   关闭时清空已选文件（防误提交）。开关开启但未选文件 → 提交前拦截并提示。
 - 下载文案随配置变化：dock 下载按钮 `title`、卡片下载按钮 `title` 与 `.dl-badge` 角标
   （琥珀色，区别于「已转换」的靛蓝）均按 `has_download_source` 切换。
-- 资源版本：`style.css?v=29`、`app.js?v=19`（F-2 纪律）。
+- 资源版本：`style.css?v=29`、`reader.js?v=11`、`app.js?v=19`（**三个资源戳都要管**；F-2 纪律；当前值以 `plugins/knowledge-base/frontend/index.html` 的资源戳为准）。
 
 ### 17.4 关键坑
 
@@ -942,7 +957,7 @@ agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库W
 `style.css`：`.switch-row` 加 `cursor:pointer`（整行可点）与 hover 反馈；
 `.switch` 自身不再需要 label 语义，仅保留定位尺寸。
 
-资源版本递增（F-2）：`style.css?v=29→30`、`app.js?v=19→20`。
+资源版本递增（F-2）：`style.css?v=29→30`、`app.js?v=19→20`（当前值以 `plugins/knowledge-base/frontend/index.html` 的资源戳为准）。
 
 ### 18.3 验证
 

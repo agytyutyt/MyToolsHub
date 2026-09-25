@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!-- 轨迹速写插件（前端 + Python 后端）
- * 流程：① 上传轨迹表（先删除背景图片）→ ② 字段自检（调用「过滤器」插件预览）→ ③ 生成速写报告
+ * 流程：① 上传轨迹表（先删除背景图片）→ ② 字段自检（本插件自带过滤，硬过滤预演）→ ③ 生成速写报告
  * 图标：全部使用插件自带的 SVG（frontend/icons/），不使用 emoji 字符，兼容 Win7。
  * 后端接口前缀：/api/trajectory-sketch
  -->
@@ -18,7 +18,7 @@
     <span class="head-icon" id="headIcon" data-page-node-id="GchYp8ugrhSkiACJJjS2Kv"></span>
     <div data-page-node-id="S7zH04K2TVpwNZnabg3FSA">
       <h1 data-page-node-id="Ui4QqBlyiv5J7s667XtpS0">轨迹速写</h1>
-      <p class="subtitle" data-page-node-id="FHGwLrkGOYK2Ra2wQlCmLb">上传原始轨迹表（Excel，自动删除背景图片）→ 调用「过滤器」完成字段过滤（默认硬过滤，可切换大模型辅助）
+      <p class="subtitle" data-page-node-id="FHGwLrkGOYK2Ra2wQlCmLb">上传原始轨迹表（Excel，自动删除背景图片）→ 字段过滤（默认硬过滤，可切换大模型辅助）
         → 轨迹分析 → 速写报告（停留点 / 出行段 / 报告正文 / 数据质量）</p>
     </div>
   </header>
@@ -31,7 +31,7 @@
     <summary data-page-node-id="Boo1g1MnU0vUEkhlM71Y9w"><span class="ic-slot" id="cfgIcon" data-page-node-id="cjYMXWQEdXW3FoUtg6Kkbl"></span> 管理配置（保留字段名单 / 列映射 / 阈值 / 报告文案）</summary>
 
     <div class="cfg-block" data-page-node-id="LZ22omFaYkUsFljnoguE8S">
-      <h3 data-page-node-id="g12SXQDBDeYFKpD0nEj4Hz">保留字段名单<small data-page-node-id="D2KTrrntDqTxem1evzWzdt">（本插件调用「过滤器」插件时的字段白名单；可写规范列名或任意别名）</small></h3>
+      <h3 data-page-node-id="g12SXQDBDeYFKpD0nEj4Hz">保留字段名单<small data-page-node-id="D2KTrrntDqTxem1evzWzdt">（字段白名单；可写规范列名或任意别名，保存后自动展开为该列的全部别名）</small></h3>
       <div class="chip-editor" id="cfgKeepChips" data-page-node-id="J1qQdiusITuOF1dfHTJ5h5"></div>
       <div class="row-actions" data-page-node-id="Gv2912gXGYzjAb76Vpubvi">
         <input id="cfgKeepInput" type="text" placeholder="输入字段名后回车添加，如：时间 / 经度 / 地址" data-page-node-id="HS9rStBBk2Wq22HVNoX1Af" />
@@ -108,7 +108,7 @@
         </label>
         <label class="mode-row" id="llmRow" data-page-node-id="6EahivLFHqTJCoeLcUnHr2">
           <input type="radio" name="mode" value="llm" data-page-node-id="iUUVIzGl5xud05ohP9G2zt" />
-          <span data-page-node-id="LHoYHCYPfF6JFrZvOUDnNB"><b data-page-node-id="NJ2j7ClteypTvouzpxuzNY">大模型辅助判断</b><small data-page-node-id="RCNPbqciVgX62QS8eTVPmR">由大模型做表头语义关联（如「开始时间」↔「时间」），需过滤器插件已配置大模型</small></span>
+          <span data-page-node-id="LHoYHCYPfF6JFrZvOUDnNB"><b data-page-node-id="NJ2j7ClteypTvouzpxuzNY">大模型辅助判断</b><small data-page-node-id="RCNPbqciVgX62QS8eTVPmR">由大模型做表头语义关联（如「开始时间」↔「时间」），需先在「大模型设置」中配置接入信息</small></span>
         </label>
         <p class="muted" id="modeHint" data-page-node-id="xVzWgFR5Dj8r8YVbgzX2yQ"></p>
         <div class="row-actions" data-page-node-id="GlFxXDDFZ7ZfVnRH4rU2G0">

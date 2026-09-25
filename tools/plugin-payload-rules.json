@@ -9,7 +9,7 @@
     "exclude_dirs  —— 目录名精确匹配，命中则整目录剔除（任意层级）",
     "exclude_files —— 文件名精确匹配，命中则剔除（任意层级）",
     "exclude_globs —— 文件名通配匹配（* 与 ?）",
-    "required      —— payload 必须存在的文件（相对插件目录；<entry> 取 manifest.json 的 entry）",
+    "required      —— 建议存在的文件（相对插件目录；<entry> 取 manifest.json 的 entry）；当前实现命中缺失只 Warn，不拒绝出包",
     "max_files / max_bytes —— 防误打包整个仓库的体积护栏",
     "template_suffix —— 配置模板命名后缀（命名纪律：模板不得叫 config.json，见 jztools_data.py:74）",
     "",

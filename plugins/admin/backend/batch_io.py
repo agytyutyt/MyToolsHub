@@ -881,16 +881,19 @@ def _plan_unit(work, d, rowno, mode, ctx):
     if existing is not None:
         if mode == "insert":
             return "skip", "已存在同名单位，按「仅新增」跳过"
-        if (existing.get("description") or "") == desc:
+        if not desc:
+            return "skip", "描述留空，按「不修改」跳过"
+        new_desc = "" if _is_clear(desc) else desc
+        if (existing.get("description") or "") == new_desc:
             return "skip", "内容与现状一致，无需更新"
-        existing["description"] = desc
+        existing["description"] = new_desc
         return "update", "已更新单位描述"
     if mode == "update":
         return "skip", "单位不存在，按「仅更新」跳过"
     work.setdefault("units", []).append({
         "id": "unit-" + uuid.uuid4().hex[:8],
         "name": name,
-        "description": desc,
+        "description": "" if _is_clear(desc) else desc,
         "departments": [],
     })
     return "create", "新增单位"
@@ -916,16 +919,19 @@ def _plan_department(work, d, rowno, mode, ctx):
     if existing is not None:
         if mode == "insert":
             return "skip", "该单位下已存在同名部门，按「仅新增」跳过"
-        if (existing.get("description") or "") == desc:
+        if not desc:
+            return "skip", "描述留空，按「不修改」跳过"
+        new_desc = "" if _is_clear(desc) else desc
+        if (existing.get("description") or "") == new_desc:
             return "skip", "内容与现状一致，无需更新"
-        existing["description"] = desc
+        existing["description"] = new_desc
         return "update", "已更新部门描述"
     if mode == "update":
         return "skip", "该单位下不存在该部门，按「仅更新」跳过"
     unit.setdefault("departments", []).append({
         "id": "dept-" + uuid.uuid4().hex[:8],
         "name": name,
-        "description": desc,
+        "description": "" if _is_clear(desc) else desc,
         "users": [],
     })
     return "create", "新增部门"

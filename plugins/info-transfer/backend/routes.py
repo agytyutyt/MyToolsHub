@@ -32,7 +32,7 @@
 并发设计（对齐 trajectory-convert / qr-video-decode 插件）：
 - POST /encode 接收文件与参数，立即返回 task_id；
 - 文档提取、编码、写视频/写图片放到后台线程执行；
-- 前端通过 GET /status/<task_id> 轮询，完成后经 /download、/image 取产物。
+- 前端通过 GET /task/<task_id> 轮询任务状态（/status 是插件能力自检，不是任务状态），完成后经 /download、/image 取产物。
 """
 
 # 会话工具经主体模块 jz_api 取用（依赖倒置：插件不再 import admin 插件的内部模块，
@@ -217,7 +217,7 @@ JZ2_FLAG_FEC = 0x08      # bit3：0=信封帧 1=FEC share 帧
 # fmt 枚举（meta 内 1 字节）
 JZ2_FMT_CODES = {"text": 0, "markdown": 1, "word": 2, "excel": 3, "file": 4}
 JZ2_FMT_NAMES = {v: k for k, v in JZ2_FMT_CODES.items()}
-ZXING_NOTE = "pip install zxing-cpp"
+ZXING_NOTE = ("缺少 zxingcpp：v2 码解析（图片/视频）必需。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-zxingcpp-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
 
 # 视频编码器候选（cv2 内置 FFmpeg 的 libopenh264 在部分机器缺 DLL 时，
 # 依次尝试 MPEG-4 Part 2 回退；mp4v 浏览器可能无法直接播放但解码端不受影响）
@@ -809,12 +809,14 @@ def _parse_doc_pieces(clx, wd):
 def extract_doc_lean(filename, file_bytes):
     """精简传输提取：返回 (fmt, name, data, ext)。
 
-    提取方式由持久化配置（config.json）驱动：
+    提取方式按内置清单 SUPPORTED_FORMATS[ext]["extract"] 映射选择，与运行配置无关：
     - text：.txt/.md 文本解码（markdown 为源码）；
     - docx：.docx 提取正文文本与表格（纯数据）；
-    - xlrd：.xlsx/.xlsm/.xls 提取内容构建二维数组；
+    - openpyxl：.xlsx/.xlsm 提取内容构建二维数组；xlrd：.xls 提取（fmt 同为 excel）；
     - csv：.csv 解析构建二维数组；
-    - none（如 .doc 旧版二进制格式）：不可精简 → 抛 LeanUnsupported，
+    - doc：.doc（97-2003 二进制）经 olefile 提取正文文本（fmt=word）；
+    - ppt：.ppt 提取纯文本；pypdf：.pdf 提取纯文本（两者 fmt 均为 text）；
+    - none（**仅 .pptx**）：不可精简 → 抛 LeanUnsupported，
       由调用方自动回退原件传输并提示。
     """
     name = os.path.basename(filename or "未命名")
@@ -859,7 +861,7 @@ def _pack_data(fmt, data):
       （实测 ppt 10.4×、doc 12×、pdf 2.9×，见《信息传输格式开销评估与优化方案》）；
       已压缩容器（docx/xlsx/jpg）试压不划算自动保持原样。
       解析端按 zip=1 解压与 fmt 无关（解压结果是 base64 串，照常 b64decode），
-      网页端与 APP（≥v1.7）天然兼容，无需改动。
+      网页端与 APP（APK ≥ 2.0.1，对应《移动端APP.md》v1.7 能力）天然兼容，无需改动。
     """
     if isinstance(data, str):
         if fmt == "file":
@@ -947,7 +949,7 @@ def parse_envelope(obj):
 # ===================== 协议 v2：JZ2 二进制帧（T07 信封 v2 / T08 二进制直载） =====================
 # 帧结构（21B 定长帧头 + meta + payload）：
 #   magic 3B "JZ2" | ver 1B | flags 1B | seg_i 3B | seg_n 3B | meta_len 2B | body_len 4B | crc32 4B
-#   flags bit0-1 = 压缩算法（0=none 1=zlib 2=xz 预留）；bit2 = mode（0=exact 1=rebuild）；
+#   flags bit0-1 = 压缩算法（0=none 1=zlib 2=xz[T10 已实现]）；bit2 = mode（0=exact 1=rebuild）；
 #   bit3 = 帧类型（0=信封帧 1=FEC share 帧）
 #   CRC32 覆盖「帧头（除 CRC 字段自身）+ meta + payload」——帧头/载荷任何位翻转都会被拒。
 # 两种帧：
@@ -1293,7 +1295,7 @@ def reassemble_qrtransfer_v2(codes):
     - 返回原始字节（已剥 4B 长度前缀）。
     """
     if not ZFEC_AVAILABLE:
-        raise RuntimeError("后端缺少 zfec 依赖，无法纠错重组，请执行：pip install zfec")
+        raise RuntimeError("后端缺少 zfec 依赖，无法纠错重组。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-zfec-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     data_list = None
     total = k = m = None
     for code in codes:
@@ -1552,7 +1554,7 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
             ) if not ok
         ]
         raise RuntimeError("后端缺少依赖：" + "、".join(missing) +
-                           "，请先安装：pip install qrcode zfec opencv-python numpy")
+                           "。请管理员在「管理后台 → 插件管理」按依赖徽标安装对应「依赖组件包」（免重启生效）")
 
     err = qrcode_constants.ERROR_CORRECT_L
     is_v2 = raw_bytes.startswith(JZ2_MAGIC)
@@ -1867,7 +1869,7 @@ def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix, cancel_
     cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
     """
     if not QRCODE_AVAILABLE:
-        raise RuntimeError("后端缺少 qrcode 依赖，请先安装：pip install qrcode")
+        raise RuntimeError("后端缺少 qrcode 依赖。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-qrcode-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     err = qrcode_constants.ERROR_CORRECT_L
     if env_bytes.startswith(JZ2_MAGIC):
         pages = _build_static_pages_v2(env_bytes, version, err)
@@ -1956,7 +1958,7 @@ def decode_image_file(file_bytes):
     （仅对 v1 文本载荷可靠——v2 二进制码必须安装 zxing-cpp）。
     """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
-        raise RuntimeError("后端缺少 opencv-python / numpy，无法解析图片，请执行：pip install opencv-python numpy")
+        raise RuntimeError("后端缺少 cv2 / numpy，无法解析图片。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-cv2-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     arr = np.frombuffer(file_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:
@@ -1984,7 +1986,7 @@ def decode_video_frames(video_path, progress_cb=None):
     优先 zxing-cpp（v2 二进制载荷无损）；不可用时回退 cv2（仅 v1 文本可靠）。
     """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
-        raise RuntimeError("后端缺少 opencv-python / numpy，无法解析视频，请执行：pip install opencv-python numpy")
+        raise RuntimeError("后端缺少 cv2 / numpy，无法解析视频。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-cv2-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError("无法读取视频文件")
@@ -2058,7 +2060,7 @@ def reassemble_qrtransfer(codes):
     与 qr-video-decode 插件后端逻辑一致：帧头 4+4+4 字符，zfec 纠错重组。
     """
     if not ZFEC_AVAILABLE:
-        raise RuntimeError("后端缺少 zfec 依赖，无法纠错重组，请执行：pip install zfec")
+        raise RuntimeError("后端缺少 zfec 依赖，无法纠错重组。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-zfec-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
 
     def decode_index(b64):
         return int.from_bytes(base64.b64decode(b64.encode("ascii")), BYTE_ORDER)
@@ -2199,7 +2201,7 @@ def envelope_to_file(fmt, name, data, ext=None):
                     writer.writerow([_cell_text(row)])
             return buf.getvalue().encode("utf-8"), "text/csv", f"{safe}.csv"
         if not OPENPYXL_AVAILABLE:
-            raise RuntimeError("后端缺少 openpyxl，无法导出 .xlsx，请执行：pip install openpyxl")
+            raise RuntimeError("后端缺少 openpyxl，无法导出 .xlsx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "数据"[:31] if len("数据") <= 31 else "数据"
@@ -2214,7 +2216,7 @@ def envelope_to_file(fmt, name, data, ext=None):
         return buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"{safe}.xlsx"
     if fmt == "word":
         if not DOCX_AVAILABLE:
-            raise RuntimeError("后端缺少 python-docx，无法导出 .docx，请执行：pip install python-docx")
+            raise RuntimeError("后端缺少 python-docx，无法导出 .docx。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-docx-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
         text = data if isinstance(data, str) else ""
         if not text.endswith("\n"):
             text += "\n"
@@ -2485,7 +2487,7 @@ def register(app) -> None:
         """接收文字 / 文件与参数，后台执行封装，立即返回 task_id。
 
         文件格式白名单见 SUPPORTED_FORMATS（Word / Excel / CSV / Txt / Markdown /
-        PPT / PDF；后三类仅原件传输）；多文件由前端逐个提交、每文件一个独立任务。
+        PPT / PDF；其中仅 .pptx 为「仅原件传输」，.ppt / .pdf 走精简提取）；多文件由前端逐个提交、每文件一个独立任务。
         raw=1 为原件传输（文件原样封装）；默认 raw=0 精简传输
         （word/txt/md 提取文本、excel 构建二维数组，声明原始类型与后缀；
         精简不可行时自动回退原件并在任务 note 说明）。
@@ -2831,7 +2833,9 @@ def register(app) -> None:
     def it_export():
         """把解析出的数据导出为文件（txt / md / docx / xlsx）。
 
-        请求体：{"payload": {jzt,fmt,name,ext,data}, "export": "auto"}。
+        请求体：{"payload": {jzt,fmt,name,ext,data}}。
+        注：历史文档里的 "export" 字段当前**未被读取**——导出格式由 fmt+ext 决定
+        （word→.docx、excel→.xlsx 或 .csv、text→.txt、markdown→.md）。
         """
         body = request.get_json(silent=True) or {}
         payload = body.get("payload")
@@ -2856,12 +2860,16 @@ def register(app) -> None:
 
 
 # 依赖 → 失效功能 → 修复指引（供 /status 的 missing_deps 与前端横幅使用）
+# 依赖 → 失效功能 → 依赖组件包名（None = 无对应组件包，只能升级主包）
+# 注：包名要与 deploy/依赖组件/JZToolsHub-依赖-<pkg>-v*.zip 的 <pkg> 一致（如 cv2 而非 opencv-python），
+# 否则用户按提示找不到包——历史上这里写死成「OpenCV」且把 qrcode/zfec/zxingcpp 判成"无组件"，
+# 三者的组件包其实都存在。
 _DEP_FEATURES = [
-    ("opencv-python(cv2)", CV2_AVAILABLE, "视频码流模式（生成 mp4）", True),
-    ("numpy", NUMPY_AVAILABLE, "视频码流模式（生成 mp4）", True),
-    ("qrcode", QRCODE_AVAILABLE, "全部出码功能", False),
-    ("zfec", ZFEC_AVAILABLE, "全部出码功能（纠删码）", False),
-    ("zxingcpp", ZXING_AVAILABLE, "视频解码校验", False),
+    ("opencv-python(cv2)", CV2_AVAILABLE, "视频码流模式（生成 mp4）", "cv2"),
+    ("numpy", NUMPY_AVAILABLE, "视频码流模式（生成 mp4）", "numpy"),
+    ("qrcode", QRCODE_AVAILABLE, "全部出码功能", "qrcode"),
+    ("zfec", ZFEC_AVAILABLE, "全部出码功能（纠删码）", "zfec"),
+    ("zxingcpp", ZXING_AVAILABLE, "视频解码校验", "zxingcpp"),
 ]
 
 
@@ -2889,14 +2897,19 @@ _declared = _declared_requires()
 def _missing_deps():
     """缺失的依赖清单：指出**哪个依赖未满足、会导致什么功能失效、怎么修**。
 
-    cv2/numpy 由「依赖组件包」按需提供（不随主包，见 docs/design/主体与插件解耦-设计文档.md
-    §3.4 / T25）：未装组件时本插件仍可加载，但视频码流模式不可用——这里给出可操作的提示。
+    第三方依赖一律由「依赖组件包」按需提供（不随主包，见 docs/design/主体与插件解耦-设计文档.md
+    §3.4 / T25）：未装组件时本插件仍可加载，仅对应功能不可用——这里给出**可照做**的提示，
+    包名与入口名必须与 `deploy/依赖组件/` 的真实产物一致。
     """
     out = []
-    for name, ok, feature, by_component in _DEP_FEATURES:
+    for name, ok, feature, component in _DEP_FEATURES:
         if ok:
             continue
-        out.append({"name": name, "feature": feature,
-                    "fix": "请安装「依赖组件包」（JZToolsHub-依赖组件-OpenCV-*.zip，解压后双击「安装依赖组件.bat」）" if by_component else "请升级主包或联系维护者"})
+        if component:
+            fix = ("请安装依赖组件包 JZToolsHub-依赖-%s-v*.zip"
+                   "（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。" % component)
+        else:
+            fix = "请升级主包或联系维护者。"
+        out.append({"name": name, "feature": feature, "fix": fix})
     return out
 

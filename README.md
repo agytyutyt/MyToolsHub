@@ -160,7 +160,7 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 > | LibreOffice 核心 | `JZToolsHub-离线组件-LibreOffice核心-<版本>.zip`（≈163 MB） | 解压后双击 `安装LibreOffice核心组件.bat`（**免管理员**） | **对目标机隐身**：纯解压、不写注册表、不建快捷方式、不改文件关联、不进"程序和功能"，目标机 Office/WPS 与默认应用均不受影响 |
 > | Chrome | `JZToolsHub-离线组件-Chrome-<版本>.zip`（≈160 MB） | 右键"以管理员身份运行" `安装Chrome浏览器.bat`（**需管理员**，全机静默安装） | 目标机已有 Chrome/Edge 时可不装 |
 >
-> 主包（`deploy\JZToolsHub-v<版本>.zip`，≈122 MB）**默认不含任何离线组件**；LibreOffice 组件
+> 主包（`deploy\JZToolsHub-v<版本>.zip`）**默认不含任何离线组件**；体积以出包产物为准（解耦后仅含框架依赖 + 核心插件 `admin`，见 `HANDOFF.md` §2.2）；LibreOffice 组件
 > 内含**裁剪核心包**（只保留 `.doc→.docx` / `.xls→.xlsx` 需要的那套，357.5 MB → 164.5 MB），
 > 安装到 `<程序目录>\runtime\libreoffice\`，应用**自动探测、零配置、装完即生效（无需重启工具箱）**；
 > 也可随时双击 `卸载LibreOffice核心组件.bat` 单独移除。详见 `docs/guide/离线部署包说明.md` §1/§2
@@ -180,7 +180,7 @@ python app.py
 
 - 默认管理员：`admin` / `admin123`（首次启动自动生成于数据根目录 `config/admin.json`，**登录后请尽快改密**）。
 - 管理后台：`/admin`；数据目录设置：`/admin/settings`（仅超级管理员）。
-- 环境变量：`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 `5000`，解析失败回落 5000）。
+- 环境变量：`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 `5000`，解析失败回落 5000）、`JZTOOLS_DATA_ROOT`（显式指定数据根；指定时**不读写**指针文件，见 `jztools_data.py:138-152`）、`XHR_SOFFICE`（覆盖 LibreOffice `soffice` 路径，见 `jz_deps.py:359`）。
 
 > 源码模式使用 Flask 内置服务器（`debug=True`，自动重载），仅供开发。生产请用打包产物（内置 waitress 8 线程）。
 
@@ -198,9 +198,9 @@ powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
 #                                        脚本会校验并在与基线不符时告警）
 #   -DeployName "JZToolsHub-py38"       输出目录名（多版本部署目录共存）
 #   -Force                              允许版本号与上一版相同（默认会报错中止）
-#   -WithOfflineRuntime                 随包携带离线组件（出胖包；默认**不带**，主包约 122MB）
+#   -WithOfflineRuntime                 随包携带离线组件（出胖包；默认**不带**）
 #   -SkipOfflineRuntime                 旧开关，已等价于默认行为（仅为兼容旧命令行保留）
-#   -KeepFullLibreOffice                随包时使用完整的 LibreOffice MSI（默认改用裁剪核心包）
+#   -KeepFullLibreOffice                随包时**同时保留**完整 LibreOffice MSI（默认仅留裁剪核心包；两者都在时包体积约 682 MB）
 #   -ZipOnly                            跳过打包与组装，仅用既有部署目录重生成 zip
 
 # 离线组件：先把第三方组件拉到 runtime\（在有网机器上执行一次；支持断点续传）
@@ -223,7 +223,7 @@ powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1 -Comp
 
 产物：
 
-* `deploy\JZToolsHub\` + `deploy\JZToolsHub-v<版本>.zip`（主包，默认约 122 MB，**不含组件**）
+* `deploy\JZToolsHub\` + `deploy\JZToolsHub-v<版本>.zip`（主包，约 27 MB（实测，2026-09 解耦后），仅含核心插件 `admin`，业务插件走插件包/插件集分发，**不含组件**；体积以出包产物为准，详见 `HANDOFF.md` §2.2）
 * `deploy\JZToolsHub-离线组件-LibreOffice核心-<版本>.zip`（≈163 MB，一键安装、对目标机隐身，
   详见 `docs/guide/LibreOffice核心组件一键安装评估.md`）
 * `deploy\JZToolsHub-离线组件-Chrome-<版本>.zip`（可选，需管理员安装）
@@ -234,9 +234,8 @@ deploy\JZToolsHub\
 ├─ JZToolsHub.exe      # 后端可执行程序（双击或 start.bat 启动，无控制台，托盘常驻）
 ├─ _internal\          # Python 运行时 + Flask + 全部第三方依赖
 ├─ static\             # 首页前端源码（可修改，重启生效）
-├─ plugins\            # 插件：frontend/ 可改；backend/ 随包源码
-├─ wheels\             # zfec 预编译 wheel（随包，便于离线补装/重建）
-├─ tools\              # build-zfec-wheel.py（重建 zfec wheel）
+├─ plugins\            # 仅含核心插件 admin（业务插件走插件包/插件集分发）；frontend/ 可改；backend/ 随包源码
+├─ tools\plugin-upgrade\  # 目标机离线装插件脚本（install/upgrade/rollback/uninstall/体检，免管理员）
 ├─ runtime\            # ★ 离线运行组件（**仅胖包** `-WithOfflineRuntime` 才有；瘦包无此目录，组件另发）
 ├─ config\tools.json   # 工具注册清单模板（首启复制到数据根目录）
 ├─ docs\  README.md  HANDOFF.md  插件设计规范.md  移动端APP.md
@@ -244,18 +243,18 @@ deploy\JZToolsHub\
 ├─ 一键安装.bat         # 安装 / 更新（自动判断；主包不含组件时打印组件安装指引）
 ├─ 一键卸载.bat         # 卸载（含用户数据，需确认）
 ├─ install.ps1         # 安装 / 更新 / 卸载核心逻辑
-└─ version.json        # {app, schema, commit, built_at, python, offline}（模板同步触发依据）
+└─ version.json        # {app, schema, commit, built_at, python, offline, plugin_api}（模板同步触发依据）
 ```
 
 打包脚本依次完成：**校验打包解释器版本与依赖完整性** → PyInstaller 按 `JZToolsHub.spec` 打包后端 →
-组装部署目录（复制 `static/`、`plugins/`、`docs/`、契约文档、`wheels/`、`tools/`、`config/tools.json`）
+组装部署目录（复制 `static/`、`plugins/`（仅核心插件 `admin`）、`docs/guide/`、`docs/design/`、`docs/README.md`、根目录 `README.md`/`HANDOFF.md`/`插件设计规范.md`/`移动端APP.md`、`install.ps1`、`一键安装.bat`、`一键卸载.bat`、`config/tools.json`；`tools/` 仅带 `plugin-upgrade/`，`wheels/` 不随主包）
 → 清理插件运行时数据（`data/`、`.task_cache/`、`__pycache__/`、`out/`、`*.pyc`、**仅精确名 `config.json`**）
 → **自检同步模板 `*.template.json` 数量** → 仅当传 `-WithOfflineRuntime` 时**组装 `runtime/` 离线组件
 并按 `manifest.json` 校验完整性**（LibreOffice 的 MSI 被裁剪核心包替代，清单如实改写为
 `core_pruned` + 核心包体积）→ 复制安装/卸载脚本并写 `version.json` → 生成 `start.bat` → 压缩为 zip。
 
 > 打包脚本会在开工前检查三件事：① `-Python` 指定的解释器版本是否为基线 **3.14**（不符则告警）；
-> ② 该解释器是否已装齐 spec 里 collect_all 的 14 个第三方库（缺库不会让打包失败，只会打出
+> ② 该解释器是否已装齐 `build-deploy.ps1` 自带的 14 项依赖自检探针清单所列的库（`build-deploy.ps1:104-105`，与 `JZToolsHub.spec` 的 `PACKAGES` 不是同一份清单；缺库不会让打包失败，只会打出
 > 功能残缺的包，所以显式拦截；其中 `zfec` 需 `--find-links wheels` 才能装上）；
 > ③ **胖包模式（`-WithOfflineRuntime`）下**，`runtime/manifest.json` 声明的离线组件是否齐全且体积
 > 一致（缺一即中止，避免发出"声称离线可用但缺组件"的包）；**瘦包模式跳过此项**。
@@ -272,7 +271,7 @@ deploy\JZToolsHub\
 | 安装 Chrome（仅目标机无现代浏览器时需要） | 解压 Chrome 组件包 → **右键"以管理员身份运行"** `安装Chrome浏览器.bat`（全机安装需提权） |
 | 卸载 | 双击 `一键卸载.bat` 并输入 Y（删程序 + 用户数据）；保留数据用 `install.ps1 -Uninstall -KeepData` |
 
-一键安装流程：停止旧进程 → 检测既有安装（注册表 Uninstall 键 > 默认目录 `%LOCALAPPDATA%\JZToolsHub` > 含 `config/data_root.json` 的源目录 = 就地更新）→ 复制程序文件 → 同步配置模板到数据根目录 → **若包内含 `runtime/`（胖包）则就地处理离线组件，否则打印组件安装指引** → 写 `version.json` / 注册表 / 快捷方式。
+一键安装流程：停止旧进程 → 检测既有安装（注册表 Uninstall 键 > 默认目录 `%LOCALAPPDATA%\JZToolsHub` > 含 `config/data_root.json` 的源目录 = 就地更新）→ **插件版本防回退（低版本包拒装）与主体备份（失败即中止安装）** → 复制程序文件 → 同步配置模板到数据根目录 → **若包内含 `runtime/`（胖包）则就地处理离线组件，否则打印组件安装指引** → 写 `version.json` / 注册表 / 快捷方式。
 
 > **主包默认瘦身**：不含 Chrome / LibreOffice，需要高保真 Office 预览的目标机，**另外解压组件包双击一次**即可（免管理员、对目标机隐身、装完即生效、不影响 Office/WPS 与默认应用）。浏览器缺失时优先用目标机自带的 Chrome/Edge。
 
@@ -283,7 +282,7 @@ deploy\JZToolsHub\
 
 ### 3.4 插件包：只升级一个插件（出包 + 目标机更新）
 
-主包约 122 MB，为一个插件重出一版不划算。插件包只含一个插件的**代码**（通常 < 10 MB），
+主包体积远大于单个插件包，为一个插件重出一版不划算。插件包只含一个插件的**代码**（通常 < 10 MB），
 校验规则与离线安装器 `tools/plugin-upgrade/install-plugin.ps1` 完全同源
 （规则单点定义见 `docs/design/插件独立升级方案-设计文档.md` §4/§5.3）。
 
@@ -312,7 +311,7 @@ powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id admi
 | `tools\plugin-packages.json` | **入库登记**（版本递增、`?v=N` 递增、依赖白名单的比对基线） |
 
 构建期强制校验（任一失败即中止，`-SkipChecks` 才会降级为警告，**不建议用**）：版本必须递增、
-前端资源改动必须递增 `?v=N`、后端第三方依赖必须 ∈ `JZToolsHub.spec` 的 `PACKAGES` ∪ 插件内
+前端资源改动必须递增 `?v=N`、后端第三方依赖必须 ∈ `JZToolsHub.spec` 的 `PACKAGES` ∪ `DEP_COMPONENT_PACKAGES`（依赖组件包提供；需目标机装对应组件，缺则插件降级）∪ 插件内
 `vendor/` ∪ 标准库、payload 不得夹带运行态数据（`data/`、`__pycache__/`、`*.log`…）。
 
 **② 目标机更新**（两条入口，管理员挑一条）
@@ -351,6 +350,8 @@ JZToolsHub/
 ├── app.py                     # ★ 框架入口：数据根初始化、日志、插件加载、核心路由、压缩/缓存中间件
 ├── jz_llm.py                  # ★ 统一大模型：两级配置、四种调用格式、插件只拟定提示词
 ├── jztools_data.py            # ★ 数据根目录管理：双指针解析、旧数据迁移、配置模板同步
+├── jz_api.py                  # ★ 框架 API 门面：会话用户 / 操作标签 / 组织树 / 用户级大模型配置（插件只调它）
+├── jz_deps.py                 # ★ 依赖判定引擎：读 manifest.requires + 已装依赖清单 → ok/degraded/blocked
 ├── config/
 │   ├── tools.json             # ★ 工具注册清单模板（站点信息 + 分类 + 工具条目）
 │   └── data_root.json         # 数据根目录备份指针（开发机产物，见 §12 注意事项）
@@ -375,18 +376,25 @@ JZToolsHub/
 │   └── js/  main.js  tool.js  jz-icon.js  llm-settings.js（首页 ⋯ → 大模型设置对话框）
 ├── android-app/InfoParse/     # 移动端 APP（Kotlin，信息传输的 Android 离线接收端）
 ├── wheels/                    # ★ 第三方预编译 wheel（zfec，见 §2.3 与 wheels/README.md）
-├── runtime/                   # 离线运行组件下载目录（Chrome MSI + LibreOffice MSI/裁剪核心包，已 gitignore，约 517MB）
-├── tools/                     # 开发/构建辅助脚本
+├── runtime/                   # 离线运行组件下载目录（Chrome MSI + LibreOffice MSI/裁剪核心包，已 gitignore；体积 517–682 MB 随口径不同，以 HANDOFF §4 实测记录为准）
+├── tools/                     # 开发/构建辅助脚本（逐项清单以目录实际内容为准）
 │   ├── build-zfec-wheel.py    #   重建 zfec wheel（本机编译产物重打为标准 wheel）
-│   ├── build-libreoffice-core.py # ★ 把 LibreOffice MSI 裁剪成便携核心包（357.5MB → 164.5MB）
+│   ├── build-libreoffice-core.py # ★ 把 LibreOffice MSI 裁剪成便携核心包（体积以脚本输出为准）
 │   ├── fetch-offline-bundle.py#   ★ 下载离线运行组件到 runtime/（断点续传 + sha256 校验）
 │   ├── offline-components.json#   ★ 组件清单：URL / 版本 / 冻结 sha256 / 许可证（入库，可评审）
 │   ├── build-offline-component.ps1 # ★ 把组件打成可单独分发的一键安装包（默认 LibreOffice 核心）
+│   ├── build-deploy-local.py  #   ★ 主包「组装」阶段：dist + 仓库源码 → deploy\<DeployName>\（增量合并）
+│   ├── verify-package.py      #   ★ 主包校验：结构 + 内容 +（可选）解压冒烟；出包后必跑
+│   ├── gen-installed-deps.py  #   ★ 生成 config/installed-deps.json（主体侧"装了哪些依赖"的唯一真源）
 │   ├── plugin-payload-rules.json   # ★ 插件 payload 的"代码/数据"边界规则（插件包与整包清理共用同一份）
-│   ├── build-plugin-package.ps1    # ★ 出「插件包」：单个插件独立升级用的小包（< 10MB）
+│   ├── build-plugin-package.ps1    # ★ 出「插件包」：单个插件独立升级用的小包
+│   ├── build-plugin-set.ps1   #   ★ 出「插件集」：一组插件包 + index.json + 一键安装脚本（新机首装 / 批量收敛）
+│   ├── build-dep-component.ps1#   ★ 出「依赖组件包」（cv2 / numpy 等，不随主包）
 │   ├── plugin-packages.json        #   已发布插件包登记（入库；sha256 冻结值 + 各文件指纹 + 缓存戳基线）
 │   ├── plugin-upgrade/        #   ★ 随插件包分发的目标机脚本（安装/升级/回滚/卸载/体检，免管理员）
+│   ├── dep-component/         #   ★ 依赖组件包的目标机安装脚本（install-dep-component.ps1）
 │   ├── e2e/                   #   ★ 插件升级链路端到端回归测试（沙箱：假程序目录 + 假数据根）
+│   ├── dev/                   #   开发期一次性小工具（预览排查 / 调研用本地服务，不随包）
 │   └── offline-runtime/       #   ★ 随组件包分发的安装脚本与说明
 │       ├── install-libreoffice-core.ps1 # 一键安装 LibreOffice 核心（免管理员、对目标机隐身）
 │       ├── 安装LibreOffice核心组件.bat   # 双击入口（免管理员）
@@ -397,10 +405,10 @@ JZToolsHub/
 ├── docs/                      # 文档（五层结构，**索引见 docs/README.md**）
 │   ├── README.md              #   文档索引：覆盖矩阵 + 文档模板 + 命名/生命周期规范
 │   ├── 项目管理手册.md         #   ★ 新手入门：改代码 / 开插件 / 移植 / 打包运维 四类场景
-│   ├── guide/                 #   交付层（随包）：打包部署手册、离线部署包说明、LibreOffice 组件评估、干净机器验收手册
-│   ├── design/                #   设计层（随包）：8 份功能/插件设计文档
+│   ├── guide/                 #   交付层（随包）：打包部署手册、离线部署包说明、干净机器部署验收手册、验收手册、LibreOffice 组件评估
+│   ├── design/                #   设计层（随包）：功能/插件设计文档（份数以 `docs/README.md` §2 为准）
 │   ├── eval/                  #   评估层（不随包）：信息传输总纲、Python 选型、热插拔路线、手搓引擎
-│   ├── plan/                  #   方案层（不随包）：信息传输 TODO 清单、解耦 TODO 清单与实施方案
+│   ├── plan/                  #   方案层（不随包）：信息传输优化方案与 TODO 清单（解耦 TODO 清单已归档）
 │   └── archive/               #   归档层（不随包）：已完成 / 已决 / 已取代，只作留证
 ├── 插件设计规范.md             # ★ 插件开发铁律（开发插件前必读）
 ├── 移动端APP.md                # ★ 信息传输协议权威规范
@@ -410,17 +418,20 @@ JZToolsHub/
 ├── openh264-2.5.0-win64.dll   # OpenCV 视频编码依赖（cv2 缺 DLL 时手工放置；来源与许可证见 docs/guide/离线部署包说明.md §9）
 ├── demo/                      # 多码同屏 PoC（方案已否决，仅背景留存，gitignore）
 ├── .bench_corpus/             # 压缩评估语料与脚本（可随时重建，gitignore）
-├── test_plugin_templates.py    # 插件级配置模板同步单测（7 例）
-├── test_plugin_admin.py        # 插件包校验/应用/回滚逻辑单测（19 例，含与出包工具的交叉验证）
+├── test_plugin_templates.py    # 插件级配置模板同步单测
+├── test_plugin_admin.py        # 插件包校验/应用/回滚逻辑单测（含与出包工具的交叉验证）
 ├── test_admin_plugin_manager.py # 后台插件管理页 HTTP 全链路测试
-├── test_bg_image.py            # 背景图清理单测（17 例，含两份副本一致性断言）
-├── test_xlsx_stale_dimension.py # xlsx 失真 <dimension> 声明回归（14 例，覆盖四个读表插件）
-├── test_filter_preview.py      # 过滤器上传预览/按列开关/后处理开关回归（21 例）
+├── test_bg_image.py            # 背景图清理单测（含两份副本一致性断言）
+├── test_xlsx_stale_dimension.py # xlsx 失真 <dimension> 声明回归（覆盖四个读表插件）
+├── test_filter_preview.py      # 过滤器上传预览/按列开关/后处理开关回归
+├── test_data_migrate.py        # 数据迁移（导出/导入）回归：打包口径 + 加密口径
+├── test_llm_module.py          # 统一大模型模块回归：配置 / 四种调用格式 / 解析顺序
 ├── 一键安装.bat  一键卸载.bat   # 双击入口
 └── README.md  HANDOFF.md
 ```
 
-> 根目录六个 `test_*.py` 用 `python -m unittest <模块名>` 在**仓库根**运行（模块就在根，不是包）。
+> 仓库根 `test_*.py`（数量随用例新增变化，以仓库根实际文件为准）用 `python -m unittest <模块名>`
+> 在**仓库根**运行（模块就在根，不是包）。
 > 插件自带测试在 `plugins/<id>/backend/test_*.py`，端到端脚本在 `tools/e2e/`；
 > 测试脚本**不随包分发**（口径见 `tools/plugin-payload-rules.json`）。
 
@@ -432,8 +443,12 @@ JZToolsHub/
 │   ├── tools.json             # 工具注册清单（首启从程序目录模板复制，之后改这里）
 │   ├── admin.json             # 单位/部门/人员/角色（敏感字段 Fernet 加密）
 │   ├── .admin_key             # 加密密钥（必须与 admin.json 同目录迁移）
+│   ├── llm.json               # 统一大模型配置（模式 / 接入信息，Key 加密存储）
 │   └── .app_state.json        # 记录 last_app 版本号 + 各插件已装版本/模板指纹（模板同步幂等依据）
-├── backups/plugins/<id>/      # 插件包升级的旧版代码备份（-Rollback 的输入，默认保留 3 份）
+├── backups/
+│   ├── plugins/<id>/          # 插件包升级的旧版代码备份（-Rollback 的输入，默认保留 3 份）
+│   ├── app/                   # 主体备份（整包升级前自动留快照，失败即中止安装）
+│   └── migrate/               # 数据迁移导入覆盖前的备份（只留最近 3 份）
 ├── logs/access.log            # 访问日志（按天滚动，保留 30 天）
 └── plugins/<id>/              # 各插件运行数据
     ├── data/                  #   业务记录（共享文档 / 公告 / 战果台账 / 知识库 files）
@@ -466,7 +481,7 @@ JZToolsHub/
 
 | 函数 | 作用 |
 | --- | --- |
-| `get_data_root()` | 双指针解析：主指针 `~/.jztoolshub.json` > 备份指针 `<程序目录>/config/data_root.json` > 默认 `~/.jztoolshub` |
+| `get_data_root()` | 解析顺序：环境变量 `JZTOOLS_DATA_ROOT` > 主指针 `~/.jztoolshub.json` > 备份指针 `<程序目录>/config/data_root.json` > 默认 `~/.jztoolshub`（显式指定环境变量时**不读写指针文件**，供 CI / 沙箱演练用） |
 | `get_data_root_dir(*parts)` / `get_data_root_file(*parts)` | 插件定位自有数据的唯一入口（自动建目录） |
 | `migrate_legacy_app_data()` | 启动时把旧版留在程序目录的用户数据搬进数据根目录（幂等） |
 | `migrate_data_root(old, new)` / `set_data_root()` | 管理员换数据目录时整体迁移 config/logs/plugins |
@@ -492,7 +507,7 @@ JZToolsHub/
 | `grant_all` | `false` | `true` = 对全体登录用户开放，无需逐人授权 |
 | `order` | `0` | 同分类内升序 |
 
-`manifest.json` 字段：`id`（必填）、`icon`、`accent`、`entry`、`features`、`version`、`author`、`form`（`source`/`package`）、`name`/`description`（仅回退用）。
+`manifest.json` 字段：`id`（必填）、`icon`、`accent`、`entry`、`features`、`version`、`author`、`form`（`source`/`package`）、`requires`（依赖声明：三类 `python_packages`/`vendored`/`external` + `min_app_version`/`api_version`，由 `jz_deps.read_requires()`（`jz_deps.py:273-281`）消费，决定插件是否加载/降级）、`name`/`description`（仅回退用）。
 
 ### 5.4 admin 插件 —— 安全层与组织管理
 
@@ -551,7 +566,7 @@ spec = importlib.util.spec_from_file_location(module_name, backend/__init__.py,
 ② config/tools.json 的 name / description
       ↓ 缺省
 ③ manifest.json 的 name / description
-（icon / accent / entry / features 始终以 manifest 为基础，可被 ① 覆盖）
+（icon / accent / features 以 manifest 为基础，可被 ① 覆盖；**`entry` 例外——始终取 `manifest.json`**）
 ```
 
 参考实现：`plugins/notice-board/backend/routes.py` 的 `home_card()`（按当前用户可见范围取最新公告）。
@@ -627,17 +642,9 @@ plugins/my-tool/
 
 ```python
 from flask import jsonify, request
+import jz_api                         # 会话用户 / 操作标签走框架 API 门面
 import jztools_data
-
-try:                                  # 取当前登录用户（admin 提供，导入失败兜底 None）
-    from jztools_admin.routes import get_session_user
-except Exception:
-    get_session_user = None
-
-try:                                  # 访问日志操作标签（B-8）
-    from jztools_admin.routes import set_operation
-except Exception:
-    def set_operation(op): pass
+# ★ 禁止 import 其他插件的后端模块（规范 B-7）：一律经 jz_api 取框架能力
 
 API_PREFIX = "/api/my-tool"
 DATA_DIR = jztools_data.get_data_root_dir("plugins", "my-tool", "data")
@@ -655,8 +662,8 @@ def register(app):
 
     @app.post(f"{API_PREFIX}/echo")
     def mt_echo():
-        set_operation("回显文本")
-        user = get_session_user() if get_session_user else None
+        jz_api.set_operation("回显文本")   # 无 provider 时空操作，无需 try/except
+        user = jz_api.get_session_user()  # 未登录 / admin 未加载时返回 None
         data = request.get_json(silent=True) or {}
         return jsonify({"you_said": str(data.get("msg", ""))[:500],
                         "by": (user or {}).get("username")})
@@ -677,14 +684,14 @@ GET  /api/<id>/result/<task_id>    → {"status": "pending|running|done|error", 
 
 ### 6.5 插件之间复用能力
 
-**禁止** import 其他插件的后端模块（规范 B-7）。正确做法是提供并调用程序化 HTTP 接口：
+**插件间禁止 import 与后端互调**（规范 B-7）；能力复用只有两条正路——把能力提升为主体框架模块（如 `jz_llm`），或把两个插件合并。插件自带的 `/apply` 类程序化接口仅限**前端与外部脚本**调用，不得作为插件间后端依赖（轨迹速写已改为自带 `filter_local` 实现）：
 
 ```bash
-# 轨迹速写调用「过滤器」的字段过滤能力
+# 外部脚本程序化调用示例（插件间后端协作不得走此通道）
 curl -X POST http://localhost:5000/api/file-filter/apply \
      -H "Content-Type: application/json" \
      -d '{"rows": [["姓名","时间","地点"], ["张三","2026-01-01 10:00","A"]], "mode": "hard"}'
-# → {"rows": [...], "kept": ["时间","地点"], "removed": ["姓名"], "replace_count": 0}
+# → {"rows": [...], "kept": [{"column":"时间","matched":"时间"}, {"column":"地点","matched":"地点"}], "removed": ["姓名"], "replace_count": 0}
 ```
 
 ### 6.6 运维动作速查
@@ -692,12 +699,12 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | 动作 | 操作 | 是否重启 |
 | --- | --- | --- |
 | 改名称 / 描述 / 排序 | 编辑数据根目录 `config/tools.json` | 否 |
-| 临时下线 / 恢复 | 该条目 `enabled: false` / `true` | 否 |
+| 临时下线 / 恢复 | 该条目 `enabled: false` / `true` | 下线：否；**恢复：含后端的插件需重启**（启动时才按 `enabled` 决定是否 `load_routes()`，否则卡片可开、接口 404） |
 | 按人授权 | 管理后台「人员管理 → 权限」勾选插件 ID | 否（重新登录或刷新会话） |
 | 新增 / 升级插件 | 用插件包：开发侧出包见 **§3.4**，目标机二选一：① 管理后台「插件管理」页上传 zip（免命令行、免解压，程序自动校验 → 备份 → 替换 → 停服重启，页面自动刷新）② 双击「安装插件.bat」（离线脚本，免管理员）。见 `docs/guide/离线部署包说明.md` §11；手工覆盖目录亦可，但需递增 `?v=` 与 `manifest.version` | 视改动而定（含后端改动则自动重启，约 5~10 秒） |
 | 批量更新多个插件 | 管理后台「插件管理」→ 共享盘批量更新：填 `index.json` 路径 → 检查更新 → 勾选 → 批量升级（全部成功后若含后端改动则自动统一重启一次） | 视改动而定 |
 | 回滚插件 | 管理后台「插件管理」→ 该行「回滚」（成功后同样自动重启），或命令行 `install-plugin.ps1 -Rollback <插件id>` | 是（自动） |
-| 卸载插件 | 用插件包：`install-plugin.ps1 -Uninstall <插件id>`；手工方式：先删 `tools.json` 条目 → 备份数据 → 再删目录 → 重启 | 是 |
+| 卸载插件 | 三选一：① 管理后台「插件管理」页点该行「卸载」（删/停注册条目 → 备份数据 → 删目录；核心插件拒绝卸载）② 命令行 `install-plugin.ps1 -Uninstall <插件id>` ③ 手工：先删 `tools.json` 条目 → 备份数据 → 再删目录 → 重启 | 是 |
 | 换数据目录 | 后台「系统设置」→ 输入新路径 →「更改并迁移」 | 否（自动迁移） |
 
 ---
@@ -743,6 +750,10 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | `POST /api/admin/plugins/enable` | 启用 / 停用插件（写数据根 `tools.json`；仅超管） |
 | `GET /api/admin/plugins/index`、`POST /api/admin/plugins/batch-apply` | 共享盘索引检查更新 / 批量升级（仅超管） |
 | `POST /api/admin/plugins/restart` | 重启服务让插件代码生效（打包运行下自重启；源码模式返回提示；仅超管） |
+| `POST /api/admin/plugins/uninstall` | 卸载插件（删/停注册条目 → 备份数据 → 删目录；核心插件拒绝卸载；仅超管） |
+| `POST /api/admin/plugins/align` | 版本登记对齐：把 `.app_state.json` 的登记版本对齐到程序目录实际版本（登记漂移的一键修复；仅超管） |
+| `GET /api/admin/deps` | 本机「已安装依赖」清单（框架包 / 外部组件 / 插件自带，含版本），用于判断插件为什么不可运行（仅超管） |
+| `POST /api/admin/packages/scan`、`POST /api/admin/packages/install` | 扫描介质目录里的插件包与依赖组件包（只读，不安装）→ 安装扫描结果（服务端重新扫描校验，不接受前端任意路径；仅超管） |
 | `GET\|POST /api/admin/units`、`PUT\|DELETE /api/admin/units/<id>` | 单位 CRUD（需 `unit` 权限） |
 | `GET\|POST /api/admin/departments`、`PUT\|DELETE /api/admin/departments/<id>` | 部门 CRUD（需 `department` 权限） |
 | `GET\|POST /api/admin/users`、`PUT\|DELETE /api/admin/users/<username>` | 人员 CRUD（需 `user` 权限）；密码/身份证/API Key 加密存储 |
@@ -785,18 +796,18 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 | file-filter | office | 前后端 | openpyxl / xlrd / requests | 启用 | 表格脱敏过滤：上传后识别列名（胶囊 + 删除线预判，点胶囊逐列决定保留/删除）+ 后处理规则展示与开关；硬过滤 / 大模型语义匹配 / 文本与正则后处理；`/apply` 供其他插件复用 |
 | trajectory-sketch | office | 前后端 | openpyxl / xlrd / requests | 启用 | 轨迹表 → 字段过滤 → 轨迹分析 → 速写报告；分析引擎为零依赖可插拔包 |
 | shared-docs | office | 前后端 | python-docx / openpyxl / xlrd | 启用 | 多人协作编辑 Word/Excel，乐观锁、在线用户、导入导出 |
-| case-report | office | 前后端 | requests / openpyxl | 启用 | 收网报告 → 大模型五要素抽取 → 键值对台账、跨记录汇总、Excel 导出 |
+| case-report | office | 前后端 | requests / openpyxl | 启用 | 收网报告 → 大模型抽取案件要素 + 缴获物品明细 → 键值对台账、跨记录汇总、Excel 导出 |
 | character-graph | office | 前后端 | python-docx / pypdf / requests | 启用 | 文档 → 大模型抽取人物关系 → 3D 星图 |
-| info-transfer | office | 前后端 | qrcode / zfec / opencv / numpy / openpyxl（+ 可选 python-docx / xlrd / olefile） | 启用 | 文字/文档封装为二维码（静态多张 / 视频流），解析还原；协议 v2 `fmt=file` 原文件完整传输 |
+| info-transfer | office | 前后端 | qrcode / zfec / opencv / numpy / zxing-cpp / openpyxl / pypdf（+ 可选 python-docx / xlrd / olefile；清单以 `plugins/info-transfer/backend/requirements.txt` 为准） | 启用 | 文字/文档封装为二维码（静态多张 / 视频流），解析还原；协议 v2 `fmt=file` 原文件完整传输 |
 | trajectory-convert | dev | 前后端 | openpyxl / xlrd / qrcode / opencv / numpy / zfec | 启用 | Excel 轨迹 → 二维码视频流 / 静态二维码 |
 | qr-video-decode | dev | 前后端 | zfec | 启用 | 二维码视频流逐帧识别 + zfec 纠错重组 |
 | md5-generator | dev | 纯前端 | — | 启用 | MD5 摘要生成 |
 | map-marker | maps | 纯前端 | — | **停用** | 高德地图标点、二维码识别回放、移动轨迹 |
 | base64 | dev | 纯前端 | — | **停用** | Base64 编解码 |
-| json-formatter | dev | 纯前端 | — | **停用** | JSON 格式化 / 压缩 |
+| json-formatter | dev | 纯前端 | — | **停用** | JSON 格式化 / 压缩 / 校验 |
 | color-picker | design | 纯前端 | — | **停用** | 取色器 |
 
-> `ai` / `design` / `maps` 三个分类在当前默认配置下没有启用中的工具（其成员均为停用状态），首页会显示空分类；可在「隐藏工具」中把空分类一并下线。
+> `ai` 分类当前没有任何工具成员，首页**不渲染区块**（前端对无可见工具的分类直接跳过），也不出现在「隐藏工具」列表里，要下线需直接编辑数据根 `config/tools.json` 的 `categories`；`maps` 仅含已停用的 `map-marker`、`design` 仅含已停用的 `color-picker`——这两个分类首页同样不渲染区块，但可在「隐藏工具」中把分类一并下线。
 
 ---
 
@@ -861,14 +872,14 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 > **无需**人工登记。模板内可用 `"_mode": "overwrite"` 声明整份覆盖；缺省 `ensure-keys` 只补缺失键。
 > 目标机路径映射：`plugins/<id>/backend/config.template.json` → 数据根 `plugins/<id>/config.json`。
 >
-> ⚠️ **但"新增一个带模板的插件"仍要两处登记**：应用侧的自动发现只保证**下次启动**补键，
-> 而安装器 `install.ps1` 走的是**硬编码清单** `Sync-ConfigTemplates` 的 `$cfgPairs`，
-> 漏登记会出现"装完那一刻配置没生成、要等首次启动才补上"的空档。两处清单见本文 §10.2 末段。
+> ⚠️ **但"新增一个带模板的插件"安装器侧仍要登记**：应用侧是**自动发现**（无需登记 `_TEMPLATE_SYNC`，
+> 它现在只留框架级 `config/tools.json` 一条），而安装器 `install.ps1` 走的是**硬编码清单**
+> `Sync-ConfigTemplates` 的 `$cfgPairs`，漏登记会出现"装完那一刻配置没生成、要等首次启动才补上"的空档。
 
 > **模板命名纪律：配置模板一律命名 `config.template.json`，与运行时 `config.json` 分离。**
 > 打包脚本会删除插件树内所有 `config.json`（清掉本机含 API Key 的运行时配置），模板若沿用
-> `config.json` 命名会被一并删除，导致同步链路静默失效。新增带模板配置的插件时，必须在
-> `jztools_data._TEMPLATE_SYNC` 与 `install.ps1` 的 `Sync-ConfigTemplates` **两处同时登记**且保持一致
+> `config.json` 命名会被一并删除，导致同步链路静默失效。新增带模板配置的插件时，**只需**在
+> 安装器 `install.ps1` 的 `$cfgPairs` 登记（应用侧自动发现，见上）
 > （`build-deploy.ps1` 打包后会自检 `*.template.json` 数量，防止误删）。
 >
 > **提示词（`prompt.json`）不再随版本下发**：模板已删除，提示词由插件内 `llm_client` 的内置默认值
@@ -877,7 +888,6 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 双保险：`install.ps1` 的 `Sync-ConfigTemplates` 在安装时也做等价合并；即使手动替换程序文件夹，app 启动时也会自动同步。
 
-> **新增带模板配置的插件时，必须在两处同时登记**并保持一致：① `jztools_data.py` 的 `_TEMPLATE_SYNC`；② `install.ps1` 的 `Sync-ConfigTemplates`。
 > 用户数据（`admin.json`、`.admin_key`、插件 `data/`、日志）**绝不参与**模板同步。
 
 ### 10.3 升级 / 换目录
@@ -914,13 +924,13 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 | 启动时报 `View function mapping is overwriting an existing endpoint` | 两个插件的路由函数同名；给路由函数加插件前缀（如 `mt_status`），或显式传 `endpoint=` |
 | 卡片点击显示"无法加载工具" | 检查 `manifest.json` 的 `entry` 指向的文件是否存在于 `frontend/` |
 | 登录后接口全部 401 | 会话超时（默认空闲 30 分钟 / 登录满 12 小时）；重新登录 |
-| 轨迹速写提示「过滤器插件不可用」 | 确认 `file-filter` 的 `enabled: true` 并重启服务，再看 `/api/trajectory-sketch/status` 的 `filter_plugin.reason` |
+| 轨迹速写大模型过滤失败 | 过滤能力已由插件内置（`filter_local`），不再依赖 `file-filter` 插件；若 `mode=llm` 失败，检查「大模型设置」接入信息与 `requests` 依赖组件 |
 | 插件说"大模型未配置"但管理员已配 | 看 `GET /api/<插件id>/config` 的 `llm_source`：`user`=用的是本人配置、`global`=回退到管理员配置、空=确实没有可用配置（`llm_reason` 给出该去哪儿配）。若模式为"用户各自设置"且未勾选回退，未配置的用户就会看到这个提示。**插件自有配置已不参与解析**（历史 `llm` 段由启动迁移收编进统一配置后清除） |
 | 用户自助入口（右下角 ⋯）不显示 | 属预期：只有管理员在「管理后台 → 大模型设置」把模式切到**用户各自设置**后才出现；管理员统一配置模式下该选项按需求隐藏 |
 | 大模型连通失败 | 先看提示里的 HTTP 状态：401/403 → Key 不对；404 → 地址不是**完整接口地址**（OpenAI 兼容要填到 `chat/completions`，框架不做路径拼接）；结构异常 → 调用格式选错了（如把 Anthropic 接口按 OpenAI 格式调） |
 | 知识库 Word/Excel 预览样式不对 | 先看 `GET /api/knowledge-base/status` 的 `office_render`：引擎不可用时会**静默回退**到降级渲染。常见原因：`vendor/` 缺失，或 vendor 的 `xhr/__init__.py` 少了一行 `from typing import Optional`（Python ≤3.13 上会导致引擎导入即 `NameError`，详见 `vendor/README.md`）。改了引擎或升级 vendor 后**递增 `routes.py` 的 `PREVIEW_CACHE_VERSION`** 即可自动重渲染旧缓存（无需手工清缓存、无需重启）；排查时也可手工删除 `<数据根>/plugins/knowledge-base/data/files/*.preview.json` |
 | 装依赖时 zfec 编译失败（`error: [WinError 2]` / 找不到编译器） | `zfec` 没有 Python 3.14 的官方 wheel，不加 `--find-links wheels` 会退化成源码编译。用 `pip install --find-links wheels ...`，或参考 `wheels/README.md` 重建 wheel |
-| 地图标点空白 | 在插件页「⚙️ 配置」中填写有效的高德 Web 服务 Key |
+| 地图标点空白 | 在插件页「⚙️ 配置」中填写有效的高德 Key——须在高德开放平台创建 **Web 端（JS API）** 应用（不是 Web 服务）；该应用开启了安全密钥时，一并填 `securityJsCode` |
 | 端口被占用 | 设 `JZTOOLS_PORT` 换端口，或先停旧进程 |
 | 升级后数据不见了 | 确认数据根目录未被误删；旧程序目录里的数据会在新版首启自动迁移，升级前勿删旧目录 |
 | 升级后提示密码错误 | 只复制了 `admin.json` 而未迁移 `.admin_key`；两者必须同目录 |
@@ -947,16 +957,16 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 4. **长耗时必须异步化**（>3 秒）：提交即返回 `task_id` + 轮询；有界线程池 + TTL 30 分钟 + 归属校验。
 5. **数据只写数据根目录**：用 `jztools_data.get_data_root_dir/file()`，禁止拼绝对路径或写别的插件目录。
 6. **归属四字段取自会话**：`created_by` / `created_by_name` / `unit_id` / `department_id`，**禁止**从请求体接收；列表接口必须按可见性过滤（越权读 404、越权写 403）。
-7. **禁止 import 其他插件后端模块**（B-7）；需要复用能力就提供程序化 HTTP 接口（参考 `file-filter` 的 `/apply`）。
+7. **插件间禁止 import 与后端互调**（B-7）；能力复用走『提升为主体模块（如 `jz_llm`）或合并插件』，`/apply` 类接口仅限前端与外部脚本调用。
 8. **禁止插件自行落盘访问日志**（B-8）；用 `set_operation("描述")` 标记具体操作。
-9. **敏感配置外置**：API Key 写 `backend/config.json`（gitignore）或由用户在页面录入，禁止硬编码入库。
+9. **敏感配置外置**：API Key 写 `backend/config.json`（gitignore）或由用户在页面录入，禁止硬编码入库。**大模型 API Key 例外**：一律交 `jz_llm` 统一配置，插件不得自持（见 §5.5 与《插件设计规范.md》SEC-2）。
 10. **前端资源用相对路径**；`data/` 与含密钥的 `config.json` 必须 gitignore；**随版本下发的配置模板必须命名 `config.template.json`**（不得叫 `config.json`，否则会被打包清理规则删掉）。
 11. **自包含验收**：把插件目录 + 一段 `tools.json` 注册片段复制到全新部署即可完整工作。
 12. **别删"旧浏览器兼容"代码**：目标机基线与浏览器基线是两件事（§2.1）。`main.js` 的 `?.` 规避、`jz-icon.js` + `static/icons/` 的 SVG emoji 回退、knowledge-base 的 pdf.js legacy 构建、插件自带 SVG 图标——触发条件都是"浏览器版本低 / 缺彩色 emoji 字体"，与 Windows 版本无关，**取消 Win7 支持之后仍然必须保留**。
 13. **新增 C 扩展依赖前先查 wheel**：`zfec` / `numpy` / `pillow` 是版本锁定型（`cpXX-cpXX`），每个 Python 小版本都要等新 wheel；`opencv-python`（`cp37-abi3`）与 `cryptography`（`cp311-abi3`）是稳定 ABI，跨版本可用。新增锁定型依赖时用 `pip download <包> --only-binary :all:` 先验证，必要时补进 `wheels/`（见 `wheels/README.md`）。
-12. **卸载顺序**：先删 `tools.json` 条目 → 备份数据 → 再删目录（顺序反了会留下悬空引用）。
+14. **卸载顺序**：先删 `tools.json` 条目 → 备份数据 → 再删目录（顺序反了会留下悬空引用）。
 
-> 完整条款（B-1~B-21、SEC-1~SEC-11、F-1~F-7、S-1~S-8、M-1~M-3、V-1~V-7）见 **《插件设计规范.md》**。
+> 完整条款（B-1~B-21、SEC-1~SEC-11、F-1~F-7、S-1~S-9、M-1~M-3、V-1~V-9、R-1~R-6、U-1~U-8 含 U-7a）见 **《插件设计规范.md》**。
 
 ---
 

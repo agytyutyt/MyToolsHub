@@ -2,8 +2,8 @@
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 文档版本 | v1.0（2026-09-04）+ 2026-09-17 状态标注 |
-| 对应桌面端 | 插件 `info-transfer`（信息传输）——**现行 v1.2.0**（以 `plugins/info-transfer/manifest.json` 为准）；协议已演进到 **v2（JZ2 二进制帧）**，与 v1 双协议并存（见 §3.0） |
+| 文档版本 | **v1.8（2026-09-24）**——完整修订记录见附录 E（v1.0 首版于 2026-09-04） |
+| 对应桌面端 | 插件 `info-transfer`（信息传输）——**插件版本以 `plugins/info-transfer/manifest.json` 为准**（本文不固化版本号）；协议已演进到 **v2（JZ2 二进制帧）**，与 v1 双协议并存（见 §3.0） |
 | APP 范围 | **只做「信息解析」**（解析信息封装功能产生的二维码图片 / 二维码视频） |
 | 读者 | Android 开发者（假设为初级水平，本文给出可直接使用的代码与逐项检查清单） |
 | 通信方式 | **无后端、无联网**。APP 完全离线运行，第 3 章协议即全部契约 |
@@ -70,12 +70,13 @@
 | FR-02 | 相册导入 PNG/JPG 图片解析（支持一次多选，多张为多页拆分码） | P0 一期 |
 | FR-03 | 多页拆分码的收集与重组（可分多次扫描，进度提示） | P0 一期 |
 | FR-04 | 解析结果展示：文档格式徽标、来源名、内容预览（文本 / 表格） | P0 一期 |
-| FR-05 | 导出文件（.txt / .md / .csv）到「下载」目录 | P0 一期 |
+| FR-05 | 导出文件（.txt / .md / .docx / .xlsx / .csv）到「下载」目录 | P0 一期 |
 | FR-06 | 分享内容 / 文件到微信、QQ 等 | P0 一期 |
 | FR-07 | 复制全部内容到剪贴板 | P0 一期 |
 | FR-08 | 多页收集任务的本地暂存（APP 退出后可继续） | P1 一期 |
-| FR-09 | 二维码视频（MP4）流解析（含 zfec 纠错） | P2 二期（可选） |
+| FR-09 | 二维码视频（MP4）流解析（含 zfec 纠错） | P2 **已实现**（见第 5 章） |
 | FR-10 | 解析历史记录 | P2 可选 |
+| FR-11 | 相机直扫二维码视频流：识别页相机逐帧采集视频帧（形态C）并进收集器，无需先录 MP4 | P0 一期（**已实现**，`ScanActivity` + `CameraScanner`） |
 
 **不做**（明确排除，勿实现）：
 
@@ -113,13 +114,13 @@
 │ 主页(识别历史)  │ ────────▶ │ 识别页      │ ──────────▶ │ 内容判别/收集器  │ ─────────▶ │ 结果页    │
 │ 历史卡片列表    │           │ CameraX    │             │ · 单张信封→直出  │            │ 格式徽标  │
 │ +相机FAB       │           │ + ML Kit   │             │ · 带 pg→收集进度 │            │ 内容预览  │
-│ 点卡片回看结果  │           │ 重置/导入   │             │ · base64→(二期) │            │ 导出/分享 │
+│ 点卡片回看结果  │           │ 放弃/导入   │             │ · 视频帧→收集器  │            │ 导出/分享 │
 └────────────────┘           └───────────┘             └────────────────┘            └──────────┘
       ▲                                                    │  「重新扫描」回识别页(从历史进入时隐藏)
       └──────────────── 识别成功自动写入历史 ────────────────┘
 ```
 
-识别成功的结果自动保存到本地历史（`filesDir/history/`，一条结果一个 JSON 文件）；主页按时间倒序以卡片展示，支持长按删除单条、菜单清空全部。识别页提供「重置」按钮：一键清空多页收集器、视频流帧收集器与本地暂存，回到全新识别状态。
+识别成功的结果自动保存到本地历史（`filesDir/history/`，一条结果一个 JSON 文件）；主页按时间倒序以卡片展示，支持长按删除单条、菜单清空全部。识别页**不提供「重置」按钮**（v1.2 起暂时移除，见附录 E）；有未完成的收集任务时，识别页显示「待继续任务」框，其中「放弃」按钮一键清空多页收集器、视频流帧收集器与本地暂存，回到全新识别状态。
 
 ### 2.2 技术选型（按此执行，不要自行更换）
 
@@ -138,25 +139,35 @@
 ```
 app/src/main/java/com/xxx/infoparse/
 ├── HomeActivity.kt          # 主页（识别历史卡片列表 + 相机 FAB 入口）
-├── ScanActivity.kt          # 识别页（相机 + 重置 + 图片/视频导入）
+├── ScanActivity.kt          # 识别页（相机 + 放弃 + 图片/视频导入 + 视频流帧收集）
 ├── CollectActivity.kt       # 多页收集进度页（可与 ScanActivity 合并，现状已合并）
 ├── ResultActivity.kt        # 结果展示页
+├── ResultStore.kt           # 页面间传递当前信封（内存单例，避免 Intent 序列化大文本）
+├── VideoParseHelper.kt      # 视频（MP4）解析：逐帧取图 → 扫码 → 收集 → 出结果
 ├── history/
 │   └── HistoryStore.kt      # 识别历史持久化（filesDir/history/，一条结果一个 JSON）
 ├── ui/
 │   ├── HistoryAdapter.kt    # 主页历史卡片适配器
 │   └── FmtUi.kt             # 格式徽标着色/统计文案（主页与结果页共用）
 ├── protocol/
-│   ├── Envelope.kt          # 信封数据模型 + 解析 + 校验
-│   ├── PageCollector.kt     # 多页收集/重组器
-│   └── QrFrame.kt           # (二期) 视频帧解析 + 系统位重组
+│   ├── Envelope.kt          # 信封数据模型 + 解析 + 校验 + 错误文案（Msg）
+│   ├── PageCollector.kt     # 多页收集/重组器（v1 文本分片）
+│   ├── Jz2.kt               # v2 JZ2 二进制帧解析 + 信封/多页收集（Jz2.EnvCollector）
+│   ├── QrFrame.kt           # 视频帧解析 + 系统位重组
+│   └── ZfecCompat.kt        # zfec 兼容 RS 纠错解码（缺帧时补齐，见附录 C）
 ├── scan/
-│   ├── CameraScanner.kt     # CameraX + ML Kit 封装
+│   ├── CameraScanner.kt     # CameraX + ML Kit 封装（rawBytes 直读 + 同内容去重）
 │   └── ImageDecoder.kt      # 相册图片解码
 ├── export/
-│   └── Exporter.kt          # CSV/TXT 生成、保存、分享
-└── util/Csv.kt              # CSV 转义工具
+│   └── Exporter.kt          # 导出规格（扩展名/mime）、保存到下载、分享
+└── util/
+    ├── Csv.kt               # CSV 转义工具
+    ├── DocxWriter.kt        # 逐段文本 → 最小 OOXML .docx
+    ├── XlsxWriter.kt        # 二维数组 → 最小 OOXML .xlsx
+    └── Zlib.kt              # zlib 解压（v1 压缩信封）
 ```
+
+> 现行实现的类名为 `ScanActivity` / `HomeActivity`（本文 §4 的部分代码快照仍写作 `MainActivity`，仅为示例命名，以源码为准）。
 
 ---
 
@@ -186,10 +197,12 @@ app/src/main/java/com/xxx/infoparse/
 
 | 字段 | 类型 | 必有 | 说明 |
 | --- | --- | --- | --- |
-| `jzt` | number | ✅ | 协议标识，**恒为 1**。解析时若 ≠ 1 → 拒绝（文案见 3.6） |
-| `fmt` | string | ✅（完整信封必含） | 文档格式声明，允许 5 个值：`text`（纯文本）、`markdown`、`word`、`excel`（后两个为兼容保留，封装端不再生成）、`file`（原始文件完整传输，v2 新增） |
+| `jzt` | number | ✅ | 协议标识，**恒为 1**。解析时若 ≠ 1 → 拒绝（文案见 3.5） |
+| `fmt` | string | ✅（完整信封必含） | 文档格式声明，允许 5 个值：`text`（纯文本）、`markdown`、`word`、`excel`、`file`（原始文件完整传输）。<br>⚠️ **`word` / `excel` 是现行精简码型，不是历史遗留**：封装端对 `.docx`/`.doc` 生成 `word`、对 `.xlsx`/`.xlsm`/`.xls`/`.csv` 生成 `excel`（v3 起恢复生成，见附录 E 修订记录）；`file` 仅在用户选择"原件传输"时出现。**APP 必须实现全部 5 个值** |
 | `name` | string | ✅（完整信封必含） | 来源显示名。`text`/`markdown`/`word`/`excel` **不含扩展名**（如原文件 `花名册.xlsx` → `name` 为 `花名册`）；**`file` 为完整原始文件名（含扩展名）**；粘贴的文字默认 `文字信息`。展示用 |
 | `data` | string 或 二维数组 | ✅ | 数据载荷，类型随 `fmt` 而定，见 3.1.1 |
+| `ext` | string | ❌（可选） | **（现行）** 精简传输声明的**原始文件后缀名**（如 `docx`/`xlsx`/`md`/`txt`，无点号；解析时去点号并小写归一）。APP 用它决定还原扩展名（如 `word` + `ext=doc` → `.docx`、`excel` + `ext=csv` → `.csv`）；旧二维码或粘贴文字无此字段，此时按 `fmt` 默认规则导出 |
+| `zip` | number | ❌（可选） | **（现行）** 取 `1` 时 `data` 为 **base64(zlib(载荷))**，须先解压再按 `fmt` 解释，见 3.1.1；解压失败 → 文案「压缩数据异常，无法解压还原」（3.5） |
 
 三种格式的真实样例（来自封装端实测输出，可直接作为测试断言）：
 
@@ -211,9 +224,11 @@ app/src/main/java/com/xxx/infoparse/
 | --- | --- | --- |
 | `text` | string | 原文，可能含 `\n` 换行 |
 | `markdown` | string | markdown 原文 |
-| `word` | string | **（兼容保留，仅旧二维码出现）** 逐段纯文本（`\n` 分段）；表格行以「单元格A \| 单元格B」形式混在文本行中（`\|` 两侧各一个空格）。APP 按纯文本展示即可 |
-| `excel` | 二维数组 `[[v,v,...],...]` | **（兼容保留，仅旧二维码出现）** 第一行通常为表头（不做强约定，原样展示）。**单元格值只可能是 4 类**：string、number（int/float）、boolean、null。多工作表时以单元素标记行 `["〖工作表：Sheet名〗"]` 分隔。⚠️ 不存在日期对象——封装端已把日期转为 `"2026-01-05 09:30:00"` 这类字符串 |
+| `word` | string | **（现行精简码型）** 逐段纯文本（`\n` 分段）；表格行以**制表符（`\t`）**分隔单元格、混在文本行中（形如 `单元格A\t单元格B`；`.doc` 与 `.docx` 同样输出制表符）。APP 按纯文本展示即可 |
+| `excel` | 二维数组 `[[v,v,...],...]` | **（现行精简码型）** 第一行通常为表头（不做强约定，原样展示）。**单元格值只可能是 4 类**：string、number（int/float）、boolean、null。**仅传输活动工作表**（`.xls` 为第一个工作表），其余工作表不传输。⚠️ 不存在日期对象——封装端已把日期转为 `"2026-01-05 09:30:00"` 这类字符串 |
 | `file` | string | **（v2 新增）** 原始文件字节的 base64（标准字母表，含 padding）。**不做任何解析，导出/分享时解码还原原始文件**；`name` 为完整文件名（含扩展名），mime 按扩展名推断。样式/宏/图片等与原文件完全一致 |
+
+**压缩载荷（`zip=1`，现行）**：`data` 先按 base64 解码得到 zlib 流，**解压还原为载荷**，再按上表 `fmt` 解释（`text`/`markdown`/`word` → 文本，`excel` → 二维数组，`file` → **再 base64 解码**为原始文件字节）；解压失败（流损坏/截断）一律拒收，文案「压缩数据异常，无法解压还原」（3.5）。
 
 #### 3.1.2 导出规则（APP 端落盘）
 
@@ -221,8 +236,8 @@ app/src/main/java/com/xxx/infoparse/
 | --- | --- | --- |
 | `text` | `.txt` | data 原文（UTF-8） |
 | `markdown` | `.md` | data 原文（UTF-8） |
-| `word` | `.docx` | **（兼容旧码）** data 逐段文本重建为**可编辑的 Word 文档**（最小 OOXML，一个文本行一个段落；原始样式/宏/图片不在数据中，无法还原） |
-| `excel` | `.csv` | **（兼容旧码）** 二维数组 → CSV（UTF-8 **带 BOM**，Excel 直接打开不乱码）；转义规则见 4.7.1 |
+| `word` | `.docx` | **（现行）** data 逐段文本重建为**可编辑的 Word 文档**（最小 OOXML，一个文本行一个段落；原始样式/宏/图片不在数据中，无法还原） |
+| `excel` | `.xlsx`（`ext=csv` 时 `.csv`） | **（现行）** 二维数组 → 重建 **.xlsx 工作簿**（纯数据、无样式/公式）；`ext=csv` 时写 CSV（UTF-8 **带 BOM**，Excel 直接打开不乱码）；转义规则见 4.5.1 |
 | `file` | 原扩展名 | data base64 解码后的**原始文件字节**，文件名 = `name` 原样（已含扩展名），mime 按扩展名推断（未知类型 `application/octet-stream`）。**与原文档逐字节一致** |
 
 导出文件名 = `name` + 扩展名（`file` 除外，直接用 `name`）；`name` 中若含 `\ / : * ? " < > |` 等非法文件名字符需替换为 `_`；`name` 已带同名扩展名时不重复追加。分享文件使用对应 mime（file 按扩展名推断），接收端即可显示完整文件名与后缀。
@@ -329,9 +344,11 @@ APP 扫到一串文本后，按下面的顺序判别（**顺序不能变**）：
 | 内容不是信封也不是合法帧 | 未识别到「信息传输」封装的二维码内容 |
 | `jzt` ≠ 1 | 信封协议版本不受支持 |
 | JZ2 帧 CRC / 长度校验失败 | 二维码数据已损坏（完整性校验失败） |
-| `fmt` 不在 4 个取值内 | 未知的文档格式声明：<fmt 原值> |
+| `zip=1` 但压缩载荷损坏/截断（解压失败） | 压缩数据异常，无法解压还原 |
+| `fmt` 不在 5 个取值内（text/markdown/word/excel/file） | 未知的文档格式声明：<fmt 原值> |
 | 多页未集齐 | 已收集 x/n 张，还差：第 a、b…张（列出缺失页码，最多列 5 个） |
 | 新页 `pg.n` 与任务 `total` 不一致 | 该二维码页数与当前任务不一致，已忽略 |
+| 视频帧的 `n`/`k`/`m` 与当前任务不一致 | 该二维码与当前视频任务不一致，已忽略 |
 | excel 的 `data` 不是二维数组 | Excel 数据结构异常 |
 | 图片中扫不出码 | 图片中未识别到二维码 |
 
@@ -340,6 +357,13 @@ APP 扫到一串文本后，按下面的顺序判别（**顺序不能变**）：
 ## 4. 一期实现指引（MVP）
 
 > 本章代码可直接复制使用。包名以 `com.xxx.infoparse` 为例，自行替换。
+
+> **⚠️ 与现行实现的差异清单（本章代码是早期快照，一律以源码为准）**：完整实现见 `android-app/InfoParse/app/src/main/java/com/jztools/infoparse/`，与本章代码块的主要差异如下——
+> - `protocol/Envelope.kt`：现行 `Envelope` 含 `ext: String?`（精简传输声明的原始后缀名，旧码为 null）与 `rebuilt: Boolean`（v2 `mode=rebuild` 拆包重组标注），本章快照只有 `fmt`/`name`/`data`；校验分支还含 `zip=1` 解压（3.1.1）；
+> - `scan/CameraScanner.kt`：现行回调为 `onQrBytes(bytes: ByteArray)`，取 `codes.firstOrNull()?.rawBytes`（v2 二进制帧必需），本章快照仍用 `rawValue` 字符串且带 500ms 时间节流（已被 T08 取代，见 FAQ-4）；
+> - `export/Exporter.kt`：现行 `saveToDownloads(context, fileName, bytes: ByteArray, mime)` 写**字节数组**（支持 `.docx`/`.xlsx`/原始文件），本章快照为 `text: String`；扩展名/mime 由 `exportSpec` + `normalizedExt` 决定（见 4.5）；
+> - 页面类名：现行 `ScanActivity` / `HomeActivity`，本章示例代码写作 `MainActivity`（仅示例命名）；
+> - 本章未含的现行源文件：`protocol/Jz2.kt`、`protocol/ZfecCompat.kt`、`ResultStore.kt`、`VideoParseHelper.kt`、`util/DocxWriter.kt`、`util/XlsxWriter.kt`、`util/Zlib.kt`（工程结构见 2.3）。
 
 ### 4.1 工程创建与依赖
 
@@ -391,9 +415,11 @@ object Fmt {
     const val MARKDOWN = "markdown"
     const val WORD = "word"
     const val EXCEL = "excel"
-    val ALL = setOf(TEXT, MARKDOWN, WORD, EXCEL)
+    /** 原始文件（v2）：data 为文件字节的 base64，name 为完整文件名（含扩展名） */
+    const val FILE = "file"
+    val ALL = setOf(TEXT, MARKDOWN, WORD, EXCEL, FILE)
     fun label(f: String) = when (f) {
-        TEXT -> "纯文本"; MARKDOWN -> "Markdown"; WORD -> "Word 文档"; EXCEL -> "Excel 表格"
+        TEXT -> "纯文本"; MARKDOWN -> "Markdown"; WORD -> "Word 文档"; EXCEL -> "Excel 表格"; FILE -> "原始文件"
         else -> f
     }
 }
@@ -637,6 +663,8 @@ class CameraScanner(
         val media = proxy.image
         if (media == null) { proxy.close(); return }
         // 500ms 节流：同一码面会连续回调，避免重复触发
+        // ⚠️ 已被 T08 取代：现行实现**彻底移除时间节流**，改为按内容去重（同内容跳过），
+        //    否则会把视频流捕获率压到约 13%，低于 zfec 重组所需帧比例（见 FAQ-4）
         val now = System.currentTimeMillis()
         val throttled = now - lastAt < 500
         if (throttled) { proxy.close(); return }
@@ -780,7 +808,7 @@ object ImageDecoder {
 | 来源名 | `name` 原样展示（顶栏标题） |
 | 统计行 | 信息卡内：excel「共 N 行」；其他「共 X 字符」，另固定展示「已去除样式与宏，仅保留数据信息」 |
 | 内容卡 | 文本类：TextView 等宽字体（`monospace`），**最多渲染前 4000 字符**，超出追加「…（内容较长，导出文件可查看全部）」；excel：表格预览（见下），**最多渲染前 100 行**；`file`：不展示内容，显示「原始文件已完整封装，导出可还原」提示 |
-| 按钮 | 底部动作导航栏（藏蓝底、纯图标、长按气泡显示名称）：「导出文件」（4.7，下载图标）、「复制全部」（ClipboardManager，excel 用 TSV 文本）、「分享文件」；「重新扫描」为导航栏上方独立按钮（回识别页；从主页历史卡片进入时隐藏，返回键即回主页） |
+| 按钮 | 底部动作导航栏（藏蓝底、纯图标、长按气泡显示名称）：「导出文件」（4.5，下载图标）、「复制全部」（ClipboardManager，excel 用 TSV 文本）、「分享文件」；「重新扫描」为导航栏上方独立按钮（回识别页；从主页历史卡片进入时隐藏，返回键即回主页） |
 
 excel 表格预览最简单实现：`HorizontalScrollView` 包 `TableLayout`，逐行 `TableRow` 逐格 `TextView`；首行加粗作为表头。超过 100 行截断并提示。
 
@@ -855,18 +883,19 @@ object Exporter {
 ```
 fmt=text      → 文件 name.txt   (mime text/plain)     保存 + 分享
 fmt=markdown  → 文件 name.md    (mime text/markdown)  保存 + 分享
-fmt=word      → 文件 name.txt   (mime text/plain)     保存 + 分享
-fmt=excel     → 文件 name.csv   (mime text/csv)       保存 + 分享
+fmt=word      → 文件 name.docx  (mime application/vnd.openxmlformats-officedocument.wordprocessingml.document)     保存 + 分享
+fmt=excel     → 文件 name.xlsx  (mime application/vnd.openxmlformats-officedocument.spreadsheetml.sheet)  保存 + 分享
+                （`ext=csv` 时 → 文件 name.csv，mime text/csv，UTF-8 带 BOM，见 4.5.1）
 ```
 
 文件名清洗：`name.replace(Regex("""[\\/:*?"<>|]"""), "_")`，重名时 MediaStore 自动追加 `(1)`，无需处理。
 
 ### 4.6 多页收集暂存（FR-08）
 
-- 每次收集器状态变化时把 `collector.serialize()` 存入 `SharedPreferences`（键 `pending_collect`）；
-- APP 启动时读取：存在且未完成 → 恢复收集器并在主页显示「有待继续的收集任务：已收集 x/n」与「放弃」按钮；
-- 收集完成或用户放弃后清除该键。
-- ⚠️ 序列化可能包含 MB 级文本，SharedPreferences 存储上限实操约 1~2MB；超出时可改写内部存储文件（`context.filesDir/pending_collect.json`），逻辑不变。
+- 每次收集器状态变化时把 `collector.serialize()` 写入**内部存储文件** `filesDir/pending_collect.json`（`ScanActivity.pendingFile`，`writeText` 覆盖写，不受 SharedPreferences 容量限制）；
+- **识别页**启动时读取（`ScanActivity.onCreate` → `restorePending()`）：文件存在且任务未完成 → 恢复收集器并在识别页显示「待继续任务」框（`activity_scan.xml` 的 `boxPending`），按钮为「继续收集（已收集 x/n 张）」与「放弃」；已集齐则直接重组出结果；
+- 收集完成或用户点「放弃」后删除该文件。
+- 说明：早期版本用 `SharedPreferences`（键 `pending_collect`）存同一序列化文本，因 MB 级文本受其约 1~2MB 实操上限限制，现行实现已改为上述内部存储文件，逻辑不变。
 
 ---
 
@@ -1069,10 +1098,10 @@ print("case5 视频:", mp4)
 | TC-05 | 只扫 case2 前 3 页 | 停留在收集状态：「已收集 3/5 张，还差：第 4、5 张」 |
 | TC-06 | TC-05 后杀掉 APP 重启 | 恢复收集任务（FR-08），补扫后正常出结果 |
 | TC-07 | case2 集齐前混扫其他二维码 | 提示「未识别到…」，收集进度不受影响 |
-| TC-08 | case3 excel | 表格预览正确；空单元格显示为空；导出 CSV 用 Excel 打开无乱码、行列一致 |
+| TC-08 | case3 excel | 表格预览正确；空单元格显示为空；导出 `.xlsx` 用 Excel 打开行列一致、无乱码（`ext=csv` 的码导出 `.csv`，UTF-8 带 BOM 同样不乱码） |
 | TC-09 | case4 markdown | 导出 `值班安排.md`，内容含换行 |
 | TC-10 | 扫普通网址二维码 | 提示「未识别到…」，无崩溃 |
-| TC-11 | word 导出 | 生成 `xxx.txt`（与桌面端行为一致，word 数据导出纯文本） |
+| TC-11 | word 导出 | 生成 `xxx.docx`（与桌面端行为一致，word 数据重建 .docx，见 §3.1.2 / 修订记录 v1.4） |
 | TC-12 | 复制全部 | 剪贴板内容与预览全文一致（excel 为 TSV） |
 | TC-13 | (二期) case5 视频 | 解析成功，内容一致；故意截断视频 → E-13 文案 |
 | TC-14 | 断网状态全流程 | 全部功能可用（APK 未声明 INTERNET 权限即天然通过） |
@@ -1121,13 +1150,14 @@ print("case5 视频:", mp4)
 │   无 "pg" → 完整信封 {jzt:1, fmt, name, data}             │
 │ 其他     → base64 帧头 12 字符（二期视频帧）               │
 ├─ 信封字段 ───────────────────────────────────────────────┤
-│ jzt=1；fmt ∈ {text,markdown,word,excel}；name 不含扩展名   │
+│ jzt=1；fmt ∈ {text,markdown,word,excel,file}；name 不含扩展名   │
 │ data：text/md/word → 字符串；excel → 二维数组(仅4类值)      │
 ├─ 多页重组 ───────────────────────────────────────────────┤
 │ total=首个 n；n 不一致→忽略；同 i→覆盖；按 i 升序拼 data     │
 │ 拼接结果 = 完整信封 JSON 文本                               │
 ├─ 导出 ───────────────────────────────────────────────────┤
-│ text→.txt  markdown→.md  word→.txt  excel→.csv(BOM)       │
+│ text→.txt  markdown→.md  word→.docx  excel→.xlsx       │
+│ （excel 的 ext=csv 时导出 .csv，UTF-8 带 BOM）           │
 ├─ 视频帧（二期）────────────────────────────────────────┤
 │ 头12字符b64→9字节[3B idx][3B n][0x00][k][m]；载荷b64→等长块 │
 │ nblocks=n/m；g=idx%nblocks；s=idx/nblocks；s<k 为原始块     │
@@ -1296,7 +1326,7 @@ API 29 起 `MediaStore.Downloads` 写「下载」目录**不需要任何存储�
 国内网络建议在 `settings.gradle.kts` 配置镜像仓库（阿里云 maven mirror），或配置代理后再 Sync。
 
 **FAQ-4 扫码回调疯狂触发**
-CameraX 的 ImageAnalysis 是连续回调，必须像 4.3 那样做节流（500ms）+ `STRATEGY_KEEP_ONLY_LATEST`；否则 UI 会被刷爆。
+CameraX 的 ImageAnalysis 是连续回调，必须用 `STRATEGY_KEEP_ONLY_LATEST` + **按内容去重（与上次相同的字节直接跳过）**；**不要**用时间节流——原 500ms 时间节流会把视频流捕获率压到约 2 次/秒（约 13% 帧率），低于 zfec 重组所需帧比例，导致视频流扫不出（T08 起已彻底移除，见 4.3 快照注与 `docs/archive/二维码视频流传输修复-todolist.md`）。
 
 **FAQ-5 中文乱码**
 ML Kit `rawValue` 按内置规则解码，本协议二维码为 UTF-8 字节模式，正常不乱码。若个别机型乱码，改用 `barcode.rawBytes` 后 `String(bytes, Charsets.UTF_8)`。
@@ -1307,8 +1337,8 @@ ML Kit `rawValue` 按内置规则解码，本协议二维码为 UTF-8 字节模�
 **FAQ-7 多页收集时用户中途换了图片集**
 以首个页面的 `pg.n` 为准（3.3 规则 2），不一致的页忽略并提示；无需更复杂的逻辑。
 
-**FAQ-8 word 数据里的「A | B」是什么**
-word 信封的 data 是纯文本，表格行以 ` | ` 分隔单元格混排在文本里（协议如此，桌面端同样展示）。APP 按纯文本显示即可，不要尝试还原表格。
+**FAQ-8 word 数据里的「A→B」是什么**
+word 信封的 data 是纯文本，表格行以**制表符 `\t`** 分隔单元格、混排在文本里（协议如此，桌面端同样展示）。APP 按纯文本显示即可，不要尝试还原表格。
 
 **FAQ-9 excel 导出在 Excel 里打开乱码**
 CSV 必须带 UTF-8 BOM（`\uFEFF`），且行结束用 `\r\n`，见 4.5.1。
@@ -1321,8 +1351,8 @@ CSV 必须带 UTF-8 BOM（`\uFEFF`），且行结束用 `\r\n`，见 4.5.1。
 | 行为 | 桌面端（Web） | 本 APP |
 | --- | --- | --- |
 | 解码引擎 | 图片 cv2 / 视频 cv2 逐帧 | 图片与实时流 ML Kit；（二期）视频 retriever+ML Kit |
-| word 导出 | `.txt` 纯文本 | v2 起封装为 `file` 完整传输，还原即原始文件；旧 word 码由逐段文本重建 `.docx` |
-| excel 导出 | `.xlsx` 重建表格 | v2 起封装为 `file` 完整传输，还原即原始文件；旧 excel 码导出 `.csv`（含 BOM） |
+| word 导出 | `.docx`（逐段文本重建，无样式/宏） | `file` 码还原原始文件；`word` 码由逐段文本重建 `.docx` |
+| excel 导出 | `.xlsx` 表格重建；`ext=csv` 时写 `.csv` | `file` 码还原原始文件；`excel` 码重建 `.xlsx`（纯数据），`ext=csv` 时写 `.csv`（UTF-8 含 BOM） |
 | 多页收集 | 一次上传全部图片 | 支持分次扫描收集（更贴合手机交互） |
 | 错误文案 | 见 3.5 表 | 与桌面端文案对齐 |
 
@@ -1335,5 +1365,6 @@ CSV 必须带 UTF-8 BOM（`\uFEFF`），且行结束用 `\r\n`，见 4.5.1。
 | v1.4 | 2026-09-07 | 修复 word 文档导出/分享：APP 端由逐段文本重建可编辑 `.docx`（util/DocxWriter，最小 OOXML），文件名 = name + `.docx`（防重复后缀），分享 mime 改为 docx 标准类型——不再导出 `.txt`。二维码数据仅承载逐段文本（3.1.1），原文样式/宏/图片无法还原；桌面端 Web 解析导出行为不变。 |
 | v1.5 | 2026-09-07 | **协议 v2：文档完整传输**。封装端（info-transfer 插件）word/excel 及其他文档改为原始文件完整传输——新增 `fmt=file`（data=文件字节 base64，name 含扩展名），不再解析文档内容，.doc/.wps/.pdf 等同步放开；`word/excel` 为兼容保留（旧码可解析）。APP 端支持 file 格式：还原原始文件（导出/分享文件名与字节与原文档一致）、结果页不展示内容预览、历史卡片显示文件字节数；复制对 file 提示改用导出。Web 端解析 file 直接下载原文件。3.1/3.1.1/3.1.2/附录 E 已同步。 |
 | v1.6 | 2026-09-21 | 修复重复建档：识别历史新增**连续去重**——同一内容指纹（fmt+name+ext+数据本体，SHA-256，`HistoryStore.fingerprint`，excel 按单元格序列化、`rebuilt` 标注不参与）连续再次识别成功时不再写历史、不再跳结果页，识别页仅提示「与上次识别相同」；扫到不同内容即恢复建档，「放弃」按钮重置去重状态。背景：识别完成后返回识别页时桌面端码面仍在轮播，`onResume` 清相机同内容去重后，小码量任务数秒内即可重新凑齐，导致同一文档产生多条历史记录（码量越少越易复现）。 |
+| v1.8 | 2026-09-24 | **协议契约补漏与文档自洽修正（不涉及协议结构变更，只改文档）**：据《20260924文档与代码一致性核对报告》B 组 8 条 + P2 #32/#33/#34/#39/#40 逐条回写——①§3.1 字段表补**现行**可选字段 `ext`（精简传输声明的原始后缀名，决定还原扩展名）与 `zip=1`（`data` 为 base64(zlib(载荷))），§3.1.1 新增「压缩载荷」段（先解压再按 `fmt` 解释，`file` 再 base64 解码），§3.5 补文案「压缩数据异常，无法解压还原」与「该二维码与当前视频任务不一致，已忽略」；②excel 导出扩展名统一为 **`.xlsx`**（`ext=csv` 时 `.csv` 带 BOM），修正 §3.1.2、§4.5、附录 A、附录 E 对照表与 TC-08 中残留的 `.csv` 表述；③`word` 表格单元格分隔符由「 \| 」改为**制表符 `\t`**（§3.1.1 与 FAQ-8）；④删去「多工作表以 `["〖工作表：Sheet名〗"]` 标记行分隔」，改为**仅传输活动工作表**（`.xls` 为第一个工作表）；⑤§2.1/§2.3 的识别页「重置」按钮改为「放弃」（待继续任务框，清空多页收集器/视频流帧收集器与暂存），与 v1.2 修订记录及实现一致；⑥FAQ-4 由「500ms 时间节流」改为**按内容去重、禁止时间节流**（时间节流会把视频流捕获率压到约 13%，低于 zfec 重组所需帧比例），§4.3 快照加「已被 T08 取代」注；⑦交叉引用修正（3.6→3.5、4.7.1→4.5.1、4.7→4.5）；⑧FR 表补 FR-11（相机直扫二维码视频流）、FR-09 去掉过期的「二期」标注、FR-05 导出清单补 `.docx/.xlsx`，§2.1 流程图「base64→(二期)」改为「视频帧→收集器」；⑨§4.6 暂存位置改为内部存储文件 `filesDir/pending_collect.json`、待继续任务框在**识别页**（非主页）；⑩§2.3 结构树补 6 个现行源文件（`ResultStore.kt`、`VideoParseHelper.kt`、`util/DocxWriter.kt`、`util/XlsxWriter.kt`、`util/Zlib.kt`、`protocol/ZfecCompat.kt`）并补 `Jz2.kt`，§4 开头新增「与现行实现的差异清单」（`Envelope` 含 `ext`/`rebuilt`、`rawValue`→`rawBytes`、`saveToDownloads(text: String)`→`bytes: ByteArray`、`MainActivity` 实为 `ScanActivity`/`HomeActivity`）。**信封字段与协议结构零变更**，本次仅补齐既有现行字段的契约描述；已实现 v1.6/v1.7 的 APP **无需改动代码**。 |：v1.5 曾记"封装端 word/excel 改为原件传输、这两个码型转为兼容保留"，但桌面端在 **v3 起恢复了精简传输**（对 `.docx`/`.doc` 生成 `word`，对 `.xlsx`/`.xlsm`/`.xls`/`.csv` 生成 `excel`），本文档未同步，导致 §3.1/§3.1.1/§3.1.2/附录 E 把**现行主力码型**误标为"仅旧二维码出现、封装端不再生成"——APP 侧若据此省略实现，最常传的 Office 文档会直接解不出（报「未知的文档格式声明」）。已修正 §3.1 字段表、§3.1.1 表、§3.1.2 表与附录 E，并修正附录 E 中"桌面端 word 导出 `.txt`"（实为 `.docx`）。**`fmt` 仍为 5 个值，字段与结构零变更**，已实现 v1.6 的 APP **无需改动代码**，仅需确认 `word`/`excel` 两条解码分支是实装而非占位。另补正：将 §3.5「fmt 取值数」与附录 A 的 fmt 集合统一为 5 个（含 file），并将 §4.5/TC-11/附录 A 中 word 导出由 `.txt` 纠正为 `.docx`（与 §3.1.2 及修订记录 v1.4 一致）；以上均属文案纠正，协议结构零变更。 |
 
 > 协议变更须同步修订本文档并升版本号；桌面端插件 `info-transfer` 的 `routes.py` 为协议最终裁定依据。

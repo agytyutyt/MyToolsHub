@@ -294,7 +294,7 @@
     script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(cfg.key)}&plugin=AMap.Scale,AMap.ToolBar,AMap.MapType`;
     script.onload = () => {
       if (window.AMap) initMap(cfg);
-      else setStatus('地图加载失败：Key 无效或未启用 Web 服务', true);
+      else setStatus('地图加载失败：Key 无效或未启用 Web 端（JS API）', true);
     };
     script.onerror = () => setStatus('地图脚本加载失败，请检查网络或 Key', true);
     document.head.appendChild(script);
