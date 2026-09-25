@@ -323,18 +323,18 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 | # | 事项 | 状态 |
 | --- | --- | --- |
-| T1 | **十二个插件出包**（admin / case-report / character-graph / file-filter / **info-transfer** / **knowledge-base** / **map-marker** / **notice-board** / **qr-video-decode** / **shared-docs** / **trajectory-convert** / **trajectory-sketch**；后 8 个是「版本同号但已发布包内容过时」，见报告 §8.3.1） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id <id>`（前三个校验已跑通，仅需去 `-NoZip`；trajectory-sketch 的差异与版本见 T6）；**admin 与 knowledge-base 是 2026-09-24 一致性核对轮新增的**——admin 改了 `backend/routes.py`（用户 custom 四键透传）、`backend/batch_io.py`（描述列留空语义）、`frontend/js/admin-llm.js` 与 `js/admin-user.js`（测试连通笔误 / 移除权限管理勾选项）、`admin-llm.html` 与 `admin-user.html`（`?v=` 递增）；knowledge-base 改了 `frontend/app.js`（语法错误修复 + 暴露 `window.toast`）与 `frontend/index.html`（`app.js?v=21`）。出包后同步 `tools/plugin-packages.json` 与插件集 |
+| T1 | **十二个插件出包**（admin / case-report / character-graph / file-filter / **info-transfer** / **knowledge-base** / **map-marker** / **notice-board** / **qr-video-decode** / **shared-docs** / **trajectory-convert** / **trajectory-sketch**；后 8 个是「版本同号但已发布包内容过时」，见报告 §8.3.1） | ✅ **已出包 2026-09-25**（13 个：T1 清单 12 个 + md5-generator v1.0.1——其 md5.js 字节密钥修复属 0925 一致性轮新增）：admin v1.4.0 / case-report v1.3.0 / character-graph v1.2.0 / file-filter v1.3.0 / info-transfer v1.2.6 / knowledge-base v1.3.5 / map-marker v1.0.1 / md5-generator v1.0.1 / notice-board v1.0.4 / qr-video-decode v1.1.4 / shared-docs v1.2.4 / trajectory-convert v1.1.7 / trajectory-sketch v1.2.6；`tools/plugin-packages.json` 已同步、插件集「全量 v20260925」已重出；出包前补齐了 3 处漏递增的 `?v=`（kb reader.js、shared-docs app.js、trajectory-sketch app.js，均被 F-2 闸门拦下后修正） |
 | T2 | 目标机验收：管理员模式（后台配一次 → 三个插件的大模型功能都可用） | ⏳ **待真机** |
 | T3 | 目标机验收：用户各自设置模式（管理员切换 → 用户端 ⋯ 卡片出现 → 各自填写 → 回退策略生效） | ⏳ **待真机** |
 | T4 | 老部署升级路径：升级后启动迁移**先收编再清除**插件历史 Key，三个插件的大模型功能不失效 | ✅ **已落地并单测覆盖**（`test_plugin_legacy_llm_migration`）；真机升级时留意日志里"已收编 / 已清除"两行 |
 | T5 | 用户级配置三条同步链路（建号时配置→用户端可见；用户改→人员管理可见；管理员改→用户端可见） | ✅ **已实测**（`test_1/2/3_*` 三例 + 真实浏览器走通三条）；顺带修掉「人员管理」把掩码当 Key 存下的缺陷 |
-| T6 | **trajectory-sketch 出包**（2026-09-24 恢复大模型辅助匹配后，工作区与已发布的 `v1.2.5` 包有 12 个文件不同 + 新增 `backend/llm_client.py`） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id trajectory-sketch`（出包脚本**不会**自动递增版本——需先手工把 `plugins/trajectory-sketch/manifest.json` 的 version 递增（如 1.2.6）再出包，脚本校验版本必须大于上一发布版（`tools/build-plugin-package.ps1:199-214`））；出包后同步 `tools/plugin-packages.json` 与插件集；真机验收随 T2/T3 一起做（`llm` 模式需在目标机配好接入信息） |
+| T6 | **trajectory-sketch 出包**（2026-09-24 恢复大模型辅助匹配后，工作区与已发布的 `v1.2.5` 包有 12 个文件不同 + 新增 `backend/llm_client.py`） | ✅ **已出包 2026-09-25（v1.2.6）**：manifest 手工递增 1.2.5→1.2.6（出包脚本不自动递增）+ 前端 `app.js?v=2→3` 后过闸门；真机验收随 T2/T3 一起做（`llm` 模式需在目标机配好接入信息） |
 
 ### 数据迁移（2026-09-23 落地，待收尾）
 
 | # | 事项 | 状态 |
 | --- | --- | --- |
-| M1 | admin 插件出包（含数据迁移与统一大模型相关改动） | ⏳ **待出包**：`tools\build-plugin-package.ps1 -Id admin`（admin 是核心插件，随主包分发，需同步主包版本） |
+| M1 | admin 插件出包（含数据迁移与统一大模型相关改动） | ✅ **已出包 2026-09-25**：admin 插件包 v1.4.0；主包 **v2.3.22**（26.8 MB，含 admin 1.4.0 与 installed-deps.json）已出，`verify-package.py --smoke` 全绿（解压冒烟 2 秒启动、登录强制、隔离数据根正常） |
 | M2 | 真机演练整机迁移：A 机导出 → B 机（干净安装）导入 → 登录、插件数据、大模型 Key 全可用 | ⏳ **待真机**（本机已用单测覆盖跨机器密钥改封） |
 | M3 | 大数据量演练（接近 300 MB 上限时给提示是否够用，见设计文档 §8） | ⏳ 视现场数据量 |
 
