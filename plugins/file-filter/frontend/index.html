@@ -30,6 +30,14 @@
           <input id="cfgKeepInput" type="text" placeholder="输入字段名后回车添加，如：时间" />
           <button id="cfgKeepAdd" class="btn secondary" type="button">添加</button>
         </div>
+        <div class="chip-add">
+          <button id="cfgKeepImport" class="btn secondary" type="button">📥 从表格导入（取第一列）</button>
+          <input id="cfgKeepImportFile" type="file" accept=".xlsx,.xls,.csv" hidden />
+          <span id="cfgKeepImportTip" class="tip"></span>
+        </div>
+        <p class="muted">导入支持 xlsx / xls / csv（≤20MB）：解析**第一列**为字段清单，自动跳过
+          表头行（「字段名称」之类）、空值与重复；解析结果先合并进上方芯片，核对后点
+          「保存配置」才生效。</p>
       </div>
       <div class="cfg-block">
         <h3>后处理规则（对表头与单元格做文本替换；如「开始时间」应用规则「开始」后变为「时间」）</h3>

@@ -731,6 +731,8 @@
     $("cfgKeepInput").addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); addCfgKeep(); }
     });
+    $("cfgKeepImport").addEventListener("click", function () { $("cfgKeepImportFile").click(); });
+    $("cfgKeepImportFile").addEventListener("change", importKeepColumns);
     $("cfgRuleAdd").addEventListener("click", function () {
       var tbody = $("cfgRulesBody");
       tbody.appendChild(buildRuleRow({ pattern: "", replacement: "", is_regex: false, enabled: true }));
@@ -775,6 +777,59 @@
     if (state.config.keep_columns.indexOf(name) < 0) state.config.keep_columns.push(name);
     input.value = "";
     renderCfgKeepChips();
+  }
+
+  // ===================== 名单批量导入（管理员） =====================
+
+  function importKeepColumns() {
+    var input = $("cfgKeepImportFile");
+    var f = input.files && input.files[0];
+    input.value = "";                          // 允许重复选同一文件
+    if (!f) return;
+    var ext = (f.name.split(".").pop() || "").toLowerCase();
+    if (["xlsx", "xls", "csv"].indexOf(ext) < 0) {
+      setImportTip("仅支持 xlsx / xls / csv 文件", true);
+      return;
+    }
+    if (f.size > 20 * 1024 * 1024) {
+      setImportTip("文件超过 20MB 上限", true);
+      return;
+    }
+    setImportTip("解析中…");
+    var fd = new FormData();
+    fd.append("file", f);
+    fetchJSON(API + "/config/import-columns", { method: "POST", body: fd })
+      .then(function (data) {
+        var added = mergeKeepColumns(data.columns || []);
+        renderCfgKeepChips();
+        setImportTip("✓ 解析到 " + (data.count || 0) + " 个字段：新增 " + added
+          + " 个、跳过表头/重复 " + (data.skipped || 0) + " 个。核对后点「保存配置」生效。");
+      })
+      .catch(function (err) {
+        setImportTip("导入失败：" + err.message, true);
+      });
+  }
+
+  // 大小写不敏感去重合并进名单芯片（只改前端 state，保存配置才落盘）
+  function mergeKeepColumns(names) {
+    state.config.keep_columns = state.config.keep_columns || [];
+    var seen = {};
+    state.config.keep_columns.forEach(function (n) { seen[nameKey(n)] = 1; });
+    var added = 0;
+    (names || []).forEach(function (n) {
+      var k = nameKey(String(n == null ? "" : n).trim());
+      if (!k || seen[k]) return;
+      seen[k] = 1;
+      state.config.keep_columns.push(String(n).trim());
+      added += 1;
+    });
+    return added;
+  }
+
+  function setImportTip(msg, isError) {
+    var el = $("cfgKeepImportTip");
+    el.textContent = msg || "";
+    el.className = "tip" + (isError ? " err" : "");
   }
 
   function buildRuleRow(rule) {

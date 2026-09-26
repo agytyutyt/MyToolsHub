@@ -678,5 +678,43 @@ class TestLLMMappingCache(Base):
         self.assertEqual(first, {"header": "备注", "target": "姓名", "status": "confirmed"})
 
 
+# ==========================================================================
+# 8. 保留字段名单批量导入（管理员）：解析第一列、跳过表头位/重复，不入库
+# ==========================================================================
+
+class TestKeepColumnsImport(Base):
+    """POST /config/import-columns 契约：只解析返回清单，保存仍走「保存配置」。"""
+
+    def test_import_parses_first_column(self):
+        rows = [["字段名称"], ["姓名"], ["所属单位"], ["姓名"], ["手机号"]]
+        blob = make_xlsx(rows)
+        res = self.post_file("/api/file-filter/config/import-columns", blob, "名单.xlsx")
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+        data = res.get_json()
+        self.assertEqual(data["columns"], ["姓名", "所属单位", "手机号"])
+        self.assertEqual(data["count"], 3)
+        self.assertEqual(data["skipped"], 2)       # 表头位 + 重复
+        # 只解析不入库：配置仍是原名单，等「保存配置」才生效
+        self.assertEqual(self.client.get("/api/file-filter/config").get_json()["keep_columns"],
+                         ["姓名", "所属单位"])
+
+    def test_import_csv_with_bom(self):
+        blob = "字段名称\n姓名\n开始时间\n".encode("utf-8-sig")
+        res = self.post_file("/api/file-filter/config/import-columns", blob, "名单.csv")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()["columns"], ["姓名", "开始时间"])
+
+    def test_import_requires_admin_and_valid_ext(self):
+        orig = self.ff._get_session_user
+        try:
+            self.ff._get_session_user = lambda: dict(OTHER)
+            res = self.client.post("/api/file-filter/config/import-columns")
+            self.assertEqual(res.status_code, 403)
+        finally:
+            self.ff._get_session_user = orig
+        res = self.post_file("/api/file-filter/config/import-columns", b"x", "名单.txt")
+        self.assertEqual(res.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

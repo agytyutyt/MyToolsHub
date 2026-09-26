@@ -615,6 +615,67 @@ def register(app):
         ok, detail = jz_llm.test_connection(plugin_id=PLUGIN_ID)
         return jsonify({"ok": ok, "detail": detail})
 
+    # 保留字段名单的表位表头：导入时首格命中则跳过（防把「字段名称」当字段导入）
+    _IMPORT_HEADER_HINTS = {"字段", "字段名", "字段名称", "字段列表", "保留字段", "列名"}
+
+    @app.post(f"{API_PREFIX}/config/import-columns")
+    def ff_config_import_columns():
+        """批量导入保留字段名单（管理员）：解析上传表格的**第一列**，返回字段名清单。
+
+        只解析**不入库**——前端把返回的字段合并进名单芯片，管理员核对后点
+        「保存配置」才落盘（与手动添加同一保存口径）。支持 xlsx / xls / csv
+        （复用 core.read_table 的解析与容错：不信任 dimension 声明、补齐行宽）；
+        空单元格跳过、大小写不敏感去重、首格为表位表头（「字段名称」之类）时跳过。
+        """
+        user = _viewer()
+        if not _can_manage(user):
+            return jsonify({"error": "仅管理员可导入保留字段名单"}), 403
+        f = request.files.get("file")
+        if f is None or not f.filename:
+            return jsonify({"error": "未选择文件"}), 400
+        orig = f.filename or ""
+        ext = orig.lower().rsplit(".", 1)[-1] if "." in orig else ""
+        if ext not in core.ALLOWED_EXTS:
+            return jsonify({"error": "仅支持 xlsx / xls / csv 文件"}), 400
+        blob = f.read()
+        if len(blob) > MAX_UPLOAD_BYTES:
+            return jsonify({"error": "文件超过 20MB 上限"}), 413
+        if not blob:
+            return jsonify({"error": "文件为空"}), 400
+        # SEC-3：落盘文件名用随机 ID，不沿用原始文件名；解析后立即删除
+        tmp = os.path.join(TASK_DIR, f"import_{uuid.uuid4().hex[:12]}.{ext}")
+        os.makedirs(TASK_DIR, exist_ok=True)
+        try:
+            with open(tmp, "wb") as fp:
+                fp.write(blob)
+            headers, rows = core.read_table(tmp, f"import.{ext}")
+        except core.TableError as e:
+            return jsonify({"error": str(e)}), 400
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        cells = [headers[0]] if headers else []
+        cells.extend(core.cell_to_str(r[0] if r else "") for r in rows)
+        seen, columns, skipped = set(), [], 0
+        for idx, raw in enumerate(cells):
+            name = core.clean_text(raw)
+            if not name:
+                continue
+            if idx == 0 and name.casefold() in _IMPORT_HEADER_HINTS:
+                skipped += 1
+                continue
+            kf = name.casefold()
+            if kf in seen:
+                skipped += 1
+                continue
+            seen.add(kf)
+            columns.append(name[:100])  # 与 POST /config 的单字段截断同口径
+        _set_operation("导入保留字段名单")
+        return jsonify({"ok": True, "columns": columns, "count": len(columns),
+                        "skipped": skipped, "filename": orig})
+
     # ===================== 自学习字段映射（P0） =====================
     # 权限口径（设计文档 §7-1，2026-09-26 拍板）：识别/复核环节的操作员（登录用户）
     # 确认/否决字段映射；学习记忆的修改维护（查看全量/删除/清空/导出）归管理员，
