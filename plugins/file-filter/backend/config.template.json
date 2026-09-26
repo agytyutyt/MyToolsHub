@@ -1,4 +1,5 @@
 {
   "keep_columns": [],
-  "post_rules": []
+  "post_rules": [],
+  "mapping_limit": 10000
 }

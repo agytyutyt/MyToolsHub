@@ -11,7 +11,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>文件过滤器</title>
-<link rel="stylesheet" href="./style.css?v=6" />
+<link rel="stylesheet" href="./style.css?v=7" />
 </head>
 <body>
   <div class="page">
@@ -54,6 +54,42 @@
           <span id="cfgTestTip" class="tip hidden"></span>
           <span id="cfgSaveTip" class="tip"></span>
         </div>
+      </div>
+      <div class="cfg-block">
+        <h3>映射记忆（自学习：表头 → 保留字段的判定复用，含"确认删除"）</h3>
+        <p class="muted" id="mapStats">加载中…</p>
+        <div class="map-limit">
+          <label for="mapLimit">自动学习上限</label>
+          <input id="mapLimit" type="number" min="100" max="100000" step="100" />
+          <span class="muted">条</span>
+          <button id="mapLimitSave" class="btn secondary" type="button">保存上限</button>
+          <span class="muted">到顶后不再自动记录新建议（确认 / 改指不受限）；调低不会删除已有条目。</span>
+        </div>
+        <div class="map-filter">
+          <select id="mapStatus">
+            <option value="">全部状态</option>
+            <option value="confirmed">已确认</option>
+            <option value="suggested">模型建议</option>
+            <option value="orphan">失配（名单变更）</option>
+          </select>
+          <input id="mapQ" type="text" placeholder="按字段名 / 目标搜索后回车" />
+          <button id="mapRefresh" class="btn secondary" type="button">刷新</button>
+        </div>
+        <table class="rules-table map-table">
+          <thead>
+            <tr><th>表头</th><th>映射目标</th><th>状态</th><th>命中</th><th>确认人</th><th></th></tr>
+          </thead>
+          <tbody id="mapBody"></tbody>
+        </table>
+        <p class="muted hidden" id="mapEmpty">暂无映射记录：操作员在过滤结果里「确认 / 改指 / 否决」后，
+          判定会存入这里，下次同样字段直接复用、不再询问大模型。</p>
+        <div class="row-actions">
+          <a id="mapExportCsv" class="btn secondary" href="/api/file-filter/mappings/export?format=csv" download>导出评测集 CSV</a>
+          <a id="mapExportJsonl" class="btn secondary" href="/api/file-filter/mappings/export?format=jsonl" download>导出 JSONL</a>
+          <button id="mapClear" class="btn secondary" type="button">清空映射记忆</button>
+        </div>
+        <p class="muted">评测集（默认只含「已确认」且未失配的条目）可用于离线评测大模型/提示词变更；
+          操作员在结果页做的「确认 / 否决」实时入库，此处可改指、删除。</p>
       </div>
     </details>
 
@@ -123,6 +159,12 @@
           <div id="keptChips" class="chips"></div>
           <h2>已删除字段</h2>
           <div id="removedChips" class="chips"></div>
+          <div id="reviewBox" class="hidden">
+            <h2>映射复核</h2>
+            <p class="muted">把这次的判定存入学习记忆：确认后，下次遇到同样的字段直接按此过滤，
+              不再询问大模型；判错了就改指或否决。</p>
+            <div id="reviewList" class="review-list"></div>
+          </div>
           <div class="row-actions">
             <a id="downloadBtn" class="btn primary hidden" href="#" download>⬇️ 下载过滤后文件</a>
           </div>
@@ -132,6 +174,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=5"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>

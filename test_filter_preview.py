@@ -458,5 +458,225 @@ class TestConsistencyAndEndToEnd(Base):
         self.assertEqual(len(rows), 21)
 
 
+# ==========================================================================
+# 7. 自学习映射缓存（P0）：二次运行免 LLM、用户把关升级、/apply 保守口径
+# ==========================================================================
+
+class TestLLMMappingCache(Base):
+    """mapping_store 接入过滤管线的端到端契约（stub 掉网络，LLM 调用计数断言）。
+
+    钉住：① 未命中子集才进 LLM（名单内同名不进）；② 同表头二次运行不再调 LLM；
+    ③ confirm 后来源升级为 confirmed；④ reject 后同一建议对不回锅；⑤ /apply 缺省
+    只吃 confirmed（use_suggested 显式开启才放宽）；⑥ /mappings 接口权限口径。
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # /filter 的 llm 模式有「未配置不进队列」前置校验；匹配本身由 stub 替换
+        import jz_llm
+        cls.jz_llm = jz_llm
+        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "http://127.0.0.1:9/v1/chat/completions",
+            "api_key": "sk-test", "model": "test-model"}})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "", "api_key": "", "model": ""}})
+        super().tearDownClass()
+
+    def setUp(self):
+        self._reset_store()
+        self.calls = []
+        self._orig_match = self.ff.llm_client.match_columns
+        test = self
+
+        def fake_match(headers, *args, **kwargs):
+            test.calls.append(list(headers))
+            # 语义匹配口径：备注 → 姓名（开始时间/手机号与名单无关联）
+            return {h: ("姓名" if h == "备注" else "") for h in headers}
+
+        self.ff.llm_client.match_columns = fake_match
+
+    def tearDown(self):
+        self.ff.llm_client.match_columns = self._orig_match
+        self._reset_store()
+
+    def _reset_store(self):
+        # clear() 按设计保留 stats（历史计数），用例隔离必须连文件一起删
+        if os.path.isfile(self.ff.MAPPINGS_FILE):
+            os.remove(self.ff.MAPPINGS_FILE)
+        self.ff.MAPPINGS.reload()
+
+    def _run_llm_filter(self):
+        p = self.preview()
+        return self.filter_and_wait(staged_id=p["staged_id"], mode="llm")
+
+    def test_first_run_uses_llm_for_misses_only(self):
+        """首次运行：名单内同名（姓名）不进 LLM，未命中子集（3 列）才进。"""
+        payload = self._run_llm_filter()
+        self.assertEqual(payload["status"], "done", payload.get("detail"))
+        self.assertTrue(payload["llm_used"])
+        self.assertEqual(self.calls, [["开始时间", "手机号", "备注"]])
+        self.assertEqual([k["column"] for k in payload["kept"]], ["姓名", "备注"])
+        self.assertEqual(payload["kept"][0]["source"], "exact")
+        self.assertEqual(payload["kept"][1]["source"], "llm")
+        self.assertEqual(payload["removed"], ["开始时间", "手机号"])
+        stats = self.ff.MAPPINGS.stats()
+        self.assertEqual(stats["llm_calls"], 1)
+        self.assertEqual(stats["misses"], 3)
+
+    def test_second_run_skips_llm_and_reports_suggested(self):
+        """同表头二次运行直接读建议映射（含「无关联→删除」的负建议），不再调 LLM。"""
+        self._run_llm_filter()
+        payload = self._run_llm_filter()
+        self.assertEqual(len(self.calls), 1)  # 第二次没有再调 LLM
+        self.assertFalse(payload["llm_used"])
+        self.assertEqual([k["column"] for k in payload["kept"]], ["姓名", "备注"])
+        self.assertEqual(payload["kept"][1]["source"], "suggested")
+        # 负建议（开始时间/手机号确认无关）与正建议（备注→姓名）都在映射明细里可复核
+        self.assertEqual(payload["mappings_used"], [
+            {"key": "开始时间", "sample": "开始时间", "target": "",
+             "status": "suggested", "source": "suggested"},
+            {"key": "手机号", "sample": "手机号", "target": "",
+             "status": "suggested", "source": "suggested"},
+            {"key": "备注", "sample": "备注", "target": "姓名",
+             "status": "suggested", "source": "suggested"},
+        ])
+        stats = self.ff.MAPPINGS.stats()
+        self.assertEqual(stats["llm_calls"], 1)
+        self.assertGreaterEqual(stats["llm_saved"], 1)
+        self.assertGreaterEqual(stats["hit_suggested"], 1)
+
+    def test_confirm_upgrades_source_and_reject_blocks_pair(self):
+        """✅确认后来源升级 confirmed；❌否决后同一建议对不再回锅（删除、不再记录）。"""
+        self._run_llm_filter()
+        res = self.client.post("/api/file-filter/mappings/confirm",
+                               json={"items": [{"key": "备注", "target": "姓名"}]})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+        payload = self._run_llm_filter()
+        self.assertEqual(len(self.calls), 1)  # confirmed 命中，仍只有首次那次 LLM
+        self.assertEqual(payload["kept"][1]["source"], "confirmed")
+        used = {m["key"]: m for m in payload["mappings_used"]}
+        self.assertEqual(used["备注"]["status"], "confirmed")
+
+        # 否决后：条目删除 → 备注变 miss → LLM 再答同一对 → 拦截（不入库也不生效）
+        res = self.client.post("/api/file-filter/mappings/reject",
+                               json={"key": "备注", "target": "姓名"})
+        self.assertEqual(res.status_code, 200)
+        payload = self._run_llm_filter()
+        self.assertEqual(len(self.calls), 2)
+        self.assertEqual([k["column"] for k in payload["kept"]], ["姓名"])
+        self.assertEqual(payload["removed"], ["开始时间", "手机号", "备注"])
+        stats = self.ff.MAPPINGS.stats()
+        self.assertEqual(stats["llm_calls"], 2)
+
+    def test_apply_default_confirmed_only_use_suggested_opt_in(self):
+        """/apply 缺省只吃 confirmed（建议不参与、每次都调 LLM）；显式开启才放宽。"""
+        rows = [FIXTURE_HEADERS] + FIXTURE_ROWS
+        body = {"rows": rows, "mode": "llm"}
+        r1 = self.client.post("/api/file-filter/apply", json=body)
+        self.assertEqual(r1.status_code, 200, r1.get_data(as_text=True)[:300])
+        kept = {k["column"]: k["source"] for k in r1.get_json()["kept"]}
+        self.assertEqual(kept, {"姓名": "exact", "备注": "llm"})
+        self.assertEqual(len(self.calls), 1)
+
+        r2 = self.client.post("/api/file-filter/apply", json=body)
+        kept = {k["column"]: k["source"] for k in r2.get_json()["kept"]}
+        self.assertEqual(kept["备注"], "llm")
+        self.assertEqual(len(self.calls), 2)  # 建议存在但缺省不吃 → 再次调 LLM
+
+        r3 = self.client.post("/api/file-filter/apply", json={**body, "use_suggested": True})
+        kept = {k["column"]: k["source"] for k in r3.get_json()["kept"]}
+        self.assertEqual(kept["备注"], "suggested")
+        self.assertEqual(len(self.calls), 2)  # 建议命中，LLM 没有再调
+
+    def test_mappings_endpoint_permissions(self):
+        """权限口径：确认/否决=登录操作员；列表/删除/清空/导出=管理员。"""
+        self._run_llm_filter()
+        orig = self.ff._get_session_user
+        try:
+            self.ff._get_session_user = lambda: dict(OTHER)
+            # 操作员（登录非管理员）可以确认与否决
+            res = self.client.post("/api/file-filter/mappings/confirm",
+                                   json={"items": [{"key": "备注", "target": "姓名"}]})
+            self.assertEqual(res.status_code, 200)
+            res = self.client.post("/api/file-filter/mappings/reject",
+                                   json={"key": "备注", "target": "姓名"})
+            self.assertEqual(res.status_code, 200)
+            # 管理动作对操作员一律 403
+            for method, url, kwargs in (
+                    ("get", "/api/file-filter/mappings", {}),
+                    ("post", "/api/file-filter/mappings/delete",
+                     {"json": {"key": "备注"}}),
+                    ("post", "/api/file-filter/mappings/clear", {}),
+                    ("get", "/api/file-filter/mappings/export", {})):
+                res = getattr(self.client, method)(url, **kwargs)
+                self.assertEqual(res.status_code, 403, url)
+        finally:
+            self.ff._get_session_user = orig
+        # 管理员可用
+        res = self.client.get("/api/file-filter/mappings")
+        self.assertEqual(res.status_code, 200)
+        payload = res.get_json()
+        self.assertIn("entries", payload)
+        self.assertIn("stats", payload)
+        self.assertEqual(payload["keep_columns"], ["姓名", "所属单位"])
+
+    def test_preview_prefills_cached_matches(self):
+        """/preview 的 match 预填：缓存命中列带 {target,status}（含负映射），
+        名单内同名与无缓存列保持 None；硬过滤预判 keep/matched 口径不变（向后兼容）。"""
+        # 无缓存时：match 全空
+        p = self.preview()
+        for c in p["columns"]:
+            self.assertIsNone(c["match"], c["name"])
+        self._run_llm_filter()  # 产生建议：备注→姓名、开始时间/手机号→删除
+        p = self.preview()
+        by = {c["name"]: c for c in p["columns"]}
+        self.assertIsNone(by["姓名"]["match"])  # 名单内同名不走缓存
+        self.assertTrue(by["姓名"]["keep"])     # 硬过滤预判口径不变
+        self.assertEqual(by["备注"]["match"], {"target": "姓名", "status": "suggested"})
+        self.assertEqual(by["开始时间"]["match"], {"target": "", "status": "suggested"})
+        self.assertEqual(by["手机号"]["match"], {"target": "", "status": "suggested"})
+        # 确认后升级为 confirmed
+        self.client.post("/api/file-filter/mappings/confirm",
+                         json={"items": [{"key": "备注", "target": "姓名"}]})
+        p = self.preview()
+        by = {c["name"]: c for c in p["columns"]}
+        self.assertEqual(by["备注"]["match"], {"target": "姓名", "status": "confirmed"})
+
+    def test_mapping_limit_configurable(self):
+        """自动学习上限管理员可配：POST /config 校验/夹紧，/mappings 回传 limit 与 count。"""
+        res = self.client.post("/api/file-filter/config", json={"mapping_limit": 500})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+        self.assertEqual(self.client.get("/api/file-filter/config").get_json()["mapping_limit"],
+                         500)
+        self._run_llm_filter()
+        payload = self.client.get("/api/file-filter/mappings").get_json()
+        self.assertEqual(payload["limit"], 500)
+        self.assertEqual(payload["count"], 3)  # 备注 + 开始时间 + 手机号（负映射）
+        # 越界夹紧到下界；非整数 → 400
+        res = self.client.post("/api/file-filter/config", json={"mapping_limit": 5})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.get("/api/file-filter/config").get_json()["mapping_limit"],
+                         100)
+        res = self.client.post("/api/file-filter/config", json={"mapping_limit": "abc"})
+        self.assertEqual(res.status_code, 400)
+
+    def test_export_golden_set(self):
+        """黄金评测集导出：默认只含 confirmed；orphan（名单外目标）不进评测集。"""
+        self._run_llm_filter()
+        self.client.post("/api/file-filter/mappings/confirm",
+                         json={"items": [{"key": "备注", "target": "姓名"}]})
+        res = self.client.get("/api/file-filter/mappings/export")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("姓名".encode("utf-8"), res.data)
+        res = self.client.get("/api/file-filter/mappings/export?format=jsonl")
+        self.assertEqual(res.status_code, 200)
+        first = json.loads(res.get_data(as_text=True).splitlines()[0])
+        self.assertEqual(first, {"header": "备注", "target": "姓名", "status": "confirmed"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

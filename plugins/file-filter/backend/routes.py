@@ -7,6 +7,9 @@
 - 硬过滤：按固定字段名单保留列（规整后精确匹配），其余删除；
 - 大模型过滤：提取全部表头交大模型判断与保留名单的语义关联（「时间」↔「开始时间」），
   匹配保留、其余删除；名单内同名字段直接保留（用户点名要的列不交给模型判断）；
+- 自学习映射缓存（P0）：大模型判定经用户把关后落盘复用——已确认映射直接查表过滤不再
+  调大模型，未命中子集才进大模型；建议级映射在预览/结果里可见可改
+  （见 docs/design/过滤器自学习字段映射-设计文档.md，存储在 mapping_store.py）；
 - 后处理：按管理员配置的文本/正则规则对表头与单元格做替换（如「开始时间」-「开始」→「时间」），
   用户可在预览里**整体关闭**（默认开启）。
 
@@ -30,6 +33,8 @@ import jz_llm
 _get_session_user = jz_api.get_session_user
 _set_operation = jz_api.set_operation
 
+import csv
+import io
 import json
 import os
 import re
@@ -41,7 +46,7 @@ from datetime import datetime
 
 from flask import jsonify, request, send_file
 
-from . import bg_image, core, llm_client
+from . import bg_image, core, llm_client, mapping_store
 
 # requests 的可用性由统一大模型模块（jz_llm）持有并转发，供 /status 自检与
 # jz_deps 刷新沿用；本插件不再直接 import requests（凭据与 HTTP 调用都归框架）。
@@ -51,6 +56,9 @@ import jztools_data
 
 CONFIG_FILE = jztools_data.get_data_root_file("plugins", "file-filter", "config.json")
 TASK_DIR = jztools_data.get_data_root_dir("plugins", "file-filter", ".task_cache")
+# 自学习字段映射存储（两级信任：confirmed > suggested，见 mapping_store.py 模块头）
+MAPPINGS_FILE = jztools_data.get_data_root_file("plugins", "file-filter", "mappings.json")
+MAPPINGS = mapping_store.MappingStore(MAPPINGS_FILE)
 API_PREFIX = "/api/file-filter"
 PLUGIN_ID = "file-filter"
 
@@ -70,6 +78,12 @@ DEFAULT_CONFIG = {
     "keep_columns": [],
     "post_rules": [],
 }
+
+# 自学习映射的自动建议条目上限（管理员可配）：到顶只拦自动新增建议（确认/改指不受限），
+# 调低不删除已有条目——不采用主动清理策略（2026-09-26 拍板）
+MAPPING_LIMIT_DEFAULT = 10000
+MAPPING_LIMIT_MIN = 100
+MAPPING_LIMIT_MAX = 100000
 
 # 管理权限口径与 knowledge-base / notice-board 一致：超管或管理员角色
 MANAGE_ROLE_IDS = {"role-admin"}
@@ -110,9 +124,15 @@ def load_config():
             data = {}
     keep = data.get("keep_columns")
     rules = data.get("post_rules")
+    try:
+        limit = int(data.get("mapping_limit"))
+    except Exception:
+        limit = MAPPING_LIMIT_DEFAULT
+    limit = max(MAPPING_LIMIT_MIN, min(MAPPING_LIMIT_MAX, limit))
     return {
         "keep_columns": [str(k).strip() for k in keep if str(k).strip()] if isinstance(keep, list) else [],
         "post_rules": _sanitize_rules(rules),
+        "mapping_limit": limit,
     }
 
 
@@ -231,56 +251,159 @@ def _clean_task_files():
 
 # ===================== 过滤执行 =====================
 
-def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=None):
-    """执行过滤 + 后处理，返回 (headers2, rows2, kept, removed, replace_count, llm_used)。
+def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=None,
+               use_suggested=False, store=None, username="", suggest_limit=None):
+    """执行过滤 + 后处理，返回结果字典（自学习方案 P0 起改为 dict 返回）。
 
     mode: hard / llm；llm 模式失败抛 llm_client.LLMError。
     session: 统一大模型的接入配置快照，由**请求线程** jz_llm.resolve() 取得后传入
         （后台线程读不到会话，见 jz_llm 模块头部的线程纪律）。
     exclude: 用户在上传预览里**手动关闭**的列名——两种模式下一律删除（用户决定优先于
         模式自身的判定：大模型认为该保留、但用户点了删除，就删除）。
+    store: 字段映射存储（mapping_store.MappingStore）；None = 不读写缓存，行为同旧版。
+    use_suggested: 是否采用 suggested 级映射（大模型建议、未经确认）。交互路径传 True
+        （建议在预览/结果里可见可改，把关发生在用户侧）；程序化调用（/apply）缺省
+        False——没有把关环节，只吃已确认映射。
+    username: 映射建议的 created_by（审计字段）。
+    suggest_limit: 自动建议条目上限（管理员可配）；None 用 mapping_store 内置缺省。
+
+    返回 {headers2, rows2, kept, removed, removed_detail, replace_count, llm_used,
+    mappings_used}：
+    - kept: [{"column","matched","source"}]，source ∈ exact/confirmed/suggested/llm；
+    - removed: 列名列表（/result 与 /apply 的既有契约，保持字符串数组）；
+    - removed_detail: [{"column","source"}]，source 另有 confirmed_drop/suggested_drop/
+      llm_drop/excluded/empty/hard_unmatched；
+    - mappings_used: 本次实际采用的缓存/大模型映射（key/sample/target/status/source），
+      供结果页映射复核区展示。
     """
     excluded = {core.clean_text(x).casefold() for x in (exclude or []) if core.clean_text(x)}
-    kept, removed = [], []
+    keep_fold = {}
+    for k in (keep_columns or []):
+        kc = core.clean_text(k)
+        if kc:
+            keep_fold.setdefault(kc.casefold(), kc)
+    valid_targets = set(keep_fold)
     llm_used = False
+    mappings_used = []
+
     if mode == "llm":
-        mappings = llm_client.match_columns(headers, keep_columns, session=session)
-        llm_used = True
-        keep_idx = []
-        keep_fold = {core.clean_text(k).casefold(): core.clean_text(k)
-                     for k in (keep_columns or []) if core.clean_text(k)}
+        # 逐列先走零成本档：exclude（用户否决）→ 已确认映射（confirmed 是用户把关过的
+        # 最强依据，压过名单内同名自匹配——否则 UI 把预填列传回 columns 后，确认映射的
+        # 来源与命中统计会被 exact 遮蔽）→ 名单内同名（exact）→ 建议映射；
+        # 全部未命中的表头子集才交给大模型（prompt 只含 miss，省钱省时）。
+        decide = [None] * len(headers)  # i -> (keep, matched, source)
+        tier_hits = {"hit_exact": 0, "hit_confirmed": 0, "hit_suggested": 0}
         for i, h in enumerate(headers):
             hf = core.clean_text(h).casefold()
-            if not hf or hf in excluded:
-                removed.append(h)
+            if not hf:
+                decide[i] = (False, "", "empty")
                 continue
-            # 名单内同名字段直接保留：那是用户点名要的列，不把判断权交给模型
-            # （模型偶发返回空值时会让用户"明明开着却被删"，与硬过滤口径也不一致）；
-            # 其余交给大模型做语义匹配（「时间」↔「开始时间」）。
-            matched = mappings.get(h) or keep_fold.get(hf) or ""
-            if matched:
-                keep_idx.append(i)
-                kept.append((h, matched))
+            if hf in excluded:
+                decide[i] = (False, "", "excluded")
+                continue
+            hit = store.lookup(h, valid_targets, include_suggested=False, tiers="confirmed") \
+                if store is not None else None
+            if hit is not None:
+                if hit["target"]:
+                    decide[i] = (True, hit["target"], "confirmed")
+                else:
+                    decide[i] = (False, "", "confirmed_drop")
+                tier_hits["hit_confirmed"] += 1
+                mappings_used.append({"key": hit["key"], "sample": hit["sample"],
+                                      "target": hit["target"], "status": "confirmed",
+                                      "source": "confirmed"})
+                continue
+            if hf in keep_fold:
+                # 名单内同名字段直接保留：那是用户点名要的列，不把判断权交给模型
+                # （模型偶发返回空值时会让用户"明明开着却被删"，与硬过滤口径也不一致）
+                decide[i] = (True, keep_fold[hf], "exact")
+                tier_hits["hit_exact"] += 1
+                continue
+            hit = store.lookup(h, valid_targets, include_suggested=use_suggested,
+                               tiers="suggested") if store is not None else None
+            if hit is not None:
+                if hit["target"]:
+                    decide[i] = (True, hit["target"], "suggested")
+                else:
+                    decide[i] = (False, "", "suggested_drop")
+                tier_hits["hit_suggested"] += 1
+                mappings_used.append({"key": hit["key"], "sample": hit["sample"],
+                                      "target": hit["target"], "status": "suggested",
+                                      "source": "suggested"})
+            # store 为 None 或缓存未命中 → 留给 LLM（decide 保持 None）
+        if store is not None:
+            store.bump_stats(**tier_hits)
+        miss_names = list(dict.fromkeys(
+            headers[i] for i in range(len(headers)) if decide[i] is None))
+        if miss_names:
+            mappings = llm_client.match_columns(miss_names, keep_columns, session=session)
+            llm_used = True
+            model = (getattr(session, "provider", {}) or {}).get("model") \
+                if session is not None else ""
+            if store is not None:
+                store.record_suggestions(miss_names, mappings, valid_targets, model=model,
+                                         prompt_ver=llm_client.PROMPT_VER, user=username,
+                                         limit=suggest_limit)
+                store.bump_stats(llm_calls=1, misses=len(miss_names))
+            for i, h in enumerate(headers):
+                if decide[i] is not None:
+                    continue
+                m = str(mappings.get(h) or "").strip()
+                if m and (core.clean_text(m).casefold() not in valid_targets
+                          or (store is not None and store.is_rejected(h, m))):
+                    m = ""  # 名单外按未匹配（match_columns 已兜底，这里再兜一道）；被否决的对不回锅
+                if m:
+                    decide[i] = (True, m, "llm")
+                    mappings_used.append({"key": core.clean_text(h).casefold(),
+                                          "sample": core.clean_text(h), "target": m,
+                                          "status": "suggested", "source": "llm"})
+                else:
+                    decide[i] = (False, "", "llm_drop")
+                    # 「判定删除」同样进复核区：负映射也要把关（首次运行就能确认/改指）
+                    mappings_used.append({"key": core.clean_text(h).casefold(),
+                                          "sample": core.clean_text(h), "target": "",
+                                          "status": "suggested", "source": "llm"})
+        elif store is not None:
+            store.bump_stats(llm_saved=1)  # 全部命中缓存，这次大模型调用省下了
+        kept, removed_detail = [], []
+        for i, h in enumerate(headers):
+            keep, matched, source = decide[i]
+            if keep:
+                kept.append({"column": h, "matched": matched, "source": source})
             else:
-                removed.append(h)
-        headers2 = [headers[i] for i in keep_idx]
-        rows2 = [[(r[i] if i < len(r) else None) for i in keep_idx] for r in rows]
+                removed_detail.append({"column": h, "source": source})
+        headers2 = [headers[i] for i in range(len(headers)) if decide[i][0]]
+        rows2 = [[(r[i] if i < len(r) else None)
+                  for i in range(len(headers)) if decide[i][0]] for r in rows]
     else:
         keep_eff = [k for k in (keep_columns or [])
                     if core.clean_text(k) and core.clean_text(k).casefold() not in excluded]
-        headers2, rows2, kept, removed = core.filter_columns(headers, rows, keep_eff)
+        headers2, rows2, kept_pairs, removed = core.filter_columns(headers, rows, keep_eff)
+        kept = [{"column": c, "matched": m, "source": "exact"} for c, m in kept_pairs]
+        removed_detail = [{"column": c,
+                           "source": "excluded" if core.clean_text(c).casefold() in excluded
+                           else "hard_unmatched"} for c in removed]
+
     headers2, rows2, count = core.post_process(headers2, rows2, post_rules)
-    return headers2, rows2, kept, removed, count, llm_used
+    return {"headers2": headers2, "rows2": rows2, "kept": kept,
+            "removed": [d["column"] for d in removed_detail],
+            "removed_detail": removed_detail,
+            "replace_count": count, "llm_used": llm_used,
+            "mappings_used": mappings_used}
 
 
-def build_preview(headers, rows, keep_columns, post_rules):
-    """上传预览：识别到的列名 + 硬过滤预判 + 后处理预判。
+def build_preview(headers, rows, keep_columns, post_rules, store=None):
+    """上传预览：识别到的列名 + 硬过滤预判 + 后处理预判 + 缓存映射预填。
 
     返回 ``{"columns": [...], "summary": {...}}``，每列：
 
     - ``name`` 列名（规整后；空表头为空串）；``index`` 原列序号（0 起）；
     - ``keep`` / ``matched``：**硬过滤（字段名精确匹配）预判**——该列是否会被保留、
       匹配到名单里的哪个字段。大模型过滤的语义匹配发生在提交之后，故这里是预判；
+    - ``match``：**映射缓存预填**（自学习 P1）——该列命中已确认/建议级映射时为
+      ``{"target", "status"}``（``target=""`` 为确认/建议删除的负映射），未命中或
+      名单内同名（``keep=True``，不走缓存）为 None。``keep/matched`` 仍按硬过滤口径
+      不变（向后兼容）；前端在大模型模式下据 ``match`` 预填胶囊并标注来源徽标；
     - ``post_name`` / ``replace_count``：按当前后处理规则预演的表头新名与该列替换处数
       （仅字符串单元格计数，与 :func:`core.post_process` 同口径）；
     - ``locked``：空表头列，无法被"按名字保留"，前端不给切换；
@@ -291,6 +414,7 @@ def build_preview(headers, rows, keep_columns, post_rules):
         kc = core.clean_text(k)
         if kc:
             keep_fold.setdefault(kc.casefold(), kc)
+    valid_targets = set(keep_fold)
     dup_counter = {}
     for h in headers:
         hf = core.clean_text(h).casefold()
@@ -302,6 +426,14 @@ def build_preview(headers, rows, keep_columns, post_rules):
         name = core.clean_text(h)
         matched = keep_fold.get(name.casefold(), "")
         keep = bool(matched)
+        match = None
+        if store is not None and name:
+            # 缓存预填：已确认优先，其次建议（与 run_filter 的管线顺序一致——
+            # confirmed 压过名单内同名；预填结果只进前端徽标/预填，不改 keep/matched 口径）
+            hit = store.lookup(name, valid_targets, include_suggested=True, tiers="confirmed") \
+                or store.lookup(name, valid_targets, include_suggested=True, tiers="suggested")
+            if hit is not None:
+                match = {"target": hit["target"], "status": hit["status"]}
         new_header, count = post[i]
         if keep:
             n_keep += 1
@@ -313,6 +445,7 @@ def build_preview(headers, rows, keep_columns, post_rules):
             "name": name,
             "keep": keep,
             "matched": matched,
+            "match": match,
             "post_name": new_header,
             "replace_count": count,
             "locked": not name,
@@ -363,24 +496,41 @@ def _flag(raw, default):
     return str(raw).strip().lower() not in ("0", "false", "no", "off")
 
 
+def _mapping_valid_targets():
+    """当前保留名单的规整集合：映射的确认校验与失配（orphan）判定都以它为准。"""
+    cfg = load_config()
+    return {core.clean_text(k).casefold() for k in cfg["keep_columns"] if core.clean_text(k)}
+
+
+def _mapping_limit():
+    """自动建议条目上限（管理员可配，load_config 已夹紧 100~100000）。"""
+    return load_config()["mapping_limit"]
+
+
 def _run_filter_task(task_id, in_path, in_ext, out_path, out_ext, mode, keep, post_rules,
                      session, exclude=None):
     """后台线程执行：读表 → 过滤 → 后处理 → 写出 → 任务置 done。
 
     session 由请求线程 jz_llm.resolve() 取得后传入（后台线程读不到会话）。
+    交互路径吃 suggested 级映射（把关发生在预览/结果页的用户动作里）；
+    大模型建议的 created_by 取任务创建者（审计字段）。
     """
     try:
         set_task(task_id, status="running")
+        username = (get_task(task_id) or {}).get("created_by") or ""
         headers, rows = core.read_table(in_path, f"input.{in_ext}")
-        headers2, rows2, kept, removed, count, llm_used = run_filter(
-            headers, rows, mode, keep, post_rules, session, exclude)
-        core.write_table(out_path, out_ext, headers2, rows2)
+        result = run_filter(headers, rows, mode, keep, post_rules, session, exclude,
+                            use_suggested=True, store=MAPPINGS, username=username,
+                            suggest_limit=_mapping_limit())
+        core.write_table(out_path, out_ext, result["headers2"], result["rows2"])
         set_task(task_id, status="done",
-                 kept=[{"column": c, "matched": m} for c, m in kept],
-                 removed=removed,
-                 replace_count=count,
-                 llm_used=llm_used,
-                 rows=len(rows2),
+                 kept=result["kept"],
+                 removed=result["removed"],
+                 removed_detail=result["removed_detail"],
+                 mappings_used=result["mappings_used"],
+                 replace_count=result["replace_count"],
+                 llm_used=result["llm_used"],
+                 rows=len(result["rows2"]),
                  filename=os.path.basename(out_path),
                  download=f"{API_PREFIX}/download/{task_id}",
                  output_ext=out_ext)
@@ -445,6 +595,13 @@ def register(app):
                 if isinstance(keep, list) else []
         if "post_rules" in data:
             cfg["post_rules"] = _sanitize_rules(data.get("post_rules"))
+        if "mapping_limit" in data:
+            try:
+                limit = int(data.get("mapping_limit"))
+            except Exception:
+                return jsonify({"error": f"mapping_limit 需为 {MAPPING_LIMIT_MIN}~"
+                                         f"{MAPPING_LIMIT_MAX} 的整数"}), 400
+            cfg["mapping_limit"] = max(MAPPING_LIMIT_MIN, min(MAPPING_LIMIT_MAX, limit))
         save_config(cfg)
         _set_operation("保存过滤器配置")
         return jsonify({"ok": True})
@@ -457,6 +614,98 @@ def register(app):
         # 本接口不再接受表单传入的地址/Key（避免插件侧出现第二处凭据输入）。
         ok, detail = jz_llm.test_connection(plugin_id=PLUGIN_ID)
         return jsonify({"ok": ok, "detail": detail})
+
+    # ===================== 自学习字段映射（P0） =====================
+    # 权限口径（设计文档 §7-1，2026-09-26 拍板）：识别/复核环节的操作员（登录用户）
+    # 确认/否决字段映射；学习记忆的修改维护（查看全量/删除/清空/导出）归管理员，
+    # 与 keep_columns 的管理口径（_can_manage）一致。
+
+    @app.get(f"{API_PREFIX}/mappings")
+    def ff_mappings_list():
+        if not _can_manage(_viewer()):
+            return jsonify({"error": "仅管理员可查看字段映射"}), 403
+        status = (request.args.get("status") or "").strip() or None
+        q = (request.args.get("q") or "").strip() or None
+        return jsonify({
+            "ok": True,
+            "entries": MAPPINGS.list_entries(_mapping_valid_targets(), status=status, q=q),
+            "stats": MAPPINGS.stats(),
+            "keep_columns": load_config()["keep_columns"],
+            "limit": _mapping_limit(),
+            "count": MAPPINGS.count(),
+        })
+
+    @app.post(f"{API_PREFIX}/mappings/confirm")
+    def ff_mappings_confirm():
+        user = _viewer()
+        if user is None:
+            return jsonify({"error": "未登录"}), 401
+        data = request.get_json(silent=True) or {}
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        res = MAPPINGS.confirm(items, user=user.get("username") or "",
+                               valid_targets=_mapping_valid_targets(),
+                               force=bool(data.get("force")))
+        if res["conflicts"]:
+            return jsonify({"error": "部分字段已有不同的已确认映射，请确认是否覆盖",
+                            "conflicts": res["conflicts"]}), 409
+        _set_operation("确认字段映射")
+        return jsonify({"ok": True, "confirmed": res["confirmed"]})
+
+    @app.post(f"{API_PREFIX}/mappings/reject")
+    def ff_mappings_reject():
+        user = _viewer()
+        if user is None:
+            return jsonify({"error": "未登录"}), 401
+        data = request.get_json(silent=True) or {}
+        key = str(data.get("key") or "")
+        target = str(data.get("target") or "")
+        if not mapping_store.norm_key(key) or not mapping_store.norm_key(target):
+            return jsonify({"error": "key 与 target 均不能为空"}), 400
+        MAPPINGS.reject(key, target, user=user.get("username") or "")
+        _set_operation("否决字段映射")
+        return jsonify({"ok": True})
+
+    @app.post(f"{API_PREFIX}/mappings/delete")
+    def ff_mappings_delete():
+        # 用 POST + 请求体传 key 而不是 DELETE /mappings/<key>：表头可能含 "/"，进路径不安全
+        if not _can_manage(_viewer()):
+            return jsonify({"error": "仅管理员可删除字段映射"}), 403
+        data = request.get_json(silent=True) or {}
+        if not MAPPINGS.delete(str(data.get("key") or "")):
+            return jsonify({"error": "映射不存在"}), 404
+        _set_operation("删除字段映射")
+        return jsonify({"ok": True})
+
+    @app.post(f"{API_PREFIX}/mappings/clear")
+    def ff_mappings_clear():
+        if not _can_manage(_viewer()):
+            return jsonify({"error": "仅管理员可清空字段映射"}), 403
+        MAPPINGS.clear()
+        _set_operation("清空字段映射")
+        return jsonify({"ok": True})
+
+    @app.get(f"{API_PREFIX}/mappings/export")
+    def ff_mappings_export():
+        if not _can_manage(_viewer()):
+            return jsonify({"error": "仅管理员可导出字段映射"}), 403
+        status = (request.args.get("status") or "confirmed").strip().lower() or "confirmed"
+        if status not in ("confirmed", "suggested", "all"):
+            return jsonify({"error": "status 仅支持 confirmed / suggested / all"}), 400
+        rows = MAPPINGS.export_records(_mapping_valid_targets(),
+                                       status=None if status == "all" else status)
+        stamp = datetime.now().strftime("%Y%m%d")
+        if (request.args.get("format") or "csv").strip().lower() == "jsonl":
+            body = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+            return send_file(io.BytesIO(body.encode("utf-8")), as_attachment=True,
+                             download_name=f"mappings_golden_{stamp}.jsonl",
+                             mimetype="application/x-ndjson")
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["表头样本", "映射目标", "状态"])
+        for r in rows:
+            w.writerow([r["header"], r["target"], r["status"]])
+        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")), as_attachment=True,
+                         download_name=f"mappings_golden_{stamp}.csv", mimetype="text/csv")
 
     @app.post(f"{API_PREFIX}/preview")
     def ff_preview():
@@ -493,7 +742,8 @@ def register(app):
             drop_stage(stage["staged_id"])   # 预览失败即回收，不占 TTL
             return jsonify({"error": str(e)}), 400
 
-        preview = build_preview(headers, rows, cfg["keep_columns"], cfg["post_rules"])
+        preview = build_preview(headers, rows, cfg["keep_columns"], cfg["post_rules"],
+                                store=MAPPINGS)
         _set_operation("预览表格字段与过滤预判")
         return jsonify({
             "ok": True,
@@ -592,6 +842,8 @@ def register(app):
             payload.update({
                 "kept": task.get("kept") or [],
                 "removed": task.get("removed") or [],
+                "removed_detail": task.get("removed_detail") or [],
+                "mappings_used": task.get("mappings_used") or [],
                 "replace_count": task.get("replace_count") or 0,
                 "rows": task.get("rows") or 0,
                 "llm_used": bool(task.get("llm_used")),
@@ -634,10 +886,11 @@ def register(app):
           "columns": ["保留字段", ...],       # 缺省用管理员配置
           "exclude": ["强制删除的字段", ...],  # 可选：覆盖模式自身的判定
           "post_rules": [{"pattern","replacement","is_regex","enabled"}],  # 缺省用管理员配置
-          "post_process": false              # 可选：显式关闭后处理（缺省 true）
-        }
-        响应：{"rows": [...], "kept": [{"column","matched"}], "removed": [...],
-               "replace_count": N, "mode": "..."}
+          "post_process": false,             # 可选：显式关闭后处理（缺省 true）
+          "use_suggested": true              # 可选：采用未确认的建议级映射（缺省 false——
+        }                                    #   程序化调用没有把关环节，只吃已确认映射）
+        响应：{"rows": [...], "kept": [{"column","matched","source"}], "removed": [...],
+               "mappings_used": [...], "replace_count": N, "mode": "..."}
         """
         user = _viewer()
         if user is None:
@@ -669,18 +922,23 @@ def register(app):
             if all(core.clean_text(v) == "" for v in row):
                 continue
             rows.append(row)
+        use_suggested = bool(data.get("use_suggested"))
         try:
-            headers2, rows2, kept, removed, count, _ = run_filter(
-                headers, rows, mode, keep, post_rules, jz_llm.resolve(PLUGIN_ID), exclude)
+            result = run_filter(headers, rows, mode, keep, post_rules,
+                                jz_llm.resolve(PLUGIN_ID), exclude,
+                                use_suggested=use_suggested, store=MAPPINGS,
+                                username=(user or {}).get("username") or "",
+                                suggest_limit=_mapping_limit())
         except llm_client.LLMError as e:
             return jsonify({"error": f"大模型过滤失败：{e}"}), 502
         except core.TableError as e:
             return jsonify({"error": str(e)}), 400
         _set_operation("程序化表格过滤")
         return jsonify({
-            "rows": [headers2] + rows2,
-            "kept": [{"column": c, "matched": m} for c, m in kept],
-            "removed": removed,
-            "replace_count": count,
+            "rows": [result["headers2"]] + result["rows2"],
+            "kept": result["kept"],
+            "removed": result["removed"],
+            "mappings_used": result["mappings_used"],
+            "replace_count": result["replace_count"],
             "mode": mode,
         })

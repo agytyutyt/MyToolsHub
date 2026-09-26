@@ -26,6 +26,10 @@
 - **两种过滤模式**
   - **硬过滤**：只保留与保留字段名单精确匹配的字段（规整后比较：去 BOM、全角空格转半角、去首尾空白、忽略大小写），其余列删除。
   - **大模型过滤**：提取表格全部字段（标题），交由大模型判断与名单字段的语义关联（如「时间」↔「开始时间」，字段名不必完全一致），匹配保留、其余删除。需在「大模型设置」配置接入信息（格式不限，支持管理员统一配置或用户各自配置）。**名单内同名字段直接保留**（用户点名要的列不交给模型判断，避免模型偶发返回空值时"明明开着却被删"）。
+  - **自学习映射缓存（P0）**：大模型只接「缓存未命中的表头子集」，判定落盘复用——已确认映射
+    （用户确认/改指过，含"确认删除"的负映射）下次直接查表过滤不再调大模型，建议级映射供交互
+    路径复用、程序化接口（`/apply`）缺省不用；被否决的映射对进拦截表不再回锅；管理员名单变更
+    后失配的映射自动失效。结果页映射复核区与管理面板属 P1（前端待实施）。
 - **按列开关（用户决定优先于模式判定）**：页面上每个列名胶囊都可点击切换——**点开的列一定保留**
   （即使不在管理员名单里），**点掉的列一定删除**（即使大模型认为该保留）。同名重复列会一起切换
   （过滤按字段名匹配，同名必然同判），页面上以 `×N` 标出。
@@ -50,7 +54,8 @@
   将被删除，点胶囊切换保留/删除，表头会被后处理改名的显示 `→ 新名`）→ **后处理规则**展示与
   「启用后处理规则」开关（默认开启，显示按当前保留字段预计替换处数）→ 「开始过滤」。
 - 「③ 过滤结果」（与左侧过滤选项相邻）：过滤统计（保留/删除字段对照、替换处数、后处理是否关闭、
-  文档预处理）+ 过滤后文件下载。
+  文档预处理）+ **映射复核**（自学习：把本次用到的「表头 → 保留字段」判定存入学习记忆——
+  ✓ 确认 / ✏ 改指 / ✕ 否决；确认后下次同样字段直接按此过滤，不再询问大模型）+ 过滤后文件下载。
 
 ## 管理配置（仅管理员/超管）
 
@@ -59,6 +64,7 @@
 1. **保留字段名单**：硬过滤的精确匹配基准、大模型过滤的语义匹配基准、上传预览「预计保留」的判定依据。
 2. **后处理规则**：`查找内容 / 替换为（留空=删除）/ 正则开关 / 启用开关`，多条按顺序执行；**非法正则在过滤执行时自动跳过**（保存不做正则校验，规则仍留在列表里）。
 3. **大模型接入**：接入信息（格式 / API 地址 / Key / 模型名称）由「管理后台 → 大模型设置」/ 首页右下角「⋯ → 大模型设置」统一维护（归主体模块 `jz_llm`），**本插件不再接受也不保存接入信息**；面板里的「大模型连通测试」测的就是这份统一配置。
+4. **映射记忆（自学习）**：查看/搜索全部「表头 → 保留字段」学习条目（状态过滤含失配 orphan），可改指、删除、清空；一键导出黄金评测集（CSV / JSONL，默认只含已确认条目）；展示运行统计（大模型调用次数 / 缓存省去的调用次数 / 已用条数）。**自动学习上限**可调（`mapping_limit`，默认 10000、范围 100~100000）：到顶只拦自动记录新建议（确认 / 改指不受限），调低不删除已有条目。
 
 配置保存在数据根目录 `plugins/file-filter/config.json`（**只含保留字段名单与后处理规则，不含任何密钥**；已 gitignore）。
 
@@ -72,9 +78,15 @@
 | `/config/test` | POST | 大模型连通测试 | 管理员 |
 | `/preview` | POST | multipart `file` → **同步**返回 `staged_id` / `columns`（每列 `name/keep/matched/post_name/replace_count/locked/dup`）/ `summary` / `post_rules` / `rows` / `sanitize`；上传件同时暂存供 `/filter` 复用 | 登录 |
 | `/filter` | POST | multipart：`file` **或** `staged_id`（复用预览暂存件）+ `mode`(hard/llm) + `columns`（JSON 数组，可选缺省用配置）+ `exclude`（JSON 数组，手动关闭的列，可选）+ `post_process`(1/0，缺省 1)，异步返回 `task_id` + `sanitize` | 登录 |
-| `/result/<task_id>` | GET | 轮询：恒有 `task_id / status`；`status=done` 时另有 `kept / removed / replace_count / rows / llm_used / post_enabled / sanitize / download / filename / output_ext`；`status=error` 时另有 `detail`（任务归属校验：创建者或超管） | 创建者/超管 |
+| `/result/<task_id>` | GET | 轮询：恒有 `task_id / status`；`status=done` 时另有 `kept / removed / removed_detail / mappings_used / replace_count / rows / llm_used / post_enabled / sanitize / download / filename / output_ext`（`kept` 每项带 `source`=exact/confirmed/suggested/llm；`mappings_used` 为本次采用的映射明细，供结果页复核）；`status=error` 时另有 `detail`（任务归属校验：创建者或超管） | 创建者/超管 |
 | `/download/<task_id>` | GET | 下载过滤后文件 | 创建者/超管 |
-| `/apply` | POST | **程序化调用接口（供其他插件）**：JSON `{rows, mode, columns?, exclude?, post_rules?, post_process?}` → `{rows, kept, removed, replace_count, mode}`；`kept` 元素为 `{column, matched}`（`matched` 是命中的真实表头），`mode` 回显实际生效的过滤模式；同步、不落盘 | 登录 |
+| `/apply` | POST | **程序化调用接口（供其他插件）**：JSON `{rows, mode, columns?, exclude?, post_rules?, post_process?, use_suggested?}` → `{rows, kept, removed, mappings_used, replace_count, mode}`；`kept` 元素为 `{column, matched, source}`（`matched` 是命中的真实表头），`mode` 回显实际生效的过滤模式；`use_suggested` 缺省 false——程序化调用没有把关环节，只吃已确认映射；同步、不落盘 | 登录 |
+| `/mappings` | GET | 字段映射列表（`status`=confirmed/suggested/orphan、`q` 模糊过滤）+ 运行统计 + `limit`（自动学习上限）/ `count`（当前条数）+ 当前名单 | 管理员 |
+| `/mappings/confirm` | POST | 确认/改指映射 `{items:[{key,target,sample?}], force?}`；同 key 已有不同已确认映射且未带 `force` → 409 + `conflicts` | 登录（操作员把关） |
+| `/mappings/reject` | POST | 否决映射对 `{key, target}`：进拦截表防回锅，同名同目标条目删除 | 登录（操作员把关） |
+| `/mappings/delete` | POST | 删除单条 `{key}`（POST+请求体而非 DELETE 路径：表头可能含 `/`） | 管理员 |
+| `/mappings/clear` | POST | 清空全部映射与拦截表（保留运行统计） | 管理员 |
+| `/mappings/export` | GET | 导出黄金评测集 `?format=csv\|jsonl&status=confirmed\|suggested\|all`（失配条目一律剔除） | 管理员 |
 
 > `columns` 显式传空数组（用户把字段全关了）→ 400「未选择任何保留字段」，**不静默回退**管理员名单
 > （该行为仅限 `/filter` 端点；`/apply` 对显式空数组仍回退到配置默认，属既有契约）；
@@ -96,10 +108,11 @@ resp = requests.post(
         # "exclude": ["备注"],     # 强制删除的列（覆盖模式自身的判定）
         # "post_rules": [{"pattern": "开始", "replacement": "", "is_regex": False}],  # 缺省用管理员配置
         # "post_process": False,   # 显式关闭后处理（缺省 true）
+        # "use_suggested": True,   # 缺省 false：只吃已确认映射（程序化调用没有把关环节）
     },
     cookies=request.cookies,       # 透传当前请求会话
 )
-data = resp.json()  # {"rows": [[表头],[数据]...], "kept": [{"column": "字段名", "matched": "命中的真实表头"}], "removed": [...], "replace_count": N, "mode": "hard"|"llm"}
+data = resp.json()  # {"rows": [[表头],[数据]...], "kept": [{"column": "字段名", "matched": "命中的真实表头", "source": "exact|confirmed|suggested|llm"}], "removed": [...], "mappings_used": [...], "replace_count": N, "mode": "hard"|"llm"}
 ```
 
 ## 依赖与升级

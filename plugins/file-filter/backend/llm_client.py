@@ -19,6 +19,9 @@ import jz_llm
 PLUGIN_ID = "file-filter"
 LLM_TIMEOUT = 120
 
+# 内置提示词版本：随映射建议落库（model + prompt_ver），改提示词/换模型后可归因评测
+PROMPT_VER = 1
+
 # 兼容既有调用点：插件各处按 llm_client.LLMError 捕获大模型异常
 LLMError = jz_llm.LLMError
 
