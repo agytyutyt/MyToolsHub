@@ -11,7 +11,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>文件过滤器</title>
-<link rel="stylesheet" href="./style.css?v=7" />
+<link rel="stylesheet" href="./style.css?v=8" />
 </head>
 <body>
   <div class="page">
@@ -24,8 +24,12 @@
     <details class="card config-card" id="cfgCard" hidden>
       <summary>⚙️ 管理配置（保留字段名单 / 后处理规则 / 大模型）</summary>
       <div class="cfg-block">
-        <h3>保留字段名单（硬过滤精确匹配；大模型过滤的语义匹配基准；也是上传后「预计保留」的判定依据）</h3>
-        <div class="chip-editor" id="cfgKeepChips"></div>
+        <h3>保留字段名单（精确匹配基准；大模型语义匹配目标；也是上传后「预计保留」的判定依据）</h3>
+        <div class="keep-toolbar">
+          <input id="cfgKeepFilter" type="text" placeholder="输入关键字实时筛选名单字段" />
+          <span id="cfgKeepCount" class="muted"></span>
+        </div>
+        <div class="chip-editor keep-scroll" id="cfgKeepChips"></div>
         <div class="chip-add">
           <input id="cfgKeepInput" type="text" placeholder="输入字段名后回车添加，如：时间" />
           <button id="cfgKeepAdd" class="btn secondary" type="button">添加</button>
@@ -73,31 +77,38 @@
           <button id="mapLimitSave" class="btn secondary" type="button">保存上限</button>
           <span class="muted">到顶后不再自动记录新建议（确认 / 改指不受限）；调低不会删除已有条目。</span>
         </div>
-        <div class="map-filter">
-          <select id="mapStatus">
-            <option value="">全部状态</option>
-            <option value="confirmed">已确认</option>
-            <option value="suggested">模型建议</option>
-            <option value="orphan">失配（名单变更）</option>
-          </select>
-          <input id="mapQ" type="text" placeholder="按字段名 / 目标搜索后回车" />
+        <div class="map-toolbar">
+          <input id="mapQ" type="text" placeholder="过滤名单字段 / 表头 / 映射目标后回车（命中条目自动展开）" />
           <button id="mapRefresh" class="btn secondary" type="button">刷新</button>
         </div>
-        <table class="rules-table map-table">
-          <thead>
-            <tr><th>表头</th><th>映射目标</th><th>状态</th><th>命中</th><th>确认人</th><th></th></tr>
-          </thead>
-          <tbody id="mapBody"></tbody>
-        </table>
+        <div class="map-accord" id="mapAccord"></div>
         <p class="muted hidden" id="mapEmpty">暂无映射记录：操作员在过滤结果里「确认 / 改指 / 否决」后，
           判定会存入这里，下次同样字段直接复用、不再询问大模型。</p>
+        <div id="recheckBox" class="hidden">
+          <h3>匹配修正 · 复核结果（仅建议级条目，已确认条目不在范围）</h3>
+          <p class="muted" id="recheckTip"></p>
+          <table class="rules-table map-table">
+            <thead>
+              <tr><th>表头</th><th>原映射</th><th>新建议</th><th></th></tr>
+            </thead>
+            <tbody id="recheckBody"></tbody>
+          </table>
+          <div class="row-actions">
+            <button id="recheckAcceptAll" class="btn secondary" type="button">✓ 全部采纳</button>
+            <button id="recheckDismiss" class="btn secondary" type="button">收起</button>
+          </div>
+          <p class="muted">采纳的条目升级为「已确认」（记管理员名下）；未采纳的条目保持复核后的建议值。</p>
+        </div>
         <div class="row-actions">
+          <button id="mapRecheck" class="btn secondary" type="button">🔍 匹配修正（AI 复核建议条目）</button>
+          <button id="mapRefresh" class="btn secondary" type="button">刷新</button>
           <a id="mapExportCsv" class="btn secondary" href="/api/file-filter/mappings/export?format=csv" download>导出评测集 CSV</a>
           <a id="mapExportJsonl" class="btn secondary" href="/api/file-filter/mappings/export?format=jsonl" download>导出 JSONL</a>
           <button id="mapClear" class="btn secondary" type="button">清空映射记忆</button>
         </div>
         <p class="muted">评测集（默认只含「已确认」且未失配的条目）可用于离线评测大模型/提示词变更；
-          操作员在结果页做的「确认 / 否决」实时入库，此处可改指、删除。</p>
+          操作员在结果页做的「确认 / 否决」实时入库，此处可改指、删除；「名单内」徽标表示
+          该确认删除正压着保留名单里的同名字段（优先于名单生效），删除该条即恢复名单效力。</p>
       </div>
     </details>
 
@@ -119,15 +130,9 @@
       <section class="panel">
         <div class="panel-title">② 过滤模式与字段识别</div>
         <div class="card">
-          <h2>过滤模式</h2>
-          <label class="radio-row">
-            <input type="radio" name="mode" value="hard" checked />
-            <span><b>硬过滤</b> — 字段名称与预设值精准匹配</span>
-          </label>
-          <label class="radio-row">
-            <input type="radio" name="mode" value="llm" />
-            <span><b>大模型过滤</b> — 通过大模型辅助判断字段的合规性</span>
-          </label>
+          <h2>过滤机制（双重过滤）</h2>
+          <p class="muted">先按保留字段名单<b>精确匹配</b>，无法命中的字段交由<b>大模型语义匹配</b>；
+            大模型未配置时自动降级为仅精确匹配并提示。判定结果在过滤后需你最终确认（防误判）。</p>
 
           <h2>识别到的字段</h2>
           <p class="muted" id="previewEmpty">上传文件后，这里会列出识别到的列名与过滤预计结果（画删除线的列将被删除）。</p>
@@ -163,6 +168,20 @@
         </div>
         <div class="card hidden" id="resultCard">
           <div id="resultStats" class="result-stats"></div>
+          <div id="confirmBox" class="hidden">
+            <h2>最终确认</h2>
+            <p class="muted">带「模型建议 / 建议删」徽标的字段是大模型与未确认建议的判定，
+              请把关后确认；精确匹配与已确认映射已直接生效。点击胶囊可切换保留 / 删除，
+              确认后决策会写入学习记忆（下次同样字段直接复用）。</p>
+            <h3>将保留</h3>
+            <div id="confirmKeepChips" class="chips"></div>
+            <h3>将删除</h3>
+            <div id="confirmDropChips" class="chips"></div>
+            <div class="row-actions">
+              <button id="confirmBtn" class="btn primary" type="button">✓ 确认并下载</button>
+              <span id="confirmTip" class="tip"></span>
+            </div>
+          </div>
           <h2>保留字段</h2>
           <div id="keptChips" class="chips"></div>
           <h2>已删除字段</h2>
@@ -182,6 +201,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=6"></script>
+  <script src="./app.js?v=7"></script>
 </body>
 </html>

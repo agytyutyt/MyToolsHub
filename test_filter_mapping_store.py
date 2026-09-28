@@ -269,6 +269,210 @@ class StoreCase(unittest.TestCase):
         self.store.record_suggestions(["人员"], {"人员": "所属单位"}, KEEP)
         self.assertEqual(self.store.count(), 2)
 
+    # ---------- 匹配修正写回（P3b） ----------
+
+    def test_apply_recheck_updates_suggested_only(self):
+        """写回只动建议级：confirmed 不翻案、rejected/名单外/不存在跳过、同值不落盘。"""
+        self.store.record_suggestions(["人员", "访客"], {"人员": "姓名", "访客": "所属单位"},
+                                      KEEP)
+        self.store.confirm([{"key": "姓名", "target": "姓名"}], user="op", valid_targets=KEEP)
+        self.store.reject("临时", "姓名", user="op")
+        res = self.store.apply_recheck(
+            [{"key": "人员", "new_target": "所属单位"},   # updated
+             {"key": "访客", "new_target": "所属单位"},   # unchanged
+             {"key": "姓名", "new_target": "所属单位"},   # confirmed → skipped
+             {"key": "临时", "new_target": "姓名"},       # rejected → skipped
+             {"key": " outsiders ", "new_target": "姓名"},  # 不存在 → skipped
+             {"key": "人员2", "new_target": "名单外字段"}],  # 名单外 → skipped
+            KEEP, model="m2", prompt_ver=2, user="admin")
+        self.assertEqual(res, {"updated": 1, "unchanged": 1, "skipped": 4})
+        self.assertEqual(self.store.lookup("人员", KEEP)["target"], "所属单位")
+        entry = self.store.get_entry("人员")
+        self.assertEqual(entry["sample"], "人员")      # sample 保留（不被归一化键覆盖）
+        self.assertEqual(entry["model"], "m2")
+        self.assertEqual(entry["prompt_ver"], 2)
+        # confirmed 未被翻案
+        self.assertEqual(self.store.lookup("姓名", KEEP)["target"], "姓名")
+
+    def test_list_entries_in_keep_list_flag(self):
+        """「名单内」标记：确认删除的键恰在保留名单中时为 True（决策 ⑦ 展示口径）。"""
+        self.store.confirm([{"key": "姓名", "target": ""}], user="op", valid_targets=KEEP)
+        self.store.confirm([{"key": "备注2", "target": ""}], user="op", valid_targets=set())
+        rows = {r["key"]: r for r in self.store.list_entries(KEEP)}
+        self.assertTrue(rows["姓名"]["in_keep_list"])
+        self.assertFalse(rows["备注2"]["in_keep_list"])
+        # 非负映射不标（有无 target 无名单内语义）
+        self.store.record_suggestions(["人员"], {"人员": "姓名"}, KEEP)
+        rows = {r["key"]: r for r in self.store.list_entries(KEEP)}
+        self.assertFalse(rows["人员"]["in_keep_list"])
+
+
+    # ---------- 加权统计（P4） ----------
+
+    def test_passive_votes_promote_after_threshold(self):
+        """被动采纳计票：同向 ≥5 票且零翻转 → 自动转正（confirmed_by=加权转正）。"""
+        self.store.record_suggestions(["人员"], {"人员": "姓名"}, KEEP)
+        res = {"voted": 0, "promoted": []}
+        for i in range(5):
+            res = self.store.record_passive_votes([{"key": "人员", "dir": "keep"}],
+                                                  user="u%d" % i)
+        self.assertEqual(res["voted"], 1)
+        self.assertEqual(res["promoted"], ["人员"])
+        entry = self.store.get_entry("人员")
+        self.assertEqual(entry["status"], "confirmed")
+        self.assertEqual(entry["confirmed_by"], "加权转正")
+        self.assertEqual(entry["keep_votes"], 5)
+        # 转正后不再计票（仅建议级参与）
+        res = self.store.record_passive_votes([{"key": "人员", "dir": "keep"}], user="u")
+        self.assertEqual(res["voted"], 0)
+
+    def test_passive_votes_below_threshold_no_promote(self):
+        self.store.record_suggestions(["人员"], {"人员": "姓名"}, KEEP)
+        for i in range(4):
+            self.store.record_passive_votes([{"key": "人员", "dir": "keep"}], user="u")
+        self.assertEqual(self.store.get_entry("人员")["status"], "suggested")
+
+    # 旧 test_flip_blocks_promotion 已废弃：「零翻转永久封禁」判据在 P4b 修订为
+    # 「连续同向 streak ≥5」——早期一次异议只重置 streak，后续共识可重新定论；
+    # 其意图由 test_alternating_votes_stay_suggested（持续分歧停留建议级）接替。
+
+    def test_negative_suggestion_promotes_to_confirmed_drop(self):
+        """负建议（target=""）按 drop 票转正为确认删除。"""
+        self.store.record_suggestions(["临时"], {"临时": ""}, KEEP)
+        for i in range(5):
+            self.store.record_passive_votes([{"key": "临时", "dir": "drop"}],
+                                            user="u%d" % i)
+        entry = self.store.get_entry("临时")
+        self.assertEqual((entry["status"], entry["target"]), ("confirmed", ""))
+
+    # ---------- P4 收尾：remap 反向定论 / 用户去重 / orphan confirmed 修正 ----------
+
+    def test_remap_collective_drop_promotes_to_negative(self):
+        """remap 的反向多数：连续 5 张 drop 票 → 集体定论删除（confirmed 负映射）。"""
+        self.store.record_suggestions(["临时"], {"临时": ""}, KEEP)
+        self.store.flip_to_remap("临时", user="op")
+        for i in range(5):
+            self.store.record_passive_votes([{"key": "临时", "dir": "drop"}], user="u%d" % i)
+        entry = self.store.get_entry("临时")
+        self.assertEqual((entry["status"], entry["target"]), ("confirmed", ""))
+
+    def test_passive_vote_user_dedup(self):
+        """同一用户对同一条目的被动采纳只计一次（防单人刷票）；不同用户各计一票。"""
+        self.store.record_suggestions(["人员"], {"人员": "姓名"}, KEEP)
+        r1 = self.store.record_passive_votes([{"key": "人员", "dir": "keep"}], user="alice")
+        r2 = self.store.record_passive_votes([{"key": "人员", "dir": "keep"}], user="alice")
+        self.assertEqual((r1["voted"], r2["voted"]), (1, 0))
+        self.assertEqual(self.store.get_entry("人员")["keep_votes"], 1)
+        self.store.record_passive_votes([{"key": "人员", "dir": "keep"}], user="bob")
+        self.assertEqual(self.store.get_entry("人员")["keep_votes"], 2)
+
+    def test_apply_recheck_orphan_confirmed(self):
+        """orphan confirmed（名单变更）纳入修正：LLM 新目标有效 → 降级建议级待采纳。"""
+        self.store.confirm([{"key": "备注", "target": "姓名"}], user="op", valid_targets=KEEP)
+        narrowed = {"所属单位"}   # 模拟名单变更：姓名不再在列 → 备注 失配
+        res = self.store.apply_recheck([{"key": "备注", "new_target": "所属单位"}],
+                                       narrowed, model="m", prompt_ver=2)
+        self.assertEqual(res["updated"], 1)
+        entry = self.store.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("suggested", "所属单位"))
+        # 非失配的 confirmed 不动
+        self.store.confirm([{"key": "人员", "target": "所属单位"}], user="op",
+                           valid_targets={"所属单位"})
+        res = self.store.apply_recheck([{"key": "人员", "new_target": "姓名"}],
+                                       {"所属单位"}, model="m", prompt_ver=2)
+        self.assertEqual(res["skipped"], 1)
+        self.assertEqual(self.store.get_entry("人员")["status"], "confirmed")
+
+    def test_flip_to_remap_and_lookup(self):
+        """删除→保留翻转：条目转 remap（目标清空、keep 票 +1），管线可命中临时保留。"""
+        self.store.record_suggestions(["备注"], {"备注": ""}, KEEP)
+        self.assertTrue(self.store.flip_to_remap("备注", user="op"))
+        self.assertEqual(self.store.lookup_remap("备注")["key"], "备注")
+        entry = self.store.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"], entry["keep_votes"]),
+                         ("remap", "", 1))
+        # 已确认条目不可转 remap（目标变更走 confirm/force）
+        self.store.confirm([{"key": "姓名", "target": "姓名"}], user="op", valid_targets=KEEP)
+        self.assertFalse(self.store.flip_to_remap("姓名", user="op"))
+        self.assertIsNone(self.store.lookup_remap("不存在"))
+
+    def test_apply_recheck_moves_remap_to_suggested(self):
+        """重映射闭环：recheck 提出有效目标 → remap 转回建议级，进 diff 待采纳。"""
+        self.store.record_suggestions(["备注"], {"备注": ""}, KEEP)
+        self.store.flip_to_remap("备注", user="op")
+        res = self.store.apply_recheck([{"key": "备注", "new_target": "姓名"}], KEEP,
+                                       model="m", prompt_ver=2)
+        self.assertEqual(res["updated"], 1)
+        entry = self.store.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("suggested", "姓名"))
+        # 无有效目标的 remap 维持原状
+        self.store.flip_to_remap("临时", user="op") is None  # 无条目 → False
+        self.store.record_suggestions(["临时"], {"临时": ""}, KEEP)
+        self.store.flip_to_remap("临时", user="op")
+        res = self.store.apply_recheck([{"key": "临时", "new_target": ""}], KEEP)
+        self.assertEqual(res["skipped"], 1)
+        self.assertEqual(self.store.get_entry("临时")["status"], "remap")
+
+    def test_confirm_records_votes(self):
+        """显式确认/改指同时计票（审计口径）。"""
+        self.store.confirm([{"key": "备注", "target": "姓名"}], user="op", valid_targets=KEEP)
+        self.assertEqual(self.store.get_entry("备注")["keep_votes"], 1)
+        self.store.confirm([{"key": "人员", "target": ""}], user="op", valid_targets=KEEP)
+        self.assertEqual(self.store.get_entry("人员")["drop_votes"], 1)
+
+    # ---------- confirmed 加权治理（P4b 决策 11） ----------
+
+    def test_dissent_demotes_confirmed(self):
+        """非管理员异议：confirmed 降级重议（现任目标不变）+ 异议方向计一票。"""
+        self.store.confirm([{"key": "备注", "target": "姓名"}], user="op", valid_targets=KEEP)
+        self.assertTrue(self.store.dissent("备注", "drop", user="u1"))
+        entry = self.store.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("suggested", "姓名"))
+        self.assertEqual((entry["drop_votes"], entry["dissent_by"]), (1, "u1"))
+        self.assertEqual(entry["streak"], 1)
+
+    def test_dissent_agreement_is_noop(self):
+        """异议方向与现行确认一致（都是保留）→ 不构成异议，条目不动。"""
+        self.store.confirm([{"key": "备注", "target": "姓名"}], user="op", valid_targets=KEEP)
+        self.assertFalse(self.store.dissent("备注", "keep", user="u1"))
+        self.assertEqual(self.store.get_entry("备注")["status"], "confirmed")
+
+    def test_dissent_then_streak_repromotes(self):
+        """异议降级后，连续同向 5 票重新转正（原映射正确 → 快速定论）。"""
+        self.store.confirm([{"key": "备注", "target": "姓名"}], user="op", valid_targets=KEEP)
+        self.store.dissent("备注", "drop", user="u1")      # 异议：该列应删
+        for i in range(5):
+            self.store.record_passive_votes([{"key": "备注", "dir": "keep"}], user="u%d" % i)
+        entry = self.store.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("confirmed", "姓名"))
+        self.assertEqual(entry["streak"], 5)
+
+    def test_keep_suggestion_collective_drop_promotes_to_negative(self):
+        """反向多数：keep 建议被连续 5 张 drop 票 → 转确认删除（负映射）。"""
+        self.store.record_suggestions(["人员"], {"人员": "姓名"}, KEEP)
+        for i in range(5):
+            self.store.record_passive_votes([{"key": "人员", "dir": "drop"}], user="u%d" % i)
+        entry = self.store.get_entry("人员")
+        self.assertEqual((entry["status"], entry["target"]), ("confirmed", ""))
+
+    def test_negative_suggestion_collective_keep_promotes_to_remap(self):
+        """反向多数：负建议被连续 5 张 keep 票（集体说留但无目标）→ 转 remap 待重映射。"""
+        self.store.record_suggestions(["临时"], {"临时": ""}, KEEP)
+        for i in range(5):
+            self.store.record_passive_votes([{"key": "临时", "dir": "keep"}], user="u%d" % i)
+        entry = self.store.get_entry("临时")
+        self.assertEqual(entry["status"], "remap")
+
+    def test_alternating_votes_stay_suggested(self):
+        """来回翻转（持续分歧）：streak 永不达标，停留建议级持续提案。"""
+        self.store.record_suggestions(["人员"], {"人员": "姓名"}, KEEP)
+        for i in range(6):
+            self.store.record_passive_votes(
+                [{"key": "人员", "dir": "keep" if i % 2 == 0 else "drop"}], user="u%d" % i)
+        entry = self.store.get_entry("人员")
+        self.assertEqual(entry["status"], "suggested")
+        self.assertEqual(entry["streak"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

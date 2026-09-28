@@ -65,6 +65,8 @@ PLUGIN_ID = "file-filter"
 FILTER_WORKERS = 2
 _executor = ThreadPoolExecutor(max_workers=FILTER_WORKERS)
 TASKS = {}
+# 匹配修正（P3b）同时只允许一个任务：非阻塞 acquire，占用中再提交返回 409
+_recheck_lock = threading.Lock()
 # 上传暂存表 {staged_id: {...}}：/preview 落盘的上传件，供 /filter 复用（用户调整字段后
 # 不必重新上传）。与 TASKS 同锁同 TTL、同归属校验（非创建者且非超管一律 404）。
 STAGES = {}
@@ -313,6 +315,11 @@ def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=N
                                       "target": hit["target"], "status": "confirmed",
                                       "source": "confirmed"})
                 continue
+            hit_remap = store.lookup_remap(h) if store is not None else None
+            if hit_remap is not None:
+                # 待重映射（P4）：用户曾翻转保留但目标未定 → 临时保留，交管理员重映射
+                decide[i] = (True, "", "remap_keep")
+                continue
             if hf in keep_fold:
                 # 名单内同名字段直接保留：那是用户点名要的列，不把判断权交给模型
                 # （模型偶发返回空值时会让用户"明明开着却被删"，与硬过滤口径也不一致）
@@ -336,7 +343,27 @@ def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=N
         miss_names = list(dict.fromkeys(
             headers[i] for i in range(len(headers)) if decide[i] is None))
         if miss_names:
-            mappings = llm_client.match_columns(miss_names, keep_columns, session=session)
+            # 样本值注入（P4）：每个未命中表头取前 3 个非空单元格内容，辅助语义判断
+            samples = {}
+            if rows:
+                col_of = {}
+                for i, h in enumerate(headers):
+                    col_of.setdefault(h, i)
+                for name in miss_names:
+                    col = col_of.get(name)
+                    if col is None:
+                        continue
+                    vals = []
+                    for r in rows:
+                        s = core.cell_to_str(r[col] if col < len(r) else None).strip()
+                        if s:
+                            vals.append(s[:20])
+                        if len(vals) >= 3:
+                            break
+                    if vals:
+                        samples[name] = vals
+            mappings = llm_client.match_columns(miss_names, keep_columns, session=session,
+                                                samples=samples or None)
             llm_used = True
             model = (getattr(session, "provider", {}) or {}).get("model") \
                 if session is not None else ""
@@ -428,12 +455,13 @@ def build_preview(headers, rows, keep_columns, post_rules, store=None):
         keep = bool(matched)
         match = None
         if store is not None and name:
-            # 缓存预填：已确认优先，其次建议（与 run_filter 的管线顺序一致——
-            # confirmed 压过名单内同名；预填结果只进前端徽标/预填，不改 keep/matched 口径）
-            hit = store.lookup(name, valid_targets, include_suggested=True, tiers="confirmed") \
+            # 缓存预填：待重映射 → 已确认 → 建议（与 run_filter 管线顺序一致——
+            # remap 临时保留压过名单内同名；预填结果只进前端徽标/预填，不改 keep/matched 口径）
+            hit = store.lookup_remap(name) \
+                or store.lookup(name, valid_targets, include_suggested=True, tiers="confirmed") \
                 or store.lookup(name, valid_targets, include_suggested=True, tiers="suggested")
             if hit is not None:
-                match = {"target": hit["target"], "status": hit["status"]}
+                match = {"target": hit.get("target", ""), "status": hit["status"]}
         new_header, count = post[i]
         if keep:
             n_keep += 1
@@ -505,6 +533,45 @@ def _mapping_valid_targets():
 def _mapping_limit():
     """自动建议条目上限（管理员可配，load_config 已夹紧 100~100000）。"""
     return load_config()["mapping_limit"]
+
+
+def _run_recheck_task(task_id, pairs, keep, valid_targets, session, username):
+    """后台执行匹配修正（P3b）：分批重判 → 写回建议级 → 产出 diff（§8.2）。
+
+    占用 _recheck_lock 直到结束（POST 侧 acquire 后交给本任务释放）。
+    session 由请求线程 resolve 后传入（线程纪律同过滤任务）。
+    """
+    try:
+        set_task(task_id, status="running")
+        model = (getattr(session, "provider", {}) or {}).get("model") or ""
+        batch = llm_client.RECHECK_BATCH_SIZE
+        judged = {}
+        for i in range(0, len(pairs), batch):
+            chunk = pairs[i:i + batch]
+            res = llm_client.recheck_mappings(chunk, keep, session=session)
+            judged.update(res)
+            set_task(task_id, processed=min(i + batch, len(pairs)))
+        outcomes = MAPPINGS.apply_recheck(
+            [{"key": p["key"], "new_target": judged.get(p["key"], p["old_target"])}
+             for p in pairs],
+            valid_targets, model=model, prompt_ver=llm_client.RECHECK_PROMPT_VER,
+            user=username)
+        diffs = []
+        for p in pairs:
+            entry = MAPPINGS.get_entry(p["key"])
+            new_target = entry["target"] if entry else p["old_target"]
+            if mapping_store.norm_key(new_target) != mapping_store.norm_key(p["old_target"]):
+                diffs.append({"key": p["key"], "sample": p["sample"],
+                              "old_target": p["old_target"], "new_target": new_target})
+        set_task(task_id, status="done", diffs=diffs, processed=len(pairs),
+                 outcomes=outcomes)
+    except llm_client.LLMError as e:
+        set_task(task_id, status="error", detail=f"匹配修正失败：{e}")
+    except Exception as e:  # SEC-5：不透出堆栈与路径；异常消息截断供排障（如 KeyError 键名）
+        set_task(task_id, status="error",
+                 detail=f"匹配修正失败（{type(e).__name__}: {e}）"[:300])
+    finally:
+        _recheck_lock.release()
 
 
 def _run_filter_task(task_id, in_path, in_ext, out_path, out_ext, mode, keep, post_rules,
@@ -687,10 +754,18 @@ def register(app):
             return jsonify({"error": "仅管理员可查看字段映射"}), 403
         status = (request.args.get("status") or "").strip() or None
         q = (request.args.get("q") or "").strip() or None
+        all_rows = MAPPINGS.list_entries(_mapping_valid_targets())
+        governance = {
+            "auto_promoted": sum(1 for e in all_rows if e["confirmed_by"] == "加权转正"),
+            "revising": sum(1 for e in all_rows
+                            if e.get("dissent_by") and e["status"] == "suggested"),
+            "flipped": sum(1 for e in all_rows if e.get("flips", 0) > 0),
+        }
         return jsonify({
             "ok": True,
             "entries": MAPPINGS.list_entries(_mapping_valid_targets(), status=status, q=q),
             "stats": MAPPINGS.stats(),
+            "governance": governance,
             "keep_columns": load_config()["keep_columns"],
             "limit": _mapping_limit(),
             "count": MAPPINGS.count(),
@@ -767,6 +842,117 @@ def register(app):
             w.writerow([r["header"], r["target"], r["status"]])
         return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")), as_attachment=True,
                          download_name=f"mappings_golden_{stamp}.csv", mimetype="text/csv")
+
+    @app.post(f"{API_PREFIX}/mappings/remap")
+    def ff_mappings_remap():
+        """删除→保留翻转（P4）：条目转「待重映射」——目标待定，管线临时保留，
+        进失配分组交管理员经匹配修正重映射后最终确定。"""
+        user = _viewer()
+        if user is None:
+            return jsonify({"error": "未登录"}), 401
+        data = request.get_json(silent=True) or {}
+        key = str(data.get("key") or "")
+        if not mapping_store.norm_key(key):
+            return jsonify({"error": "key 不能为空"}), 400
+        if not MAPPINGS.flip_to_remap(key, user=user.get("username") or ""):
+            return jsonify({"error": "映射不存在或已确认，无法转入待重映射"}), 409
+        _set_operation("标记映射待重映射")
+        return jsonify({"ok": True})
+
+    @app.post(f"{API_PREFIX}/mappings/vote")
+    def ff_mappings_vote():
+        """加权计票（P4）：被动采纳项逐条 +1 票（建议级，达判据自动转正）；
+        带 `dissent: true` 的项为非管理员对已确认映射的异议 → 降级重议（决策 11）。
+        管理员的改指/否决不走此路径（前端按 can_manage 分流，立即生效）。"""
+        user = _viewer()
+        if user is None:
+            return jsonify({"error": "未登录"}), 401
+        data = request.get_json(silent=True) or {}
+        items = data.get("items") if isinstance(data.get("items"), list) else []
+        passive, dissents = [], []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            (dissents if item.get("dissent") else passive).append(item)
+        res = MAPPINGS.record_passive_votes(passive, user=user.get("username") or "")
+        dissented = 0
+        for item in dissents:
+            if MAPPINGS.dissent(item.get("key"), item.get("dir"),
+                                user=user.get("username") or ""):
+                dissented += 1
+        _set_operation("映射加权计票")
+        return jsonify({"ok": True, "voted": res["voted"],
+                        "promoted": res["promoted"], "outcomes": res["outcomes"],
+                        "dissented": dissented})
+
+    @app.post(f"{API_PREFIX}/mappings/recheck")
+    def ff_mappings_recheck():
+        """匹配修正（P3b/P4，管理员）：把条目分批交 LLM 重判，产出 diff 供采纳。
+
+        范围（P4 校准，回归"失配驱动"初衷）：缺省 `mismatch` = 失配条目（名单变更
+        orphan suggested + 待重映射 remap）；`all_suggested` 可选扩展为全部建议级。
+        **已确认条目一律不动**（决策 ⑥）。新结果由后台写回（apply_recheck，remap
+        提出目标后转回建议级），diff 经 GET /mappings/recheck/<task_id> 轮询，
+        采纳走既有 confirm 接口升级。
+        """
+        if not _can_manage(_viewer()):
+            return jsonify({"error": "仅管理员可执行匹配修正"}), 403
+        # session 必须在请求线程内解析（后台线程读不到会话），见 jz_llm 线程纪律
+        session = jz_llm.resolve(PLUGIN_ID)
+        if not session.configured():
+            return jsonify({"error": session.reason or "大模型未配置，无法执行匹配修正"}), 400
+        data = request.get_json(silent=True) or {}
+        scope = data.get("scope") or "mismatch"
+        if scope not in ("mismatch", "all_suggested"):
+            return jsonify({"error": "scope 仅支持 mismatch / all_suggested"}), 400
+        if not _recheck_lock.acquire(False):
+            return jsonify({"error": "已有匹配修正任务进行中，请稍候"}), 409
+        try:
+            valid_targets = _mapping_valid_targets()
+            if scope == "mismatch":
+                # 失配 = 名单变更导致的 orphan（建议级 + 已确认，决策 10 扩展）+ 待重映射 remap
+                entries = MAPPINGS.list_entries(valid_targets, status="orphan")
+                entries += MAPPINGS.list_entries(valid_targets, status="remap")
+            else:
+                entries = MAPPINGS.list_entries(valid_targets, status="suggested")
+                entries += MAPPINGS.list_entries(valid_targets, status="remap")
+            if not entries:
+                _recheck_lock.release()  # 提前返回必须放锁（否则锁泄漏，后续提交全部 409）
+                return jsonify({"error": "没有可复核的条目（已确认条目不在范围；"
+                                         "可改用 scope=all_suggested 复核全部建议级）"}), 400
+            keep = load_config()["keep_columns"]
+            user = _viewer()
+            task_id = create_task(user)
+            set_task(task_id, type="recheck", status="pending",
+                     total=len(entries), processed=0)
+            pairs = [{"key": e["key"], "sample": e["sample"], "old_target": e["target"]}
+                     for e in entries]
+            _executor.submit(_run_recheck_task, task_id, pairs, keep, valid_targets,
+                             session, (user or {}).get("username") or "")
+            _set_operation("启动映射匹配修正")
+            return jsonify({"ok": True, "task_id": task_id, "total": len(entries)})
+        except Exception:
+            _recheck_lock.release()  # 提交失败路径；成功提交后由 _run_recheck_task 释放
+            raise
+
+    @app.get(f"{API_PREFIX}/mappings/recheck/<task_id>")
+    def ff_mappings_recheck_result(task_id):
+        if not _can_manage(_viewer()):
+            return jsonify({"error": "仅管理员可查看匹配修正结果"}), 403
+        if not TASK_ID_RE.match(task_id or ""):
+            return jsonify({"error": "非法任务 ID"}), 400
+        task = get_task(task_id)
+        if not task or task.get("type") != "recheck" or not _task_owned_by(task, _viewer()):
+            return jsonify({"error": "任务不存在或已过期"}), 404
+        payload = {"task_id": task_id, "status": task.get("status"),
+                   "processed": task.get("processed") or 0,
+                   "total": task.get("total") or 0}
+        if task.get("status") == "done":
+            payload["diffs"] = task.get("diffs") or []
+            payload["outcomes"] = task.get("outcomes") or {}
+        elif task.get("status") == "error":
+            payload["detail"] = task.get("detail") or "匹配修正失败"
+        return jsonify(payload)
 
     @app.post(f"{API_PREFIX}/preview")
     def ff_preview():
@@ -847,7 +1033,9 @@ def register(app):
                                 "code": "staged_expired"}), 404
             orig, ext = stage["original_name"], stage["ext"]
 
-        mode = (request.form.get("mode") or "hard").strip()
+        # v1.5：不再提供过滤模式选择——默认双重过滤（精确 → 学习记忆/大模型）；
+        # 大模型不可用时自动降级为仅精确匹配，降级原因随任务结果提示（degraded）。
+        mode = (request.form.get("mode") or "llm").strip()
         columns_raw, columns_given = _form_list(request.form.get("columns"))
         exclude_raw, _ = _form_list(request.form.get("exclude"))
         if columns_given and not columns_raw:
@@ -859,8 +1047,10 @@ def register(app):
             return jsonify({"error": "保留字段名单为空：请勾选保留字段或联系管理员配置"}), 400
         # 必须在请求线程内解析（后台线程读不到会话），见 jz_llm 模块头部的线程纪律
         session = jz_llm.resolve(PLUGIN_ID)
+        degraded = ""
         if mode == "llm" and not session.configured():
-            return jsonify({"error": session.reason or "大模型未配置，无法使用大模型过滤"}), 400
+            mode = "hard"
+            degraded = session.reason or "大模型未配置"
 
         task_id = create_task(user)
         cleanup_tasks()
@@ -881,7 +1071,7 @@ def register(app):
         post_enabled = _flag(request.form.get("post_process"), True)
         post_rules = cfg["post_rules"] if post_enabled else []
         set_task(task_id, output_ext=out_ext, original_name=orig, sanitize=sanitize,
-                 post_enabled=post_enabled)
+                 post_enabled=post_enabled, degraded=degraded)
         _executor.submit(_run_filter_task, task_id, in_path, ext, out_path, out_ext,
                          mode, keep, post_rules, session, exclude_raw)
         _set_operation("提交表格过滤任务")
@@ -916,6 +1106,9 @@ def register(app):
             })
         elif task.get("status") == "error":
             payload["detail"] = task.get("detail") or "过滤失败"
+        if task.get("degraded"):
+            payload["degraded"] = True
+            payload["degraded_reason"] = task.get("degraded") or ""
         return jsonify(payload)
 
     @app.get(f"{API_PREFIX}/download/<task_id>")

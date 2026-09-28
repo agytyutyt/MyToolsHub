@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="590" viewBox="0 0 1300 590" font-family="Microsoft YaHei, PingFang SC, sans-serif">
+<rect width="1300" height="590" fill="#FAFAFA"/>
+<defs><marker id="arw" markerWidth="9" markerHeight="9" refX="7" refY="3.5" orient="auto"><path d="M0,0 L8,3.5 L0,7 Z" fill="#546E7A"/></marker></defs>
+<text x="650" y="42" text-anchor="middle" font-size="20" font-weight="bold" fill="#263238">自学习记忆机制（怎么学 · 怎么存 · 怎么转正 · 怎么复用）</text>
+<text x="650" y="66" text-anchor="middle" font-size="13" fill="#607D8B">两级信任：已确认（用户把关）＞ 模型建议（LLM 判定）——用户只做「保留 / 删除」二选一</text>
+<text x="70" y="112" font-size="13" font-weight="bold" fill="#00695C">逐档判定（命中即出结果，未命中落到下一档）</text>
+<rect x="70" y="126" width="250" height="64" rx="9" fill="#E8F5E9" stroke="#388E3C" stroke-width="1.6"/>
+<text x="195" y="147" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">① 名单精确同名</text>
+<text x="195" y="164" text-anchor="middle" font-size="12" fill="#455A64">规整后忽略大小写</text>
+<rect x="365" y="126" width="250" height="64" rx="9" fill="#E0F2F1" stroke="#00695C" stroke-width="1.6"/>
+<text x="490" y="147" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">② 记忆·已确认</text>
+<text x="490" y="164" text-anchor="middle" font-size="12" fill="#455A64">主键 → 压缩键；含确认删除</text>
+<rect x="660" y="126" width="250" height="64" rx="9" fill="#E0F2F1" stroke="#00695C" stroke-width="1.6"/>
+<text x="785" y="147" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">③ 记忆·建议</text>
+<text x="785" y="164" text-anchor="middle" font-size="12" fill="#455A64">带票数（keep/drop）</text>
+<rect x="955" y="126" width="250" height="64" rx="9" fill="#F3E5F5" stroke="#7B1FA2" stroke-width="1.6"/>
+<text x="1080" y="147" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">④ LLM 语义判定</text>
+<text x="1080" y="164" text-anchor="middle" font-size="12" fill="#455A64">注入每列 3 个样本值</text>
+<path d="M320,158 L365,158" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="342" y="152" font-size="11" fill="#455A64">未命中</text>
+<path d="M615,158 L660,158" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="637" y="152" font-size="11" fill="#455A64">未命中</text>
+<path d="M910,158 L955,158" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="932" y="152" font-size="11" fill="#455A64">未命中</text>
+<text x="1080" y="216" font-size="11" fill="#78909C">判定即结果（来源可追溯）</text>
+<path d="M1080,190 L1080,206" fill="none" stroke="#546E7A" stroke-width="1.6" stroke-dasharray="6,4" marker-end="url(#arw)"/>
+<rect x="660" y="240" width="250" height="78" rx="9" fill="#FFF3E0" stroke="#EF6C00" stroke-width="1.6"/>
+<text x="785" y="261" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">用户最终确认</text>
+<text x="785" y="278" text-anchor="middle" font-size="12" fill="#455A64">（保留 / 删除二选一切换）</text>
+<text x="785" y="295" text-anchor="middle" font-size="12" fill="#455A64">防 LLM 误判：确认前不下载</text>
+<path d="M1080,190 L1080,226 L910,226 L910,240" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="920" y="214" font-size="11" fill="#455A64">proposal 提案</text>
+<path d="M785,240 L785,190" fill="none" stroke="#546E7A" stroke-width="1.6" stroke-dasharray="6,4" marker-end="url(#arw)"/>
+<text x="795" y="208" font-size="11" fill="#455A64">确认后下次直接命中 ②</text>
+<rect x="70" y="240" width="250" height="260" rx="9" fill="#E8F5E9" stroke="#388E3C" stroke-width="1.6"/>
+<text x="195" y="261" text-anchor="middle" font-size="13" font-weight="bold" fill="#263238">记忆 mappings.json</text>
+<rect x="88" y="296" width="214" height="34" rx="6" fill="#FFFFFF" stroke="#A7D8D0"/>
+<text x="195" y="310" text-anchor="middle" font-size="11.5" fill="#263238">confirmed 已确认</text>
+<text x="195" y="324" text-anchor="middle" font-size="10.5" fill="#78909C">显式 ✓ / 加权转正 / 负映射</text>
+<rect x="88" y="336" width="214" height="34" rx="6" fill="#FFFFFF" stroke="#A7D8D0"/>
+<text x="195" y="350" text-anchor="middle" font-size="11.5" fill="#263238">suggested 模型建议</text>
+<text x="195" y="364" text-anchor="middle" font-size="10.5" fill="#78909C">积累 keep/drop 票数</text>
+<rect x="88" y="376" width="214" height="34" rx="6" fill="#FFFFFF" stroke="#A7D8D0"/>
+<text x="195" y="390" text-anchor="middle" font-size="11.5" fill="#263238">remap 待重映射</text>
+<text x="195" y="404" text-anchor="middle" font-size="10.5" fill="#78909C">翻转为保留但目标未定</text>
+<rect x="88" y="416" width="214" height="34" rx="6" fill="#FFFFFF" stroke="#A7D8D0"/>
+<text x="195" y="430" text-anchor="middle" font-size="11.5" fill="#263238">rejected 拦截表</text>
+<text x="195" y="444" text-anchor="middle" font-size="10.5" fill="#78909C">被否决的对，防同错回锅</text>
+<path d="M70,300 L40,300 L40,158 L70,158" fill="none" stroke="#546E7A" stroke-width="1.6" stroke-dasharray="6,4" marker-end="url(#arw)"/>
+<text x="2" y="234" font-size="11" fill="#455A64">下次过滤直接查记忆（不再问 LLM）</text>
+<path d="M785,318 L320,318" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="552" y="312" font-size="11" fill="#455A64">四种落点</text>
+<text x="330" y="336" font-size="11.5" fill="#455A64">采纳保留 → confirmed（keep 票+1）</text>
+<text x="330" y="354" font-size="11.5" fill="#455A64">采纳删除 → 确认删除（drop 票+1）</text>
+<text x="330" y="372" font-size="11.5" fill="#455A64">翻转改删 → rejected 拦截 + 负映射</text>
+<text x="330" y="390" font-size="11.5" fill="#455A64">翻转改留 → 转 remap 待重映射</text>
+<rect x="365" y="452" width="250" height="78" rx="9" fill="#E0F2F1" stroke="#00695C" stroke-width="1.6"/>
+<text x="490" y="473" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">加权转正</text>
+<text x="490" y="490" text-anchor="middle" font-size="12" fill="#455A64">同向 ≥5 票且零翻转</text>
+<text x="490" y="507" text-anchor="middle" font-size="12" fill="#455A64">建议级自动升级已确认</text>
+<text x="490" y="524" text-anchor="middle" font-size="12" fill="#455A64">（删除/改指即推翻）</text>
+<path d="M490,452 L490,500 L195,500 L195,368" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="195" y="428" font-size="11" fill="#455A64">计票触发评估</text>
+<path d="M615,491 L660,491 L660,318" fill="none" stroke="#546E7A" stroke-width="1.6" marker-end="url(#arw)"/>
+<text x="660" y="398" font-size="11" fill="#455A64">转正后退出确认块</text>
+<rect x="955" y="300" width="280" height="118" rx="9" fill="#E0F2F1" stroke="#00695C" stroke-width="1.6"/>
+<text x="1095" y="321" text-anchor="middle" font-size="14" font-weight="bold" fill="#263238">管理员维护（匹配修正）</text>
+<text x="1095" y="338" text-anchor="middle" font-size="12" fill="#455A64">范围 = 失配：名单变更 + 待重映射</text>
+<text x="1095" y="355" text-anchor="middle" font-size="12" fill="#455A64">→ 分批交 LLM 重匹配（可扩展全部建议级）</text>
+<text x="1095" y="372" text-anchor="middle" font-size="12" fill="#455A64">→ diff 反馈管理员 → 采纳 → confirmed</text>
+<text x="1095" y="389" text-anchor="middle" font-size="12" fill="#455A64">改指 / 删除 / 清空 / 导出评测集</text>
+<path d="M955,418 L345,418 L345,400" fill="none" stroke="#546E7A" stroke-width="1.6" stroke-dasharray="6,4" marker-end="url(#arw)"/>
+<text x="560" y="426" font-size="11" fill="#455A64">重匹配后写回</text>
+<text x="955" y="446" font-size="11" fill="#78909C">「待重映射」来源：用户把建议删除的列翻转为保留（未指目标）</text>
+</svg>

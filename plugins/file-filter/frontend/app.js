@@ -21,6 +21,7 @@
     config: null,        // {keep_columns, post_rules, can_manage, llm_configured, llm_reason}
     preview: null,       // /preview 响应（staged_id / columns / summary / post_rules / sanitize）
     chips: [],           // 识别到的列（可点击切换）：见 buildChips
+    confirmItems: [],    // 最终确认项（P3a）：见 buildConfirmItems
     taskTimer: null,
   };
 
@@ -126,8 +127,7 @@
     fd.append("file", state.file);
     fetchJSON(API + "/preview", { method: "POST", body: fd }).then(function (data) {
       state.preview = data;
-      state.chips = buildChips(data.columns || []);
-      applyModePrefill();          // 上传预填按当前模式：mode 停在大模型档时直接吃缓存预判
+      state.chips = buildChips(data.columns || []);   // 预填已在 buildChips 内按双重过滤口径完成
       renderPreview();
       renderPostRules(data.post_rules);
       $("filterBtn").disabled = false;
@@ -145,14 +145,16 @@
       counts[k] = (counts[k] || 0) + 1;
     });
     return columns.map(function (c) {
+      var dbl = !!(state.config && state.config.llm_configured);
       return {
         index: c.index,
         name: c.name,
         key: nameKey(c.name),
-        keep: !!c.keep,                       // 硬过滤预判：名单里有同名 → 保留
-        hardKeep: !!c.keep,                   // 硬过滤口径的预判（模式切换回填用）
+        // 双重过滤预填：大模型可用时按映射缓存预填（待重映射=临时保留；负映射=删），否则仅精确同名
+        keep: (dbl && c.match) ? (c.match.status === "remap" ? true : c.match.target !== "") : !!c.keep,
+        hardKeep: !!c.keep,                   // 精确口径的预判（降级提示与审计用）
         match: c.match || null,               // 映射缓存预填：{target, status} | null
-        touched: false,                       // 用户手动点过 → 模式切换不再改它的预判
+        touched: false,                       // 用户手动点过 → 不再被程序改预判
         matched: c.matched || "",
         postName: c.post_name || c.name,      // 后处理规则预演后的表头
         replaceCount: c.replace_count || 0,   // 该列预计替换处数（仅保留的列计入合计）
@@ -221,11 +223,26 @@
     return chip;
   }
 
-  // 来源徽标：映射缓存只在大模型模式下参与判定，硬过滤口径下显示反而误导
+  // 来源徽标：大模型不可用（降级为仅精确匹配）时，记忆建议不参与判定，只显示精确徽标
   function chipBadge(c) {
-    if (currentMode() !== "llm") return null;
+    var dbl = !!(state.config && state.config.llm_configured);
+    if (!dbl) {
+      if (!c.matched) return null;
+      var x = document.createElement("span");
+      x.className = "src exact";
+      x.textContent = "精确";
+      x.title = "与保留名单字段同名";
+      return x;
+    }
     if (c.match) {
       var confirmed = c.match.status === "confirmed";
+      if (c.match.status === "remap") {
+        var rm = document.createElement("span");
+        rm.className = "src remap";
+        rm.textContent = "待重映射";
+        rm.title = "用户判定保留但目标未定：本次临时保留，管理员重映射后定目标";
+        return rm;
+      }
       if (c.match.target) {
         var b = document.createElement("span");
         b.className = "src " + (confirmed ? "confirmed" : "suggested");
@@ -254,6 +271,9 @@
 
   function chipTitle(c) {
     if (!c.keep) return "删除 — 点击改为保留";
+    if (c.match && c.match.status === "remap") {
+      return "待重映射（临时保留，管理员重映射中）— 点击改为删除";
+    }
     if (c.match && c.match.target) {
       return (c.match.status === "confirmed" ? "已确认映射「" : "模型建议「") + c.name
         + "」→「" + c.match.target + "」— 点击改为删除";
@@ -264,14 +284,14 @@
   }
 
   function previewHint() {
-    var mode = currentMode();
     var parts = [];
-    if (mode === "llm") {
-      parts.push("点击字段可切换保留 / 删除。带「已确认 / 模型建议 / 确认删 / 建议删」徽标的字段"
-        + "按学习记忆预填了判定（悬停可看映射目标）；画删除线的字段若与保留字段语义相关"
-        + "仍会被保留，你手动点开的字段一定保留。");
+    if (state.config && state.config.llm_configured) {
+      parts.push("双重过滤：点击字段可切换保留 / 删除。带「已确认 / 模型建议 / 确认删 / 建议删」"
+        + "徽标的字段按学习记忆预填了判定（悬停可看映射目标）；画删除线的字段若与保留字段"
+        + "语义相关仍会被保留，你手动点开的字段一定保留。");
     } else {
-      parts.push("点击字段可切换保留 / 删除：画删除线的字段会被删除，其余保留。");
+      parts.push("大模型未配置：本次仅按保留字段名单精确匹配（画删除线的字段将被删除），"
+        + "点击字段可切换。");
     }
     if (state.chips.some(function (c) { return c.dup && c.dupCount > 1; })) {
       parts.push("同名重复列（×N）会一起保留 / 删除。");
@@ -288,21 +308,6 @@
       if (c.key === key) { c.keep = !anyOn; c.touched = true; }
     });
     renderPreview();
-  }
-
-  // 模式切换时回填预判：硬过滤只认名单内同名；大模型模式吃映射缓存（已确认/建议级，
-  // 含负映射「确认删/建议删」）。用户手动点过的胶囊（touched）不回填，尊重用户决定。
-  function applyModePrefill() {
-    var llm = currentMode() === "llm";
-    state.chips.forEach(function (c) {
-      if (c.locked || c.touched) return;
-      c.keep = llm ? (c.match ? c.match.target !== "" : c.hardKeep) : c.hardKeep;
-    });
-  }
-
-  function currentMode() {
-    var el = document.querySelector('input[name="mode"]:checked');
-    return el ? el.value : "hard";
   }
 
   function selectedColumns() {
@@ -395,34 +400,43 @@
   function bindActions() {
     bindPostToggle();
     $("filterBtn").addEventListener("click", submitFilter);
+    $("confirmBtn").addEventListener("click", confirmAndDownload);
     $("resetBtn").addEventListener("click", function () {
       clearFile();
       setStatus("");
     });
-    document.querySelectorAll('input[name="mode"]').forEach(function (el) {
-      el.addEventListener("change", function () {
-        applyModePrefill();                    // 预判口径随模式变：回填缓存预判 + 重写提示文案
-        renderPreview();
-        if (el.value === "llm" && state.config && !state.config.llm_configured) {
-          setStatus("提示：" + (state.config.llm_reason || "大模型未配置"), true);
-        } else {
-          setStatus("");
-        }
-      });
-    });
   }
 
-  function submitFilter() {
+  function submitFilter(opts) {
     if (!state.file) return;
-    var mode = currentMode();
-    if (mode === "llm" && state.config && !state.config.llm_configured) {
-      setStatus(state.config.llm_reason || "大模型未配置，无法使用大模型过滤", true);
-      return;
-    }
     var picked = selectedColumns();
     if (!picked.on.length) {
       setStatus("请至少保留一个字段：点击字段胶囊可切换保留 / 删除", true);
       return;
+    }
+    // 名单内字段被手动点掉（决策 ⑦ 提示）：本次按用户决定删除，但名单与记忆不受影响
+    var keepFold = {};
+    ((state.config && state.config.keep_columns) || []).forEach(function (n) {
+      keepFold[nameKey(n)] = 1;
+    });
+    var inListOff = picked.off.filter(function (n) { return keepFold[nameKey(n)]; });
+    if (inListOff.length && !(opts && opts.skipListWarning) && !window.confirm("字段 "
+        + inListOff.map(function (n) { return "「" + n + "」"; }).join("、")
+        + " 在保留字段名单中，本次将按您的选择删除（仅对本次文件生效，名单与学习记忆不受影响）。继续吗？")) {
+      return;
+    }
+    // 待重映射列被手动点掉（P4 收尾）：计一张 drop 票——连续 5 票集体定论为删除
+    // （按用户去重；当前文件仍按用户决定删除，remap 保留态由票数决定是否推翻）
+    var remapDrops = [];
+    state.chips.forEach(function (c) {
+      if (c.touched && !c.keep && c.match && c.match.status === "remap") {
+        remapDrops.push({ key: c.key, dir: "drop" });
+      }
+    });
+    if (remapDrops.length) {
+      fetchJSON(API + "/mappings/vote", {
+        method: "POST", body: JSON.stringify({ items: remapDrops }),
+      }).catch(function () { /* 计票失败不影响本次过滤 */ });
     }
     var fd = new FormData();
     if (state.preview && state.preview.staged_id) {
@@ -430,7 +444,6 @@
     } else {
       fd.append("file", state.file);
     }
-    fd.append("mode", mode);
     fd.append("columns", JSON.stringify(picked.on));
     if (picked.off.length) fd.append("exclude", JSON.stringify(picked.off));
     fd.append("post_process", $("postToggle").checked ? "1" : "0");
@@ -497,9 +510,204 @@
 
   function resetResult() {
     if (state.taskTimer) clearTimeout(state.taskTimer);
+    state.confirmItems = [];
     $("resultCard").classList.add("hidden");
     $("resultEmpty").classList.remove("hidden");
     $("downloadBtn").classList.add("hidden");
+  }
+
+  // ===================== 最终确认（P3a：只拦建议级判定） =====================
+
+  var VERIFIED_SOURCES = { exact: 1, confirmed: 1, confirmed_drop: 1, remap_keep: 1,
+                           excluded: 1, empty: 1, hard_unmatched: 1 };
+
+  // 把任务结果折算成逐列确认项：verified（精确/已确认/用户点掉等）直通，
+  // llm/llm_drop/suggested/suggested_drop 为 proposal，需用户把关。
+  function buildConfirmItems(task) {
+    var used = {};
+    (task.mappings_used || []).forEach(function (m) {
+      used[m.key] = m;
+      if (m.sample) used[m.sample] = m;
+    });
+    function lookup(column) {
+      return used[column] || used[nameKey(column)] || null;
+    }
+    var items = [];
+    (task.kept || []).forEach(function (k) {
+      var m = lookup(k.column);
+      items.push({
+        column: k.column,
+        key: m ? m.key : nameKey(k.column),
+        sample: m ? (m.sample || k.column) : k.column,
+        target: (k.source === "llm" || k.source === "suggested") ? (k.matched || "") : "",
+        source: k.source,
+        original: "keep", decision: "keep", newTarget: "",
+        verified: !!VERIFIED_SOURCES[k.source],
+      });
+    });
+    (task.removed_detail || []).forEach(function (d) {
+      var m = lookup(d.column);
+      items.push({
+        column: d.column,
+        key: m ? m.key : nameKey(d.column),
+        sample: m ? (m.sample || d.column) : d.column,
+        target: "",                            // 被删除的列无需目标；改留时由用户选 newTarget
+        source: d.source,
+        original: "drop", decision: "drop", newTarget: "",
+        verified: !!VERIFIED_SOURCES[d.source],
+      });
+    });
+    return items;
+  }
+
+  function renderConfirmBox() {
+    var box = $("confirmBox");
+    var items = state.confirmItems || [];
+    var need = items.some(function (i) { return !i.verified; });
+    if (!need) {
+      box.classList.add("hidden");
+      return false;
+    }
+    box.classList.remove("hidden");
+    renderConfirmChips($("confirmKeepChips"), items.filter(function (i) {
+      return i.decision === "keep";
+    }), "点击改为删除");
+    renderConfirmChips($("confirmDropChips"), items.filter(function (i) {
+      return i.decision === "drop";
+    }), "点击改为保留");
+    $("confirmBtn").disabled = false;
+    $("confirmTip").textContent = "";
+    return true;
+  }
+
+  function renderConfirmChips(box, items, flipHint) {
+    box.innerHTML = "";
+    if (!items.length) {
+      var p = document.createElement("p");
+      p.className = "muted";
+      p.textContent = "无";
+      box.appendChild(p);
+      return;
+    }
+    items.forEach(function (it) {
+      var chip = document.createElement("span");
+      chip.className = "chip" + (it.decision === "keep" ? "" : " off");
+      chip.appendChild(document.createTextNode(it.column));
+      if (it.source === "llm" || it.source === "llm_drop") {
+        var b = document.createElement("span");
+        b.className = "src suggested";
+        b.textContent = it.decision === "keep" ? "模型建议" : "建议删";
+        chip.appendChild(b);
+      } else if (it.source === "suggested" || it.source === "suggested_drop") {
+        var s = document.createElement("span");
+        s.className = "src " + (it.decision === "keep" ? "suggested" : "drop");
+        s.textContent = it.decision === "keep" ? "模型建议" : "建议删";
+        chip.appendChild(s);
+      }
+      if (it.verified) {
+        chip.title = "已直接生效（" + sourceLabel(it.source) + "）";
+      } else {
+        chip.classList.add("toggle");
+        chip.title = flipHint;
+        chip.addEventListener("click", function () { flipConfirmItem(it); });
+      }
+      box.appendChild(chip);
+    });
+  }
+
+  function sourceLabel(s) {
+    return { exact: "名单内同名", confirmed: "已确认映射", confirmed_drop: "已确认删除",
+             remap_keep: "待重映射（管理员重映射中）",
+             excluded: "您手动点掉", empty: "未命名列", hard_unmatched: "未匹配名单" }[s] || s;
+  }
+
+  function flipConfirmItem(item) {
+    // 同名重复列同判：一起翻转
+    (state.confirmItems || []).forEach(function (i) {
+      if (i.key === item.key) i.decision = (i.decision === "keep") ? "drop" : "keep";
+    });
+    renderConfirmBox();
+  }
+
+  function confirmAndDownload() {
+    var items = state.confirmItems || [];
+    var proposals = items.filter(function (i) { return !i.verified; });
+    // ① 名单内删除提示（决策 ⑦：确认删除压过名单同名字段，需让操作员知道后果）
+    var keepFold = {};
+    ((state.config && state.config.keep_columns) || []).forEach(function (n) {
+      keepFold[nameKey(n)] = 1;
+    });
+    var inList = items.filter(function (i) {
+      return i.decision === "drop" && keepFold[nameKey(i.column)];
+    });
+    if (inList.length && !window.confirm("字段 "
+        + inList.map(function (i) { return "「" + i.column + "」"; }).join("、")
+        + " 在保留字段名单中。确认删除将写入学习记忆，后续文件持续生效并优先于名单"
+        + "（管理员可在映射记忆中恢复）。继续吗？")) {
+      return;
+    }
+    // ② 决策落库（P4 两种粒度）：
+    //    未翻转项 = 被动采纳 → 计票（同向 ≥5 票且零翻转自动转正）；
+    //    翻转项 = 显式动作 → 立即生效（改删=否决+负映射；改留=转待重映射，目标由管理员重映射确定）。
+    var votes = [], writes = [];
+    proposals.forEach(function (it) {
+      if (it.original === "keep" && it.decision === "keep") {
+        votes.push({ key: it.key, dir: "keep", sample: it.sample });
+      } else if (it.original === "drop" && it.decision === "drop") {
+        votes.push({ key: it.key, dir: "drop", sample: it.sample });
+      } else if (it.original === "keep" && it.decision === "drop") {
+        if (it.target) {
+          writes.push(fetchJSON(API + "/mappings/reject", {
+            method: "POST",
+            body: JSON.stringify({ key: it.key, target: it.target }),
+          }));
+        }
+        writes.push(confirmMappings([{ key: it.key, target: "", sample: it.sample }], false));
+      } else {  // 删除→保留翻转：转待重映射（不再强制用户选目标）
+        writes.push(fetchJSON(API + "/mappings/remap", {
+          method: "POST",
+          body: JSON.stringify({ key: it.key, sample: it.sample }),
+        }));
+      }
+    });
+    var adjusted = proposals.some(function (it) { return it.decision !== it.original; });
+    $("confirmBtn").disabled = true;
+    $("confirmTip").textContent = (writes.length + votes.length) ? "落库中…" : "";
+    Promise.all(writes).catch(function () { return null; })
+      .then(function () {
+        if (!votes.length) return { promoted: [] };
+        return fetchJSON(API + "/mappings/vote", {
+          method: "POST", body: JSON.stringify({ items: votes }),
+        }).catch(function () { return { promoted: [] }; });
+      })
+      .then(function (res) {
+        var promoted = ((res && res.promoted) || []).length;
+        var oc = (res && res.outcomes) || {};
+        if (!adjusted) {
+          $("confirmBox").classList.add("hidden");
+          $("downloadBtn").classList.remove("hidden");
+          if (promoted) {
+            setStatus("已确认：" + writes.length + " 条显式落库、" + votes.length
+              + " 条计票，其中 " + (oc.confirmed || 0) + " 条定论为已确认"
+              + ((oc.remap || 0) ? "、" + oc.remap + " 条定论转待重映射（管理员定目标）" : "") + "。");
+          } else {
+            setStatus("已确认：" + writes.length + " 条显式落库、" + votes.length
+              + " 条计票（累计同向 5 票后自动定论）。");
+          }
+          return;
+        }
+        // ③ 调整折算进预览胶囊（touched 语义），重跑——已落库，重跑命中缓存
+        // （名单内提示已在 ① 用"持续生效"措辞确认过，重跑不再重复弹）
+        items.forEach(function (it) {
+          if (it.verified || it.decision === it.original) return;
+          state.chips.forEach(function (c) {
+            if (c.locked || c.key !== nameKey(it.column)) return;
+            c.keep = (it.decision === "keep");
+            c.touched = true;
+          });
+        });
+        submitFilter({ skipListWarning: true });
+      });
   }
 
   function showResult(task) {
@@ -515,7 +723,14 @@
     addLine(stats, "删除字段：", String((task.removed || []).length) + " 个");
     addLine(stats, "后处理替换：", task.post_enabled === false
       ? "已关闭（本次不改写文本）" : String(task.replace_count || 0) + " 处");
-    if (task.llm_used) addLine(stats, "匹配方式：", "大模型语义匹配");
+    if (task.degraded) {
+      addLine(stats, "匹配方式：", "⚠️ 大模型未配置，已降级为仅精确匹配"
+        + (task.degraded_reason ? "（" + task.degraded_reason + "）" : ""));
+    } else if (task.llm_used) {
+      addLine(stats, "匹配方式：", "双重过滤（精确 + 大模型语义匹配）");
+    } else {
+      addLine(stats, "匹配方式：", "精确匹配 + 学习记忆（未调大模型）");
+    }
     if (task.sanitize && task.sanitize.note) {
       addLine(stats, "文档预处理：", task.sanitize.note);
     }
@@ -525,11 +740,14 @@
       return { column: c };
     }), false);
     renderReview(task);
+    state.confirmItems = buildConfirmItems(task);
+    var needConfirm = renderConfirmBox();
 
     var dl = $("downloadBtn");
     dl.href = task.download || "#";
     dl.setAttribute("download", (task.filename || "filtered") + "_已过滤." + (task.output_ext || "xlsx"));
-    if (task.download) dl.classList.remove("hidden");
+    // 有待把关的 proposal 判定时，先经「确认并下载」，防 LLM 误判静默落盘
+    if (task.download && !needConfirm) dl.classList.remove("hidden");
 
     var note = $("outNote");
     note.textContent = "";
@@ -588,6 +806,7 @@
   function buildReviewRow(m) {
     var row = document.createElement("div");
     row.className = "review-row";
+    var isAdmin = !!(state.config && state.config.can_manage);
 
     var label = document.createElement("span");
     label.className = "name";
@@ -610,18 +829,28 @@
       }));
     }
 
-    // 改指：换成名单里另一个字段（「建议删/确认删」的行也可借此改为保留）
+    // 改指：换成名单里另一个字段（「建议删/确认删」的行也可借此改为保留）。
+    // 对已确认映射的改指：管理员立即覆盖；非管理员 = 异议重议（计票，决策 11）。
     actions.appendChild(buildTargetSelect());
     actions.appendChild(mkAction("应用", function () {
       var sel = actions.querySelector("select");
       var t = sel ? sel.value : "";
       if (!t) return;
+      if (m.status === "confirmed" && !isAdmin) {
+        dissentVote(m, "keep", row);
+        return;
+      }
       applyReassign(row, m, t);
     }));
 
     if (m.target) {
-      // 否决映射对（对「删除」判定否决没有意义——想保留请用改指）
+      // 否决映射对（对「删除」判定否决没有意义——想保留请用改指）。
+      // 已确认映射的否决：管理员立即生效；非管理员 = 异议重议。
       actions.appendChild(mkAction("✕ 否决", function () {
+        if (m.status === "confirmed" && !isAdmin) {
+          dissentVote(m, "drop", row);
+          return;
+        }
         fetchJSON(API + "/mappings/reject", {
           method: "POST",
           body: JSON.stringify({ key: m.key, target: m.target }),
@@ -635,6 +864,39 @@
 
     row.appendChild(actions);
     return row;
+  }
+
+  // 非管理员对已确认映射的异议（P4 决策 11）：降级重议 + 计一票，不立即覆盖。
+  function dissentVote(m, direction, row) {
+    fetchJSON(API + "/mappings/vote", {
+      method: "POST",
+      body: JSON.stringify({ items: [{ key: m.key, dir: direction, dissent: true }] }),
+    }).then(function (res) {
+      if ((res.dissented || 0) < 1) {
+        setStatus("该映射已进入重议流程，无需重复提交。");
+        return;
+      }
+      m.status = "suggested";
+      if (row) {
+        var badge = row.querySelector(".badge");
+        badge.textContent = "模型建议";
+        badge.className = "badge warn";
+        badge.title = "重议中：有用户对已确认映射提出异议；连续同向 5 票后自动定论";
+        var actions = row.querySelector(".review-actions");
+        if (actions && !actions.querySelector(".reconfirm")) {
+          // 异议后补 ✓ 入口：提交人马上改主意时可直接重新确认
+          var re = mkAction("✓ 确认", function () {
+            confirmMappings([{ key: m.key, target: m.target, sample: m.sample }], false)
+              .then(function () { markReviewRow(row, m); })
+              .catch(function (err) { setStatus("确认失败：" + err.message, true); });
+          });
+          re.classList.add("reconfirm");
+          actions.insertBefore(re, actions.firstChild);
+        }
+      }
+      setStatus("已记录你的判断：「" + (m.sample || m.key) + "」进入重议"
+        + "（建议级）；后续使用与确认将决定最终走向，管理员可提前定论。");
+    }).catch(function (err) { setStatus("提交失败：" + err.message, true); });
   }
 
   function reviewLabel(m) {
@@ -731,6 +993,7 @@
     $("cfgKeepInput").addEventListener("keydown", function (e) {
       if (e.key === "Enter") { e.preventDefault(); addCfgKeep(); }
     });
+    $("cfgKeepFilter").addEventListener("input", renderCfgKeepChips);
     $("cfgKeepImport").addEventListener("click", function () { $("cfgKeepImportFile").click(); });
     $("cfgKeepImportFile").addEventListener("change", importKeepColumns);
     $("cfgRuleAdd").addEventListener("click", function () {
@@ -746,7 +1009,13 @@
   function renderCfgKeepChips() {
     var box = $("cfgKeepChips");
     box.innerHTML = "";
-    ((state.config && state.config.keep_columns) || []).forEach(function (name, idx) {
+    var all = (state.config && state.config.keep_columns) || [];
+    var filterEl = $("cfgKeepFilter");
+    var q = (filterEl ? filterEl.value : "").trim().toLowerCase();
+    var shown = 0;
+    all.forEach(function (name, idx) {
+      if (q && name.toLowerCase().indexOf(q) < 0) return;   // 实时筛选（idx 仍是原数组下标）
+      shown += 1;
       var chip = document.createElement("span");
       chip.className = "chip";
       chip.textContent = name;
@@ -761,11 +1030,18 @@
       chip.appendChild(x);
       box.appendChild(chip);
     });
-    if (!(state.config.keep_columns || []).length) {
+    $("cfgKeepCount").textContent = "共 " + all.length + " 个字段"
+      + (q ? "，匹配 " + shown + " 个" : "");
+    if (!all.length) {
       var p = document.createElement("p");
       p.className = "muted";
-      p.textContent = "暂无保留字段，请在下方添加。";
+      p.textContent = "暂无保留字段，请在下方添加或从表格导入。";
       box.appendChild(p);
+    } else if (!shown) {
+      var p2 = document.createElement("p");
+      p2.className = "muted";
+      p2.textContent = "没有匹配「" + q + "」的字段。";
+      box.appendChild(p2);
     }
   }
 
@@ -937,16 +1213,41 @@
     });
   }
 
-  // ===================== 映射记忆管理（管理员，P1） =====================
+  // ===================== 映射记忆管理（管理员，P1/P3b/P3c） =====================
+
+  var mapOpenNodes = new Set();                   // 保持展开状态（键 = kind:name）
+  var recheckDiffs = [];                          // 最近一次匹配修正的 diff
 
   function bindMappingsPanel() {
     $("mapRefresh").addEventListener("click", refreshMappings);
     $("mapClear").addEventListener("click", clearMappings);
-    $("mapStatus").addEventListener("change", refreshMappings);
     $("mapLimitSave").addEventListener("click", saveMappingLimit);
-    $("mapQ").addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); refreshMappings(); }
+    $("mapRecheck").addEventListener("click", startRecheck);
+    $("recheckAcceptAll").addEventListener("click", acceptAllRecheck);
+    $("recheckDismiss").addEventListener("click", function () {
+      $("recheckBox").classList.add("hidden");
     });
+    $("mapQ").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); renderMapAccord(); }
+    });
+    // 懒渲染：details 的 toggle 事件不冒泡，用捕获 phase 在容器上代理
+    $("mapAccord").addEventListener("toggle", function (e) {
+      var details = e.target;
+      if (details.tagName !== "DETAILS") return;
+      var key = details.dataset.kind + ":" + details.dataset.name;
+      if (details.open) {
+        mapOpenNodes.add(key);
+        if (!details.dataset.built) {
+          var node = findAccordNode(details.dataset.kind, details.dataset.name);
+          var q = $("mapQ").value.trim();
+          var visible = node ? nodeVisibleEntries(node, q) : [];
+          details.querySelector(".node-body").appendChild(buildNodeTable(node, visible));
+          details.dataset.built = "1";
+        }
+      } else {
+        mapOpenNodes.delete(key);
+      }
+    }, true);
     // 展开面板时重拉：页面加载时的快照不含本轮运行新产生的映射
     $("cfgCard").addEventListener("toggle", function () {
       if ($("cfgCard").open) refreshMappings();
@@ -968,31 +1269,183 @@
   }
 
   function refreshMappings() {
-    var status = $("mapStatus").value;
-    var q = $("mapQ").value.trim();
-    var qs = [];
-    if (status) qs.push("status=" + encodeURIComponent(status));
-    if (q) qs.push("q=" + encodeURIComponent(q));
-    fetchJSON(API + "/mappings" + (qs.length ? "?" + qs.join("&") : ""))
-      .then(renderMappings)
+    fetchJSON(API + "/mappings")
+      .then(function (data) {
+        state.mapEntries = data.entries || [];
+        state.mapKeep = data.keep_columns || [];
+        var st = data.stats || {};
+        var gov = data.governance || {};
+        $("mapStats").textContent = "大模型已调用 " + (st.llm_calls || 0)
+          + " 次，映射缓存替它省下 " + (st.llm_saved || 0) + " 次调用；已用 "
+          + (data.count != null ? data.count : state.mapEntries.length) + " / 上限 "
+          + (data.limit != null ? data.limit : "—") + " 条；治理：加权转正 "
+          + (gov.auto_promoted || 0) + " · 重议中 " + (gov.revising || 0)
+          + " · 有翻转 " + (gov.flipped || 0) + " 条。";
+        $("mapLimit").value = data.limit != null ? data.limit : "";
+        renderMapAccord();
+      })
       .catch(function (err) {
         $("mapStats").textContent = "映射记忆加载失败：" + err.message;
       });
   }
 
-  function renderMappings(data) {
-    var st = data.stats || {};
-    $("mapStats").textContent = "大模型已调用 " + (st.llm_calls || 0)
-      + " 次，映射缓存替它省下 " + (st.llm_saved || 0) + " 次调用；已用 "
-      + (data.count != null ? data.count : (data.entries || []).length) + " / 上限 "
-      + (data.limit != null ? data.limit : "—") + " 条，当前列出 "
-      + (data.entries || []).length + " 条。";
-    $("mapLimit").value = data.limit != null ? data.limit : "";
-    var tbody = $("mapBody");
-    tbody.innerHTML = "";
-    var rows = data.entries || [];
-    $("mapEmpty").classList.toggle("hidden", rows.length > 0);
-    rows.forEach(function (m) { tbody.appendChild(buildMapRow(m)); });
+  // ---------- 手风琴（P3c 修订）：名单字段为可折叠节点 + 虚拟分组节点 ----------
+  // 数据形态：名单可达数千条、单字段映射通常仅数十条——主从分栏改为单列折叠；
+  // 初始渲染只建 summary 行，展开才建子表（懒渲染），过滤框作用于字段名与条目两层。
+
+  function mapAccordNodes() {
+    var entries = state.mapEntries || [];
+    var keep = state.mapKeep || [];
+    var byTarget = {};
+    var dropEntries = [], orphanEntries = [];
+    entries.forEach(function (e) {
+      if (!e.target) {
+        if (e.status !== "remap") dropEntries.push(e);   // 待重映射有专属分组，不混入确认删除
+        return;
+      }
+      var k = nameKey(e.target);
+      (byTarget[k] = byTarget[k] || []).push(e);
+      if (e.orphan) orphanEntries.push(e);
+    });
+    var nodes = keep.map(function (n) {
+      return { kind: "field", name: n, entries: byTarget[nameKey(n)] || [] };
+    });
+    nodes.push({ kind: "drop", name: "确认删除", entries: dropEntries });
+    var remapEntries = entries.filter(function (e) { return e.status === "remap"; });
+    nodes.push({ kind: "remap", name: "待重映射", entries: remapEntries });
+    nodes.push({ kind: "orphan", name: "失配", entries: orphanEntries });
+    // 未学习 = 名单字段既无正向映射（作为 target）、也无自身记录（作为 key，
+    // 例如确认删除）——有过任何学习记录就不算覆盖缺口
+    var entryKeys = new Set(entries.map(function (e) { return e.key; }));
+    nodes.push({
+      kind: "unlearned", name: "未学习", entries: [],
+      missed: keep.filter(function (n) {
+        return !(byTarget[nameKey(n)] || []).length && !entryKeys.has(nameKey(n));
+      }),
+    });
+    nodes.push({ kind: "all", name: "全部条目", entries: entries });
+    return nodes;
+  }
+
+  function nodeVisibleEntries(node, q) {
+    if (!q) return node.entries;
+    if (node.name.indexOf(q) >= 0) return node.entries;   // 名称命中 → 显示全部条目
+    return node.entries.filter(function (e) {
+      return (e.sample || "").indexOf(q) >= 0 || e.key.indexOf(q) >= 0
+        || (e.target || "").indexOf(q) >= 0;
+    });
+  }
+
+  function findAccordNode(kind, name) {
+    return mapAccordNodes().filter(function (n) {
+      return n.kind === kind && n.name === name;
+    })[0] || null;
+  }
+
+  function renderMapAccord() {
+    var box = $("mapAccord");
+    var q = $("mapQ").value.trim();
+    box.innerHTML = "";
+    var shown = 0;
+    mapAccordNodes().forEach(function (node) {
+      var nameHit = !q || node.name.indexOf(q) >= 0;
+      var visible = nodeVisibleEntries(node, q);
+      if (node.kind === "unlearned" && q) {
+        node.missed = (node.missed || []).filter(function (n) { return n.indexOf(q) >= 0; });
+      }
+      var entryHit = visible.length > 0;
+      if (q && !nameHit && !entryHit
+          && !(node.kind === "unlearned" && (node.missed || []).length)) {
+        return;  // 过滤掉无关节点
+      }
+      // 条目命中（字段名未命中）→ 自动展开并只显示命中的条目
+      var forceOpen = !!q && !nameHit && entryHit;
+      box.appendChild(buildMapNode(node, visible, forceOpen));
+      shown += 1;
+    });
+    var emptyEl = $("mapEmpty");
+    if (!shown) {
+      emptyEl.textContent = q
+        ? "没有匹配的名单字段或映射条目。"
+        : "暂无映射记录：操作员在过滤结果里「确认 / 改指 / 否决」后，判定会存入这里，"
+          + "下次同样字段直接复用、不再询问大模型。";
+      emptyEl.classList.remove("hidden");
+    } else {
+      emptyEl.classList.add("hidden");
+    }
+  }
+
+  function nodeKey(node) {
+    return node.kind + ":" + node.name;
+  }
+
+  function buildMapNode(node, visibleEntries, forceOpen) {
+    var key = nodeKey(node);
+    var isOpen = forceOpen || mapOpenNodes.has(key);
+    var details = document.createElement("details");
+    details.className = "map-node";
+    details.dataset.kind = node.kind;
+    details.dataset.name = node.name;
+    if (isOpen) details.open = true;
+    var summary = document.createElement("summary");
+    var label = document.createElement("span");
+    label.textContent = node.name;
+    var cnt = document.createElement("span");
+    var n = node.kind === "unlearned" ? (node.missed || []).length : visibleEntries.length;
+    cnt.className = "cnt" + (n ? "" : " zero");
+    cnt.textContent = String(n);
+    summary.appendChild(label);
+    summary.appendChild(cnt);
+    details.appendChild(summary);
+    var body = document.createElement("div");
+    body.className = "node-body";
+    if (node.kind === "unlearned") {
+      var hint = document.createElement("p");
+      hint.className = "node-hint";
+      var missed = node.missed || [];
+      // 名单上千时全量罗列会成为巨幅文本：只展示前 50 个
+      var shownNames = missed.slice(0, 50);
+      hint.textContent = "以下保留字段尚无任何映射记录（覆盖缺口，共 " + missed.length + " 个）："
+        + (shownNames.join("、") || "无") + (missed.length > shownNames.length ? " …等" : "") + "。";
+      body.appendChild(hint);
+      details.dataset.built = "1";
+      details.appendChild(body);
+      return details;
+    }
+    if (isOpen) {
+      body.appendChild(buildNodeTable(node, visibleEntries));
+      details.dataset.built = "1";
+    }
+    details.appendChild(body);  // 懒渲染：首次展开时由 toggle 代理补建子表
+    return details;
+  }
+
+  function buildNodeTable(node, entries) {
+    var table = document.createElement("table");
+    table.className = "rules-table map-table";
+    var thead = document.createElement("thead");
+    var trh = document.createElement("tr");
+    ["表头", "映射目标", "状态", "票数", "命中", "确认人", ""].forEach(function (t) {
+      var th = document.createElement("th");
+      th.textContent = t;
+      trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    table.appendChild(thead);
+    var tbody = document.createElement("tbody");
+    if (!entries.length) {
+      var tr = document.createElement("tr");
+      var td = document.createElement("td");
+      td.colSpan = 7;
+      td.className = "muted";
+      td.textContent = node.kind === "field" ? "该字段尚无映射记录。" : "无条目。";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    } else {
+      entries.forEach(function (m) { tbody.appendChild(buildMapRow(m)); });
+    }
+    table.appendChild(tbody);
+    return table;
   }
 
   function buildMapRow(m) {
@@ -1009,13 +1462,50 @@
 
     var tdS = document.createElement("td");
     var badge = document.createElement("span");
-    badge.className = "badge " + (m.orphan ? "off" : (m.status === "confirmed" ? "ok" : "warn"));
-    badge.textContent = m.orphan ? "失配" : (m.status === "confirmed" ? "已确认" : "模型建议");
     if (m.orphan) {
+      badge.className = "badge off";
+      badge.textContent = "失配";
       badge.title = "映射目标不在当前保留名单里（名单变更过），不参与过滤；请改指或删除";
+    } else if (m.status === "remap") {
+      badge.className = "badge warn";
+      badge.textContent = "待重映射";
+      badge.title = "用户判定保留但目标未定：匹配修正重匹配后由管理员确定；重映射前该表头按保留处理";
+    } else if (m.status === "confirmed") {
+      badge.className = "badge ok";
+      badge.textContent = "已确认";
+    } else {
+      badge.className = "badge warn";
+      badge.textContent = "模型建议";
     }
     tdS.appendChild(badge);
+    if (m.confirmed_by === "加权转正" && m.status === "confirmed") {
+      var auto = document.createElement("span");
+      auto.className = "badge";
+      auto.textContent = "加权转正";
+      auto.title = "由被动采纳计票自动转正（连续同向 ≥5 票）；删除或改指即推翻";
+      tdS.appendChild(auto);
+    }
+    if (m.dissent_by && m.status === "suggested") {
+      var ds = document.createElement("span");
+      ds.className = "badge drop";
+      ds.textContent = "重议中";
+      ds.title = "有用户（" + m.dissent_by + "）对已确认映射提出异议，已降级重议；"
+        + "连续同向 5 票后自动定论，或直接改指/删除";
+      tdS.appendChild(ds);
+    }
+    if (!m.target && m.in_keep_list) {
+      var ik = document.createElement("span");
+      ik.className = "badge drop";
+      ik.textContent = "名单内";
+      ik.title = "该确认删除正压着保留名单里的同名字段（优先于名单生效）；删除本条即恢复名单效力";
+      tdS.appendChild(ik);
+    }
     tr.appendChild(tdS);
+
+    var tdV = document.createElement("td");
+    tdV.textContent = (m.keep_votes || 0) + "/" + (m.drop_votes || 0);
+    tdV.title = "保留票/删除票；同向 ≥5 票且零翻转自动转正";
+    tr.appendChild(tdV);
 
     var tdN = document.createElement("td");
     tdN.textContent = String(m.hits || 0);
@@ -1053,6 +1543,127 @@
     }));
     tr.appendChild(tdA);
     return tr;
+  }
+
+  // ---------- 匹配修正（P3b）：AI 复核建议级条目，diff 供采纳 ----------
+
+  function startRecheck() {
+    if (!window.confirm("匹配修正将把学习记忆中的【建议级】条目（含失配）分批交由大模型重新判断；"
+      + "已确认条目不在范围。复核结果写回建议级，采纳后才升级为已确认。继续吗？")) {
+      return;
+    }
+    $("mapRecheck").disabled = true;
+    $("recheckTip").className = "tip";
+    $("recheckTip").textContent = "启动中…";
+    fetchJSON(API + "/mappings/recheck", { method: "POST", body: JSON.stringify({}) })
+      .then(function (data) { pollRecheck(data.task_id); })
+      .catch(function (err) {
+        $("mapRecheck").disabled = false;
+        $("recheckTip").className = "tip err";
+        $("recheckTip").textContent = err.message;
+      });
+  }
+
+  function pollRecheck(taskId) {
+    fetchJSON(API + "/mappings/recheck/" + taskId)
+      .then(function (t) {
+        if (t.status === "done") {
+          $("mapRecheck").disabled = false;
+          var oc = t.outcomes || {};
+          $("recheckTip").textContent = "复核完成：共 " + (t.total || 0) + " 条，更新 "
+            + (t.diffs || []).length + " 条、维持原判 " + (oc.unchanged || 0)
+            + " 条、跳过 " + (oc.skipped || 0) + " 条（名单外/已确认等）。";
+          renderRecheckDiffs(t.diffs || []);
+          refreshMappings();
+          return;
+        }
+        if (t.status === "error") {
+          $("mapRecheck").disabled = false;
+          $("recheckTip").className = "tip err";
+          $("recheckTip").textContent = t.detail || "匹配修正失败";
+          return;
+        }
+        $("recheckTip").textContent = "复核中… " + (t.processed || 0) + " / "
+          + (t.total || 0) + " 条";
+        setTimeout(function () { pollRecheck(taskId); }, 1200);
+      })
+      .catch(function (err) {
+        $("mapRecheck").disabled = false;
+        $("recheckTip").className = "tip err";
+        $("recheckTip").textContent = err.message;
+      });
+  }
+
+  function renderRecheckDiffs(diffs) {
+    recheckDiffs = diffs || [];
+    var box = $("recheckBox");
+    var tbody = $("recheckBody");
+    tbody.innerHTML = "";
+    if (!recheckDiffs.length) {
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    recheckDiffs.forEach(function (d) {
+      var tr = document.createElement("tr");
+      var tdH = document.createElement("td");
+      tdH.textContent = d.sample || d.key;
+      tr.appendChild(tdH);
+      var tdO = document.createElement("td");
+      tdO.textContent = d.old_target || "（删除）";
+      tr.appendChild(tdO);
+      var tdN = document.createElement("td");
+      tdN.textContent = d.new_target || "（删除）";
+      tr.appendChild(tdN);
+      var tdA = document.createElement("td");
+      tdA.appendChild(mkAction("✓ 采纳", function () {
+        adoptRecheck([d], tdA);
+      }));
+      tr.appendChild(tdA);
+      tbody.appendChild(tr);
+    });
+  }
+
+  function adoptRecheck(items, td) {
+    if (td) td.textContent = "采纳中…";
+    var done = 0, failed = [];
+    var next = function (idx) {
+      if (idx >= items.length) {
+        if (td) td.textContent = "已采纳 " + done + " 条" + (failed.length ? "，失败 " + failed.length + " 条" : "");
+        refreshMappings();
+        if (!failed.length) {
+          recheckDiffs = recheckDiffs.filter(function (d) {
+            return !items.some(function (x) { return x.key === d.key; });
+          });
+          if (!recheckDiffs.length) $("recheckBox").classList.add("hidden");
+          else renderRecheckDiffs(recheckDiffs);
+        }
+        return;
+      }
+      var d = items[idx];
+      confirmMappings([{ key: d.key, target: d.new_target, sample: d.sample }], false)
+        .then(function () { done += 1; next(idx + 1); })
+        .catch(function (err) {
+          if (hasConflicts(err) && window.confirm(conflictText(err, d.new_target))) {
+            confirmMappings([{ key: d.key, target: d.new_target, sample: d.sample }], true)
+              .then(function () { done += 1; next(idx + 1); })
+              .catch(function (e2) { failed.push(d.key); next(idx + 1); });
+          } else {
+            failed.push(d.key);
+            next(idx + 1);
+          }
+        });
+    };
+    next(0);
+  }
+
+  function acceptAllRecheck() {
+    if (!recheckDiffs.length) return;
+    if (!window.confirm("确定全部采纳 " + recheckDiffs.length
+        + " 条修正建议吗？采纳后升级为「已确认」。")) {
+      return;
+    }
+    adoptRecheck(recheckDiffs.slice(), $("recheckAcceptAll"));
   }
 
   function clearMappings() {

@@ -29,6 +29,13 @@ SCHEMA_VERSION = 1
 
 STATUS_SUGGESTED = "suggested"
 STATUS_CONFIRMED = "confirmed"
+STATUS_REMAP = "remap"          # 待重映射：用户翻转保留但未定目标，交管理员复核
+
+# 加权转正判据（P4）：同向票数 ≥ MIN_VOTES 且零翻转 → 建议级自动升级 confirmed。
+# 注：设计初稿的「Wilson 下界 ≥0.95」在 5 票时数学上不可达（5/5 一致的下界仅 0.57，
+# 需 73 票），故判据为同向一致票数，Wilson 比率保留为展示指标。
+PROMOTE_MIN_VOTES = 5
+_WILSON_Z = 1.96
 
 MAX_KEY_LEN = 200
 MAX_TARGET_LEN = 100
@@ -66,6 +73,16 @@ def _coerce_limit(value):
     except Exception:
         return DEFAULT_MAX_ENTRIES
     return max(1, n)
+
+
+def _wilson_lower(p, n, z=_WILSON_Z):
+    """Wilson 成功比例置信下界（展示指标：票数的统计可信度）。"""
+    if n <= 0:
+        return 0.0
+    denom = 1 + z * z / n
+    centre = p + z * z / (2 * n)
+    margin = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5)
+    return max(0.0, (centre - margin) / denom)
 
 
 class MappingStore:
@@ -156,7 +173,7 @@ class MappingStore:
             return None
         target = "" if raw.get("target") is None else str(raw.get("target")).strip()[:MAX_TARGET_LEN]
         status = raw.get("status")
-        if status not in (STATUS_SUGGESTED, STATUS_CONFIRMED):
+        if status not in (STATUS_SUGGESTED, STATUS_CONFIRMED, STATUS_REMAP):
             status = STATUS_SUGGESTED
         try:
             hits = max(0, int(raw.get("hits") or 0))
@@ -166,6 +183,23 @@ class MappingStore:
             prompt_ver = max(0, int(raw.get("prompt_ver") or 0))
         except Exception:
             prompt_ver = 0
+
+        def _int(field):
+            try:
+                return max(0, int(raw.get(field) or 0))
+            except Exception:
+                return 0
+
+        vote_dir = raw.get("last_vote_dir")
+        if vote_dir not in ("keep", "drop"):
+            vote_dir = ""
+        passive = raw.get("passive_users")
+        passive_users = {}
+        if isinstance(passive, dict):
+            for k, v in list(passive.items())[:500]:
+                ku = str(k)[:100]
+                if ku:
+                    passive_users[ku] = str(v or "")[:32]
         return {
             "key": key,
             "sample": str(raw.get("sample") or key)[:MAX_KEY_LEN],
@@ -175,6 +209,15 @@ class MappingStore:
             "model": str(raw.get("model") or "")[:100],
             "prompt_ver": prompt_ver,
             "hits": hits,
+            "keep_votes": _int("keep_votes"),
+            "drop_votes": _int("drop_votes"),
+            "flips": _int("flips"),
+            "streak": _int("streak"),
+            "last_vote_dir": vote_dir,
+            "last_vote_at": str(raw.get("last_vote_at") or "")[:32],
+            "passive_users": passive_users,
+            "dissent_by": str(raw.get("dissent_by") or "")[:100],
+            "dissent_at": str(raw.get("dissent_at") or "")[:32],
             "created_by": str(raw.get("created_by") or "")[:100],
             "created_at": str(raw.get("created_at") or "")[:32],
             "confirmed_by": str(raw.get("confirmed_by") or "")[:100],
@@ -262,6 +305,179 @@ class MappingStore:
             data = self._load_unlocked()
             return t in (data["rejected"].get(key) or {})
 
+    # ===================== 加权统计（P4）：计票 / 转正 / 待重映射 =====================
+
+    @staticmethod
+    def _bump_vote_unlocked(entry, direction, now):
+        """+1 票并维护连续同向计数（streak）与方向翻转计数。
+
+        streak：相邻投票方向相同则累加，方向变化清零重计（早期一次异议只重置
+        streak，后续共识可重新转正）；方向变化同时记一次 flips（冲突信号，仅展示）。
+        """
+        if entry.get("last_vote_dir") == direction:
+            entry["streak"] = entry.get("streak", 0) + 1
+        else:
+            if entry.get("last_vote_dir"):
+                entry["flips"] = entry.get("flips", 0) + 1
+            entry["streak"] = 1
+        entry["last_vote_dir"] = direction
+        entry["last_vote_at"] = now
+        field = "keep_votes" if direction == "keep" else "drop_votes"
+        entry[field] = entry.get(field, 0) + 1
+
+    @staticmethod
+    def _maybe_promote_unlocked(entry, now):
+        """加权定论评估（P4）：建议级/待重映射 + **连续同向票 streak ≥5** → 自动定论。
+
+        - 建议级：投票方向与条目自身方向一致（keep 建议看 keep 票、负建议看 drop 票）
+          → 升级 confirmed（target 不变）；
+        - **反向多数同样定论**：keep 建议被连续 5 张 drop 票 → 转确认删除（target="")；
+          负建议被连续 5 张 keep 票（集体说留但无目标）→ 转 **remap 待重映射**，
+          交管理员经匹配修正定目标；
+        - **remap：连续 5 张 drop 票 → 集体判定删除（confirmed 负映射）**（P4 收尾）；
+          keep 票维持 remap（已是保留态）；
+        - 方向变化清零重计——早期一次异议只重置 streak，后续共识可重新定论；
+          持续分歧（来回翻转）streak 永不达标 → 停留建议级持续提案（翻转率 = 冲突信号）。
+        定论条目 confirmed_by 记「加权转正」（remap 除外，交管理员定目标）。
+        """
+        if entry["status"] == STATUS_REMAP:
+            if entry.get("last_vote_dir") == "drop" and entry.get("streak", 0) >= PROMOTE_MIN_VOTES:
+                entry["status"] = STATUS_CONFIRMED
+                entry["target"] = ""
+                entry["confirmed_by"] = "加权转正"
+                entry["confirmed_at"] = now
+                return True
+            return False
+        if entry["status"] != STATUS_SUGGESTED:
+            return False
+        if entry.get("streak", 0) < PROMOTE_MIN_VOTES:
+            return False
+        own = "keep" if entry["target"] else "drop"
+        last = entry.get("last_vote_dir")
+        if last == own:
+            entry["status"] = STATUS_CONFIRMED
+            entry["confirmed_by"] = "加权转正"
+            entry["confirmed_at"] = now
+            return True
+        if last == "drop" and own == "keep":
+            # 集体判定删除：keep 建议转确认删除（负映射）
+            entry["target"] = ""
+            entry["status"] = STATUS_CONFIRMED
+            entry["confirmed_by"] = "加权转正"
+            entry["confirmed_at"] = now
+            return True
+        if last == "keep" and own == "drop":
+            # 集体判定保留但无目标：负建议转待重映射，交管理员定目标
+            entry["status"] = STATUS_REMAP
+            return True
+        return False
+        return False
+
+    def dissent(self, key, direction, user=""):
+        """非管理员对已确认映射的异议（P4 决策 11）：降级重议。
+
+        confirmed → suggested（**现任目标不变**），异议方向计一票（streak 重置），
+        记 dissent_by/at；后续连续同向票决定最终走向（原映射正确 → 快速重新转正；
+        持续翻转 → 停留建议级交管理员）。与管理员的立即生效改指/否决相区分。
+        返回是否发生了降级（一致方向的"异议"为 no-op，返回 False）。
+        """
+        key = norm_key(key)
+        if not key or direction not in ("keep", "drop"):
+            return False
+        with self._lock:
+            data = self._load_unlocked()
+            entry = data["entries"].get(key)
+            if entry is None or entry["status"] != STATUS_CONFIRMED:
+                return False
+            own_direction = "keep" if entry["target"] else "drop"
+            if direction == own_direction:
+                return False  # 与现行确认一致，不构成异议
+            now = _now()
+            entry["status"] = STATUS_SUGGESTED
+            entry["dissent_by"] = str(user or "")[:100]
+            entry["dissent_at"] = now
+            self._bump_vote_unlocked(entry, direction, now)
+            self._compact_idx = None  # confirmed 集合变化
+            self._save_unlocked()
+            return True
+
+    def record_passive_votes(self, items, user=""):
+        """被动采纳计票（P4）：确认流整批采纳的未翻转项逐条 +1 票，不改状态；
+        达判据的建议级/待重映射条目自动定论。
+
+        - 建议级：同向 streak ≥5 → confirmed（负建议反向 keep 多数 → 转 remap）；
+        - **remap：drop 票 streak ≥5 → 集体判定删除（confirmed 负映射）**（P4 收尾）；
+        - **按用户去重**：同一用户对同一条目的被动采纳只计一次（防单人刷票），
+          显式动作（确认/改指/否决/异议）不受限。返回 {voted, promoted, outcomes}。
+        """
+        voted, promoted, outcomes = 0, [], {"confirmed": 0, "remap": 0}
+        with self._lock:
+            data = self._load_unlocked()
+            entries = data["entries"]
+            for item in (items or []):
+                if not isinstance(item, dict):
+                    continue
+                key = norm_key(item.get("key"))
+                direction = item.get("dir")
+                if not key or direction not in ("keep", "drop"):
+                    continue
+                entry = entries.get(key)
+                if entry is None or entry["status"] not in (STATUS_SUGGESTED, STATUS_REMAP):
+                    continue
+                now = _now()
+                voters = entry.setdefault("passive_users", {})
+                if user and user in voters:
+                    continue  # 同用户同条目只计一次
+                if user:
+                    voters[user] = now
+                was_status = entry["status"]
+                self._bump_vote_unlocked(entry, direction, now)
+                voted += 1
+                if self._maybe_promote_unlocked(entry, now):
+                    promoted.append(key)
+                    # 定论方向统计：remap 定论（集体判删）与 confirmed 定论分开计数
+                    outcomes["remap" if was_status == STATUS_REMAP else "confirmed"] += 1
+            if voted:
+                self._compact_idx = None  # 转正会改变 confirmed 集合（压缩键索引仅 confirmed）
+                self._save_unlocked()
+        return {"voted": voted, "promoted": promoted, "outcomes": outcomes}
+
+    def lookup_remap(self, header):
+        """待重映射命中（P4）：该表头曾被评为保留但目标未定 → 临时保留。
+
+        仅主键精确匹配（remap 稀少，不做压缩键）；命中返回与 lookup 同构的快照
+        （target=""、status=remap），否则 None。
+        """
+        key = norm_key(header)
+        if not key:
+            return None
+        with self._lock:
+            data = self._load_unlocked()
+            e = data["entries"].get(key)
+            if e is not None and e["status"] == STATUS_REMAP:
+                return {"key": key, "sample": e["sample"],
+                        "target": "", "status": STATUS_REMAP}
+            return None
+
+    def flip_to_remap(self, key, user=""):
+        """删除→保留翻转（P4）：条目转待重映射——目标清空、票 +1（keep），
+        退出负建议判定路径（管线临时保留），交管理员经匹配修正重映射。"""
+        key = norm_key(key)
+        if not key:
+            return False
+        with self._lock:
+            data = self._load_unlocked()
+            entry = data["entries"].get(key)
+            if entry is None or entry["status"] == STATUS_CONFIRMED:
+                return False  # 已确认条目的目标变更走 confirm/force，不经 remap
+            now = _now()
+            entry["status"] = STATUS_REMAP
+            entry["target"] = ""
+            self._bump_vote_unlocked(entry, "keep", now)
+            self._compact_idx = None
+            self._save_unlocked()
+            return True
+
     # ===================== 学习：回写建议 / 用户把关 =====================
 
     def record_suggestions(self, headers, mappings, valid_targets,
@@ -305,6 +521,8 @@ class MappingStore:
                         "model": str(model or "")[:100],
                         "prompt_ver": prompt_ver,
                         "hits": 0,
+                        "keep_votes": 0, "drop_votes": 0, "flips": 0, "streak": 0,
+                        "last_vote_dir": "", "last_vote_at": "",
                         "created_by": str(user or "")[:100],
                         "created_at": now,
                         "confirmed_by": "", "confirmed_at": "",
@@ -349,7 +567,7 @@ class MappingStore:
                     continue
                 now = _now()
                 base = dict(existing) if existing else {}
-                entries[key] = {
+                new_entry = {
                     "key": key,
                     "sample": str(item.get("sample") or base.get("sample") or key)[:MAX_KEY_LEN],
                     "target": target,
@@ -358,11 +576,21 @@ class MappingStore:
                     "model": base.get("model") or "",
                     "prompt_ver": base.get("prompt_ver") or 0,
                     "hits": base.get("hits") or 0,
+                    "keep_votes": base.get("keep_votes", 0),
+                    "drop_votes": base.get("drop_votes", 0),
+                    "flips": base.get("flips", 0),
+                    "streak": base.get("streak", 0),
+                    "last_vote_dir": base.get("last_vote_dir", ""),
+                    "last_vote_at": base.get("last_vote_at", ""),
+                    "passive_users": base.get("passive_users", {}),
                     "created_by": base.get("created_by") or str(user or "")[:100],
                     "created_at": base.get("created_at") or now,
                     "confirmed_by": str(user or "")[:100],
                     "confirmed_at": now,
                 }
+                # 显式确认/改指同时计票（审计口径）；方向按目标是否为空（负映射=drop 票）
+                self._bump_vote_unlocked(new_entry, "drop" if not target else "keep", now)
+                entries[key] = new_entry
                 rej = rejected.get(key)
                 if rej is not None:
                     rej.pop(norm_key(target), None)
@@ -425,6 +653,87 @@ class MappingStore:
             data = self._load_unlocked()
             return len(data["entries"])
 
+    def get_entry(self, key):
+        """取单条映射的快照（拷贝）；不存在返回 None。"""
+        key = norm_key(key)
+        if not key:
+            return None
+        with self._lock:
+            data = self._load_unlocked()
+            e = data["entries"].get(key)
+            return dict(e) if e else None
+
+    def apply_recheck(self, pairs, valid_targets, model="", prompt_ver=0, user=""):
+        """匹配修正写回（P3b/P4）：更新**建议级与待重映射**条目（sample 保留）。
+
+        口径：名单外的值、被 rejected 拦截的对、confirmed 条目（确认态只能被用户动作
+        改变）一律跳过；remap 条目提出有效目标后**转回 suggested**（进 diff 待采纳）；
+        新旧目标相同计 unchanged 不落盘。pairs: [{"key", "new_target"}]。
+        返回 {"updated", "unchanged", "skipped"}。
+        """
+        updated = unchanged = skipped = 0
+        with self._lock:
+            data = self._load_unlocked()
+            entries, rejected = data["entries"], data["rejected"]
+            for p in (pairs or []):
+                key = norm_key(p.get("key"))
+                if not key:
+                    skipped += 1
+                    continue
+                entry = entries.get(key)
+                if entry is None:
+                    skipped += 1  # 运行中被删 → 跳过
+                    continue
+                if entry["status"] == STATUS_CONFIRMED:
+                    # 已确认条目不动——**除非失配**（名单变更后 target 已不在名单，
+                    # 决策 10 扩展）：LLM 建议的新目标有效则降级回建议级（进 diff
+                    # 待管理员采纳），让失配的已确认映射也能经修正闭环恢复。
+                    orphan = norm_key(entry["target"]) not in (valid_targets or set())
+                    val = str(p.get("new_target") or "").strip()[:MAX_TARGET_LEN]
+                    if not orphan or not val:
+                        skipped += 1
+                        continue
+                    vt = norm_key(val)
+                    if vt not in (valid_targets or set()) or vt in (rejected.get(key) or {}):
+                        skipped += 1
+                        continue
+                    if vt == norm_key(entry["target"]):
+                        skipped += 1  # 建议与原目标相同（名单未含该目标的场景外无意义）
+                        continue
+                    entry["target"] = val
+                    entry["status"] = STATUS_SUGGESTED
+                    entry["model"] = str(model or "")[:100]
+                    entry["prompt_ver"] = prompt_ver
+                    updated += 1
+                    continue
+                val = str(p.get("new_target") or "").strip()[:MAX_TARGET_LEN]
+                if val:
+                    vt = norm_key(val)
+                    if vt not in (valid_targets or set()) or vt in (rejected.get(key) or {}):
+                        skipped += 1
+                        continue
+                if entry["status"] == STATUS_REMAP:
+                    if not val:
+                        skipped += 1  # 重映射仍无目标 → 维持 remap 待复核
+                        continue
+                    entry["target"] = val
+                    entry["status"] = STATUS_SUGGESTED  # 转回建议级，进 diff 待管理员采纳
+                    entry["model"] = str(model or "")[:100]
+                    entry["prompt_ver"] = prompt_ver
+                    updated += 1
+                    continue
+                if norm_key(entry["target"]) == (norm_key(val) if val else ""):
+                    unchanged += 1
+                    continue
+                entry["target"] = val
+                entry["model"] = str(model or "")[:100]
+                entry["prompt_ver"] = prompt_ver
+                updated += 1
+            if updated:
+                self._compact_idx = None
+                self._save_unlocked()
+        return {"updated": updated, "unchanged": unchanged, "skipped": skipped}
+
     def bump_stats(self, **counters):
         """累加运行统计（未知键与零值忽略）；有变化才落盘。"""
         with self._lock:
@@ -442,7 +751,12 @@ class MappingStore:
                 self._save_unlocked()
 
     def list_entries(self, valid_targets, status=None, q=None):
-        """管理面板列表：status 支持 suggested/confirmed/orphan（伪状态）；q 模糊匹配。"""
+        """管理面板列表：status 支持 suggested/confirmed/orphan（伪状态）；q 模糊匹配。
+
+        ``in_keep_list``：确认删除（target=""）条目的 key 恰在当前保留名单中——该记忆
+        正压着名单里的同名字段（管线中 confirmed 档优先于 exact），管理面板据此挂
+        「名单内」徽标（§8.1/决策 ⑦）。
+        """
         rows = []
         with self._lock:
             data = self._load_unlocked()
@@ -457,7 +771,8 @@ class MappingStore:
                 if q and q not in e["key"] and q not in (e["sample"] or "") \
                         and q not in (e["target"] or ""):
                     continue
-                rows.append({**e, "orphan": orphan})
+                rows.append({**e, "orphan": orphan,
+                             "in_keep_list": not e["target"] and key in (valid_targets or set())})
         return rows
 
     def export_records(self, valid_targets, status=STATUS_CONFIRMED):

@@ -156,6 +156,12 @@ class Base(unittest.TestCase):
     def cols(self, preview, name):
         return [c for c in preview["columns"] if c["name"] == name][0]
 
+    def _reset_store(self):
+        # clear() 按设计保留 stats（历史计数），用例隔离必须连文件一起删
+        if os.path.isfile(self.ff.MAPPINGS_FILE):
+            os.remove(self.ff.MAPPINGS_FILE)
+        self.ff.MAPPINGS.reload()
+
 
 # ==========================================================================
 # 1. 上传预览：识别到的列名 + 硬过滤预判
@@ -503,12 +509,6 @@ class TestLLMMappingCache(Base):
         self.ff.llm_client.match_columns = self._orig_match
         self._reset_store()
 
-    def _reset_store(self):
-        # clear() 按设计保留 stats（历史计数），用例隔离必须连文件一起删
-        if os.path.isfile(self.ff.MAPPINGS_FILE):
-            os.remove(self.ff.MAPPINGS_FILE)
-        self.ff.MAPPINGS.reload()
-
     def _run_llm_filter(self):
         p = self.preview()
         return self.filter_and_wait(staged_id=p["staged_id"], mode="llm")
@@ -714,6 +714,412 @@ class TestKeepColumnsImport(Base):
             self.ff._get_session_user = orig
         res = self.post_file("/api/file-filter/config/import-columns", b"x", "名单.txt")
         self.assertEqual(res.status_code, 400)
+
+
+# ==========================================================================
+# 9. 匹配修正（P3b）：范围只含建议级（confirmed 不动）、分批重判、写回与 diff
+# ==========================================================================
+
+class TestMappingRecheck(Base):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import jz_llm
+        cls.jz_llm = jz_llm
+        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "http://127.0.0.1:9/v1/chat/completions",
+            "api_key": "sk-test", "model": "test-model"}})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "", "api_key": "", "model": ""}})
+        super().tearDownClass()
+
+    def setUp(self):
+        self._reset_store()
+        self._orig_match = self.ff.llm_client.match_columns
+        self._orig_recheck = self.ff.llm_client.recheck_mappings
+        self.ff.llm_client.match_columns = lambda headers, *a, **k: {
+            h: ("姓名" if h == "备注" else "") for h in headers}
+        # 复核重判：备注 → 所属单位（制造 diff），其余维持原判
+        self.ff.llm_client.recheck_mappings = lambda pairs, keep, **k: {
+            p["key"]: ("所属单位" if p["key"] == "备注" else p["target"]) for p in pairs}
+
+    def tearDown(self):
+        self.ff.llm_client.match_columns = self._orig_match
+        self.ff.llm_client.recheck_mappings = self._orig_recheck
+        self._reset_store()
+
+    def _seed(self):
+        """首轮过滤产生建议（备注→姓名；开始时间/手机号→删除），并把删除采纳为已确认。"""
+        p = self.preview()
+        payload = self.filter_and_wait(staged_id=p["staged_id"], mode="llm")
+        self.assertEqual(payload["status"], "done", payload.get("detail"))
+        res = self.client.post("/api/file-filter/mappings/confirm", json={"items": [
+            {"key": "开始时间", "target": ""}, {"key": "手机号", "target": ""}]})
+        self.assertEqual(res.status_code, 200)
+
+    def _poll_recheck(self, task_id, timeout=30.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            res = self.client.get("/api/file-filter/mappings/recheck/" + task_id)
+            self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+            payload = res.get_json()
+            if payload["status"] in ("done", "error"):
+                return payload
+            time.sleep(0.2)
+        self.fail("匹配修正任务超时")
+
+    def test_recheck_scope_diff_and_adopt(self):
+        """范围只含建议级（confirmed 不进 pairs）；diff 写回建议级；采纳升级 confirmed。"""
+        self._seed()
+        res = self.client.post("/api/file-filter/mappings/recheck",
+                               json={"scope": "all_suggested"})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+        payload = self._poll_recheck(res.get_json()["task_id"])
+        self.assertEqual(payload["status"], "done", payload.get("detail"))
+        self.assertEqual(payload["total"], 1)          # 仅备注（suggested）
+        self.assertEqual([d["key"] for d in payload["diffs"]], ["备注"])
+        self.assertEqual((payload["diffs"][0]["old_target"],
+                          payload["diffs"][0]["new_target"]), ("姓名", "所属单位"))
+        self.assertEqual(payload["outcomes"]["updated"], 1)
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual(entry["target"], "所属单位")
+        self.assertEqual(entry["status"], "suggested")  # 写回建议级，未升级
+        # 采纳 → confirmed
+        res = self.client.post("/api/file-filter/mappings/confirm",
+                               json={"items": [{"key": "备注", "target": "所属单位"}]})
+        self.assertEqual(res.status_code, 200)
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual(entry["status"], "confirmed")
+        # confirmed 条目未被复核翻案
+        confirmed = self.ff.MAPPINGS.get_entry("开始时间")
+        self.assertEqual((confirmed["target"], confirmed["status"]), ("", "confirmed"))
+
+    def test_recheck_permission_empty_and_bad_id(self):
+        self._seed()
+        orig = self.ff._get_session_user
+        try:
+            self.ff._get_session_user = lambda: dict(OTHER)
+            self.assertEqual(
+                self.client.post("/api/file-filter/mappings/recheck").status_code, 403)
+            self.assertEqual(
+                self.client.get("/api/file-filter/mappings/recheck/abc123").status_code, 403)
+        finally:
+            self.ff._get_session_user = orig
+        # 清空后无建议条目 → 400
+        self.ff.MAPPINGS.clear()
+        self.assertEqual(
+            self.client.post("/api/file-filter/mappings/recheck").status_code, 400)
+        # 非法任务 ID → 400
+        self.assertEqual(
+            self.client.get("/api/file-filter/mappings/recheck/!!bad!").status_code, 400)
+
+    def test_recheck_single_flight_409(self):
+        """同一时刻只允许一个复核任务：占住锁再提交 → 409。"""
+        self._seed()
+        if not self.ff._recheck_lock.acquire(False):
+            self.fail("锁应空闲")
+        try:
+            res = self.client.post("/api/file-filter/mappings/recheck")
+            self.assertEqual(res.status_code, 409)
+        finally:
+            self.ff._recheck_lock.release()
+
+
+# ==========================================================================
+# 10. 双重过滤缺省化（v1.5）：不再传 mode 时默认双重过滤；LLM 未配置自动降级
+# ==========================================================================
+
+class TestDoubleFilterDefault(Base):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import jz_llm
+        cls.jz_llm = jz_llm
+        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "http://127.0.0.1:9/v1/chat/completions",
+            "api_key": "sk-test", "model": "test-model"}})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "", "api_key": "", "model": ""}})
+        super().tearDownClass()
+
+    def setUp(self):
+        self._reset_store()
+        self._orig_match = self.ff.llm_client.match_columns
+        self.calls = []
+        test = self
+
+        def fake_match(headers, *args, **kwargs):
+            test.calls.append(list(headers))
+            return {h: ("姓名" if h == "备注" else "") for h in headers}
+
+        self.ff.llm_client.match_columns = fake_match
+
+    def tearDown(self):
+        self.ff.llm_client.match_columns = self._orig_match
+        self._reset_store()
+
+    def test_filter_without_mode_runs_double_filter(self):
+        """/filter 不传 mode → 默认双重过滤：精确直接保留，未命中子集进大模型。"""
+        p = self.preview()
+        payload = self.filter_and_wait(staged_id=p["staged_id"])   # 不传 mode
+        self.assertEqual(payload["status"], "done", payload.get("detail"))
+        self.assertTrue(payload["llm_used"])
+        self.assertIsNone(payload.get("degraded"))
+        self.assertEqual([k["column"] for k in payload["kept"]], ["姓名", "备注"])
+        self.assertEqual(payload["kept"][0]["source"], "exact")
+        self.assertEqual(payload["kept"][1]["source"], "llm")
+        self.assertEqual(self.calls, [["开始时间", "手机号", "备注"]])
+
+    def test_degrade_to_hard_when_llm_unconfigured(self):
+        """大模型未配置：自动降级为仅精确匹配，degraded 标记与原因随结果提示。"""
+        self.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "", "api_key": "", "model": ""}})
+        try:
+            p = self.preview()
+            payload = self.filter_and_wait(staged_id=p["staged_id"])   # 不传 mode
+            self.assertEqual(payload["status"], "done", payload.get("detail"))
+            self.assertFalse(payload["llm_used"])
+            self.assertTrue(payload["degraded"])
+            self.assertTrue(payload["degraded_reason"])
+            # 仅精确匹配：备注/开始时间/手机号全部删除（hard_unmatched；夹具无「所属单位」列）
+            self.assertEqual([k["column"] for k in payload["kept"]], ["姓名"])
+            sources = {d["column"]: d["source"] for d in payload["removed_detail"]}
+            self.assertEqual(sources["备注"], "hard_unmatched")
+            self.assertEqual(sources["开始时间"], "hard_unmatched")
+            # 降级路径不产生任何记忆写入（建议级不参与）
+            self.assertEqual(self.ff.MAPPINGS.count(), 0)
+        finally:
+            self.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+                "format": "openai", "url": "http://127.0.0.1:9/v1/chat/completions",
+                "api_key": "sk-test", "model": "test-model"}})
+
+
+# ==========================================================================
+# 11. P4：remap 端点与管线临时保留、计票端点、recheck 范围、样本值注入
+# ==========================================================================
+
+class TestMappingP4(Base):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        import jz_llm
+        cls.jz_llm = jz_llm
+        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "http://127.0.0.1:9/v1/chat/completions",
+            "api_key": "sk-test", "model": "test-model"}})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {
+            "format": "openai", "url": "", "api_key": "", "model": ""}})
+        super().tearDownClass()
+
+    def setUp(self):
+        self._reset_store()
+        self._orig_match = self.ff.llm_client.match_columns
+        self._orig_recheck = self.ff.llm_client.recheck_mappings
+        self.samples_seen = []
+        test = self
+
+        def fake_match(headers, *args, **kwargs):
+            test.samples_seen.append(kwargs.get("samples"))
+            return {h: ("姓名" if h == "备注" else "") for h in headers}
+
+        self.ff.llm_client.match_columns = fake_match
+        self.ff.llm_client.recheck_mappings = lambda pairs, keep, **k: {
+            p["key"]: p["target"] for p in pairs}
+
+    def tearDown(self):
+        self.ff.llm_client.match_columns = self._orig_match
+        self.ff.llm_client.recheck_mappings = self._orig_recheck
+        self._reset_store()
+
+    def _seed_suggestions(self):
+        p = self.preview()
+        payload = self.filter_and_wait(staged_id=p["staged_id"], mode="llm")
+        self.assertEqual(payload["status"], "done", payload.get("detail"))
+
+    def _poll_recheck(self, task_id, timeout=30.0):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            res = self.client.get("/api/file-filter/mappings/recheck/" + task_id)
+            self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+            payload = res.get_json()
+            if payload["status"] in ("done", "error"):
+                return payload
+            time.sleep(0.2)
+        self.fail("匹配修正任务超时")
+
+    def test_samples_injected_into_match_prompt(self):
+        """样本值注入（PROMPT_VER=2）：LLM 收到每个未命中表头的前 3 个非空样本值。"""
+        self._seed_suggestions()
+        self.assertEqual(self.ff.llm_client.PROMPT_VER, 2)
+        samples = self.samples_seen[0] or {}
+        self.assertEqual(samples.get("备注"), ["开始检查", "开始复核", "正常"])
+        self.assertNotIn("姓名", samples)               # 精确命中列不进 LLM
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual(entry["prompt_ver"], 2)        # 落库归因
+
+    def test_remap_flow_temporary_keep_without_llm(self):
+        """删除→保留翻转：转 remap → 二轮管线临时保留（remap_keep）且不再进 LLM。"""
+        self._seed_suggestions()
+        res = self.client.post("/api/file-filter/mappings/remap",
+                               json={"key": "开始时间", "sample": "开始时间"})
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+        p = self.preview()
+        payload = self.filter_and_wait(staged_id=p["staged_id"], mode="llm")
+        self.assertEqual(payload["status"], "done")
+        kept = {k["column"]: k["source"] for k in payload["kept"]}
+        self.assertEqual(kept.get("开始时间"), "remap_keep")
+        # remap 不进 LLM：二轮全部缓存命中（备注建议、开始时间 remap、手机号建议删）
+        # → LLM 一次都没调（样本捕获列表长度不变）
+        self.assertEqual(len(self.samples_seen), 1)
+        self.assertFalse(payload["llm_used"])
+        entries = {e["key"]: e for e in
+                   self.client.get("/api/file-filter/mappings").get_json()["entries"]}
+        self.assertEqual(entries["开始时间"]["status"], "remap")
+
+    def test_remap_endpoint_guards(self):
+        res = self.client.post("/api/file-filter/mappings/remap", json={"key": "不存在"})
+        self.assertEqual(res.status_code, 409)
+        orig = self.ff._get_session_user
+        try:
+            self.ff._get_session_user = lambda: None
+            res = self.client.post("/api/file-filter/mappings/remap", json={"key": "备注"})
+            self.assertEqual(res.status_code, 401)
+        finally:
+            self.ff._get_session_user = orig
+
+    def test_vote_endpoint_and_promotion(self):
+        """计票端点：按用户去重；5 个不同用户同向 → 加权转正，确认块不再出现该条。"""
+        self._seed_suggestions()                        # 备注 suggested 姓名
+        orig = self.ff._get_session_user
+        try:
+            for i in range(5):
+                self.ff._get_session_user = lambda i=i: {
+                    "username": "op%d" % i, "role_id": "role-user", "super_admin": False}
+                res = self.client.post("/api/file-filter/mappings/vote",
+                                       json={"items": [{"key": "备注", "dir": "keep"}]})
+                self.assertEqual(res.status_code, 200)
+                self.assertEqual(res.get_json()["voted"], 1)
+            # 同用户重复采纳 → 去重不计
+            self.ff._get_session_user = lambda: {
+                "username": "op0", "role_id": "role-user", "super_admin": False}
+            dup = self.client.post("/api/file-filter/mappings/vote",
+                                   json={"items": [{"key": "备注", "dir": "keep"}]})
+            self.assertEqual(dup.get_json()["voted"], 0)
+        finally:
+            self.ff._get_session_user = orig
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual((entry["status"], entry["confirmed_by"]), ("confirmed", "加权转正"))
+        p = self.preview()
+        payload = self.filter_and_wait(staged_id=p["staged_id"], mode="llm")
+        self.assertEqual(payload["kept"][-1]["source"], "confirmed")
+
+    def test_recheck_scope_mismatch_default(self):
+        """recheck 范围校准：缺省只复核失配（remap/orphan），全部建议级需显式扩展。"""
+        vt = self.ff._mapping_valid_targets()
+        M = self.ff.MAPPINGS
+        M.record_suggestions(["临时A"], {"临时A": "姓名"}, vt, user="t")   # 非失配建议
+        M.record_suggestions(["临时B"], {"临时B": ""}, vt, user="t")
+        M.flip_to_remap("临时B", user="t")                                  # 失配（待重映射）
+        res = self.client.post("/api/file-filter/mappings/recheck")
+        self.assertEqual(res.status_code, 200, res.get_data(as_text=True)[:300])
+        payload = self._poll_recheck(res.get_json()["task_id"])
+        self.assertEqual(payload["total"], 1)               # 默认只含 remap（临时B）
+        res = self.client.post("/api/file-filter/mappings/recheck",
+                               json={"scope": "all_suggested"})
+        payload = self._poll_recheck(res.get_json()["task_id"])
+        self.assertEqual(payload["total"], 2)               # 扩展后含全部建议级
+        res = self.client.post("/api/file-filter/mappings/recheck",
+                               json={"scope": "bogus"})
+        self.assertEqual(res.status_code, 400)
+
+
+    def test_vote_dissent_demotes_confirmed_then_repromotes(self):
+        """非管理员对已确认映射的异议（决策 11）：降级重议；连续同向 5 票重新转正。"""
+        self._seed_suggestions()
+        res = self.client.post("/api/file-filter/mappings/confirm",
+                               json={"items": [{"key": "备注", "target": "姓名"}]})
+        self.assertEqual(res.status_code, 200)
+        # 异议（该列应删）：confirmed 降级回建议级，现任目标不变
+        res = self.client.post("/api/file-filter/mappings/vote",
+                               json={"items": [{"key": "备注", "dir": "drop", "dissent": True}]})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()["dissented"], 1)
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("suggested", "姓名"))
+        self.assertEqual(entry["dissent_by"], "tester")
+        # 后续 5 连 keep（被动采纳，按用户去重 → 5 个不同用户）→ 重新转正
+        for i in range(5):
+            self.ff._get_session_user = lambda i=i: {
+                "username": "voter%d" % i, "role_id": "role-user", "super_admin": False}
+            self.client.post("/api/file-filter/mappings/vote",
+                             json={"items": [{"key": "备注", "dir": "keep"}]})
+        self.ff._get_session_user = lambda: dict(USER)
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("confirmed", "姓名"))
+
+    def test_vote_dissent_agreement_is_noop(self):
+        """异议方向与现行确认一致 → dissented=0，条目保持 confirmed。"""
+        self._seed_suggestions()
+        self.client.post("/api/file-filter/mappings/confirm",
+                         json={"items": [{"key": "备注", "target": "姓名"}]})
+        res = self.client.post("/api/file-filter/mappings/vote",
+                               json={"items": [{"key": "备注", "dir": "keep", "dissent": True}]})
+        self.assertEqual(res.get_json()["dissented"], 0)
+        self.assertEqual(self.ff.MAPPINGS.get_entry("备注")["status"], "confirmed")
+
+
+    def test_preview_remap_match_and_governance(self):
+        """预览 remap 预填：待重映射列 match={target:"",status:"remap"}（预览-结果一致）；
+        /mappings 回传治理统计（加权转正/重议中/有翻转）。"""
+        self._seed_suggestions()
+        self.ff.MAPPINGS.flip_to_remap("开始时间", user="tester")
+        p = self.preview()
+        by = {c["name"]: c for c in p["columns"]}
+        self.assertEqual(by["开始时间"]["match"], {"target": "", "status": "remap"})
+        self.assertIsNone(by["姓名"]["match"])
+        res = self.client.get("/api/file-filter/mappings")
+        payload = res.get_json()
+        gov = payload.get("governance") or {}
+        self.assertIn("auto_promoted", gov)
+        self.assertIn("revising", gov)
+        self.assertIn("flipped", gov)
+
+    def test_vote_dissent_demotes_confirmed_then_repromotes(self):
+        """非管理员对已确认映射的异议（决策 11）：降级重议；连续同向 5 票重新转正。"""
+        self._seed_suggestions()
+        res = self.client.post("/api/file-filter/mappings/confirm",
+                               json={"items": [{"key": "备注", "target": "姓名"}]})
+        self.assertEqual(res.status_code, 200)
+        res = self.client.post("/api/file-filter/mappings/vote",
+                               json={"items": [{"key": "备注", "dir": "drop", "dissent": True}]})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.get_json()["dissented"], 1)
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("suggested", "姓名"))
+        self.assertEqual(entry["dissent_by"], "tester")
+        orig = self.ff._get_session_user
+        try:
+            for i in range(5):
+                self.ff._get_session_user = lambda i=i: {
+                    "username": "voter%d" % i, "role_id": "role-user", "super_admin": False}
+                self.client.post("/api/file-filter/mappings/vote",
+                                 json={"items": [{"key": "备注", "dir": "keep"}]})
+        finally:
+            self.ff._get_session_user = orig
+        entry = self.ff.MAPPINGS.get_entry("备注")
+        self.assertEqual((entry["status"], entry["target"]), ("confirmed", "姓名"))
 
 
 if __name__ == "__main__":
