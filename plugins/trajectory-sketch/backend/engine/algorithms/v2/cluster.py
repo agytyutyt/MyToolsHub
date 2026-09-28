@@ -11,10 +11,19 @@
 
   1. 地址字符串相同          —— 强信号，工参地址本身是地点级描述；
   2. 坐标距离 < co_site      —— 共址（同站不同小区 / 同小区工参微调）；
-  3. 双向切换且距离 ≤ 上限   —— 邻区乒乓。
+  3. 快速往返弹跳（a→b→a 全程 ≤ handover_bounce_minutes）且距离 ≤ 上限 —— 邻区乒乓。
 
-实现与上游 ``SQLRewrite/src/cluster.py`` **逐条对齐**（并查集 + 相同的合并顺序），
-以保证同一份数据的簇划分与对拍结果一致。
+信号 3 为什么数"弹跳"而不是"切换总次数"
+----------------------------------------
+用户在家与单位之间每天通勤，同样会产生大量 a→b 与 b→a 的转移边——按总次数计数，
+多日数据必然把两个**不同**地点（只要相距 ≤ handover_max_meters）并成一个簇：
+实测月度数据中一条 430 米、35+33 次切换的通勤边把工作地拖进了住址巨簇，
+工作日的整段外出随之从报告里消失。只有"离开 a 后在极短时间内经 b 回到 a"才是
+原地乒乓的特征；通勤的去程与回程相隔数小时，不构成弹跳。
+
+与上游 ``SQLRewrite/src/cluster.py`` 的对齐说明：并查集结构与合并顺序保持一致，
+仅信号 3 的计数口径由"切换总次数"改为"快速往返弹跳次数"——这是对真实数据形态
+（月度、跨址通勤）的**有意分叉**，对拍结论在此处不再逐条一致。
 """
 from __future__ import annotations
 
@@ -52,13 +61,17 @@ def build_clusters(dataset: Dataset, params: Dict[str, Any]
         if p.cell not in cell_first:
             cell_first[p.cell] = {"lon": p.lon, "lat": p.lat, "address": p.address}
 
-    # ---- 相邻转移边统计（同一号码内、相邻两次上报的小区不同）----
+    # ---- 相邻转移边统计（同一号码内、相邻两次上报的小区不同；决定合并尝试顺序）----
     edges: Dict[Tuple[str, str], int] = {}
     for _user, seq in _cell_sequences(points):
         for i in range(len(seq) - 1):
             a, b = seq[i], seq[i + 1]
             if a != b:
                 edges[(a, b)] = edges.get((a, b), 0) + 1
+
+    # ---- 快速往返弹跳统计（信号 3 的唯一计数口径，见模块文档）----
+    bounce_gap_s = float(ccfg["handover_bounce_minutes"]) * 60.0
+    bounces = _cell_bounces(points, bounce_gap_s)
 
     # ---- 并查集 ----
     parent: Dict[str, str] = {c: c for c in cell_first}
@@ -80,19 +93,19 @@ def build_clusters(dataset: Dataset, params: Dict[str, Any]
     same_addr = bool(ccfg["merge_same_address"])
 
     stats = {"by_address": 0, "by_cosite": 0, "by_handover": 0}
-    for (a, b), n in edges.items():
+    for (a, b), _n in edges.items():
         if find(a) == find(b):
             continue
         ca, cb = cell_first[a], cell_first[b]
         d = haversine(ca["lon"], ca["lat"], cb["lon"], cb["lat"])
-        rev = edges.get((b, a), 0)
+        bounce = bounces.get((a, b), 0) + bounces.get((b, a), 0)
         if same_addr and ca["address"] and ca["address"] == cb["address"]:
             union(a, b)
             stats["by_address"] += 1
         elif d < co_site:
             union(a, b)
             stats["by_cosite"] += 1
-        elif (n + rev) >= min_cnt and d <= max_m:
+        elif bounce >= min_cnt and d <= max_m:
             union(a, b)
             stats["by_handover"] += 1
 
@@ -140,6 +153,38 @@ def _cell_sequences(points: List[Point]):
             yield cur, seq
             cur, seq = p.usernum, []
         seq.append(p.cell)
+    if cur is not None:
+        yield cur, seq
+
+
+def _cell_bounces(points: List[Point], gap_s: float) -> Dict[Tuple[str, str], int]:
+    """快速往返弹跳计数：a→b→a，且从离开 a 到回到 a 不超过 ``gap_s`` 秒。
+
+    只统计紧邻三元组（a、b 相邻上报，b、a 相邻上报）——乒乓的时间尺度是
+    秒级到分钟级；通勤的去程与回程相隔数小时，天然不落入时间窗。
+    """
+    bounces: Dict[Tuple[str, str], int] = {}
+    for _user, seq in _point_sequences(points):
+        for i in range(len(seq) - 2):
+            a, b, a2 = seq[i].cell, seq[i + 1].cell, seq[i + 2].cell
+            if a == b or b == a2 or a != a2:
+                continue
+            if seq[i + 2].ts - seq[i].ts <= gap_s:
+                bounces[(a, b)] = bounces.get((a, b), 0) + 1
+    return bounces
+
+
+def _point_sequences(points: List[Point]):
+    """按号码切分**点**序列（points 已按 (号码, 时间) 排序，顺序扫一次）。"""
+    cur: str = None
+    seq: List[Point] = []
+    for p in points:
+        if cur is None:
+            cur = p.usernum
+        elif p.usernum != cur:
+            yield cur, seq
+            cur, seq = p.usernum, []
+        seq.append(p)
     if cur is not None:
         yield cur, seq
 

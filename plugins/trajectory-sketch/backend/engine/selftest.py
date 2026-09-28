@@ -140,6 +140,20 @@ def test_pingpong() -> None:
           str(res["quality"]["地点簇数"]))
 
 
+def test_commuter_two_places() -> None:
+    print("· 通勤双址 → 工作地独立成簇，往返出行可见（切换合并不被通勤刷满）")
+    res = analyze_rows(_commuter_rows())
+    q = res["quality"]
+    check("住址与工作地独立成簇（共 2 簇）", q["地点簇数"] == 2, str(q["地点簇数"]))
+    stays = res["stays"]
+    work = [s for s in stays if str(s["代表地址"]).startswith("办公")]
+    check("工作地停留被检出", len(work) >= 2, str([s["代表地址"] for s in stays])[:120])
+    check("无跨天巨停留", all(s["停留分钟"] < 1440 for s in stays),
+          str(max((s["停留分钟"] for s in stays), default=0)))
+    trips = [t for t in res["trips"] if t["判定"] == "有效出行"]
+    check("往返通勤可见（有效出行 ≥ 4 段）", len(trips) >= 4, str(len(trips)))
+
+
 def test_idempotent() -> None:
     print("· 幂等性（同输入两次结果完全一致）")
     rows = _moving_rows()
@@ -221,6 +235,34 @@ def _retime(rows, time_col: int, base: int, step: int):
     return out
 
 
+def _commuter_rows():
+    """构造"夜间住址（双小区乒乓）↔ 白天工作地（双小区乒乓）× 3 天"的数据。
+
+    两地相距约 600 米、地址不同：按旧的"双向切换总次数"口径，三天通勤产生
+    ≥3 次往返切换，足以把工作地并入住址簇（回归 9/23 外出漏报）；按新的
+    "快速往返弹跳"口径（去程与回程相隔数小时，不构成弹跳），两地保持独立。
+    """
+    from engine.timeutil import epoch_to_str
+    rows = [["BEGINTIME", "USERNUM", "LAI", "CI", "ADDRESS", "LONGITUDE", "LATITUDE"]]
+    home = (("3001", "住址A栋", 109.9000, 21.6000), ("3002", "住址B栋", 109.9010, 21.6000))
+    work = (("4001", "办公A栋", 109.9000, 21.6054), ("4002", "办公B栋", 109.9010, 21.6054))
+    for d in range(3):
+        b = d * 86400
+        for i in range(161):                    # 00:00–08:00 在家，3 分钟乒乓
+            ci, addr, lon, lat = home[i % 2]
+            rows.append([epoch_to_str(b + i * 180), "15700000007", "1335731",
+                         ci, addr, lon, lat])
+        for i in range(196):                    # 08:15–18:00 在工作地
+            ci, addr, lon, lat = work[i % 2]
+            rows.append([epoch_to_str(b + 29700 + i * 180), "15700000007", "1335731",
+                         ci, addr, lon, lat])
+        for i in range(112):                    # 18:15–23:57 回家
+            ci, addr, lon, lat = home[i % 2]
+            rows.append([epoch_to_str(b + 66150 + i * 180), "15700000007", "1335731",
+                         ci, addr, lon, lat])
+    return rows
+
+
 def _moving_rows():
     """构造"先停留 → 长途移动 → 再停留"的数据，用于验证出行判定与报告。"""
     rows = [["BEGINTIME", "USERNUM", "LAI", "CI", "ADDRESS", "LONGITUDE", "LATITUDE"]]
@@ -284,7 +326,8 @@ def run_excel(path: str) -> None:
 def main(argv) -> int:
     print("=== 轨迹分析引擎自测 ===")
     for fn in (test_percentile, test_time, test_schema_guard, test_empty_and_dirty,
-               test_static_user, test_pingpong, test_idempotent, test_moving_and_report,
+               test_static_user, test_pingpong, test_commuter_two_places,
+               test_idempotent, test_moving_and_report,
                test_multi_user_and_no_user, test_params_guard):
         fn()
     if "--excel" in argv:

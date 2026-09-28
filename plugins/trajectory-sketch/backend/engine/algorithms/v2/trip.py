@@ -18,6 +18,13 @@
     mid_conf_factor × 噪声 ≤ 净位移 < 高置信线    → 「位置变动」（置信度 中，报告注明疑似）
     净位移 < mid_conf_factor × 噪声               → 不做位移，合并两个停留点
 
+合并豁免（重要不变式）：**净位移一旦达到高置信线，回访与直线度判据一律不再触发
+合并。**短途出行途中，终端常会二次重选途经小区（去程路过、几分钟内又经过一次），
+窗口内因此出现"回访"；小区粒度的散布采样也会把累计位移撑大、直线度压低。这两个
+信号只应在中置信带内作为"疑似切换"的证据，不能吞掉净位移明确的真实移动（实测：
+772 米的通勤位移（高置信线 582 米）因直线度 0.32、回访 1 次被合并，10 小时的外出
+停留随之从报告里消失）。
+
 速度只用**净位移 / 净时长**，不再逐点累加。首 / 末未纳入停留点的时段同样按此规则
 构成出行段（``include_leading_trailing``）。
 """
@@ -79,9 +86,11 @@ def build_trips(dataset: Dataset, stays: List[Stay], params: Dict[str, Any],
             path = [(a.lon, a.lat)] + list(zip(lon[i0 + 1:i1], lat[i0 + 1:i1])) + [(b.lon, b.lat)]
             m = _window_metrics(path, clu[i0:i1 + 1], ts[i0:i1 + 1], revisit_gap_s)
 
-            do_merge = (m["net_m"] < mid
-                        or (merge_revisit and m["revisit"] > 0)
-                        or m["straightness"] < min_str)
+            # 高置信豁免：净位移已达高置信线时，回访/直线度不再有合并权（见模块文档）。
+            do_merge = (m["net_m"] < high
+                        and (m["net_m"] < mid
+                             or (merge_revisit and m["revisit"] > 0)
+                             or m["straightness"] < min_str))
             if do_merge:
                 st[i] = _merge_stays(a, b)
                 st.pop(i + 1)

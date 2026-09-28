@@ -12,7 +12,7 @@
 ----------
     低速样本 = 相邻点对中 速度 < slow_speed_kmh 的那些
     noise    = percentile(低速样本位移, noise_percentile)
-    D_thr    = clamp(noise × radius_factor, radius_min, radius_max)   # 未开簇时
+    D_thr    = clamp(noise × radius_factor, radius_min, radius_max)
     T_thr    = max(min_stay_minutes, adaptive_min_stay_factor × 中位采样间隔)
 
 阈值与复杂度
@@ -22,7 +22,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from ...contract import ClusterInfo, Dataset, Point, Stay
 from ...geo import haversine, max_dist_to_centroid
@@ -67,17 +67,20 @@ def estimate_noise(dataset: Dataset, params: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def thresholds(noise: Dict[str, Any], params: Dict[str, Any],
-               clustered: bool = True) -> Tuple[float, float]:
+def thresholds(noise: Dict[str, Any], params: Dict[str, Any]) -> Tuple[float, float]:
     """返回 ``(停留半径 D_thr 米, 最短停留 T_thr 秒)``。
 
-    半径作用于**簇质心序列**。簇质心本身是稳定的（同簇点坐标相同），故开启聚类时
-    用较小的固定半径即可；未开启聚类时才需按定位噪声放大。
+    半径作用于簇质心（未聚类时为原始坐标）序列。``fixed`` 模式取固定半径；
+    ``auto``/``adaptive`` 按定位噪声自适应（噪声 × radius_factor，夹取
+    [radius_min, radius_max]）。
+
+    为什么 auto 不再"开簇就用固定 800 米"：簇质心稳定不代表地点之间隔得远——
+    城镇数据中两个真实地点的质心可以只差五百多米（住址 ↔ 工作地），固定 800 米
+    会让"窗口内所有点到质心 ≤ D_thr"永远成立，整月被判成一个停留点（9/23 外出
+    漏报的第三层根因）。自适应半径随数据收紧，radius_min_meters（默认 300 米）托底。
     """
     sp = params["staypoint"]
-    mode = str(sp["radius_mode"])
-    use_fixed = (mode == "fixed") or (mode == "auto" and clustered)
-    if use_fixed:
+    if str(sp["radius_mode"]) == "fixed":
         d = float(sp["fixed_radius_meters"])
     else:
         d = float(min(float(sp["radius_max_meters"]),
@@ -88,12 +91,10 @@ def thresholds(noise: Dict[str, Any], params: Dict[str, Any],
     return d, max(t_min, t_adapt)
 
 
-def detect_stays(dataset: Dataset, params: Dict[str, Any], noise: Dict[str, Any],
-                 clustered: Optional[bool] = None) -> List[Stay]:
+def detect_stays(dataset: Dataset, params: Dict[str, Any],
+                 noise: Dict[str, Any]) -> List[Stay]:
     """在地点簇质心序列上做停留点检测（双指针 + 窗口质心半径）。"""
-    if clustered is None:
-        clustered = bool(params["cluster"]["enable"])
-    d_thr, t_thr = thresholds(noise, params, clustered)
+    d_thr, t_thr = thresholds(noise, params)
     max_win = int(params["staypoint"]["max_window_points"])
 
     stays: List[Stay] = []

@@ -42,7 +42,8 @@
         "MSISDN",
         "号码",
         "用户号码",
-        "手机号"
+        "手机号",
+        "用户ID"
       ],
       "SPCODE": [
         "SPCODE",
@@ -97,6 +98,7 @@
       "merge_same_address": true,
       "co_site_meters": 50.0,
       "handover_min_count": 3,
+      "handover_bounce_minutes": 10.0,
       "handover_max_meters": 2000.0
     },
     "staypoint": {

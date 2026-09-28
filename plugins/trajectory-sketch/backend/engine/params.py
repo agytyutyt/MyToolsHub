@@ -26,7 +26,7 @@ DEFAULT_ALGO = "v2"
 # --------------------------------------------------------------------------
 DEFAULT_COLUMN_MAP = {
     "BEGINTIME": ["BEGINTIME", "BEGIN_TIME", "开始时间", "时间", "起始时间", "上报时间"],
-    "USERNUM":   ["USERNUM", "USER_NUM", "MSISDN", "号码", "用户号码", "手机号"],
+    "USERNUM":   ["USERNUM", "USER_NUM", "MSISDN", "号码", "用户号码", "手机号", "用户ID"],
     "SPCODE":    ["SPCODE", "SP_CODE"],
     "LAI":       ["LAI", "LAC", "位置区"],
     "CI":        ["CI", "小区", "小区号"],
@@ -57,13 +57,14 @@ DEFAULT_CLUSTER = {
     "enable": True,
     "merge_same_address": True,  # 地址相同 → 必合并（最强信号）
     "co_site_meters": 50.0,      # 共址 / 同站不同小区 → 必合并
-    "handover_min_count": 3,     # 双向切换次数下限
+    "handover_min_count": 3,     # 快速往返弹跳次数下限（见 handover_bounce_minutes）
+    "handover_bounce_minutes": 10.0,  # 弹跳时间窗：a→b→a 全程不超过该窗才计为一次乒乓
     "handover_max_meters": 2000.0,
 }
 
 DEFAULT_STAYPOINT = {
-    "radius_mode": "auto",           # auto（开簇时用固定小半径）| fixed | adaptive
-    "fixed_radius_meters": 800.0,
+    "radius_mode": "auto",           # auto（按噪声自适应，与 adaptive 等价）| fixed | adaptive
+    "fixed_radius_meters": 800.0,    # 仅 fixed 模式使用
     "radius_factor": 1.2,
     "radius_min_meters": 300.0,
     "radius_max_meters": 3000.0,
@@ -243,6 +244,7 @@ def _clamp(params: Dict[str, Any]) -> None:
     c = params["cluster"]
     c["co_site_meters"] = max(0.0, float(c["co_site_meters"]))
     c["handover_min_count"] = max(1, int(c["handover_min_count"]))
+    c["handover_bounce_minutes"] = max(0.0, float(c["handover_bounce_minutes"]))
     c["handover_max_meters"] = max(0.0, float(c["handover_max_meters"]))
 
     cl = params["clean"]
@@ -269,8 +271,6 @@ def validate(params: Dict[str, Any]) -> List[str]:
         w.append("停留半径模式（radius_mode）取值非法，已按 auto 处理。")
     if params["trip"]["mid_conf_factor"] > params["trip"]["high_conf_factor"]:
         w.append("中置信系数大于高置信系数，将导致判定层级颠倒，请检查配置。")
-    if not params["cluster"]["enable"] and params["staypoint"]["radius_mode"] == "auto":
-        w.append("地点簇已关闭且半径为 auto，将按定位噪声自适应放大停留半径（结果偏保守）。")
     return w
 
 

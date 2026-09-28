@@ -36,10 +36,10 @@ def run(dataset: Dataset, params: Dict[str, Any]) -> Dict[str, Any]:
     cluster.attach_clusters(dataset, mapping, table)
 
     # ---- 阶段 D：停留点 ----
-    clustered = bool(params["cluster"]["enable"])
+    clustered = bool(params["cluster"]["enable"])   # 仅供质量报告与簇统计使用
     noise = staypoint.estimate_noise(dataset, params)
-    d_thr, t_thr = staypoint.thresholds(noise, params, clustered)
-    stays = staypoint.detect_stays(dataset, params, noise, clustered)
+    d_thr, t_thr = staypoint.thresholds(noise, params)
+    stays = staypoint.detect_stays(dataset, params, noise)
 
     # ---- 阶段 E：出行段（可能合并停留点）----
     stays, trips = trip_mod.build_trips(dataset, stays, params, noise)
@@ -109,8 +109,7 @@ def _quality(dataset: Dataset, params: Dict[str, Any], noise: Dict[str, Any],
         "低速样本数": int(noise.get("n_samples", 0)),
         "停留半径阈值D_thr_米": int(round(d_thr)),
         "最短停留T_thr_分钟": round(t_thr / 60.0, 1),
-        "半径模式": ("固定" if (str(params["staypoint"]["radius_mode"]) == "fixed"
-                            or (str(params["staypoint"]["radius_mode"]) == "auto" and clustered))
+        "半径模式": ("固定" if str(params["staypoint"]["radius_mode"]) == "fixed"
                    else "自适应"),
         "地点簇启用": clustered,
         "算法版本": params.get("algo", VERSION),
