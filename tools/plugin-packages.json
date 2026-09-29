@@ -650,13 +650,13 @@
                                                     }
                                      },
                      "trajectory-sketch":  {
-                                               "version":  "1.2.8",
+                                               "version":  "1.2.9",
                                                "api_version":  1,
-                                               "file":  "JZToolsHub-插件-trajectory-sketch-v1.2.8.zip",
-                                               "sha256":  "b5d34807756153bb60d9adea948cf626001ff2e6f11f93c3a64312d1ae91c7b5",
-                                               "size":  166402,
-                                               "built_at":  "2026-09-29T15:11:28+08:00",
-                                               "code_sha256":  "65fa67e948413e19f75fe8603727984073cf43f046628101908e32971d747c61",
+                                               "file":  "JZToolsHub-插件-trajectory-sketch-v1.2.9.zip",
+                                               "sha256":  "6898d7f89269b7972af3cd16aa49b7f0bb14d2f9414a818f82c459e350b38c3f",
+                                               "size":  167322,
+                                               "built_at":  "2026-09-29T17:20:53+08:00",
+                                               "code_sha256":  "dde6a816633c8cd0a02af94a71a38c49f8e27b9876711f424b73fd0ac0110211",
                                                "file_count":  51,
                                                "requires_restart":  true,
                                                "file_hashes":  {
@@ -689,8 +689,8 @@
                                                                    "plugins/trajectory-sketch/backend/llm_client.py":  "3e1f7fee41399c41",
                                                                    "plugins/trajectory-sketch/backend/report_store.py":  "9befa809d56dfb6d",
                                                                    "plugins/trajectory-sketch/backend/requirements.txt":  "70acf5c488026a58",
-                                                                   "plugins/trajectory-sketch/backend/routes.py":  "96d2d7747f15369a",
-                                                                   "plugins/trajectory-sketch/frontend/app.js":  "5574d10a76259715",
+                                                                   "plugins/trajectory-sketch/backend/routes.py":  "714b28da88931836",
+                                                                   "plugins/trajectory-sketch/frontend/app.js":  "87c3b21104c4348f",
                                                                    "plugins/trajectory-sketch/frontend/icons/_generate.py":  "c7d156252c08d589",
                                                                    "plugins/trajectory-sketch/frontend/icons/check.svg":  "a60766647cb6b46c",
                                                                    "plugins/trajectory-sketch/frontend/icons/clock.svg":  "0a37fd8b4223228b",
@@ -707,20 +707,20 @@
                                                                    "plugins/trajectory-sketch/frontend/icons/upload.svg":  "7de692d848f8f6bb",
                                                                    "plugins/trajectory-sketch/frontend/icons/user.svg":  "73fb2cda25fac55c",
                                                                    "plugins/trajectory-sketch/frontend/icons/warning.svg":  "3ae86d1c01cecaa1",
-                                                                   "plugins/trajectory-sketch/frontend/index.html":  "06a3bf53b5f43cf1",
-                                                                   "plugins/trajectory-sketch/frontend/style.css":  "f325ab7a80539be9",
-                                                                   "plugins/trajectory-sketch/manifest.json":  "7e64aa1ece8932d5",
-                                                                   "plugins/trajectory-sketch/README.md":  "eb7d21076413c6a2"
+                                                                   "plugins/trajectory-sketch/frontend/index.html":  "e116b1cb9a4a17f7",
+                                                                   "plugins/trajectory-sketch/frontend/style.css":  "0c5df2445b972724",
+                                                                   "plugins/trajectory-sketch/manifest.json":  "f53661ef9be75606",
+                                                                   "plugins/trajectory-sketch/README.md":  "6f7bf6546953043a"
                                                                },
                                                "assets":  {
                                                               "frontend/app.js":  {
-                                                                                      "h":  "5574d10a76259715",
-                                                                                      "v":  3,
+                                                                                      "h":  "87c3b21104c4348f",
+                                                                                      "v":  4,
                                                                                       "referenced":  true
                                                                                   },
                                                               "frontend/style.css":  {
-                                                                                         "h":  "f325ab7a80539be9",
-                                                                                         "v":  2,
+                                                                                         "h":  "0c5df2445b972724",
+                                                                                         "v":  3,
                                                                                          "referenced":  true
                                                                                      }
                                                           }
