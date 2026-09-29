@@ -60,8 +60,9 @@ pip install -r plugins/trajectory-sketch/backend/requirements.txt     # openpyxl
 | --- | --- | --- |
 | `/status` | GET | 依赖自检（`openpyxl` / `xlrd` / `requests`）+ 过滤能力状态（含大模型是否已配置）+ 算法版本 + 配置提醒 |
 | `/config` | GET | 读取配置（含保留字段别名展开明细、`can_manage`） |
-| `/config` | POST | 保存配置（仅管理员/超管） |
-| `/upload` | POST | multipart `file` → **删除背景图片** → 暂存 + 硬过滤预演 + 字段自检（同步）；响应含 `sanitize` |
+| `/config` | POST | 保存配置（仅管理员/超管）；**不含算法版本**——算法唯一切换入口是 `/algorithm` |
+| `/algorithm` | POST | `{algo}` → 切换分析算法（**办案员即可**，写 `analysis.algo`，下一次生成报告生效） |
+| `/upload` | POST | multipart `file` → **删除背景图片** → 暂存 + 硬过滤预演 + 字段自检（同步）；响应含 `sanitize`、`algorithm`、`algorithms` |
 | `/analyze` | POST | `{staged_id, mode}` → **异步**返回 `task_id` |
 | `/result/<task_id>` | GET | 轮询进度与结果（含质量/停留点/出行段/报告/警告/`sanitize`） |
 | `/download/<task_id>` | GET | 下载速写报告 `.xlsx` |
@@ -121,6 +122,10 @@ plugins/trajectory-sketch/
 出行段 / 无数据段（状态栅格不切条目，短途出行不被缓行吞）。报告正文按**窗口状态聚合
 叙述**（同态连续区间一条，五态命名，速度=净位移÷实际时间）；`quality` 增 `v3_状态分布`
 等键。参数全在 `analysis.v3` 节。
+
+**算法切换**：字段自检卡片顶部的「算法」胶囊（switch 形态，v2 ↔ v3 分段高亮）是
+**唯一切换入口**，办案员 / 管理员均可点击，下一次生成报告即生效（`POST /algorithm`
+仅写 `analysis.algo`；配置面板不再提供算法选择）。
 口径与实测预测：`docs/design/轨迹速写v3算法-设计文档.md`；实施清单：
 `docs/plan/轨迹速写v3算法-TODO清单.md`。
 

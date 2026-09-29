@@ -76,6 +76,8 @@
 
 | T18 | 参数逐项说明写入插件 README | 需求方定稿：不单开文档。`plugins/trajectory-sketch/README.md` §6 增「分析参数逐项说明（分析阈值 · v2 / v3 分立）」：通用底座（clean/cluster/噪声）/ v2 判定（staypoint 半径组 + trip）/ v3 专属七参数，逐项给默认值、功能、调大/调小预期；另附「v3 会读到哪些 v2 参数」与「调参速查（症状 → 参数）」；两份设计文档挂指针 | README §6 即参数唯一真源；walk_speed_kmh 如实标注"预留未使用" | ✅ |
 
+| T19 | 算法切换胶囊（需求方定稿） | 字段自检卡顶部「算法」胶囊（switch 形态，v2↔v3 分段高亮）为**唯一切换入口**，办案员/管理员均可点；新端点 `POST /algorithm` 仅写 `analysis.algo`（办案员即可，无管理员门禁）；设置面板撤算法下拉、`/config` POST 不再收 `analysis.algo`；上传响应带 `algorithms`；样式 `style.css`（.algo-switch）+ 资源版本 v=3/v=4 | 烟囱：切换 200 生效、未知算法 400、config POST 不再改 algo（另有 403 门禁）；selftest 74/74 | ✅ |
+
 ## 验收红线（跨批次）
 
 1. **缺省不变**：`analysis.algo` 缺省 v2；v2 在全部既有用例下输出与 1.2.7 完全一致（幂等）。

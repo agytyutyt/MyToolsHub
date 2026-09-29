@@ -170,6 +170,22 @@ textarea.mono { font-family: Consolas, "Courier New", monospace; font-size: 12px
 }
 .check-summary .pill.ok { background: #E8F5E9; color: #1B5E20; }
 .check-summary .pill.bad { background: #FDECEA; color: #B71C1C; }
+/* 算法切换胶囊（switch 形态，办案员 / 管理员均在字段自检卡切换） */
+.algo-switch {
+  display: inline-flex; align-items: center; border-radius: 999px; overflow: hidden;
+  background: #F1F1F5; border: 1px solid #E3E4E8;
+}
+.algo-switch .algo-label {
+  padding: 3px 10px; font-size: 12px; color: #5B6472;
+  background: #E9EAF0; border-right: 1px solid #E3E4E8;
+}
+.algo-switch .algo-seg {
+  padding: 3px 14px; font-size: 12px; font-weight: 600; color: #5B6472;
+  cursor: pointer; user-select: none; transition: background .15s, color .15s;
+}
+.algo-switch .algo-seg:hover { color: var(--accent); }
+.algo-switch .algo-seg.on { background: var(--accent); color: #fff; cursor: default; }
+.algo-switch.busy { opacity: .55; pointer-events: none; }
 .field-cols { display: flex; gap: 16px; flex-wrap: wrap; }
 .field-cols > div { flex: 1 1 200px; min-width: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }

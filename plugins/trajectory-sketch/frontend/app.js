@@ -229,19 +229,6 @@
     // 数值参数
     var grid = $('cfgParams');
     clear(grid);
-    var algoWrap = el('label', 'cfg-num');
-    algoWrap.appendChild(el('span', null, '算法版本'));
-    var sel = el('select');
-    (cfg.algorithms || []).forEach(function (a) {
-      var o = el('option', null, a);
-      o.value = a;
-      if (c.analysis && c.analysis.algo === a) { o.selected = true; }
-      sel.appendChild(o);
-    });
-    algoWrap.appendChild(sel);
-    algoWrap.appendChild(el('small', null, '算法实现位于引擎包，可插拔替换'));
-    grid.appendChild(algoWrap);
-    sel.id = 'cfgAlgo';
 
     NUM_FIELDS.forEach(function (f) {
       var wrap = el('label', 'cfg-num');
@@ -319,7 +306,8 @@
   }
 
   function saveConfig() {
-    var analysis = { algo: $('cfgAlgo') ? $('cfgAlgo').value : 'v2' };
+    // 算法版本不在配置面板中修改（唯一入口：字段自检卡片的算法胶囊）
+    var analysis = {};
     var inputs = $('cfgParams').querySelectorAll('input[data-key]');
     for (var i = 0; i < inputs.length; i++) {
       var inp = inputs[i];
@@ -380,8 +368,37 @@
 
     var sum = $('checkSummary');
     clear(sum);
+
+    // 算法胶囊（switch 形态）：办案员 / 管理员均在此切换，下一次生成报告即生效
+    var algoSwitch = el('span', 'algo-switch');
+    algoSwitch.appendChild(el('span', 'algo-label', '算法'));
+    (up.algorithms || [up.algorithm]).forEach(function (a) {
+      var seg = el('span', 'algo-seg' + (a === up.algorithm ? ' on' : ''), a);
+      seg.addEventListener('click', function () {
+        if (a === state.staged.algorithm || algoSwitch.className.indexOf('busy') >= 0) { return; }
+        algoSwitch.className = 'algo-switch busy';
+        $('runStatus').className = 'status';
+        $('runStatus').textContent = '正在切换算法…';
+        api('/algorithm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ algo: a })
+        }).then(function (r) {
+          state.staged.algorithm = r.algo;
+          renderCheck(state.staged);
+          $('runStatus').className = 'status ok';
+          $('runStatus').textContent = '已切换为算法 ' + r.algo + '，下一次生成报告即生效';
+        }).catch(function (err) {
+          algoSwitch.className = 'algo-switch';
+          $('runStatus').className = 'status err';
+          $('runStatus').textContent = err.message;
+        });
+      });
+      algoSwitch.appendChild(seg);
+    });
+    sum.appendChild(algoSwitch);
+
     var pills = [
-      ['算法 ' + s(up.algorithm), ''],
       ['过滤后数据行 ' + s(up.filter.rows), ''],
       [up.schema.can_analyze ? '必需字段齐备' : '缺少必需字段', up.schema.can_analyze ? 'ok' : 'bad']
     ];

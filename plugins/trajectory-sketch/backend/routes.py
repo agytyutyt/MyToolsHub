@@ -301,11 +301,8 @@ def register(app):
 
         analysis = data.get("analysis")
         if isinstance(analysis, dict):
-            algo = str(analysis.get("algo") or "").strip()
-            if algo:
-                if algo not in available_algorithms():
-                    return jsonify({"error": "未知的算法版本：%s" % algo}), 400
-                cfg["analysis"]["algo"] = algo
+            # 算法版本（analysis.algo）不经此接口修改——唯一入口是
+            # POST /api/trajectory-sketch/algorithm（字段自检卡片的算法胶囊）。
             for sect in ("clean", "cluster", "staypoint", "trip"):
                 if isinstance(analysis.get(sect), dict):
                     cfg["analysis"][sect] = {**cfg["analysis"].get(sect, {}), **analysis[sect]}
@@ -317,6 +314,22 @@ def register(app):
         config_store.save_config(cfg)
         _set_operation("保存轨迹速写配置")
         return jsonify({"ok": True})
+
+    @app.post(f"{API_PREFIX}/algorithm")
+    def ts_algorithm_set():
+        """切换分析算法（办案员即可切换）：仅写 analysis.algo，不触碰其余配置。
+
+        无管理员门禁——算法选择属于办案操作而非系统配置；可选项来自引擎注册表。
+        下一次「生成速写报告」即按新算法执行（任务运行时读取当前配置）。
+        """
+        body = request.get_json(silent=True) or {}
+        algo = str(body.get("algo") or "").strip()
+        if algo not in available_algorithms():
+            return jsonify({"error": "未知的算法版本：%s" % (algo or "（空）")}), 400
+        cfg = config_store.load_config()
+        cfg["analysis"]["algo"] = algo
+        config_store.save_config(cfg)
+        return jsonify({"ok": True, "algo": algo, "algorithms": available_algorithms()})
 
     @app.post(f"{API_PREFIX}/upload")
     def ts_upload():
@@ -396,6 +409,7 @@ def register(app):
             "preview": filtered[:6],
             "llm_configured": _filter_llm_configured(),
             "algorithm": normalize_params(config_store.engine_config(cfg)).get("algo"),
+            "algorithms": available_algorithms(),
         })
 
     @app.post(f"{API_PREFIX}/analyze")
