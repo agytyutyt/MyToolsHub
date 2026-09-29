@@ -154,6 +154,123 @@ def test_commuter_two_places() -> None:
     check("往返通勤可见（有效出行 ≥ 4 段）", len(trips) >= 4, str(len(trips)))
 
 
+def test_v3_votes() -> None:
+    print("· v3 三票纯函数（桥接 / 守卫 / 四行判定）")
+    from engine.algorithms.v3 import votes as V
+
+    def win(lon, lat, t0, t1):
+        return {"pos": (lon, lat), "first": (lon, lat), "last": (lon, lat),
+                "ts_first": t0, "ts_last": t1, "t0": t0, "n": 1, "addr": "", "points": []}
+
+    # 只含 0/1 与桥接：闪断窗（两侧静止）→ 101 → 静止
+    info = {0: win(109.9, 21.6, 0, 60), 1: None, 2: win(109.9, 21.6, 660, 720)}
+    st, votes_t, _br = V.window_state(1, info, 0, 2, 300, 200.0, 10.0, 150.0, 60.0)
+    check("v3 闪断桥接 101 → 静止", st == 1 and votes_t == (1, 0, 1), str(votes_t))
+    # 跨 ≥2 空窗不桥接：000 → 失联
+    info = {0: win(109.9, 21.6, 0, 60), 1: None, 2: None, 3: win(109.9, 21.6, 1260, 1320)}
+    st, votes_t, _br = V.window_state(2, info, 0, 3, 300, 200.0, 10.0, 150.0, 60.0)
+    check("v3 跨 2 空窗 000 → 失联", st == 0 and votes_t == (0, 0, 0), str(votes_t))
+    # 孤立数据窗：010 → 静止
+    info = {0: None, 1: win(109.9, 21.6, 300, 360), 2: None}
+    st, votes_t, _br = V.window_state(1, info, 0, 2, 300, 200.0, 10.0, 150.0, 60.0)
+    check("v3 孤立数据窗 010 → 静止", st == 1 and votes_t == (0, 1, 0), str(votes_t))
+    # 短跨度守卫：30 秒内 300 米只判蠕动，不给快速
+    w30 = win(109.9, 21.6, 0, 30)
+    w30["last"] = (109.903, 21.6)
+    v = V.own_vote(w30, 200.0, 10.0, 150.0, 60.0)
+    check("v3 短跨度守卫 → 蠕动", v == 2, str(v))
+    # 速度分带与噪声门限
+    check("v3 分带：100km/h → 快速", V.band(10000, 360, 200.0, 10.0, 150.0) == 3)
+    check("v3 分带：300km/h → 极速", V.band(50000, 600, 200.0, 10.0, 150.0) == 4)
+    check("v3 分带：位移≤噪声 → 静止", V.band(100, 60, 200.0, 10.0, 150.0) == 1)
+    # 四行判定规则
+    check("v3 判定：(3,4,1) → 快速", V.classify((3, 4, 1)) == 3)
+    check("v3 判定：(4,4,1) → 极速", V.classify((4, 4, 1)) == 4)
+    check("v3 判定：(2,2,2) → 蠕动", V.classify((2, 2, 2)) == 2)
+    check("v3 判定：(1,0,0) → 静止", V.classify((1, 0, 0)) == 1)
+    check("v3 判定：(0,0,0) → 失联", V.classify((0, 0, 0)) == 0)
+
+
+def _v3_static_rows():
+    """静止抖动：同一地点 6 小时、10 分钟一报（单空窗靠桥接续上）。"""
+    rows = [["BEGINTIME", "LONGITUDE", "LATITUDE"]]
+    for i in range(36):
+        rows.append(["", 109.92401 + 0.0004 * (i % 2), 21.626743 - 0.0004 * (i % 2)])
+    return _retime(rows, 0, 1786000000, 600)
+
+
+def _v3_tunnel_rows():
+    """行驶 40 分钟（60km/h）途中隧道闪断 1 窗，到目的地停留 30 分钟。"""
+    from engine.timeutil import epoch_to_str
+    rows = [["BEGINTIME", "LAI", "CI", "LONGITUDE", "LATITUDE"]]
+    base = 1786000000
+    ks = [k for k in range(41) if not (25 <= k <= 29)]      # k=25..29 → 1 个整窗无数据
+    for k in ks + list(range(41, 71)):
+        rows.append([epoch_to_str(base + k * 60), "1335731", str(7000 + k),
+                     109.90 + 0.009 * min(k, 40), 21.60])
+    return rows
+
+
+def _v3_void_rows():
+    """同地停留 30 分钟 → 20 分钟无数据 → 再停留 30 分钟（停留跨断档合并）。"""
+    rows = [["BEGINTIME", "LONGITUDE", "LATITUDE"]]
+    base = 1786000000
+    times = list(range(0, 1800, 120)) + list(range(3000, 4800, 120))
+    for t in times:
+        rows.append(["", 109.92401, 21.626743])
+    from engine.timeutil import epoch_to_str
+    for i, t in enumerate(times, start=1):
+        rows[i][0] = epoch_to_str(base + t)
+    return rows
+
+
+def test_v3_end_to_end() -> None:
+    print("· v3 端到端（静止 / 通勤双址 / 隧道桥接 / 跨断档合并）")
+    res = analyze_rows(_v3_static_rows(), algo="v3")
+    check("v3 静止：无出行段", len(res["trips"]) == 0, str(res["trips"])[:100])
+    check("v3 静止：停留覆盖全程", res["stays"] and res["stays"][0]["停留分钟"] >= 300,
+          str(res["stays"])[:100])
+    check("v3 静止：桥接消除失联窗", res["quality"]["v3_状态分布"].get("失联", 0) == 0,
+          str(res["quality"]["v3_状态分布"]))
+    txt = list(res["report"]["text_by_user"].values())[0]
+    check("v3 静默：报告为状态叙述", "静默" in txt and "有效出行" not in txt
+          and "【逐窗状态】" not in txt and "【断档统计】" not in txt, txt[-120:])
+
+    res = analyze_rows(_commuter_rows(), algo="v3")
+    long_trips = [t for t in res["trips"] if 500 <= t["净位移_米"] <= 700]
+    check("v3 通勤：600 米往返成出行段（红线）", len(long_trips) >= 4, str(len(long_trips)))
+    check("v3 通勤：工作地停留被检出",
+          any(str(s["代表地址"]).startswith("办公") for s in res["stays"]))
+    check("v3 通勤：跨空窗出行含无数据注记",
+          any(t["含无数据_分钟"] >= 5 for t in res["trips"]), str(res["trips"])[:150])
+    txt = list(res["report"]["text_by_user"].values())[0]
+    check("v3 通勤：报告为状态叙述（行程在空窗内如实记失联）",
+          "失联" in txt and "有效出行" not in txt
+          and "【逐窗状态】" not in txt and "【断档统计】" not in txt, txt[-120:])
+
+    res = analyze_rows(_v3_tunnel_rows(), algo="v3")
+    check("v3 隧道：闪断窗判快速不判失联",
+          res["quality"]["v3_状态分布"].get("快速", 0) >= 3
+          and res["quality"]["v3_状态分布"].get("失联", 0) == 0,
+          str(res["quality"]["v3_状态分布"]))
+    check("v3 隧道：行驶+停留 → 1 段出行 1 处停留",
+          len(res["trips"]) == 1 and len(res["stays"]) == 1
+          and res["trips"][0]["净位移_米"] > 20000,
+          str(res["trips"])[:150])
+    txt = list(res["report"]["text_by_user"].values())[0]
+    check("v3 隧道：报告含快速叙述", "快速" in txt and "失联" not in txt, txt[-120:])
+
+    res = analyze_rows(_v3_void_rows(), algo="v3")
+    check("v3 断档：同地停留跨 20 分钟无数据合并",
+          len(res["stays"]) == 1 and res["stays"][0]["停留分钟"] >= 45,
+          str(res["stays"])[:150])
+    check("v3 断档：失联区间入统计", res["quality"]["v3_断档区间数"] == 1,
+          str(res["quality"]["v3_断档区间数"]))
+    check("v3 断档：不产生出行段", len(res["trips"]) == 0, str(res["trips"])[:100])
+    txt = list(res["report"]["text_by_user"].values())[0]
+    check("v3 断档：报告含失联叙述", "失联" in txt, txt[-120:])
+
+
 def test_idempotent() -> None:
     print("· 幂等性（同输入两次结果完全一致）")
     rows = _moving_rows()
@@ -327,6 +444,7 @@ def main(argv) -> int:
     print("=== 轨迹分析引擎自测 ===")
     for fn in (test_percentile, test_time, test_schema_guard, test_empty_and_dirty,
                test_static_user, test_pingpong, test_commuter_two_places,
+               test_v3_votes, test_v3_end_to_end,
                test_idempotent, test_moving_and_report,
                test_multi_user_and_no_user, test_params_guard):
         fn()

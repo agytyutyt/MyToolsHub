@@ -12,5 +12,6 @@
 from __future__ import annotations
 
 from . import v2  # noqa: F401  导入即注册 "v2"
+from . import v3  # noqa: F401  导入即注册 "v3"
 
-__all__ = ["v2"]
+__all__ = ["v2", "v3"]

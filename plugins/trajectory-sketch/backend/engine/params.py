@@ -96,6 +96,18 @@ DEFAULT_REPORT = {
     "time_formats": [],         # 追加的时间格式（优先于内置格式尝试）
 }
 
+# v3 算法（五态窗口栅格）参数——仅 analysis.algo == "v3" 时生效，口径见
+# docs/design/轨迹速写v3算法-设计文档.md §3/§4.2。
+DEFAULT_V3 = {
+    "window_minutes": 5.0,      # 窗口宽（分钟）
+    "creep_kmh": 10.0,          # 蠕动上限
+    "fast_kmh": 150.0,          # 快速上限（超过为极速）
+    "stay_minutes": 15.0,       # 聚合层停留段最短时长
+    "guard_seconds": 60.0,      # 自身票短跨度守卫（间隔不足只判静止/蠕动）
+    "noise_floor_m": 0.0,       # 静止门限；0 = 复用 v2 自适应噪声
+    "merge_void_into_stay": True,   # 相邻停留（位置 ≤ 噪声）跨无数据段合并
+}
+
 DEFAULT_PARAMS: Dict[str, Any] = {
     "algo": DEFAULT_ALGO,
     "schema": DEFAULT_SCHEMA,
@@ -104,6 +116,7 @@ DEFAULT_PARAMS: Dict[str, Any] = {
     "staypoint": DEFAULT_STAYPOINT,
     "trip": DEFAULT_TRIP,
     "report": DEFAULT_REPORT,
+    "v3": DEFAULT_V3,
 }
 
 
@@ -213,6 +226,7 @@ def normalize(config: Any = None) -> Dict[str, Any]:
         "cluster": sect("cluster", DEFAULT_CLUSTER),
         "staypoint": sect("staypoint", DEFAULT_STAYPOINT),
         "trip": sect("trip", DEFAULT_TRIP),
+        "v3": sect("v3", DEFAULT_V3),
     }
     report_src = cfg.get("report") if isinstance(cfg.get("report"), dict) else analysis.get("report")
     params["report"] = _merge(DEFAULT_REPORT, report_src)
@@ -252,6 +266,15 @@ def _clamp(params: Dict[str, Any]) -> None:
     cl["grid_seconds"] = max(0, int(cl["grid_seconds"]))
     cl["max_gap_seconds"] = max(0.0, float(cl["max_gap_seconds"]))
 
+    v3 = params.get("v3")
+    if isinstance(v3, dict):
+        v3["window_minutes"] = max(1.0, float(v3["window_minutes"]))
+        v3["creep_kmh"] = max(0.1, float(v3["creep_kmh"]))
+        v3["fast_kmh"] = max(v3["creep_kmh"], float(v3["fast_kmh"]))
+        v3["stay_minutes"] = max(0.0, float(v3["stay_minutes"]))
+        v3["guard_seconds"] = max(0.0, float(v3["guard_seconds"]))
+        v3["noise_floor_m"] = max(0.0, float(v3["noise_floor_m"]))
+
 
 def validate(params: Dict[str, Any]) -> List[str]:
     """返回配置层面的警告（中文，可直接展示在页面「配置警告」处）。"""
@@ -271,6 +294,9 @@ def validate(params: Dict[str, Any]) -> List[str]:
         w.append("停留半径模式（radius_mode）取值非法，已按 auto 处理。")
     if params["trip"]["mid_conf_factor"] > params["trip"]["high_conf_factor"]:
         w.append("中置信系数大于高置信系数，将导致判定层级颠倒，请检查配置。")
+    v3 = params.get("v3")
+    if isinstance(v3, dict) and float(v3["fast_kmh"]) <= float(v3["creep_kmh"]):
+        w.append("v3 的极速上限（fast_kmh）不大于蠕动上限（creep_kmh），速度分带将失效，请检查配置。")
     return w
 
 
