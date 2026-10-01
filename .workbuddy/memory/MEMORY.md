@@ -68,6 +68,9 @@
 
 - 后端跨模块 import 用两步式兜底（relative → absolute → None）。
 - 前端图标别依赖 emoji 字体。
+- **仓库只保留 `main` 分支（2026-10-02 收敛，远程亦只有 main）**。历史功能分支已删；
+  唯一未并入的工作是 G2 圆角引擎 jz-radius v1.2（尖端 `a8c9834`，+1283 行：static/js/jz-radius.js
+  + 基准页 + 设计文档），需要时 `git branch G2改造 a8c9834` 或 `git cherry-pick a8c9834` 找回。
 
 ## G 文档体系
 
