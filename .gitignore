@@ -76,3 +76,7 @@ demo/
 # 且新增临时产物默认会被跟踪，把"出包 dirty 检查"误判为非干净。
 .workbuddy/*
 !.workbuddy/memory/
+
+# 客户端源码态运行时残留（client/ 开发运行写在仓库根）
+client.pid
+port.txt

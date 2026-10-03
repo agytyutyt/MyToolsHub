@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page="JZCLIENT_FALLBACK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>无法连接服务器</title>
+<style>
+  body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#f1f3f4;margin:0;
+       display:flex;align-items:center;justify-content:center;min-height:100vh}
+  .card{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.12);
+        padding:32px 40px;max-width:520px;width:92%}
+  h1{font-size:20px;margin:0 0 8px;color:#d93025}
+  p{color:#5f6368;margin:6px 0;line-height:1.6}
+  label{display:block;margin:16px 0 4px;color:#202124;font-size:13px}
+  input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #dadce0;border-radius:6px;font-size:14px}
+  .row{margin-top:20px;display:flex;gap:12px}
+  button{flex:1;padding:10px 0;border:0;border-radius:6px;font-size:14px;cursor:pointer}
+  .retry{background:#1a73e8;color:#fff}
+  .save{background:#e8f0fe;color:#1a73e8}
+  #msg{margin-top:12px;font-size:13px;color:#188038;min-height:18px}
+  #err{font-size:12px;color:#9aa0a6;word-break:break-all}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>无法连接服务器</h1>
+  <p>客户端已启动，但远程服务器不可达。本地插件不受影响，<a href="/local-admin">打开本地插件管理</a>（批次 4 上线）。</p>
+  <p id="err"></p>
+  <label for="addr">服务器地址</label>
+  <input id="addr" placeholder="例如 192.168.1.10:5000">
+  <div class="row">
+    <button class="save" onclick="save()">保存地址</button>
+    <button class="retry" onclick="retry()">重试</button>
+  </div>
+  <div id="msg"></div>
+</div>
+<script>
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];});}
+fetch("/local-api/config").then(r=>r.json()).then(c=>{
+  document.getElementById("addr").value = c.address || "";
+  if (c.health && c.health.last_error)
+    document.getElementById("err").textContent = "最近错误：" + esc(c.health.last_error);
+}).catch(()=>{});
+function save(){
+  const addr = document.getElementById("addr").value.trim();
+  fetch("/local-api/config/address", {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({address: addr})})
+    .then(r=>r.json()).then(r=>{
+      document.getElementById("msg").textContent =
+        "已保存" + (r.address ? "：" + esc(r.address) : "（已清空）") + "，点「重试」生效。";
+    }).catch(()=>{ document.getElementById("msg").textContent = "保存失败"; });
+}
+function retry(){ location.href = "/"; }
+</script>
+</body>
+</html>

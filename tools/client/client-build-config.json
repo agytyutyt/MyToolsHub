@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "product": {
+    "name": "YFJZ_Client",
+    "display_name": "JZ 工具箱",
+    "version": "0.0.1-preview"
+  },
+  "paths": {
+    "data_dirname": "JZClient"
+  },
+  "server": {
+    "default_address": ""
+  },
+  "webview2": {
+    "fallback": "fixed",
+    "version": "100.0.1185.x",
+    "source": "官方下载页 Fixed Version 下拉（100.x 可选性待核验，备选 Microsoft Update Catalog）",
+    "trim": "仅留 zh-CN/en-US 语言包；目录随出包脚本执行 NTFS compact LZX"
+  }
+}
