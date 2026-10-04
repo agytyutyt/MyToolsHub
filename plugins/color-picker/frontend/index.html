@@ -43,6 +43,23 @@
     font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ===== 响应式档位（全站统一 480/767 + max-height:640，禁私有档位） ===== */
+  @media (max-width:767px) {
+    body { padding: 16px; width: 100%; }
+    .picker-row { gap: 14px; }
+  }
+  @media (max-width:480px) {
+    body { padding: 12px; }
+    .preview { width: 96px; height: 96px; }
+    .value-row { padding: 8px 10px; gap: 8px; }
+    .value-row label { width: 38px; }
+    .value-row .btn { padding: 7px 10px; }
+  }
+  @media (max-height:640px) {
+    body { padding: 16px; }
+    .preview { width: 96px; height: 96px; }
+  }
 </style>
 </head>
 <body>
@@ -86,7 +103,7 @@
 
   // 复制并给出轻提示
   function copy(text, label) {
-    navigator.clipboard.writeText(text).then(() => {
+    window.jzCopyText(text).then(() => {
       toast.textContent = label + ' 已复制';
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 1500);
@@ -118,5 +135,13 @@
   picker.addEventListener('input', render);
   render();
 </script>
+<script>window.jzCopyText=function(t){if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(t);var a=document.createElement("textarea");a.value=t;a.style.cssText="position:fixed;opacity:0";document.body.appendChild(a);a.focus();a.select();try{document.execCommand("copy")?Promise.resolve():Promise.reject(new Error("copy failed"))}catch(e){Promise.reject(e)}finally{document.body.removeChild(a)}};window.jzCopyText=function(t){return (navigator.clipboard&&window.isSecureContext)?navigator.clipboard.writeText(t):new Promise(function(res,rej){var a=document.createElement("textarea");a.value=t;a.style.cssText="position:fixed;opacity:0";document.body.appendChild(a);a.focus();a.select();try{document.execCommand("copy")?res():rej(new Error("copy failed"))}catch(e){rej(e)}finally{document.body.removeChild(a)}})};</script>
+<style>
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:767px){ body{ padding:16px } }
+@media (max-width:480px){ body{ padding:12px } }
+
+@media (max-width:480px){ .panel, .card, .result { min-width:0 } }
+</style>
 </body>
 </html>

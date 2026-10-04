@@ -463,3 +463,10 @@ input, textarea {
   font-size: 15px;
   padding: 4px 6px;
 }.edit-item-row .ie-del:hover { background: #ffebee; border-radius: 6px; }
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:767px){
+  .item-row{ display:grid; grid-template-columns:1fr auto; gap:6px 10px }
+  .item-row > *{ min-width:0 }
+}
+@media (max-width:480px){ body{ padding:12px } .item-row{ grid-template-columns:1fr } }

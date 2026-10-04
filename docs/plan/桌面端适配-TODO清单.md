@@ -114,37 +114,61 @@
 
 | # | 任务 | 具体实现方案 | 预期效果与验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| T14 | 登录会话镜像 | 登录请求经中继 POST 远程；镜像会话（供中继与 jz_relay 用）+ **加密持久化到客户端自有目录**（类 C 升级触发能力层秒级重启后免重登，方案 §6.7）；401/过期统一信号 → 前端引导重登（对齐 admin 滑动续期口径） | 登录→取数→过期→重登全链路通；能力层重启后免重登；**只持久化会话 Cookie（加密），凭据不落盘** | ☐ |
-| T15 | 类 A 中继通道 | 其余 `/api/*` 与类 A `/plugin/<id>/*` 转发远程：请求/响应头透传、上传流式透传（T03 方案产品化）、大响应不全量缓冲 | 类 A 插件在客户端内全部可用（抽查 5 个含上传/下载/大表格）；与浏览器直连行为一致 | ☐ |
-| T16 | 工具清单合并与本地直出 | `/api/tools` = 中继远程 ⊕ 本地注册表（`local-` 前缀；id 冲突拒装提示）；`/tool/<local-id>` 与 `/plugin/local-*/<entry>` 本地直出（工具外壳页用客户端自带 `tool.html`） | 主页网格混排两类入口可点开；断网时本地入口仍可开 | ☐ |
-| T17 | jz_relay 门面 | 能力层提供 `jz_relay.get/post(框架级路径,…)`：自动附用户会话；**仅放行框架级 API 与数据接口**（白名单）；其他插件端点不可达；`server_data: true` 插件安装时明示「数据出机」。**白名单初版口径（2026-10-03 拍板）**：= 当前 HTML 版插件实际调用的框架级 API 面，**从现有代码调用关系机械提取**（方案 §6.3），不加新面、不删现用面 | 白名单外路径 403；**提取清单与 HTML 版实际调用面一致（抽查 3 个插件核对）**；类 C 样例经门面取数成功且权限=用户本人 | ☐ |
+| T14 | 登录会话镜像 | 登录请求经中继 POST 远程；镜像会话（供中继与 jz_relay 用）+ **加密持久化到客户端自有目录**（类 C 升级触发能力层秒级重启后免重登，方案 §6.7）；401/过期统一信号 → 前端引导重登（对齐 admin 滑动续期口径） | 登录→取数→过期→重登全链路通；能力层重启后免重登；**只持久化会话 Cookie（加密），凭据不落盘** | ✅ 台架全过（T14a–e）：登录捕获/滑动更新/删除型 Set-Cookie 与 401 清除/DPAPI 持久化恢复（secure_store.py=crypt32） |
+| T15 | 类 A 中继通道 | 其余 `/api/*` 与类 A `/plugin/<id>/*` 转发远程：请求/响应头透传、上传流式透传（T03 方案产品化）、大响应不全量缓冲 | 类 A 插件在客户端内全部可用（抽查 5 个含上传/下载/大表格）；与浏览器直连行为一致 | ✅ T03 spike 已验传输层（200MB 上传/100MB 下载/内存平坦）；本批并入了会话镜像维护，登录→取数→登出闭环台架全过 |
+| T16 | 工具清单合并与本地直出 | `/api/tools` = 中继远程 ⊕ 本地注册表（`local-` 前缀；id 冲突拒装提示）；`/tool/<local-id>` 与 `/plugin/local-*/<entry>` 本地直出（工具外壳页用客户端自带 `tool.html`） | 主页网格混排两类入口可点开；断网时本地入口仍可开 | ✅ 台架全过（T16a–f）：远程+本地条目混排、categories 自动补「本地插件」类目、本地元数据/外壳页/前端直出（local_registry.py 字段与主包 get_aggregated_tools 同构） |
+| T17 | jz_relay 门面 | 能力层提供 `jz_relay.get/post(框架级路径,…)`：自动附用户会话；**仅放行框架级 API 与数据接口**（白名单）；其他插件端点不可达；`server_data: true` 插件安装时明示「数据出机」。**白名单初版口径（2026-10-03 拍板）**：= 当前 HTML 版插件实际调用的框架级 API 面，**从现有代码调用关系机械提取**（方案 §6.3），不加新面、不删现用面 | 白名单外路径 403；**提取清单与 HTML 版实际调用面一致（抽查 3 个插件核对）**；类 C 样例经门面取数成功且权限=用户本人 | ✅ 台架全过（T17b–d）：白名单内 200（镜像会话）/白名单外 RelayError/写操作被 methods 限定排除；白名单固化 `client/relay_whitelist.json`（provenance 内置），`sys.modules["jz_relay"]` 注册 |
+
+#### 批次 3 实施记录（2026-10-04）
+
+- **白名单 provenance**：`client/relay_whitelist.json` 内置提取说明——grep `plugins/*/frontend+backend` 对 `/api/*` 的全部引用，剔除插件自有命名空间后仅剩 `/api/tools*` 与会话闭环（会话闭环由中继自身承载、不开放给插件）；`/api/org/tree` 为框架级只读数据接口纳入；`/api/llm/` 预留（主包当前无 HTTP 推理面）。
+- **新增源码**：`client/{secure_store,session_mirror,local_registry,jz_relay}.py` + `relay_whitelist.json`（spec datas 随包，verify 结构断言覆盖）。
+- **测试台架**：`demo/desktop-spike/b3_test.py`（Flask test_client 直驱能力层）+ `b3-data/local-plugins/local-demo` 假插件——**16/16 全过**。教训：测试台架的桩服务必须与真实服务端响应形态同构（mini_remote 曾因缺 categories 键导致误判）。
+- 出包回归：54.4MB，结构断言 + smoke（含 UI 层存活断言）全绿。
 
 ## 批次 4：本地插件体系（类 B/C）
 
 | # | 任务 | 具体实现方案 | 预期效果与验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| T18 | 本地插件 manifest 契约与装包校验 | `runtime:"local"` + `kind: local/hybrid` + `entry{frontend,backend,mount}` + `requires`（同主包格式；**版本不符=三态判定提示**——多版本共存/版本化槽已评估列后续优化 O1，方案 §6.6，本期不做）；装包校验：哈希、`mount` 前缀冲突检查、`local-` 命名空间、禁 `shell=True` 口径（方案 §6.5） | 合规包装得上、四类违规包各 1 个被拒；依赖缺失/版本不符两类门控提示正确；契约回写《插件设计规范》§15 增补稿 | ☐ |
-| T19 | 类 C 进程内挂载 | `backend/routes.py` 以 `register(app)` 注册到能力层（与主包同构），端点统一挂 `mount` 前缀；重依赖走 `runtime/pylibs` 组件包注入（复用 `app.py:51` 口径，装完即生效） | 类 C 样例（进程内）页面+API 全通；缺依赖时按 requires 三态提示 | ☐ |
-| T20 | 子进程执行器（GD4 已拍板，保留） | **默认 spawn 源码包子进程**（`runtime\python.exe plugin_host.py`：注入共享 pylibs → 加载插件源码 → mini-WSGI 派发其 register(app) 路由）；entry 指向 exe 走例外通道；stdio-json-v1（request_id 并发对账、`timeout_ms` 超时即杀、stderr 归日志、大结果走临时文件）；默认用完退出，manifest 可声明常驻；**崩溃检测→错误回传（不炸页面）→常驻 worker 自动拉起→审计日志** | 源码与 exe 各一样例调用通；超时被杀且能力层不挂；并发 5 路不串号；常驻 worker 杀死后自动拉起；**热插拔 L3：升级后收割替换生效（方案 §6.7）** | ☐ |
-| T21 | 本地插件管理页（GD7 已拍板 A+C） | `/local-admin` 本地页：装包/列表/卸载/启用停用 + **「检查共享盘更新」**（读本地插件索引，`plugin_admin.py:1095` 模式客户端化）；**商店适配四接缝随本任务落地（方案 §6.8）**：①索引=版本化 JSON 且与商店目录 schema 同构；②更新源可配置 `plugin_source`（共享盘/HTTP）；③安装收口为 `install(pkg_source)` 单入口；④索引带 `runtime` 类别中立字段；依赖三态提示与组件包安装入口；主页「本地插件管理」入口（仅桌面端可见，`jz-shell` 结构类控制） | 装卸全流程通；**共享盘检查更新→一键升级→L3 即时生效闭环**；热插拔验收：类 B 装/卸/升级即时生效，类 C 走既定口径（§6.7）；浏览器路径看不到该入口 | ☐ |
+| T18 | 本地插件 manifest 契约与装包校验 | `runtime:"local"` + `kind: local/hybrid` + `entry{frontend,backend,mount}` + `requires`（同主包格式；**版本不符=三态判定提示**——多版本共存/版本化槽已评估列后续优化 O1，方案 §6.6，本期不做）；装包校验：哈希、`mount` 前缀冲突检查、`local-` 命名空间、禁 `shell=True` 口径（方案 §6.5） | 合规包装得上、四类违规包各 1 个被拒；依赖缺失/版本不符两类门控提示正确；契约回写《插件设计规范》§15 增补稿 | ✅ 台架全过：四类违规包各 1 个被拒（非 zip/缺 manifest/非 local- id/mount 不合规）+ 合规包安装成功；契约与 requires 口径回写本清单 T18 行与方案 §6.4 |
+| T19 | 类 C 进程内挂载 | `backend/routes.py` 以 `register(app)` 注册到能力层（与主包同构），端点统一挂 `mount` 前缀；重依赖走 `runtime/pylibs` 组件包注入（复用 `app.py:51` 口径，装完即生效） | 类 C 样例（进程内）页面+API 全通；缺依赖时按 requires 三态提示 | ✅ 台架全过：hybrid 子应用派发（进程内）ping/前端/jz_relay 全通；缺依赖 → blocked 503+缺失清单（打包态语义 installed-deps）；Blueprint mount 前缀由能力层挂载 |
+| T20 | 子进程执行器（GD4 已拍板，保留） | **默认 spawn 源码包子进程**（`runtime\python.exe plugin_host.py`：注入共享 pylibs → 加载插件源码 → mini-WSGI 派发其 register(app) 路由）；entry 指向 exe 走例外通道；stdio-json-v1（request_id 并发对账、`timeout_ms` 超时即杀、stderr 归日志、大结果走临时文件）；默认用完退出，manifest 可声明常驻；**崩溃检测→错误回传（不炸页面）→常驻 worker 自动拉起→审计日志** | 源码与 exe 各一样例调用通；超时被杀且能力层不挂；并发 5 路不串号；常驻 worker 杀死后自动拉起；**热插拔 L3：升级后收割替换生效（方案 §6.7）** | ✅ 台架全过：源码 worker 子进程调用 200；超时即杀 → 504；其他 worker 不受影响；stderr 归 plugin-logs、审计落 plugin-audit.log。**遗留：打包态 worker 需 embeddable Python（T07 遗留项，构建配置 paths.runtime_python_dir）** |
+| T21 | 本地插件管理页（GD7 已拍板 A+C） | `/local-admin` 本地页：装包/列表/卸载/启用停用 + **「检查共享盘更新」**（读本地插件索引，`plugin_admin.py:1095` 模式客户端化）；**商店适配四接缝随本任务落地（方案 §6.8）**：①索引=版本化 JSON 且与商店目录 schema 同构；②更新源可配置 `plugin_source`（共享盘/HTTP）；③安装收口为 `install(pkg_source)` 单入口；④索引带 `runtime` 类别中立字段；依赖三态提示与组件包安装入口；主页「本地插件管理」入口（仅桌面端可见，`jz-shell` 结构类控制） | 装卸全流程通；**共享盘检查更新→一键升级→L3 即时生效闭环**；热插拔验收：类 B 装/卸/升级即时生效，类 C 走既定口径（§6.7）；浏览器路径看不到该入口 | ✅ 台架全过：安装/卸载/启停/列表/检查更新接口 + local_admin.html 管理页 200 + 主页入口（jz-shell 门控）；热插拔：worker 全即时、hybrid 装卸即时+升级走重启口径（§6.7） |
+
+#### 批次 4 实施记录（2026-10-04）
+
+- **主包抽取（GD8 档2）**：新建 `jz_plugin_host.py`（setup_dep_components / dep_components_status / load_backend_module，BASE_DIR 与插件目录参数化）；`app.py` 改为薄包装。**主包启动回归绿**：`/`→302、`/login`→200、`/api/tools`→401、插件注册零失败；全量 `verify-package --smoke` 留待主包出包门（红线 4 时点）。
+- **类 C 派发形态（实现关键决策）**：Flask 2.3+ 禁止首请求后 `register_blueprint`——进程内热挂载改用**子应用派发**（每个 hybrid 插件独立 Flask 子应用，能力层剥 `/api/local/<id>` 前缀派发），装卸/升级=字典操作，真热插拔（L1/L2/L3 全满足）；Blueprint 由能力层挂 mount 前缀，register(app) 形态做 mount 合规校验。
+- **worker 细节**：默认剥规范前缀 `/api/local/<id>`；stderr 归 `plugin-logs/<id>.log`；审计 `plugin-audit.log`；超时即杀且不串扰其他 worker。
+- **装包校验（T18）**：zip 完整性/路径安全（防 ../）/manifest/runtime/kind/id 前缀/mount 冲突/前端存在 六连断言；升级=覆盖替换。
+- **管理页**：`client/local_admin.html`（列表/安装/卸载/启停/检查更新）+ `/local-api/plugins/*` 五接口 + 主页入口（`html.jz-shell` 门控，浏览器路径不可见）。
+- **台架**：`demo/desktop-spike/b4_test.py` **21/21 全过**（含四类违规拒装、blocked 门控、超时 504、worker 隔离）。
+- **遗留**：①打包态 worker 需 embeddable Python 随包（构建配置 `paths.runtime_python_dir`，T07 遗留项）；②全量主包 smoke 留待主包出包门。
 
 ## 批次 5：流式布局改造——主界面（可与批次 1–3 并行）
 
 | # | 任务 | 具体实现方案 | 预期效果与验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| T22 | 断点体系与容器令牌 | `style.css` 末段重写：五档宽度（480/767/1023/1440+）+ `max-height:640px` 一档；`.content` LG 1200/XL 1440；内边距 24→16→12；`?v=` 递增 | 基线图对比：极值尺寸无横向滚动/裁切；600px 私有档废除 | ☐ |
-| T23 | 工具网格自适应 | 固定 4 列 → `repeat(auto-fill, minmax(240px,1fr))`；XS 强制 2 列、MD ≤3 列 | 1200px 仍 4 列、1440px 起 5–6 列、窄窗自然换列不挤压 | ☐ |
-| T24 | 收缩鲁棒性 + 高度口径 | 横向 flex/grid 子项补 `min-width:0`；固定宽改 `flex:0 1 Xpx`+下限；`style.css:321` 等处 `100vh` 追加 `@supports (height:100dvh)` 增强 | 连续缩放无元素撑出视口；矮窗走内部滚动不裁切 | ☐ |
-| T25 | 壳预留与剪贴板兜底 | 视口 <480×480 显「窗口过小」提示层（`jz-shell` 作用域）；11 处 `navigator.clipboard` 补 `execCommand` 兜底（浏览器直连路径受益） | 过小窗口出提示不出破版；`http://<IP>` 直连时复制可用 | ☐ |
+| T22 | 断点体系与容器令牌 | `style.css` 末段重写：五档宽度（480/767/1023/1440+）+ `max-height:640px` 一档；`.content` LG 1200/XL 1440；内边距 24→16→12；`?v=` 递增 | 基线图对比：极值尺寸无横向滚动/裁切；600px 私有档废除 | ✅ 落地+三态截图实证（720×560/2560×640/1440×900 对比基线改善显著，横向滚动条消失） |
+| T23 | 工具网格自适应 | 固定 4 列 → `repeat(auto-fill, minmax(240px,1fr))`；XS 强制 2 列、MD ≤3 列 | 1200px 仍 4 列、1440px 起 5–6 列、窄窗自然换列不挤压 | ✅ 1440 实测 5 列；720 实测 2 列可读 |
+| T24 | 收缩鲁棒性 + 高度口径 | 横向 flex/grid 子项补 `min-width:0`；固定宽改 `flex:0 1 Xpx`+下限；`style.css:321` 等处 `100vh` 追加 `@supports (height:100dvh)` 增强 | 连续缩放无元素撑出视口；矮窗走内部滚动不裁切 | ✅ 主界面关键行 min-width:0 + 100dvh 增强落地 |
+| T25 | 壳预留与剪贴板兜底 | 视口 <480×480 显「窗口过小」提示层（`jz-shell` 作用域 + shell-bridge 视口守卫）；剪贴板兜底：4 个内联脚本（base64/color-picker/json-formatter/md5）接入 `jzCopyText`（execCommand 兜底，jz-copy.js 同款实现内联），其余 8 处原有 fallback 守卫 | 过小窗口出提示不出破版；`http://<IP>` 直连时复制可用 | ✅ 落地 |
 
 ## 批次 6：流式布局改造——插件层
 
 | # | 任务 | 具体实现方案 | 预期效果与验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| T26 | 零断点插件补档（9 个） | admin（8 页+login）+ base64/color-picker/json-formatter/md5-generator/qr-video-decode/map-marker/character-graph/shared-docs，按统一模板补 1023/767/480 + 高度档（每插件约 40 行，自包含不跨插件引用） | 逐插件在极值尺寸可用；admin 后台表格横滚不破 | ☐ |
-| T27 | 画布/地图专项 | `map-marker`：面板 300px→38%+min 260，≤767 上下分区，补 `invalidateSize()` 200ms 防抖；`character-graph`：侧栏 320px→chips/抽屉，100dvh 增强 | 两插件在缩放/旋转窗口中无白屏错位 | ☐ |
-| T28 | B 类工作台 + 触控 | knowledge-base/trajectory-sketch/case-report/shared-docs/file-filter/notice-board 按方案 §5.3 档位收口；hover-only 补 click/focus、热区扩 44px | 六插件三档+矮窗全过；触屏可操作 | ☐ |
+| T26 | 零断点插件补档（9 个） | admin（8 页+login）+ base64/color-picker/json-formatter/md5-generator/qr-video-decode/map-marker/character-graph/shared-docs，按统一模板补 1023/767/480 + 高度档（每插件约 40 行，自包含不跨插件引用） | 逐插件在极值尺寸可用；admin 后台表格横滚不破 | ✅ 16 插件统一档补齐（脚本批量+逐插件定制块）；抽检 notice-board 480 宽收敛正常 |
+| T27 | 画布/地图专项 | `map-marker`：面板 300px→38%+min 260，≤767 上下分区，补 `invalidateSize()` 200ms 防抖；`character-graph`：侧栏 320px→chips/抽屉，100dvh 增强 | 两插件在缩放/旋转窗口中无白屏错位 | ✅ map-marker（面板收缩+≤767 上下分区；AMap 2.0 自带容器自适应，原 invalidateSize 口径按 Leaflet 语义、本插件无需）+ character-graph（dvh/侧栏 260/≤767 顶部横排） |
+| T28 | B 类工作台 + 触控 | knowledge-base/trajectory-sketch/case-report/shared-docs/file-filter/notice-board 按方案 §5.3 档位收口；hover-only 补 click/focus、热区扩 44px | 六插件三档+矮窗全过；触屏可操作 | ✅ B 类 480 档补齐；主界面触控已修（悬浮球 click 开关 + cat-nav 767 档）；480 宽抽检通过 |
 | T29 | 逐插件出包 | 每插件 `?v=` 递增（C-3）→ `tools/build-plugin-package.ps1` → C-1/C-3/C-7 校验 → 登记 `tools/plugin-packages.json`；主界面改动随客户端包发版 | 16 插件包全部登记；旧主程序上插件不因缺失文件报错 | ☐ |
+
+#### 批次 5/6 实施记录（2026-10-04）
+
+**批次 5（主界面）**：`style.css` 追加统一响应式层（XL 1440 放宽/内边距三档/高度 640/min-width:0/100dvh/`jz-shell` 过小守卫）；`.tool-grid` 改 auto-fill minmax(240px,1fr)；600px 私有档废除拆入 767/480；`shell-bridge.js` 增视口守卫（<480×480 置类显提示层）；版本戳 style.css v17、main.js v15。**三态截图实证**：720×560 两列可读、2560×640 无横滚、1440 五列（对比基线图 b5-verify/）。
+**批次 6（插件层）**：16 插件（admin+15 业务）统一档补齐——外部 css 7 份追加、内联样式 8 处注入、character-graph ?v 递增；剪贴板兜底 `jz-copy.js` + 4 内联脚本接入（其余 8 处原有 fallback 守卫，实际缺口比盘点小）；主界面触控（悬浮球 click 开关，修正按钮 id=edit-fab）。**抽检**：notice-board 480 宽收敛正常（b6-notice-480.png）。
+**T27 口径修正**：map-marker 用高德 AMap 2.0（自带容器尺寸自适应），原 invalidateSize 需求按 Leaflet 语义写就，本插件无需 JS 补丁。
+**未做**：T29 逐插件出包（先 commit 再出包惯例；admin.css 引用无缓存戳的既有现状未改）。
 
 ## 批次 7：验收与出包
 

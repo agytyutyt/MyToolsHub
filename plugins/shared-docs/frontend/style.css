@@ -278,3 +278,7 @@ body.col-resizing * { user-select: none; cursor: col-resize; }.excel-grid td[con
   flex-wrap: wrap;
 }
 /* Chrome<84 flex gap fallback */.dialog-actions > * + * { margin-left: 10px; }
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:767px){ .doc-title{ max-width:40% } .toolbar{ gap:6px } }
+@media (max-width:480px){ body{ padding:12px } }

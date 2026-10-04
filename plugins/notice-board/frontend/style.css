@@ -416,3 +416,6 @@ body {
 
 @media (max-width: 640px) {.view { padding: 16px; }.board { grid-template-columns: 1fr; }.page-head { flex-wrap: wrap; align-items: center; }.scope-wrap { flex-direction: column; min-height: 0; }.scope-add { padding: 10px 0; filter: none; text-shadow: none; }
 }
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:480px){ body{ padding:12px } header{ flex-wrap:wrap } }

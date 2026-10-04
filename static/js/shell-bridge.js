@@ -49,6 +49,18 @@
         };
         document.documentElement.classList.add('jz-shell');  // 结构差异唯一开关（Tier S）
         wireExternalLinks(window.jzShell);
+
+        // 窗口过小守卫（T25）：视口 <480×480 置类，CSS 层隐藏内容并显示提示
+        var hint = document.createElement('div');
+        hint.className = 'jz-tiny-hint';
+        hint.textContent = '窗口过小，请放大窗口后使用（最小 480×480）';
+        document.body.appendChild(hint);
+        var sync = function () {
+          var tiny = window.innerWidth < 480 || window.innerHeight < 480;
+          document.documentElement.classList.toggle('jz-viewport-tiny', tiny);
+        };
+        window.addEventListener('resize', sync);
+        sync();
       }).catch(function () { /* 桥失败=浏览器等同行为 */ });
     })();
   });

@@ -31,6 +31,7 @@ CFG_PATH = os.path.join(HERE, "client-build-config.json")
 REQUIRED_BODY = [
     "_internal/client-build-config.json",
     "_internal/fallback.html",
+    "_internal/relay_whitelist.json",
     "_internal/static/index.html",
     "_internal/static/tool.html",
     "_internal/kernel/jz_deps.py",

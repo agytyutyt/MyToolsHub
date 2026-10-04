@@ -155,7 +155,7 @@ body {
 /* ---------- Tool grid ---------- */
 .tool-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 20px;
 }
 
@@ -310,7 +310,7 @@ body {
   opacity: 1;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .cat-nav { right: 10px; }
   .cat-nav-dot { width: 12px; height: 12px; }
 }
@@ -427,7 +427,8 @@ body.tool-body {
 }
 
 .fab-menu:hover .fab-pop,
-.fab-pop:hover {
+.fab-pop:hover,
+.fab-pop.open {
   display: flex;
 }
 
@@ -900,14 +901,50 @@ body.modal-open {
   100% { background-position: 0 50%; }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .hero h1 { font-size: 32px; }
   .hero p { font-size: 15px; }
-  .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .tool-card { padding: 16px; }
+  .edit-hint { font-size: 12px; padding: 8px 14px; white-space: normal; max-width: 90vw; text-align: center; }
+}
+@media (max-width: 480px) {
+  .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
   .fab-menu { right: 16px; bottom: 16px; }
   .fab { width: 48px; height: 48px; }
   .fab .fab-dots > * + * { margin-left: 3px; }
   .fab .fab-dots i { width: 4px; height: 4px; }
-  .edit-hint { font-size: 12px; padding: 8px 14px; white-space: normal; max-width: 90vw; text-align: center; }
+}
+
+
+/* ==================== 响应式体系（批次 5：统一断点 480/767/1023/1440 + 高度 640） ==================== */
+/* 大屏放宽（XL）：内容上限 1200 → 1440，网格 auto-fill 自然加列 */
+@media (min-width: 1440px) {
+  .content { max-width: 1440px; }
+}
+/* 内边距随档位收敛 */
+@media (max-width: 767px) {
+  .content { padding: 16px; }
+}
+@media (max-width: 480px) {
+  .content { padding: 12px; }
+  .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+/* 高度一档：矮窗压缩 + 内部滚动优先 */
+@media (max-height: 640px) {
+  .category { margin-top: 20px; }
+  .category h2 { margin: 0 8px 12px; }
+}
+/* 收缩鲁棒性：横向行子项可收缩，任何窗口宽度不撑出视口 */
+.app-bar > *, .tool-card, .category, .content > * { min-width: 0; }
+/* 高度口径：dvh 增强（旧内核安全跳过） */
+@supports (height: 100dvh) {
+  body.tool-body { height: 100dvh; }
+}
+/* 壳内「窗口过小」提示层（jz-shell 门控；视口 <480×480 由 shell-bridge 置类） */
+html.jz-shell .jz-tiny-hint { display: none; }
+html.jz-shell.jz-viewport-tiny body > :not(.jz-tiny-hint) { display: none !important; }
+html.jz-shell.jz-viewport-tiny .jz-tiny-hint {
+  display: flex; position: fixed; inset: 0; z-index: 9999;
+  align-items: center; justify-content: center; background: #fff;
+  color: #5f6368; font-size: 15px; text-align: center;
 }

@@ -130,6 +130,45 @@ def pid_file_path():
     return os.path.join(_BASE_DIR, "client.pid")
 
 
+def program_dir():
+    """程序目录（frozen=exe 目录；源码=仓库根）。"""
+    return _BASE_DIR
+
+
+def runtime_python_exe(build_cfg):
+    """子进程运行时（GD4）：构建配置指明 embeddable 目录则用之，否则当前解释器（源码态）。"""
+    d = (build_cfg.get("paths") or {}).get("runtime_python_dir") or ""
+    if d:
+        exe = os.path.join(d, "python.exe")
+        if os.path.isfile(exe):
+            return exe
+    return sys.executable
+
+
+def host_script_path():
+    candidates = [
+        os.path.join(_RESOURCE_DIR, "plugin_host.py"),
+        os.path.join(_here, "plugin_host.py"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    raise FileNotFoundError("plugin_host.py 未找到")
+
+
+def whitelist_path():
+    """jz_relay 白名单（批次 3 T17）：随包进 _internal。"""
+    candidates = [
+        os.path.join(_RESOURCE_DIR, "relay_whitelist.json"),
+        os.path.join(_BASE_DIR, "relay_whitelist.json"),
+        os.path.join(_here, "relay_whitelist.json"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def port_file_path():
     return os.path.join(_BASE_DIR, "port.txt")
 

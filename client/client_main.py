@@ -88,10 +88,19 @@ def main():
     local_plugins = os.path.join(data_dir, "local-plugins")
     os.makedirs(local_plugins, exist_ok=True)
 
+    os.environ["JZTOOLS_DATA_ROOT"] = data_dir        # jztools_data/jz_deps 口径统一
+    from client_config import program_dir, runtime_python_exe, host_script_path
+    build_cfg["_program_dir"] = program_dir()
+
     log("=== %s %s 启动（frozen=%s） ===" % (
         product.get("name"), product.get("version"), getattr(sys, "frozen", False)))
     log("远程地址：%s（来源：客户端配置文件/构建配置默认）" % (address or "未配置 → 兜底页"))
     log("数据目录：%s" % data_dir)
+
+    from plugin_executor import PluginExecutor
+    executor = PluginExecutor(
+        runtime_python_exe(build_cfg), host_script_path(),
+        os.path.join(program_dir(), "runtime", "pylibs"), data_dir, log)
 
     from capability_app import create_capability_app
     app = create_capability_app(
@@ -101,6 +110,9 @@ def main():
         static_dir=static_dir(),
         local_plugins_dir=local_plugins,
         fallback_file=fallback_page(),
+        data_dir=data_dir,
+        executor=executor,
+        log=log,
     )
 
     port = free_port()

@@ -241,3 +241,7 @@ details.map-node .node-hint { font-size: 12px; color: var(--muted); padding: 6px
 .keep-toolbar input { flex: 1; max-width: 280px; font-size: 12px; padding: 4px 8px; }
 .keep-scroll { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
 .chip .src.remap { background: #E0F2F1; color: #00695C; }
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:767px){ .chips, .rules-list { flex-wrap:wrap } .rules-list code{ max-width:100% } }
+@media (max-width:480px){ body{ padding:12px } }

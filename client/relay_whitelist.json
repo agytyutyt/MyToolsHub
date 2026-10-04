@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "provenance": "2026-10-03 机械提取：grep plugins/*/frontend+backend 对 /api/* 的全部引用，剔除插件自有命名空间后仅剩框架级只读面（/api/tools*、会话闭环 /api/login|logout|session——会话闭环由中继自身承载、不开放给插件）。口径：不加新面、不删现用面（方案 §6.3 拍板）。",
+  "allow": [
+    { "methods": ["GET"], "prefix": "/api/tools", "note": "工具清单与单工具元数据（只读；reorder/visibility 为写操作，被 methods 限定天然排除）" },
+    { "methods": ["GET"], "prefix": "/api/org/tree", "note": "组织架构树（只读数据接口，供类 C 报表类工具取部门维度）" }
+  ],
+  "reserved": [
+    { "prefix": "/api/llm/", "note": "统一大模型：主包当前无 HTTP 推理面（进程内 jz_llm）；主包提供推理端点后启用，Key 不落本机（方案 §6.3）" }
+  ]
+}

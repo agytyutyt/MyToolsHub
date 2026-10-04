@@ -855,3 +855,6 @@ body {
   .reader-dock { bottom: 12px; padding: 8px 10px; gap: 6px; }
   .page-indicator, .zoom-indicator { min-width: 44px; }
 }
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:480px){ body{ padding:12px } .reader{ padding:12px } }

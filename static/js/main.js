@@ -217,6 +217,22 @@ fabPop.addEventListener('click', (e) => {
   }
 });
 
+// 悬浮球开关：click 切换菜单显隐（触屏/键盘可达；hover 样式保留为渐进增强，批次 5 T28）
+const fabBtn = document.getElementById('edit-fab');
+if (fabBtn) {
+  fabBtn.addEventListener('click', () => {
+    fabPop.classList.toggle('open');
+    fabBtn.setAttribute('aria-expanded', fabPop.classList.contains('open') ? 'true' : 'false');
+  });
+  fabBtn.setAttribute('aria-expanded', 'false');
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.fab') && !e.target.closest('#fab-pop')) {
+      fabPop.classList.remove('open');
+      fabBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+}
+
 // 顶部用户菜单：未登录显示「登录」，已登录显示用户名 + 管理后台入口
 window.AdminCommon.renderUserMenu(document.getElementById('user-slot'));
 

@@ -938,3 +938,9 @@ label.upload-bar-pick {
 }
 .upload-bar.is-picked .upload-bar-title { color: #1a73e8; font-weight: 500; }
 #btn-inspect { flex: 0 0 auto; white-space: nowrap; }   /* 按钮保持自然宽度、不折行 */
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:1023px){ .admin-content{ padding:20px 16px } }
+@media (max-width:767px){ .admin-content{ padding:16px 12px } .admin-head{ gap:8px } }
+@media (max-width:480px){ .admin-content{ padding:12px 10px } .admin-content button{ } .admin-content form button{ width:100% } }
+@media (max-height:640px){ .admin-head{ margin-bottom:12px } }

@@ -12,13 +12,26 @@
 转发（直传 werkzeug 流会被 requests 判为未知长度转 chunked 而挂起）；响应流式回传；
 REST 无 WS（方案 §2.1 已核实）。
 """
+import io
+import json
+import os
+import re
 import shutil
+import sys as _sys
 import tempfile
 import threading
 import time
+import zipfile
 
 import requests
 from flask import Flask, Response, jsonify, request, send_from_directory
+
+import jz_deps
+import jz_plugin_host
+import local_registry
+from jz_relay import JzRelay
+from plugin_executor import PluginExecutor
+from session_mirror import SessionMirror
 
 _HOP_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -47,8 +60,10 @@ class RemoteHealth:
 
 
 def create_capability_app(build_cfg, client_cfg, address, static_dir,
-                          local_plugins_dir, fallback_file, on_address_change=None):
+                          local_plugins_dir, fallback_file, on_address_change=None,
+                          data_dir=None, executor=None, log=None):
     """装配能力层 Flask 应用。address=None 时所有页面请求走本地兜底页。"""
+    _log = log or (lambda m: None)
     app = Flask(
         __name__,
         static_folder=static_dir,
@@ -58,6 +73,74 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     health = RemoteHealth()
     upstream = requests.Session()
     state = {"address": address}
+
+    # ---- 会话镜像 / 本地插件注册表 / jz_relay 门面（批次 3 T14/T16/T17） ----
+    from client_config import data_dir as _cfg_data_dir, whitelist_path
+    _data_dir = data_dir or _cfg_data_dir(build_cfg)
+    mirror = SessionMirror(os.path.join(_data_dir, "session.bin"), _log)
+    local_manifests = local_registry.scan_local_plugins(local_plugins_dir, _log)
+    try:
+        with open(whitelist_path(), "r", encoding="utf-8") as f:
+            whitelist = json.load(f)
+    except Exception:
+        whitelist = {"allow": []}
+        _log("relay_whitelist.json 加载失败，jz_relay 全拒绝")
+    relay = JzRelay(upstream, lambda: state["address"], mirror, whitelist, _log)
+    _sys.modules["jz_relay"] = relay          # 插件后端 import jz_relay 即用
+    app.config["SESSION_MIRROR"] = mirror
+    app.config["JZ_RELAY"] = relay
+    app.config["LOCAL_MANIFESTS"] = local_manifests
+
+    # ---- 类 C 子应用派发 + 类 B 执行器状态（批次 4 T19/T20；pylibs 注入复用主包机制） ----
+    import jz_deps
+    jz_plugin_host.setup_dep_components(build_cfg.get("_program_dir") or os.getcwd(), _log)
+    local_states = {}
+    hybrid_apps = {}      # id → Flask 子应用（进程内；装卸/升级=字典操作，天然全热插拔）
+
+    def _refresh_local_states():
+        for m in local_manifests:
+            pid = m.get("id")
+            pdir = os.path.join(local_plugins_dir, m.get("_dir", ""))
+            enabled = (client_cfg.get("local_state") or {}).get(pid, True) \
+                and m.get("enabled", True)
+            if not enabled:
+                local_states[pid] = {"status": "disabled"}
+                hybrid_apps.pop(pid, None)
+                continue
+            if m.get("kind") == "hybrid":
+                verdict = jz_deps.evaluate(
+                    pid, pdir, m,
+                    app_dir=build_cfg.get("_program_dir"),
+                    app_version=(build_cfg.get("product") or {}).get("version"),
+                    plugin_api=build_cfg.get("plugin_api", "1.0"))
+                local_states[pid] = {"status": verdict["status"],
+                                     "missing": verdict.get("missing", []),
+                                     "degraded": verdict.get("degraded", []),
+                                     "reason": verdict.get("reason", "")}
+                if verdict["status"] == "blocked":
+                    hybrid_apps.pop(pid, None)
+                    _log("本地插件 %s 不可运行（%s），跳过挂载" % (pid, verdict.get("reason")))
+                    continue
+                try:
+                    routes = jz_plugin_host.load_backend_module(local_plugins_dir, pid)
+                    sub = Flask("local_" + pid.replace("-", "_"))
+                    bp = getattr(routes, "bp", None)
+                    if bp is not None:
+                        sub.register_blueprint(bp)     # 挂载前缀由能力层剥除后派发
+                    else:
+                        reg = getattr(routes, "register", None)
+                        if not callable(reg):
+                            raise RuntimeError("未导出 register(app) 或 bp")
+                        reg(sub)
+                    hybrid_apps[pid] = sub            # 子应用派发：热插拔不受 Flask 首请求后注册限制
+                    _log("本地插件子应用已挂载：%s" % pid)
+                except Exception as exc:
+                    local_states[pid] = {"status": "error", "reason": str(exc)}
+                    _log("本地插件 %s 挂载失败，已隔离：%s" % (pid, exc))
+            elif (m.get("entry") or {}).get("backend"):
+                local_states[pid] = {"status": "ok", "mode": "worker"}
+
+    _refresh_local_states()
     _probe = {"ts": 0.0, "ok": False}
     _probe_lock = threading.Lock()
 
@@ -153,14 +236,205 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.get("/local-admin")
     def local_admin():
-        return jsonify({"error": "本地插件管理页在批次 4 T21 落地"}), 501
+        return send_from_directory(fallback_dir_or(app), "local_admin.html")
 
-    # ---------------- 本地插件 API（批次 4 T20 执行器） ----------------
+    # ---------------- 本地插件 API（批次 4 T20 执行器：类 B 子进程派发） ----------------
 
+    def _find_local(plugin_id):
+        return local_registry.find(local_manifests, plugin_id) or \
+            local_registry.find(local_manifests, "local-" + plugin_id)
+
+    @app.route("/api/local/<plugin_id>", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     @app.route("/api/local/<plugin_id>/<path:rest>",
                methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-    def local_plugin_api(plugin_id, rest):
-        return jsonify({"error": "本地插件执行器未启用（批次 4 T20）"}), 501
+    def local_plugin_api(plugin_id, rest=""):
+        m = _find_local(plugin_id)
+        if m is None:
+            return jsonify({"error": "本地插件不存在"}), 404
+        pid = m.get("id", plugin_id)
+        st = local_states.get(pid, {})
+        if st.get("status") == "blocked":
+            return jsonify({"error": "本地插件不可运行（依赖缺失）",
+                            "missing": st.get("missing", []), "hint": st.get("reason", "")}), 503
+        if st.get("status") == "disabled":
+            return jsonify({"error": "本地插件已停用"}), 404
+        # hybrid → 进程内子应用；worker → 子进程执行器。两者都剥挂载前缀：
+        # 显式 mount 优先；未声明（默认 worker）剥规范前缀 /api/local/<id>。
+        mount = ((m.get("entry") or {}).get("mount") or "").rstrip("/")
+        if not mount:
+            mount = "/api/local/" + pid
+        worker_path = request.path[len(mount):] or "/"
+        worker_headers = {k: v for k, v in request.headers.items()
+                          if k.lower() not in ("host", "content-length")}
+        if m.get("kind") == "hybrid":
+            sub = hybrid_apps.get(pid)
+            if sub is None:
+                return jsonify({"error": "本地插件子应用未挂载"}), 503
+            with sub.test_client() as tc:
+                resp = tc.open(worker_path, method=request.method,
+                               headers=list(worker_headers.items()),
+                               data=request.get_data())
+            hop = {"connection", "keep-alive", "transfer-encoding", "content-length"}
+            return Response(resp.data, status=resp.status_code,
+                            headers=[(k, v) for k, v in resp.headers
+                                     if k.lower() not in hop])
+        if executor is None:
+            return jsonify({"error": "子进程执行器未配置"}), 501
+        status, hdrs, body = executor.call(
+            m, request.method, worker_path, worker_headers,
+            request.get_data(), m.get("timeout_ms") or 60000)
+        hop = {"connection", "keep-alive", "transfer-encoding", "content-length"}
+        return Response(body, status=status,
+                        headers=[(k, v) for k, v in (hdrs or {}).items()
+                                 if k.lower() not in hop])
+
+    # ---------------- 本地插件管理（批次 4 T21，GD7 A+C） ----------------
+
+    @app.get("/local-api/plugins")
+    def lp_list():
+        out = []
+        for m in local_manifests:
+            st = dict(local_states.get(m.get("id"), {}))
+            out.append({"id": m.get("id"), "name": m.get("name"),
+                        "version": m.get("version"), "kind": m.get("kind"),
+                        "mount": (m.get("entry") or {}).get("mount"),
+                        "enabled": st.get("status") != "disabled", "state": st,
+                        "requires": m.get("requires") or {}})
+        return jsonify({"plugins": out, "store": build_cfg.get("plugin_store") or {}})
+
+    @app.post("/local-api/plugins/install")
+    def lp_install():
+        f = request.files.get("file")
+        if f is None:
+            return jsonify({"error": "未选择插件包"}), 400
+        try:
+            zf = zipfile.ZipFile(io.BytesIO(f.read()))
+        except zipfile.BadZipFile:
+            return jsonify({"error": "插件包不是有效的 zip"}), 400
+        names = zf.namelist()
+        if "manifest.json" not in names:
+            return jsonify({"error": "包根缺少 manifest.json"}), 400
+        for n in names:                                    # 路径安全（防 ../ 逃逸）
+            if n.startswith("/") or ".." in n.split("/"):
+                return jsonify({"error": "插件包含不安全路径：%s" % n}), 400
+        try:
+            m = json.loads(zf.read("manifest.json").decode("utf-8"))
+        except Exception as exc:
+            return jsonify({"error": "manifest.json 不可解析：%s" % exc}), 400
+        pid = m.get("id", "")
+        if m.get("runtime") != "local" or not pid.startswith("local-") \
+                or not _is_safe_id(pid):
+            return jsonify({"error": "id 必须 local- 前缀且 runtime=local"}), 400
+        kind = m.get("kind", "local")
+        if kind not in ("local", "hybrid"):
+            return jsonify({"error": "kind 仅支持 local / hybrid"}), 400
+        frontend = (m.get("entry") or {}).get("frontend") or "index.html"
+        if "frontend/" + frontend not in names:
+            return jsonify({"error": "包内缺少 frontend/%s" % frontend}), 400
+        if kind == "hybrid":
+            backend = (m.get("entry") or {}).get("backend")
+            if not backend or "backend/" + backend.split("/")[-1] not in names:
+                return jsonify({"error": "hybrid 插件缺少 backend"}), 400
+        mount = ((m.get("entry") or {}).get("mount") or "").rstrip("/")
+        if kind == "hybrid" and not mount.startswith("/api/local/" + pid):
+            return jsonify({"error": "mount 必须以 /api/local/%s 开头" % pid}), 400
+        for other in local_manifests:                       # mount 冲突检查（双方均非空才比）
+            om = ((other.get("entry") or {}).get("mount") or "").rstrip("/")
+            if other.get("id") != pid and om and mount and (
+                    mount == om or mount.startswith(om + "/")
+                    or om.startswith(mount + "/")):
+                return jsonify({"error": "mount 与 %s 冲突" % other.get("id")}), 400
+        target = os.path.join(local_plugins_dir, pid)
+        if os.path.isdir(target):
+            shutil.rmtree(target)                           # 升级 = 覆盖替换（zip 根即包根）
+        zf.extractall(target)
+        _rescan()
+        restart_required = kind == "hybrid"
+        return jsonify({"ok": True, "id": pid, "restart_required": restart_required,
+                        "hint": "类 C 插件需重启能力层生效（会话已持久化，免重登）"
+                        if restart_required else ""})
+
+    @app.post("/local-api/plugins/uninstall")
+    def lp_uninstall():
+        data = request.get_json(force=True, silent=True) or {}
+        pid = data.get("id", "")
+        target = os.path.join(local_plugins_dir, pid)
+        if not pid.startswith("local-") or not os.path.isdir(target):
+            return jsonify({"error": "本地插件不存在"}), 404
+        kind = next((m.get("kind") for m in local_manifests if m.get("id") == pid), "local")
+        shutil.rmtree(target, ignore_errors=True)
+        _rescan()
+        return jsonify({"ok": True, "restart_required": kind == "hybrid"})
+
+    @app.post("/local-api/plugins/state")
+    def lp_state():
+        data = request.get_json(force=True, silent=True) or {}
+        pid = data.get("id", "")
+        if not pid.startswith("local-"):
+            return jsonify({"error": "非法 id"}), 400
+        from client_config import load_client_config, save_client_config
+        cfg = dict(load_client_config(build_cfg))
+        states = dict(cfg.get("local_state") or {})
+        states[pid] = bool(data.get("enabled"))
+        cfg["local_state"] = states
+        save_client_config(build_cfg, cfg)
+        _rescan()
+        kind = next((m.get("kind") for m in local_manifests if m.get("id") == pid), "local")
+        return jsonify({"ok": True, "restart_required": kind == "hybrid" and data.get("enabled")})
+
+    @app.post("/local-api/plugins/check-update")
+    def lp_check_update():
+        store = build_cfg.get("plugin_store") or {}
+        idx = store.get("index_path") or ""
+        if not idx or not os.path.isfile(idx):
+            return jsonify({"error": "未配置共享盘索引或索引不存在", "updates": []}), 200
+        try:
+            with open(idx, "r", encoding="utf-8") as f:
+                index = json.load(f)
+        except Exception as exc:
+            return jsonify({"error": "索引不可解析：%s" % exc, "updates": []}), 200
+        updates = []
+        for entry in index.get("packages", []):
+            pid = entry.get("id", "")
+            cur = next((m.get("version") for m in local_manifests if m.get("id") == pid), None)
+            if cur is None or _ver_lt(cur, entry.get("version", "")):
+                updates.append({"id": pid, "version": entry.get("version"),
+                                "file": entry.get("file", ""), "changelog": entry.get("changelog", "")})
+        return jsonify({"updates": updates})
+
+    @app.post("/local-api/restart")
+    def lp_restart():
+        """类 C 升级/装卸后的能力层秒级重启（§6.7；会话镜像已持久化，免重登）。"""
+        import subprocess as _sp
+        exe = sys.executable if getattr(sys, "frozen", False) else None
+        if not exe:
+            return jsonify({"ok": False, "error": "仅打包态支持自重启（源码态请手动重启）"}), 400
+        def _reexec():
+            time.sleep(0.6)
+            os._exit(0)
+        threading.Thread(target=_reexec, daemon=True).start()
+        # 打包态由外部守护拉起（批次 2 托盘/批次 5 安装器配合）；当前口径：退出即由安装器/脚本重启
+        return jsonify({"ok": True, "note": "能力层即将退出，请由启动器重新拉起"})
+
+    def _ver_lt(a, b):
+        def nums(v):
+            return [int(x) for x in re.findall(r"\d+", str(v))]
+        return nums(a) < nums(b) if nums(a) and nums(b) else False
+
+    def _is_safe_id(pid):
+        import re as _re
+        return bool(_re.fullmatch(r"local-[A-Za-z0-9_-]+", pid))
+
+    def _rescan():
+        nonlocal local_manifests
+        local_manifests[:] = local_registry.scan_local_plugins(local_plugins_dir, _log)
+        app.config["LOCAL_MANIFESTS"] = local_manifests
+        local_states.clear()
+        _refresh_local_states()
+        alive = {m.get("id") for m in local_manifests}
+        for pid in list(hybrid_apps):
+            if pid not in alive:
+                hybrid_apps.pop(pid, None)    # 卸载即弹（热插拔 L2/L3）
 
     # ---------------- 中继（其余全部转发远程） ----------------
 
@@ -170,10 +444,20 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             if k.lower() in _HOP_HEADERS or k.lower() == "content-length":
                 continue
             h[k] = v
+        # 会话镜像补位（T14）：浏览器 Cookie 优先，同名镜像让位
+        mc = mirror.header()
+        if mc:
+            existing = h.pop("Cookie", None)
+            parts = [p.strip() for p in existing.split(";")] if existing else []
+            name = mc.split("=", 1)[0]
+            if not any(p.startswith(name + "=") for p in parts):
+                parts.append(mc)
+            if parts:
+                h["Cookie"] = "; ".join(parts)
         return h
 
     def forward(path):
-        """T03 spike 口径的转发（会话镜像/清单合并为批次 3 T14/T16 增量）。"""
+        """T03 spike 口径的转发 + 会话镜像维护（T14）。"""
         if not state["address"]:
             return _fallback_response()
         qs = request.query_string.decode("utf-8", "replace")
@@ -194,6 +478,11 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             health.mark(False, "%s: %s" % (type(exc).__name__, exc))
             return _fallback_response(upstream_error=str(exc))
         health.mark(True)
+        sc = r.headers.get("Set-Cookie")          # 滑动续期/登录都会重发
+        if sc:
+            mirror.update_from_set_cookie(sc)
+        if r.status_code == 401:                  # 会话失效统一信号
+            mirror.clear()
         out = [(k, v) for k, v in r.headers.items() if k.lower() not in _DROP_RESP]
         return Response(r.iter_content(chunk_size=64 * 1024),
                         status=r.status_code, headers=out)
@@ -213,6 +502,55 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return False
         accept = request.headers.get("Accept", "")
         return "text/html" in accept or "*/*" in accept or accept == ""
+
+    # ---------------- 清单合并与本地工具元数据（T16） ----------------
+
+    @app.get("/api/tools")
+    def api_tools_merged():
+        if not state["address"]:
+            return _fallback_response()
+        headers = client_headers()
+        try:
+            r = upstream.get(state["address"] + "/api/tools",
+                             headers=headers, timeout=(5, 60))
+        except requests.RequestException as exc:
+            health.mark(False, "%s: %s" % (type(exc).__name__, exc))
+            return _fallback_response(upstream_error=str(exc))
+        health.mark(True)
+        sc = r.headers.get("Set-Cookie")
+        if sc:
+            mirror.update_from_set_cookie(sc)
+        if r.status_code == 401:
+            mirror.clear()
+        if r.status_code != 200:
+            return Response(r.content, status=r.status_code,
+                            content_type=r.headers.get("Content-Type", "application/json"))
+        try:
+            data = r.json()
+        except Exception:
+            return Response(r.content, status=200,
+                            content_type=r.headers.get("Content-Type", "application/json"))
+        base = data.get("tools") if isinstance(data, dict) else data
+        base = base if isinstance(base, list) else []
+        start = max([t.get("order", 0) for t in base] or [0]) + 1000
+        merged = local_registry.tool_items(local_manifests, start)
+        categories = data.get("categories") if isinstance(data, dict) else None
+        if isinstance(categories, list) and all(c.get("id") != "local" for c in categories):
+            categories.append(dict(local_registry.LOCAL_CATEGORY))
+        if isinstance(data, dict):
+            data["tools"] = base + merged
+        else:
+            data = base + merged
+        return jsonify(data)
+
+    @app.get("/api/tools/<tool_id>")
+    def api_tool_meta(tool_id):
+        if tool_id.startswith("local-"):
+            m = local_registry.find(local_manifests, tool_id)
+            if m is None:
+                return jsonify({"error": "本地插件不存在"}), 404
+            return jsonify(local_registry.tool_item(m, 0))
+        return forward("api/tools/" + tool_id)
 
     @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
     @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])

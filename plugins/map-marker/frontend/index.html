@@ -974,5 +974,16 @@
   // ==================== 启动 ====================
   loadMap();
 </script>
+<style>
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@supports (height:100dvh){ body{ height:100dvh } }
+@media (max-width:1023px){ .panel{ width:38%; min-width:260px } }
+@media (max-width:767px){
+  .main{ flex-direction:column }
+  .panel{ width:100%; min-width:0; flex:none; max-height:45%; overflow:auto }
+  .field input{ min-width:0; flex:1 }
+}
+@media (max-width:480px){ .panel{ padding:10px } }
+</style>
 </body>
 </html>

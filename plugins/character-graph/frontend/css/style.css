@@ -313,3 +313,13 @@ input:focus { border-color: var(--accent); }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--panel-edge); border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@supports (height:100dvh){ #app{ height:100dvh } }
+@media (max-width:1023px){ #panel{ width:260px } }
+@media (max-width:767px){
+  #app{ flex-direction:column }
+  #panel{ width:100%; flex:none; max-height:40%; overflow:auto;
+          display:flex; flex-direction:row; overflow-x:auto; align-items:flex-start }
+}
+@media (max-width:480px){ #panel{ padding:10px } }

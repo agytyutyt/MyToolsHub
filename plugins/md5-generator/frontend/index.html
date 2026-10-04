@@ -98,6 +98,28 @@
     font-size: 13px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 99;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ===== 响应式档位（全站统一 480/767 + max-height:640，禁私有档位） ===== */
+  @media (max-width:767px) {
+    body { padding: 16px; width: 100%; }
+    h1 { font-size: 18px; }
+    .card { padding: 14px; }
+    .row { gap: 8px; }
+  }
+  @media (max-width:480px) {
+    body { padding: 12px; }
+    .card { padding: 12px; }
+    .seg button { padding: 7px 8px; }
+    .result { flex-wrap: wrap; }
+    .result .btn { padding: 6px 10px; }
+  }
+  @media (max-height:640px) {
+    body { padding: 16px; }
+    h1 { font-size: 18px; }
+    .sub { margin-bottom: 10px; }
+    .tabs { margin-bottom: 12px; }
+    .card { margin-bottom: 10px; }
+  }
 </style>
 </head>
 <body>
@@ -205,7 +227,7 @@
 
     function copy(text) {
       if (!text) return false;
-      navigator.clipboard.writeText(text).then(() => toast("已复制"));
+      window.jzCopyText(text).then(() => toast("已复制"));
       return true;
     }
 
@@ -390,5 +412,11 @@
     // 初始化
     calc();
   </script>
+<script>window.jzCopyText=function(t){if(navigator.clipboard&&window.isSecureContext)return navigator.clipboard.writeText(t);var a=document.createElement("textarea");a.value=t;a.style.cssText="position:fixed;opacity:0";document.body.appendChild(a);a.focus();a.select();try{document.execCommand("copy")?Promise.resolve():Promise.reject(new Error("copy failed"))}catch(e){Promise.reject(e)}finally{document.body.removeChild(a)}};window.jzCopyText=function(t){return (navigator.clipboard&&window.isSecureContext)?navigator.clipboard.writeText(t):new Promise(function(res,rej){var a=document.createElement("textarea");a.value=t;a.style.cssText="position:fixed;opacity:0";document.body.appendChild(a);a.focus();a.select();try{document.execCommand("copy")?res():rej(new Error("copy failed"))}catch(e){rej(e)}finally{document.body.removeChild(a)}})};</script>
+<style>
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:767px){ body{ padding:16px } }
+@media (max-width:480px){ body{ padding:12px } }
+</style>
 </body>
 </html>

@@ -29,6 +29,9 @@ a = Analysis(
     datas=[
         (os.path.join(ROOT, "tools", "client", "client-build-config.json"), "."),
         (os.path.join(ROOT, "client", "fallback.html"), "."),
+        (os.path.join(ROOT, "client", "local_admin.html"), "."),
+        (os.path.join(ROOT, "client", "plugin_host.py"), "."),
+        (os.path.join(ROOT, "client", "relay_whitelist.json"), "."),
         (os.path.join(ROOT, "static"), "static"),
         (os.path.join(ROOT, "jz_deps.py"), "kernel"),
         (os.path.join(ROOT, "jz_api.py"), "kernel"),

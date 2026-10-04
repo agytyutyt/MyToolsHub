@@ -150,6 +150,29 @@
     min-height: 200px;
   }
   .modal .row { margin-top: 14px; justify-content: flex-end; }
+
+  /* ===== 响应式档位（全站统一 480/767 + max-height:640，禁私有档位） ===== */
+  @media (max-width:767px) {
+    body { padding: 16px; }
+    .container { width: 100%; }
+    video, canvas { max-width: 100%; height: auto; }
+    .card { padding: 16px; }
+    .dropzone { padding: 20px 12px; }
+  }
+  @media (max-width:480px) {
+    body { padding: 12px; }
+    .card { padding: 14px; }
+    .modal-overlay { padding: 12px; }
+    .modal { padding: 14px 14px 12px; }
+    .row button { flex: 1 1 auto; min-width: 0; }
+  }
+  @media (max-height:640px) {
+    body { padding: 16px; }
+    .subtitle { margin-bottom: 12px; }
+    .card { margin-bottom: 12px; }
+    textarea { min-height: 100px; }
+    .modal-data { min-height: 120px; }
+  }
 </style>
 </head>
 <body>
@@ -208,5 +231,12 @@
 
 <script src="./jsqr.min.js?v=1"></script>
 <script src="./app.js?v=7"></script>
+<style>
+/* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
+@media (max-width:767px){ body{ padding:16px } }
+@media (max-width:480px){ body{ padding:12px } }
+
+@media (max-width:767px){ canvas, video, img { max-width:100%; height:auto } }
+</style>
 </body>
 </html>
