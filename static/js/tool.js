@@ -1,7 +1,7 @@
 /* JZToolsHub 工具外壳页逻辑
- * 布局为「顶Bar + 插件主体全幅直出」：从 URL 解析工具 ID，
- * 请求 /api/tools/<id> 校验存在性并取入口地址，iframe 指向 /plugin/<id>/<entry>。
- * 插件页自带标题区，壳层不再重复展示元信息。
+ * 布局为「左侧导航栏 + 插件主体全幅直出」（侧栏由 static/js/sidebar.js 构建）：
+ * 从 URL 解析工具 ID，请求 /api/tools/<id> 校验存在性并取入口地址，
+ * iframe 指向 /plugin/<id>/<entry>。插件页自带标题区，壳层不再重复展示元信息。
  */
 
 // 加载并渲染当前工具外壳页
@@ -58,4 +58,4 @@ async function loadTool() {
 }
 
 loadTool();
-window.AdminCommon.renderUserMenu(document.getElementById('user-slot'));
+// 侧栏底部用户区由 sidebar.js 调 AdminCommon.renderSidebarUser 渲染，这里不再重复

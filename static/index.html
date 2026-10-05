@@ -2,31 +2,23 @@
 <!-- JZToolsHub 首页
  * 工具卡片由 static/js/main.js 读取 /api/tools 动态渲染，
  * 站点标题 / 副标题 / 页脚等文案均来自 config/tools.json 的 site 段。
+ * 左侧导航栏由 static/js/sidebar.js 构建（原顶栏与右下角悬浮球的功能收拢处）。
  -->
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JZ 工具箱</title>
-  <link rel="stylesheet" href="/static/css/style.css?v=17">
+  <link rel="stylesheet" href="/static/css/style.css?v=19">
   <link rel="stylesheet" href="/plugin/admin/css/admin.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
 </head>
-<body>
+<body data-page="home">
 <a href="/local-admin" class="local-admin-entry"
-   style="display:none;position:fixed;right:14px;bottom:64px;z-index:80;background:#fff;
+   style="display:none;position:fixed;right:14px;bottom:24px;z-index:80;background:#fff;
           padding:6px 12px;border-radius:20px;box-shadow:0 1px 4px rgba(0,0,0,.25);
           font-size:13px;text-decoration:none;color:#1a73e8">本地插件管理</a>
 <style>html.jz-shell .local-admin-entry{display:block !important}</style>
-  <!-- 顶部应用栏 -->
-  <header class="app-bar">
-    <a href="/" class="logo">
-      <span class="logo-mark"></span>
-      <span class="logo-title" id="site-title">JZ 工具箱</span>
-    </a>
-    <div class="spacer"></div>
-    <div class="user-menu" id="user-slot"></div>
-  </header>
 
   <!-- 首屏标语区 -->
   <section class="hero">
@@ -47,18 +39,8 @@
   <!-- 页脚（文案来自配置 site.footer） -->
   <footer class="footer" id="footer"></footer>
 
-  <!-- 右下角悬浮球（⋮ 更多）：悬浮展开菜单 → 编辑位置 / 隐藏工具 / 大模型设置 -->
-  <!-- 「大模型设置」项由 llm-settings.js 按后端模式动态注入：管理员统一配置时该项不出现 -->
-  <div class="fab-menu" id="fab-menu">
-    <div class="fab-pop" id="fab-pop" role="menu">
-      <button type="button" class="fab-pop-item" data-action="edit" id="fab-act-edit"><span data-jz-icon="✏️"></span> 编辑位置</button>
-      <button type="button" class="fab-pop-item" data-action="hide"><span data-jz-icon="🙈"></span> 隐藏工具</button>
-    </div>
-    <button class="fab" id="edit-fab" type="button" title="更多" aria-label="更多" aria-haspopup="true">
-      <span class="fab-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-    </button>
-  </div>
-  <div class="edit-hint" id="edit-hint" hidden>编辑模式：按住插件拖起调整顺序（分类可拖标题），自动保存；点 ⋮ → 完成编辑 退出</div>
+  <!-- 编辑模式提示（入口在左侧栏「位置编辑」，main.js 控制） -->
+  <div class="edit-hint" id="edit-hint" hidden>编辑模式：按住插件拖起调整顺序（分类可拖标题），自动保存；点侧栏「完成编辑」退出</div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <!-- 浮窗：隐藏工具 -->
@@ -82,9 +64,11 @@
   </div>
 
   <script src="/static/js/jz-icon.js?v=6"></script>
-  <script src="/plugin/admin/js/admin-common.js"></script>
-  <script src="/static/js/main.js?v=15"></script>
-  <script src="/static/js/llm-settings.js?v=2"></script>
+  <script src="/plugin/admin/js/admin-common.js?v=8"></script>
+  <script src="/static/js/sidebar.js?v=2"></script>
+  <script src="/static/js/main.js?v=16"></script>
+  <!-- 大模型设置：按后端模式放开侧栏「大模型设置」项并承载其对话框 -->
+  <script src="/static/js/llm-settings.js?v=3"></script>
   <script src="/static/js/shell-bridge.js?v=1"></script>
 </body>
 </html>

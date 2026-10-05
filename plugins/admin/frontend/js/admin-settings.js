@@ -1,6 +1,6 @@
 /* 系统设置页：展示/修改数据保存目录，迁移后刷新显示 */
 (function () {
-  const { api, showToast, getSession, renderUserMenu } = window.AdminCommon;
+  const { api, showToast, getSession } = window.AdminCommon;
 
   function fmtSize(bytes) {
     if (!bytes && bytes !== 0) return '-';
@@ -46,7 +46,6 @@
   }
 
   function init() {
-    renderUserMenu(document.getElementById('user-slot'));
     document.getElementById('btn-change-root').addEventListener('click', changeRoot);
     document.getElementById('new-root-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); changeRoot(); }

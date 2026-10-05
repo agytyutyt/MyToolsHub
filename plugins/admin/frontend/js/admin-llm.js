@@ -13,7 +13,7 @@
  * 因此这里不缓存任何配置，保存后重新拉取以服务端规整结果为准。
  */
 (function () {
-  const { api, showToast, getSession, renderUserMenu, esc } = window.AdminCommon;
+  const { api, showToast, getSession, esc } = window.AdminCommon;
 
   const MODE_LABEL = {
     admin: '管理员统一配置',
@@ -217,7 +217,6 @@
   }
 
   function init() {
-    renderUserMenu(el('user-slot'));
     el('llm-format').addEventListener('change', syncFormatUI);
     // 「调用模式」卡：改完即自动保存（无需按钮）；回退开关同卡，同样自动保存。
     // 提示语按"实际改了什么"给，避免只改了回退开关却说"已保存模式"。

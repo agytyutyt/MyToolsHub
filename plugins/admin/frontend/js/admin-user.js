@@ -2,7 +2,7 @@
  * 按人分配工具权限（权限弹窗）、角色管理（原权限管理模块并入本页）、删除确认、
  * 批量导入导出（模板下载 / 导出 / 两步式导入浮窗） */
 (function () {
-  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog,
+  const { api, esc, showToast, requireModule, openModal, confirmDialog,
           batchImport, download } = window.AdminCommon;
 
   const wrapEl = document.getElementById('user-wrap');
@@ -441,7 +441,6 @@
   (async () => {
     const ok = await requireModule('user');
     if (!ok) return;
-    renderUserMenu(document.getElementById('user-slot'));
     load();
   })();
 })();

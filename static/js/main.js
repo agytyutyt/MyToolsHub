@@ -2,10 +2,11 @@
  * 1. 请求 /api/tools 获取站点信息、分类与工具清单；
  * 2. 按分类渲染工具卡片（Material Design 大方块风格，每行最多 4 个）；
  * 3. 点击卡片跳转到 /tool/<id> 工具外壳页；
- * 4. 右下角悬浮球进入「编辑位置」模式：
+ * 4. 左侧栏「位置编辑」进入编辑模式：
  *    - 插件卡片：Android 桌面式拖拽——按住图标拖起（图标跟随光标放大悬停），
  *      拖动过程中目标槽位实时生成图标「虚影」，沿途卡片顺序让位，松手落位并自动保存；
  *    - 分类区块：拖动分类标题调整分类顺序。
+ * 侧栏本身由 static/js/sidebar.js 构建（顶栏/悬浮球功能收拢处），本文件只绑定首页特有项。
  */
 
 // 工具卡片网格容器
@@ -14,9 +15,9 @@ const grid = document.getElementById('tool-grid');
 const content = document.getElementById('content');
 // 右侧分类快速定位标签容器
 const catNav = document.getElementById('cat-nav');
-// 右下角「更多」悬浮球 / 展开菜单 / 编辑提示 / 轻提示
-const fabPop = document.getElementById('fab-pop');
-const fabEditItem = document.getElementById('fab-act-edit');
+// 左侧栏首页特有项（sidebar.js 构建）：位置编辑 / 隐藏插件；编辑提示 / 轻提示
+const sideEditItem = document.getElementById('side-act-edit');
+const sideHideItem = document.getElementById('side-act-hide');
 const hint = document.getElementById('edit-hint');
 const toast = document.getElementById('toast');
 // 浮窗：隐藏工具
@@ -167,13 +168,17 @@ function applyEditAttrs() {
 }
 
 function updateEditItem() {
+  if (!sideEditItem) return;
   if (editing) {
-    fabEditItem.innerHTML = JZIcon.html('✅') + ' 完成编辑';
-    fabEditItem.classList.add('active');
+    sideEditItem.innerHTML = JZSidebar.icon('check') + '<span class="side-label">完成编辑</span>';
+    sideEditItem.dataset.tip = '完成编辑';
+    sideEditItem.classList.add('active');
   } else {
-    fabEditItem.innerHTML = JZIcon.html('✏️') + ' 编辑位置';
-    fabEditItem.classList.remove('active');
+    sideEditItem.innerHTML = JZSidebar.icon('edit') + '<span class="side-label">位置编辑</span>';
+    sideEditItem.dataset.tip = '位置编辑';
+    sideEditItem.classList.remove('active');
   }
+  JZSidebar.syncTitles();
 }
 
 function enterEditMode() {
@@ -195,46 +200,24 @@ function exitEditMode() {
   updateEditItem();
 }
 
-// 悬浮球菜单：编辑位置 / 隐藏工具
-fabPop.addEventListener('click', (e) => {
-  const item = e.target.closest('.fab-pop-item');
-  if (!item) return;
-  const action = item.dataset.action;
-  if (action === 'edit' || action === 'hide') {
-    // 布局修改属管理操作，未登录先跳登录页
-    window.AdminCommon.getSession().then(user => {
-      if (!user) {
-        showToast('请先登录后操作');
-        window.location.href = '/login?next=/';
-        return;
-      }
-      if (action === 'edit') {
-        editing ? exitEditMode() : enterEditMode();
-      } else if (action === 'hide') {
-        openHideModal();
-      }
-    });
-  }
-});
-
-// 悬浮球开关：click 切换菜单显隐（触屏/键盘可达；hover 样式保留为渐进增强，批次 5 T28）
-const fabBtn = document.getElementById('edit-fab');
-if (fabBtn) {
-  fabBtn.addEventListener('click', () => {
-    fabPop.classList.toggle('open');
-    fabBtn.setAttribute('aria-expanded', fabPop.classList.contains('open') ? 'true' : 'false');
-  });
-  fabBtn.setAttribute('aria-expanded', 'false');
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.fab') && !e.target.closest('#fab-pop')) {
-      fabPop.classList.remove('open');
-      fabBtn.setAttribute('aria-expanded', 'false');
+// 侧栏首页项：位置编辑 / 隐藏插件（布局修改属管理操作，未登录先跳登录页）
+function runSideAction(action) {
+  window.AdminCommon.getSession().then(user => {
+    if (!user) {
+      showToast('请先登录后操作');
+      window.location.href = '/login?next=/';
+      return;
+    }
+    if (action === 'edit') {
+      editing ? exitEditMode() : enterEditMode();
+    } else if (action === 'hide') {
+      openHideModal();
     }
   });
 }
 
-// 顶部用户菜单：未登录显示「登录」，已登录显示用户名 + 管理后台入口
-window.AdminCommon.renderUserMenu(document.getElementById('user-slot'));
+if (sideEditItem) sideEditItem.addEventListener('click', () => runSideAction('edit'));
+if (sideHideItem) sideHideItem.addEventListener('click', () => runSideAction('hide'));
 
 // ===================== 浮窗：隐藏工具 =====================
 

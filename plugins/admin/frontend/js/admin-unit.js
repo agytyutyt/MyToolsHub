@@ -1,6 +1,6 @@
 /* 单位管理：列表渲染、新建/编辑浮窗、删除确认、批量导入导出 */
 (function () {
-  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog,
+  const { api, esc, showToast, requireModule, openModal, confirmDialog,
           batchImport, download } = window.AdminCommon;
 
   const listEl = document.getElementById('unit-list');
@@ -120,7 +120,6 @@
   (async () => {
     const ok = await requireModule('unit');
     if (!ok) return;
-    renderUserMenu(document.getElementById('user-slot'));
     load();
   })();
 })();

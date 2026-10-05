@@ -15,7 +15,7 @@
  *   响应里的 restarting=true 表示服务端即将退出并自拉起，前端轮询等待后刷新。
  */
 (function () {
-  const { api, showToast, getSession, renderUserMenu, esc, confirmDialog } = window.AdminCommon;
+  const { api, showToast, getSession, esc, confirmDialog } = window.AdminCommon;
   let lastUpload = '';      // 最近一次上传成功的包文件名（应用时回传给服务端）
   let lastUploadId = '';    // 最近一次上传成功的插件 id（提示语里显示中文名用）
   let indexRows = [];       // 最近一次"检查更新"的结果
@@ -869,7 +869,6 @@
       setTimeout(() => { window.location.href = '/admin'; }, 800);
       return;
     }
-    renderUserMenu(document.getElementById('user-slot'));
     document.getElementById('btn-inspect').addEventListener('click', inspect);
     setupDropZone();
     document.getElementById('btn-deps').addEventListener('click', loadInstalledDeps);

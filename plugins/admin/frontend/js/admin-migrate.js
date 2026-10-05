@@ -10,7 +10,7 @@
  * 活 30 分钟（见 routes.py 的 _MIGRATE_STAGE）；服务重启则该 token 失效，重新解析即可。
  */
 (function () {
-  const { api, showToast, getSession, renderUserMenu, esc } = window.AdminCommon;
+  const { api, showToast, getSession, esc } = window.AdminCommon;
 
   let token = '';        // 最近一次解析成功的迁移包 token
   let sections = [];     // 最近一次盘点/预览的分段
@@ -216,7 +216,6 @@
   }
 
   function init() {
-    renderUserMenu(el('user-slot'));
     el('mg-export').addEventListener('click', doExport);
     el('mg-reload').addEventListener('click', loadPlan);
     el('mg-inspect').addEventListener('click', doInspect);

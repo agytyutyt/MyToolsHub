@@ -1,6 +1,6 @@
 /* 管理后台首页：加载模块清单，以主界面方格布局渲染模块卡片 */
 (function () {
-  const { api, renderUserMenu, getSession, esc, openModal, showToast } = window.AdminCommon;
+  const { api, getSession, esc, openModal, showToast } = window.AdminCommon;
 
   const grid = document.getElementById('admin-grid');
 
@@ -110,7 +110,6 @@
     try {
       const user = await getSession();
       if (!user) return;
-      renderUserMenu(document.getElementById('user-slot'));
 
       const data = await api('/api/admin/summary');
       const modules = (data.modules || []).filter(m => m.allowed && m.id !== 'permission');

@@ -32,10 +32,12 @@
     return data;
   }
 
-  // 轻提示（复用主界面 toast 样式，admin 页自行内联）
+  // 轻提示（复用主界面 toast 样式；页面自带 #toast 时直接复用，避免重复节点）
   let toastEl = null;
   let toastTimer = null;
   function ensureToast() {
+    if (toastEl) return toastEl;
+    toastEl = document.getElementById('toast');
     if (toastEl) return toastEl;
     toastEl = document.createElement('div');
     toastEl.id = 'toast';
@@ -77,44 +79,66 @@
     } catch (e) { /* 忽略 */ }
   }
 
-  // 渲染顶部用户菜单（由各 admin 页面调用，注入到 #user-slot）
-  function renderUserMenu(container) {
+  // 会话心跳：每 60 秒确认一次登录状态，过期则整页跳登录（R1 前端侧）。
+  // 顶栏用户菜单与侧栏底部用户区共用，全局只起一个。
+  function ensureSessionPoller() {
+    if (window.__sessionPoller) return;
+    window.__sessionPoller = setInterval(async () => {
+      try {
+        const res = await fetch('/api/session', { credentials: 'same-origin' });
+        const data = await res.json().catch(() => ({}));
+        if (!data.user) {
+          clearInterval(window.__sessionPoller);
+          alert('登录已过期，请重新登录');
+          window.location.href = '/login?next=' + encodeURIComponent(location.pathname);
+        }
+      } catch (e) { /* 网络抖动忽略，等下一轮 */ }
+    }, 60000);
+  }
+
+  // 渲染侧栏底部用户区（框架左侧栏：主界面 / 插件外壳页 / 管理后台页，由 static/js/sidebar.js 调用）：
+  // 管理后台（有模块权限才出现）、修改密码、用户信息（左头像+名称，右退出登录按钮）；
+  // 未登录时整块换成「登录」入口。条目样式与侧栏导航一致（.side-item），精简档仅图标。
+  function renderSidebarUser(container) {
+    ensureSessionPoller();
+    const sideIcon = name =>
+      (window.JZSidebar && window.JZSidebar.icon) ? window.JZSidebar.icon(name) : '';
+    const syncTitles = () => {
+      if (window.JZSidebar && window.JZSidebar.syncTitles) window.JZSidebar.syncTitles();
+    };
     getSession().then(user => {
       if (!user) {
-        container.innerHTML = '<a class="admin-btn primary" href="/login?next=' +
-          encodeURIComponent(location.pathname) + '">登录</a>';
+        container.innerHTML = '<a class="side-item" href="/login?next=' +
+          encodeURIComponent(location.pathname) + '">' + sideIcon('login') +
+          '<span class="side-label">登录</span></a>';
+        syncTitles();
         return;
       }
-      container.innerHTML = `
-        <div class="user-chip"><span class="avatar">${esc(user.name.slice(0, 1))}</span>${esc(user.name)}</div>
-        ${(user.modules && user.modules.length) ? '<a class="admin-btn small" href="/admin">管理后台</a>' : ''}
-        <button type="button" class="admin-btn small" id="btn-chg-pwd">修改密码</button>
-        <button type="button" class="admin-btn small" id="btn-logout">退出登录</button>`;
-      const btn = container.querySelector('#btn-logout');
-      btn.addEventListener('click', async () => {
+      // 管理后台区内（/admin 及其子页）该条目高亮，标示当前所在区域
+      const inAdmin = location.pathname.indexOf('/admin') === 0;
+      container.innerHTML =
+        ((user.modules && user.modules.length)
+          ? '<a class="side-item' + (inAdmin ? ' active' : '') + '" href="/admin" data-tip="管理后台">' +
+            sideIcon('settings') + '<span class="side-label">管理后台</span></a>'
+          : '') +
+        '<button type="button" class="side-item" id="side-chg-pwd" data-tip="修改密码">' +
+          sideIcon('lock') + '<span class="side-label">修改密码</span></button>' +
+        '<div class="side-user">' +
+          '<span class="avatar">' + esc(user.name.slice(0, 1)) + '</span>' +
+          '<span class="side-user-name">' + esc(user.name) + '</span>' +
+          '<button type="button" class="side-logout" title="退出登录" aria-label="退出登录">' +
+            sideIcon('logout') + '</button>' +
+        '</div>';
+      container.querySelector('#side-chg-pwd').addEventListener('click', openChangePasswordModal);
+      container.querySelector('.side-logout').addEventListener('click', async () => {
         try {
           await api('/api/logout', { method: 'POST' });
           window[SESSION] = null;
         } catch (e) { /* 已跳转登录 */ }
         window.location.href = '/';
       });
-      container.querySelector('#btn-chg-pwd').addEventListener('click', openChangePasswordModal);
+      syncTitles();
     });
-
-    // 会话心跳：每 60 秒确认一次登录状态，过期则整页跳登录（R1 前端侧）
-    if (!window.__sessionPoller) {
-      window.__sessionPoller = setInterval(async () => {
-        try {
-          const res = await fetch('/api/session', { credentials: 'same-origin' });
-          const data = await res.json().catch(() => ({}));
-          if (!data.user) {
-            clearInterval(window.__sessionPoller);
-            alert('登录已过期，请重新登录');
-            window.location.href = '/login?next=' + encodeURIComponent(location.pathname);
-          }
-        } catch (e) { /* 网络抖动忽略，等下一轮 */ }
-      }, 60000);
-    }
   }
 
   // 修改密码：旧密码 + 新密码（≥6 位，不得与旧密码相同），成功后保持当前会话
@@ -499,7 +523,8 @@
     download,
     showToast,
     getSession,
-    renderUserMenu,
+    renderSidebarUser,
+    openChangePasswordModal,
     loadSiteTitle,
     requireModule,
     openModal,

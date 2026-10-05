@@ -35,72 +35,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---------- App bar ---------- */
-.app-bar {
-  position: sticky;
-  top: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  padding: 12px 24px;
-  background: var(--md-surface);
-  border-bottom: 1px solid var(--md-outline-variant);
-}
-
-/* Chrome<84 不支持 flex gap，用相邻兄弟外边距兜底（现代浏览器同样生效，无间距叠加） */
-.app-bar > * + * {
-  margin-left: 16px;
-}
-
-.app-bar .logo {
-  display: flex;
-  align-items: center;
-  text-decoration: none;
-  color: inherit;
-}
-
-.app-bar .logo > * + * {
-  margin-left: 10px;
-}
-
-.app-bar .logo-mark {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: conic-gradient(#4285F4 0 25%, #EA4335 0 50%, #FBBC05 0 75%, #34A853 0 100%);
-  box-shadow: var(--md-shadow-1);
-}
-
-.app-bar .logo-title {
-  font-size: 20px;
-  font-weight: 500;
-  letter-spacing: .1px;
-}
-
-.app-bar .back-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--md-on-surface);
-  font-size: 22px;
-  cursor: pointer;
-  text-decoration: none;
-  transition: background var(--md-transition);
-}
-
-.app-bar .back-btn:hover {
-  background: rgba(60, 64, 67, .08);
-}
-
-.app-bar .spacer {
-  flex: 1;
-}
-
 /* ---------- Hero ---------- */
 .hero {
   padding: 48px 24px 8px;
@@ -135,8 +69,8 @@ body {
 /* ---------- Section / category ---------- */
 .category {
   margin-top: 32px;
-  /* 滚动定位时预留顶部栏高度，避免标题被 sticky 顶栏遮挡 */
-  scroll-margin-top: 76px;
+  /* 分类快速定位滚动落点预留少量空隙（顶栏改侧栏后页面无 sticky 头部） */
+  scroll-margin-top: 16px;
 }
 
 .category:first-child {
@@ -360,108 +294,306 @@ body.tool-body {
   color: var(--md-on-surface);
 }
 
-/* ---------- 右下角悬浮球（⋮ 更多）+ 展开菜单 ---------- */
-.fab-menu {
+/* ---------- 左侧导航栏（主界面 / 插件外壳页共用；admin 页仍用顶栏） ----------
+ * 顶栏改侧栏批次：原顶栏（站点名 / 用户菜单）与右下角悬浮球
+ * （位置编辑 / 隐藏插件 / 大模型设置）的能力全部收进侧栏，另加插件商店占位项。
+ * 两档显示：展开（图标 + 文字，224px）/ 精简（仅图标，64px），body.side-collapsed 切换，
+ * 偏好存 localStorage、窄视口自动精简（sidebar.js）。
+ * 布局：侧栏 fixed 占左侧；body.has-side-nav 用同一变量 --side-w 做 padding-left
+ * 让出空间，宽度变化时两侧同步过渡。 */
+body.has-side-nav {
+  --side-w: 224px;
+  padding-left: var(--side-w);
+  transition: padding-left var(--md-transition);
+}
+
+body.has-side-nav.side-collapsed {
+  --side-w: 64px;
+}
+
+.side-nav {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 60;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--side-w);
+  z-index: 50;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-}
-
-.fab {
-  width: 56px;
-  height: 56px;
-  border: none;
-  border-radius: 50%;
-  background: var(--md-primary);
-  color: var(--md-on-primary);
-  box-shadow: var(--md-shadow-2);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background var(--md-transition), transform var(--md-transition), box-shadow var(--md-transition);
-}
-
-.fab:hover {
-  transform: scale(1.06);
-  box-shadow: var(--md-shadow-3);
-}
-
-/* 三个横点（紧凑） */
-.fab .fab-dots {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-}
-
-.fab .fab-dots > * + * {
-  margin-left: 4px;
-}
-
-.fab .fab-dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  flex: none;
-}
-
-.fab-pop {
-  margin-bottom: 10px;
-  min-width: 168px;
-  padding: 6px;
   background: var(--md-surface);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-radius-m);
-  box-shadow: var(--md-shadow-2);
-  display: none;
-  flex-direction: column;
+  border-right: 1px solid var(--md-outline-variant);
+  transition: width var(--md-transition);
+  overflow: hidden;
 }
 
-.fab-pop > * + * {
-  margin-top: 2px;
-}
-
-.fab-menu:hover .fab-pop,
-.fab-pop:hover,
-.fab-pop.open {
-  display: flex;
-}
-
-.fab-pop-item {
+.side-head {
+  flex: none;
   display: flex;
   align-items: center;
-  padding: 10px 12px;
+  padding: 12px 12px 8px;
+}
+
+.side-logo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
   border: none;
-  background: transparent;
-  font-size: 14px;
-  color: var(--md-on-surface);
+  /* 负外边距抵消按钮内边距，站点图标与展开档前对齐一致；悬停整块高亮提示可点 */
+  padding: 4px 6px;
+  margin: -4px -6px;
   border-radius: var(--md-radius-s);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
   cursor: pointer;
   text-align: left;
-  white-space: nowrap;
+  transition: background var(--md-transition);
 }
 
-.fab-pop-item > * + * {
-  margin-left: 10px;
-}
-
-.fab-pop-item:hover {
+.side-logo:hover {
   background: var(--md-surface-container);
 }
 
-.fab-pop-item.active {
+.side-logo > * + * {
+  margin-left: 10px;
+}
+
+.side-nav .logo-mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  background: conic-gradient(#4285F4 0 25%, #EA4335 0 50%, #FBBC05 0 75%, #34A853 0 100%);
+  box-shadow: var(--md-shadow-1);
+}
+
+.side-nav .logo-title {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: .1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side-toggle {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--md-transition);
+}
+
+.side-toggle:hover {
+  background: var(--md-surface-container);
+}
+
+.side-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-list > * + * {
+  margin-top: 2px;
+}
+
+.side-item {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--md-radius-s);
+  background: transparent;
+  color: var(--md-on-surface);
+  font-size: 14px;
+  font-family: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--md-transition), color var(--md-transition);
+}
+
+.side-item:hover {
+  background: var(--md-surface-container);
+}
+
+.side-item.active {
+  background: rgba(var(--md-primary-rgb), .12);
   color: var(--md-primary);
   font-weight: 500;
 }
 
+/* llm-settings.js 数据驱动显隐：管理员未开放时该项保持 hidden */
+.side-item[hidden] {
+  display: none;
+}
+
+.side-item .side-ico {
+  flex: none;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+}
+
+.side-item .side-ico svg {
+  width: 22px;
+  height: 22px;
+}
+
+.side-item .side-label {
+  margin-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 插件商店占位项：未落地，弱化显示（点击有轻提示反馈） */
+.side-item.side-store {
+  color: var(--md-on-surface-variant);
+}
+
+.side-item.side-store .side-ico {
+  opacity: .55;
+}
+
+/* 底部：管理后台 / 修改密码 / 用户信息 */
+.side-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+.side-foot > * + * {
+  margin-top: 2px;
+}
+
+.side-foot .side-item {
+  width: 100%;
+}
+
+.side-user {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 6px;
+  border-radius: var(--md-radius-s);
+}
+
+.side-user .avatar {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.side-user-name {
+  flex: 1;
+  min-width: 0;
+  margin-left: 10px;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-logout {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--md-on-surface-variant);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--md-transition), color var(--md-transition);
+}
+
+.side-logout:hover {
+  background: rgba(var(--md-primary-rgb), .12);
+  color: var(--md-error);
+}
+
+.side-logout svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- 侧栏精简档：仅图标 ---------- */
+.side-collapsed .side-head {
+  flex-direction: column;
+  padding: 12px 8px 8px;
+}
+
+.side-collapsed .side-head > * + * {
+  margin-left: 0;
+  margin-top: 10px;
+}
+
+.side-collapsed .side-logo {
+  flex: none;
+}
+
+.side-collapsed .logo-title {
+  display: none;
+}
+
+.side-collapsed .side-list,
+.side-collapsed .side-foot {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.side-collapsed .side-item {
+  justify-content: center;
+  padding: 0;
+}
+
+.side-collapsed .side-label {
+  display: none;
+}
+
+.side-collapsed .side-user {
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.side-collapsed .side-user-name {
+  display: none;
+}
+
+.side-collapsed .side-user > * + * {
+  margin-left: 0;
+  margin-top: 6px;
+}
+
 .edit-hint {
   position: fixed;
-  bottom: 96px;
+  bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 60;
@@ -480,20 +612,16 @@ body.tool-body {
 }
 
 /* ---------- 大模型设置对话框（居中 + 背景调暗/模糊） ----------
- * 只在管理员把统一大模型设为「用户各自设置」模式时，入口才由 llm-settings.js 注入。
+ * 入口在左侧栏「大模型设置」项（llm-settings.js 按管理员模式数据驱动显隐）。
  * 结构：遮罩（调暗 + 模糊）+ 居中卡片（头部固定 / 主体滚动 / 底部固定）。
  * ★ 两处刻意写法，改之前先读：
  *   1) **滚动条放在内层主体**（.llm-card-body），卡片本身只 overflow:hidden——
  *      卡片自带圆角时，压在卡片上的内部滚动条会盖住右侧两个圆角，看起来像"圆角失效"
  *      （同类缺陷见 HANDOFF §7.3 第 22 条：滚动条占宽引发的布局/视觉问题）；
- *   2) z-index 取 66 = 悬浮球（60）之上、轻提示 toast（70）之下——
+ *   2) z-index 取 66 = 侧栏（50）之上、轻提示 toast（70）之下——
  *      保存后的提示条必须能浮在调暗层之上，否则用户看不到"已保存"。 */
 body.llm-card-open {
   overflow: hidden;                 /* 锁住页面滚动：滚轮只在对话框内生效 */
-}
-
-body.llm-card-open .fab-pop {
-  display: none !important;         /* 打开期间收起悬浮球菜单，避免菜单从遮罩下透出 */
 }
 
 .llm-overlay {
@@ -909,10 +1037,6 @@ body.modal-open {
 }
 @media (max-width: 480px) {
   .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-  .fab-menu { right: 16px; bottom: 16px; }
-  .fab { width: 48px; height: 48px; }
-  .fab .fab-dots > * + * { margin-left: 3px; }
-  .fab .fab-dots i { width: 4px; height: 4px; }
 }
 
 
@@ -920,6 +1044,24 @@ body.modal-open {
 /* 大屏放宽（XL）：内容上限 1200 → 1440，网格 auto-fill 自然加列 */
 @media (min-width: 1440px) {
   .content { max-width: 1440px; }
+}
+/* 右侧分类定位点泳道（顶栏改侧栏回归修复）：侧栏占宽后，1440 档内容右缘距视口
+   只剩个位数像素，固定在 right:18px 的定位点会压到卡片上。≥1000px 时内容列让出
+   定位点泳道（点宽 14 + 两侧余量，居中布局两侧各让 44px）；空间充裕时 min() 取
+   原上限、布局不变。min() 为 Chrome≥79 能力，旧内核回退上一行定宽（定位点与卡片
+   交叠，浏览器基线旧行为）。窄窗（<1000px）不预留：避免牺牲小窗双列卡宽，
+   定位点贴边轻微交叠为改版前既有口径。 */
+@media (min-width: 1000px) {
+  body.has-side-nav .content {
+    max-width: 1200px;
+    max-width: min(1200px, calc(100% - 88px));
+  }
+}
+@media (min-width: 1440px) {
+  body.has-side-nav .content {
+    max-width: 1440px;
+    max-width: min(1440px, calc(100% - 88px));
+  }
 }
 /* 内边距随档位收敛 */
 @media (max-width: 767px) {
@@ -935,7 +1077,7 @@ body.modal-open {
   .category h2 { margin: 0 8px 12px; }
 }
 /* 收缩鲁棒性：横向行子项可收缩，任何窗口宽度不撑出视口 */
-.app-bar > *, .tool-card, .category, .content > * { min-width: 0; }
+.tool-card, .category, .content > * { min-width: 0; }
 /* 高度口径：dvh 增强（旧内核安全跳过） */
 @supports (height: 100dvh) {
   body.tool-body { height: 100dvh; }

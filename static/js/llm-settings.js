@@ -1,7 +1,7 @@
-/* 统一大模型 · 用户自助设置对话框（首页右下角「⋯ → 大模型设置」）
+/* 大模型 · 用户自助设置对话框（左侧栏「大模型设置」项）
  *
- * 需求：管理员把统一大模型设为「用户各自设置」模式时，用户可在主界面右下角的
- * 三个点按钮里自助填写 API 地址 / 格式 / Key；**管理员未开放时该选项不出现**。
+ * 需求：管理员把统一大模型设为「用户各自设置」模式时，用户可在左侧栏自助填写
+ * API 地址 / 格式 / Key；**管理员未开放时该选项不出现**。
  *
  * 与后端约定（框架路由，见 app.py）：
  *   GET  /api/llm/settings   读模式、格式清单、本人配置（脱敏）与当前生效来源
@@ -9,12 +9,13 @@
  *   POST /api/llm/test       连通性测试（测表单里这套，缺省测已保存的）
  *
  * 实现要点：
- *   1. 入口是**动态注入**的：/api/llm/settings 返回 can_self_config=false 时什么都不做，
- *      因此"管理员未开启 → 看不到该选项"由数据驱动，不需要后端渲染开关；
+ *   1. 入口是**数据驱动显隐**的：侧栏里该项常驻（hidden），/api/llm/settings 返回
+ *      can_self_config=false 时保持隐藏，因此"管理员未开启 → 看不到该选项"不需要后端渲染开关；
+ *      侧栏由 sidebar.js 构建（主界面与插件外壳页都有），管理后台页无侧栏则什么都不做；
  *   2. 对话框是常驻 DOM（hidden 切换），不是每次新建——避免重复绑定事件；
  *      结构为「遮罩 + 居中卡片（头部固定 / 主体滚动 / 底部固定）」，
  *      背景调暗 + 模糊；滚动条放在内层主体，避免压掉卡片右侧圆角（见 style.css 注释）；
- *   3. 打开时给 body 加 llm-card-open 类：锁页面滚动 + 收起悬浮球菜单（否则菜单从遮罩下透出）；
+ *   3. 打开时给 body 加 llm-card-open 类：锁页面滚动（遮罩层压过侧栏，无需收起）；
  *   4. 兼容 Chrome 72：不用可选链 / 空值合并，显式判空（与 main.js 同口径）。
  */
 (function (global) {
@@ -38,17 +39,10 @@
   // ===================== 入口注入 =====================
 
   function ensureEntry() {
-    var pop = el('fab-pop');
-    if (!pop || el('fab-act-llm')) return;      // 无悬浮球菜单的页面（工具外壳页）不注入
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'fab-pop-item';
-    btn.id = 'fab-act-llm';
-    btn.setAttribute('data-action', 'llm');
-    btn.innerHTML = '<span data-jz-icon="💡"></span> 大模型设置';
-    pop.appendChild(btn);
-    if (global.JZIcon && global.JZIcon.processDom) global.JZIcon.processDom(btn);
-    btn.addEventListener('click', function () { openCard(); });
+    var item = el('side-act-llm');
+    if (!item || item.dataset.bound) return;   // 无侧栏的页面（管理后台等）不注入
+    item.hidden = false;
+    item.addEventListener('click', function () { openCard(); });
   }
 
   // ===================== 卡片 =====================
@@ -273,7 +267,7 @@
     if (loaded) return;
     loaded = true;
     A().api('/api/llm/settings').then(function (data) {
-      // 管理员未开启用户单独设置 → 不注入入口（需求：该选项不显示）
+      // 管理员未开启用户单独设置 → 入口保持隐藏（需求：该选项不显示）
       if (data && data.can_self_config) ensureEntry();
     }).catch(function () { /* 未登录 / 读取失败：静默不显示入口 */ });
   }

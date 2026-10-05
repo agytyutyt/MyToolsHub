@@ -1,6 +1,6 @@
 /* 部门管理：列表渲染（含所属单位）、新建/编辑浮窗（单位下拉）、删除确认、批量导入导出 */
 (function () {
-  const { api, esc, showToast, renderUserMenu, requireModule, openModal, confirmDialog,
+  const { api, esc, showToast, requireModule, openModal, confirmDialog,
           batchImport, download } = window.AdminCommon;
 
   const listEl = document.getElementById('dept-list');
@@ -141,7 +141,6 @@
   (async () => {
     const ok = await requireModule('department');
     if (!ok) return;
-    renderUserMenu(document.getElementById('user-slot'));
     load();
   })();
 })();
