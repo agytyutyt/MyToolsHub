@@ -200,8 +200,8 @@
 | T-O2-8 | 验收（C1–C12，含红线 1/2/3/5/6 与商店特有两条） | §6 | ◐（台架 `tools/e2e/store-batch8-tests.py` 57 项全过：A 读面/B 状态机+占号+下架回退+E1+部署/C 六连校验/D 能力层端到端；C6 解耦 grep 干净；主包启动回归绿；**待人工**：真机浏览器路径走查、装机冒烟、干净机切源演示） |
 | T-O2-9 | 服务器插件出包链增产前端包工件（与后端包同版本成对） | §3.5.1 | ✅（build-plugin-package.ps1 增产 `JZToolsHub-前端-*.zip` + frontend-manifest.json 文件清单 + sha256 旁挂；登记/索引/-Publish 同步带出） |
 | T-O2-10 | jz_relay 白名单扩展：自身插件服务器端点（类 C 动态规则，id 去 local- 前缀映射） | §3.5.1 | ✅（`jz_relay.own(<id>)` 返回命名空间视图；白名单增 `own_namespace` 节（enabled 开关）；框架级面与其他插件端点不变） |
-| T-O2-11 | 管理进程 supervisor（启动编排/健康探针/熔断拉起/升级停换起+回滚/孤儿收割/日志归集/控制接口/Windows 服务化；**独立安装包**） | `服务端插件运行架构-设计文档.md` §2 | ☐（批次 8 收尾后单开） |
-| T-O2-12 | worker 运行形态（自有 Flask 实例 + 会话自验 provider + 懒启动 + venv 拉起可选 + 主应用反代与统一 errorhandler） | `服务端插件运行架构-设计文档.md` §3–§4 | ☐（批次 8 收尾后单开） |
+| T-O2-11 | 管理进程 supervisor（启动编排/健康探针/熔断拉起/升级停换起+回滚/孤儿收割/日志归集/控制接口/Windows 服务化；**独立安装包**） | `服务端插件运行架构-设计文档.md` §2 | ✅（批次 8b，2026-10-06：`supervisor/` 包——core（注册表+端口分配一次持久化+探针+双计数器熔断+Job Object）/apply_chain（停换起同端口+回滚，不打 restart_pending）/control_api（stdlib+令牌）/`__main__` 入口；install-supervisor.ps1（NSSM+服务恢复策略）；真机服务化验收留出包门） |
+| T-O2-12 | worker 运行形态（自有 Flask 实例 + 会话自验 provider + 懒启动 + venv 拉起可选 + 主应用反代与统一 errorhandler） | `服务端插件运行架构-设计文档.md` §3–§4 | ◐（批次 8b：`jz_worker.py` 两级会话 provider（register_providers 零改动注入）+ `/api/session` 回环 fail-closed；主应用 `--worker` 分支 + worker 化跳过进程内加载 + 反代桥 + 统一 errorhandler（补课项落地）；store_admin 发布即部署 supervisor 分派。**venv 建环境（wheel 清单闭包安装）未实施**——拉起已支持 venv 解释器，规格见 §4） |
 
 ### 批次 8 实施记录（2026-10-05，T-O2-0~10）
 
@@ -209,6 +209,13 @@
 - **设计落定外的两个增量**：① 商店下载接口增 `artifact=frontend` 查询参数（server 条目双包工件选择，客户端装 server 条目取前端包必须）——已记入设计文档 §4.2；② `local_state` 停用状态改读磁盘最新配置（原读启动快照，停用后 rescan 不生效的隐性 bug 顺带修复）。
 - **契约要点**：catalog schema 2 原样落地（versions[]/status/submit/review/history 台账）；flat 投影 = 每 id 最新 published，附加字段 icon/deps_mode/provides/frontend_*（向后兼容，老客户端忽略）；E1 index-server.json 仅 server 条目 published 版本。
 - **遗留**：T-O2-11/12（supervisor/worker）；真机人工项见 T-O2-8 ◐ 注记；商店页暂未在主包 config.template 层面做模板同步测试（tools.json 经 merge-tools 链随主包发版合并，出包门验证）。
+
+### 批次 8b 实施记录（2026-10-06，T-O2-11/12 主体）
+
+- **改动面**：新建 `supervisor/`（core / apply_chain / control_api / `__main__` / mainapp_bridge / install）+ `jz_worker.py`；`app.py`（`--worker` 分支、worker 化跳过进程内加载、桥安装于 register_plugin_backends 之后）；`JZToolsHub.spec`（hiddenimports：jz_worker + supervisor.*）；`store_admin.deploy_backend_package` 双形态分派（worker 化→控制接口 apply，未 worker 化→既有进程内链）；台架 `tools/e2e/supervisor-tests.py`（36 项全过：端口持久化/两级会话/熔断/apply 回滚/控制接口/反代/C14 全场景）。
+- **台架抓出的四个真 bug（均已修）**：① apply 编排与监控线程打架——停换起窗口的探针失败被误熔断，加 `_applying` 抑制集；② 监控把人工 stop 计入崩溃连击（proc=None ≠ 死亡）——未托管单元不探针不计数；③ 同一具死进程在重拉失败时被重复计数——记账后即摘出 `_procs`；④ 端口占用探测用 bind，Windows TIME_WAIT 残留误报占用——改 connect 探测（只认真实监听者）。
+- **两个设计级收获**：熔断需**双计数器**（探针连败 + 快速崩溃连击——路由触发型毒插件每次重启后探针正常，单一计数器永远到不了阈值，已回写设计文档 §2）；apply 顺序必须是「备份→停旧→验端口→替换→起」（先验端口会被自己的 worker 占住）。
+- **遗留**：venv 建环境（wheel 清单闭包安装，T-O2-12c 后半）；试点插件真机迁移（迁移流程：注册表加单元 → 重启主应用 → 验证反代 → 逐个切）；supervisor 独立安装包真机服务化验收（NSSM 脚本已备）；懒启动（拍板首期不做）。
 
 ## 门控关系（未决 GD → 批次）
 

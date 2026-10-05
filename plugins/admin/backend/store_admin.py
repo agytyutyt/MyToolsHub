@@ -606,15 +606,34 @@ def mark_deploy_result(data_root, pid, version, ok, detail, by):
 
 
 def deploy_backend_package(base_dir, data_root, pid, version):
-    """server 后端包发布即部署（当前形态：进程内——复用 admin inspect/apply 全链）。
+    """server 后端包发布即部署。双形态分派（需求⑩迁移期并存）：
 
-    校验 → 备份 → 替换 → 登记（可回滚）；失败返回 {ok:False, error}，由调用方回退发布状态。
-    E 架构（supervisor）落地后此函数换为控制接口编排，契约不变。
+    - **E 形态**（插件已 worker 化——supervisor 注册表有单元）：走 supervisor 控制
+      接口 apply（校验结构 → 备份 → 停旧 → 替换 → 同端口起新 → 健康；失败自动
+      回滚再起旧版；不打 restart_pending——worker 即时生效）。supervisor 不可达
+      时返回失败（**绝不静默降级到进程内部署**——主应用已不加载该插件，静默会
+      造成"目录已更新但服务未变"的假发布）；
+    - **进程内形态**（未 worker 化）：既有 inspect/apply 全链（校验→备份→替换→
+      登记可回滚）。迁移完成后本分支随进程内形态一并退役。
+
+    失败返回 {ok:False, error}，由调用方（routes）回退发布状态并写台账。
     """
     path = os.path.join(packages_dir(data_root),
                         canonical_filename("server", pid, version))
     if not os.path.isfile(path):
         return {"ok": False, "error": "包文件缺失：%s" % path}
+    try:
+        from supervisor.mainapp_bridge import try_supervisor_apply
+    except Exception:
+        try_supervisor_apply = None
+    if try_supervisor_apply is not None:
+        handled, res = try_supervisor_apply(data_root, pid, path)
+        if handled:
+            if res and res.get("ok"):
+                return res
+            return {"ok": False,
+                    "error": "supervisor 部署失败：%s" % ((res or {}).get("error") or "未知"),
+                    "supervisor": True}
     inspected = plugin_admin.inspect_package(path, base_dir, data_root, force=True)
     if not inspected.get("ok"):
         return {"ok": False, "error": "；".join(inspected.get("errors") or ["校验失败"])}

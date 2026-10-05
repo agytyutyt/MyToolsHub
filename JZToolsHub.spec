@@ -53,6 +53,10 @@ DEP_COMPONENT_PACKAGES = [
 datas = []
 binaries = []
 hiddenimports = []
+# E 架构（需求⑩，批次 8b）：worker 入口与主应用桥随 exe 分发——
+# `JZToolsHub.exe --worker <插件id>` 分支（app.py __main__）import jz_worker；
+# supervisor/mainapp_bridge 由 app.py 运行期 import（PyInstaller 静态不可达，须显式列出）。
+hiddenimports += ["jz_worker", "supervisor", "supervisor.mainapp_bridge"]
 
 # 「依赖组件包」是**纯 Python 包**（requests / pypdf / openpyxl …），它们要用的**标准库**
 # 必须由主包提供：PyInstaller 只收集从入口静态可达的模块，组件里用到的边角标准库会缺，

@@ -719,6 +719,8 @@ def register_plugin_backends(app):
             return False
 
         app.logger.info(f"已注册后端插件：{plugin_id}")
+        # 进程内插件 id 集（E 架构统一 errorhandler 判定用，见 supervisor/mainapp_bridge）
+        app.config.setdefault("_PLUGIN_IDS", set()).add(plugin_id)
         # 方式一：登记插件首页卡片内容声明钩子（每次请求实时求值，失败不阻断加载）
         hook = getattr(routes, "home_card", None)
         if callable(hook):
@@ -742,9 +744,24 @@ def register_plugin_backends(app):
     _vj = jz_deps.read_version_json(app_dir)
     app_version, plugin_api = _vj.get("app"), _vj.get("plugin_api")
 
+    # E 架构（需求⑩）：supervisor 注册表里有单元的插件 = worker 化 → 跳过进程内
+    # 加载，/api/<id>/* 由反代桥转发到 worker（supervisor/mainapp_bridge）。迁移期
+    # 两种形态并存：未 worker 化的插件走既有进程内链，一条一条切。
+    try:
+        from supervisor.mainapp_bridge import worker_units_snapshot
+        _worker_units = worker_units_snapshot(get_data_root())
+    except Exception:
+        _worker_units = {}
+
     for item in tools:
         plugin_id = item["id"]
         if plugin_id == "admin" or not item.get("enabled", True):
+            continue
+        if plugin_id in _worker_units:
+            _plugin_states[plugin_id] = {"status": "ok", "mode": "worker",
+                                         "missing": [], "degraded": [],
+                                         "reason": "supervisor 托管（E 架构）"}
+            app.logger.info("插件 %s 已 worker 化（supervisor 托管），跳过进程内加载", plugin_id)
             continue
         manifest = manifests.get(plugin_id) or {}
         plugin_dir = get_plugin_dir(plugin_id)
@@ -1224,10 +1241,29 @@ if __name__ == "__main__":
         except (IndexError, ValueError):
             sys.exit(2)
         sys.exit(_run_restart_helper(_wait_pid))
+    if "--worker" in sys.argv:
+        # E 架构（需求⑩）worker 入口：JZToolsHub.exe --worker <插件id>
+        # （supervisor 拉起，端口/数据根/主应用地址经环境变量注入——见 jz_worker.py）
+        try:
+            _worker_id = sys.argv[sys.argv.index("--worker") + 1]
+        except (IndexError, ValueError):
+            sys.exit(2)
+        from jz_worker import run_worker
+        sys.exit(run_worker(_worker_id) or 0)
     init_data_root()  # 迁移旧版程序目录数据 + 解析数据根目录（决定日志/配置位置）
     setup_access_logging(app)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
+    # E 架构反代桥（T-O2-12b）：worker 化插件的 /api/<id>/* 转发 + 统一 errorhandler
+    # ——必须在 register_plugin_backends 之后注册（before_request 排在 admin 鉴权门
+    # 之后执行，鉴权管线先行；见 supervisor/mainapp_bridge.py 模块头）。
+    try:
+        from supervisor.mainapp_bridge import install_worker_proxy
+        install_worker_proxy(app, BASE_DIR)
+        app.logger.info("E 架构反代桥已安装（worker 化插件 %d 个）",
+                        len(worker_units_snapshot(jztools_data.get_data_root())))
+    except Exception as _e:
+        app.logger.warning("E 架构反代桥安装失败（按未启用处理）：%s", _e)
     # 插件后端已按磁盘上的代码加载完毕 → 清掉管理后台留下的"待重启"标记
     # （管理后台在页内应用插件包后标记 restart_pending；见 docs/design/插件独立升级方案-设计文档.md §9）
     try:
