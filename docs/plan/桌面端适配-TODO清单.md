@@ -201,7 +201,7 @@
 | T-O2-9 | 服务器插件出包链增产前端包工件（与后端包同版本成对） | §3.5.1 | ✅（build-plugin-package.ps1 增产 `JZToolsHub-前端-*.zip` + frontend-manifest.json 文件清单 + sha256 旁挂；登记/索引/-Publish 同步带出） |
 | T-O2-10 | jz_relay 白名单扩展：自身插件服务器端点（类 C 动态规则，id 去 local- 前缀映射） | §3.5.1 | ✅（`jz_relay.own(<id>)` 返回命名空间视图；白名单增 `own_namespace` 节（enabled 开关）；框架级面与其他插件端点不变） |
 | T-O2-11 | 管理进程 supervisor（启动编排/健康探针/熔断拉起/升级停换起+回滚/孤儿收割/日志归集/控制接口/Windows 服务化；**独立安装包**） | `服务端插件运行架构-设计文档.md` §2 | ✅（批次 8b，2026-10-06：`supervisor/` 包——core（注册表+端口分配一次持久化+探针+双计数器熔断+Job Object）/apply_chain（停换起同端口+回滚，不打 restart_pending）/control_api（stdlib+令牌）/`__main__` 入口；install-supervisor.ps1（NSSM+服务恢复策略）；真机服务化验收留出包门） |
-| T-O2-12 | worker 运行形态（自有 Flask 实例 + 会话自验 provider + 懒启动 + venv 拉起可选 + 主应用反代与统一 errorhandler） | `服务端插件运行架构-设计文档.md` §3–§4 | ◐（批次 8b：`jz_worker.py` 两级会话 provider（register_providers 零改动注入）+ `/api/session` 回环 fail-closed；主应用 `--worker` 分支 + worker 化跳过进程内加载 + 反代桥 + 统一 errorhandler（补课项落地）；store_admin 发布即部署 supervisor 分派。**venv 建环境（wheel 清单闭包安装）未实施**——拉起已支持 venv 解释器，规格见 §4） |
+| T-O2-12 | worker 运行形态（自有 Flask 实例 + 会话自验 provider + 懒启动 + venv 拉起可选 + 主应用反代与统一 errorhandler） | `服务端插件运行架构-设计文档.md` §3–§4 | ✅（批次 8b，2026-10-06 收口：`jz_worker.py` 两级会话 provider（fail-closed 拍板）+ 主应用 `--worker` 分支/worker 化跳过/反代桥/统一 errorhandler（补课项）；**venv 建环境落地**——`venv_mgr.py`（--system-site-packages 基线随主包 + wheel 闭包离线安装 + marker 幂等重建），apply 自动 venv 化，出包链 `-VenvWheels` 参数，上架机器校验同源复用；**试点迁移演练通过**（`tools/e2e/worker-migration-demo.py`：真实主应用+真实 notice-board 全链 8 项——真实登录/反代/worker 会话回环取真实身份/隔离 503 主应用照常）。懒启动首期不做（拍板）。**剩真机项**：服务化安装（NSSM）+ 逐插件真机切换） |
 
 ### 批次 8 实施记录（2026-10-05，T-O2-0~10）
 
@@ -216,6 +216,7 @@
 - **台架抓出的四个真 bug（均已修）**：① apply 编排与监控线程打架——停换起窗口的探针失败被误熔断，加 `_applying` 抑制集；② 监控把人工 stop 计入崩溃连击（proc=None ≠ 死亡）——未托管单元不探针不计数；③ 同一具死进程在重拉失败时被重复计数——记账后即摘出 `_procs`；④ 端口占用探测用 bind，Windows TIME_WAIT 残留误报占用——改 connect 探测（只认真实监听者）。
 - **两个设计级收获**：熔断需**双计数器**（探针连败 + 快速崩溃连击——路由触发型毒插件每次重启后探针正常，单一计数器永远到不了阈值，已回写设计文档 §2）；apply 顺序必须是「备份→停旧→验端口→替换→起」（先验端口会被自己的 worker 占住）。
 - **遗留**：venv 建环境（wheel 清单闭包安装，T-O2-12c 后半）；试点插件真机迁移（迁移流程：注册表加单元 → 重启主应用 → 验证反代 → 逐个切）；supervisor 独立安装包真机服务化验收（NSSM 脚本已备）；懒启动（拍板首期不做）。
+- **同日收口（批次 8b 续）**：①venv 建环境全链落地——`venv_mgr.py`（`--system-site-packages` 基线随主包、wheel 绝对路径离线安装、marker 幂等重建）+ apply 自动 venv 化（`deps_mode=venv` 包→建环境→单元切 venv 解释器）+ `validate_venv_node` 上架校验同源复用 + 出包链 `-VenvWheels`；台架 D5 组（6 项：venv apply/单元登记/健康/业务 API/私有依赖 dbgmod 生效/wheel sha 不符拒装旧版照常），**实施修正：wheel tag 校验须按「末三段」解析且分两类放行（cp314*-cp314*-win_amd64 C 扩展 / py3-none-any 纯 Python）——整名匹配与 "none" 一刀切都会误杀（已回写 §4）**。②试点迁移演练 `tools/e2e/worker-migration-demo.py` 8 项全过——真实主应用 + 真实 notice-board（注册表加单元→重启跳过进程内→supervisor 拉起→真实登录→反代访问公告板 API（worker 回环取**真实** admin 身份 dict）→停 worker 该插件 503 而主应用/登录态/工具清单照常）。③`tools/build-supervisor-package.ps1` 分件组装实测通过（supervisor/ + jz_worker.py + 安装脚本 + 注册表模板）。
 
 ## 门控关系（未决 GD → 批次）
 

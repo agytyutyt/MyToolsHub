@@ -214,6 +214,19 @@ def check_server_backend_zip(zip_path):
     if not any(n.replace("\\", "/").startswith("payload/plugins/%s/frontend/" % pid)
                for n in _zip_names(zip_path)):
         warnings.append("后端包内没有 frontend/（服务器无法服务浏览器路径）")
+    # venv 节机器校验（§4，deps_mode=venv 的包必带 wheel 闭包）：与 supervisor apply 同源
+    try:
+        from supervisor.apply_chain import validate_venv_node
+    except Exception:
+        validate_venv_node = None
+    if validate_venv_node is not None:
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                validate_venv_node(zf, meta, [n.replace("\\", "/") for n in zf.namelist()])
+        except ValueError as exc:
+            errors.append(str(exc))
+        except Exception as exc:
+            warnings.append("venv 节校验器异常（按无 venv 处理）：%s" % exc)
     # SHA256SUMS 全量核对（比安装器更严：上架即冻结，装哪台机都过）
     try:
         zf = zipfile.ZipFile(zip_path)

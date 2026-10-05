@@ -15,12 +15,16 @@
   阶段绝不调用本模块（保审核闸门）。
 """
 
+import hashlib
 import json
 import os
 import re
 import shutil
+import sys
 import time
 import zipfile
+
+from supervisor import venv_mgr
 
 HEALTH_WAIT_SECONDS = 20.0
 HEALTH_POLL = 0.5
@@ -46,8 +50,50 @@ def _zip_entries_safe(zf):
     return True, ""
 
 
+def validate_venv_node(zf, meta, names):
+    """venv 节机器校验（§4，公开：store_admin 上架机器校验同源复用）：wheel tag 预检
+    （cp314*/py3-none-any）+ 在场 + sha256。返回归一化 venv 节（无 venv 节返回 None）；
+    问题直接抛 ValueError。"""
+    node = meta.get("venv")
+    if not isinstance(node, dict):
+        return None
+    wheels = [str(w).replace("\\", "/") for w in (node.get("wheels") or []) if str(w).strip()]
+    if not wheels:
+        raise ValueError("venv 节缺 wheels 清单")
+    sha_map = node.get("wheel_sha256") or {}
+    for w in wheels:
+        if "/" in w or w.startswith(".") or ".." in w.split("/"):
+            raise ValueError("venv wheel 文件名不安全：%r" % w)
+        if not w.lower().endswith(".whl"):
+            raise ValueError("venv wheel 文件名缺 .whl 后缀：%s" % w)
+        # wheel 命名 = 分发名-版本(-构建)-pytag-abitag-plattag.whl：tag 是**末三段**，
+        # 不能拿整名匹配（分发名里也有连字符，实测 dbgmod-1.0.0-py3-none-any 误杀）。
+        # rsplit("-", 3) → [分发名-版本, pytag, abitag, plattag]
+        # O1 口径两类放行：cp314*-cp314*-win_amd64（C 扩展，Windows 产物）/
+        #                 py3-none-any（纯 Python）
+        parts = w[:-4].rsplit("-", 3)
+        pytag, abitag, plattag = (parts[1].lower(), parts[2].lower(), parts[3].lower()) \
+            if len(parts) == 4 else ("", "", "")
+        ok_tag = (pytag.startswith("cp314") and abitag == pytag
+                  and plattag in ("win_amd64", "any")) \
+            or (pytag == "py3" and abitag == "none" and plattag == "any")
+        if not ok_tag:
+            raise ValueError("wheel tag 预检未过（仅接受 cp314*/py3-none-any，O1 口径）：%s" % w)
+        arc = "payload/wheels/" + w
+        if arc not in names:
+            raise ValueError("venv wheel 包内缺失：%s" % w)
+        if isinstance(sha_map, dict) and sha_map.get(w):
+            h = hashlib.sha256()
+            with zf.open(arc) as fh:
+                for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                    h.update(chunk)
+            if h.hexdigest().lower() != str(sha_map[w]).lower():
+                raise ValueError("wheel sha256 不符：%s" % w)
+    return {"python": str(node.get("python") or ""), "wheels": wheels}
+
+
 def _read_pkg_meta(package_path):
-    """读包内 plugin-package.json + manifest.json；结构不符抛 ValueError。"""
+    """读包内 plugin-package.json + manifest.json（含 venv 节校验）；结构不符抛 ValueError。"""
     with zipfile.ZipFile(package_path) as zf:
         ok, bad = _zip_entries_safe(zf)
         if not ok:
@@ -67,6 +113,7 @@ def _read_pkg_meta(package_path):
             raise ValueError("包结构不符：缺少 %smanifest.json" % prefix)
         if not any(n.startswith(prefix + "backend/") for n in names):
             raise ValueError("包结构不符：缺少后端载荷 %sbackend/" % prefix)
+        meta["_venv_node"] = validate_venv_node(zf, meta, names)
         return meta, pid
 
 
@@ -105,6 +152,21 @@ def _extract_payload_plugin(package_path, plugin_id, dest_dir):
             target = os.path.join(dest_dir, *tail.split("/"))
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with zf.open(info) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst, 1024 * 1024)
+
+
+def _extract_payload_wheels(package_path, dest_dir):
+    """把包内 payload/wheels/*.whl 解压到 dest_dir（venv 建环境载荷，§4）。"""
+    os.makedirs(dest_dir, exist_ok=True)
+    with zipfile.ZipFile(package_path) as zf:
+        for info in zf.infolist():
+            rel = info.filename.replace("\\", "/")
+            if rel.endswith("/") or not rel.startswith("payload/wheels/"):
+                continue
+            tail = rel[len("payload/wheels/"):]
+            if not tail or "/" in tail:
+                continue
+            with zf.open(info) as src, open(os.path.join(dest_dir, tail), "wb") as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)
 
 
@@ -177,12 +239,32 @@ def apply_package(sup, plugin_id, package_path, timeout=HEALTH_WAIT_SECONDS):
         try:
             os.makedirs(os.path.dirname(tmp), exist_ok=True)
             _extract_payload_plugin(package_path, plugin_id, tmp)
+            venv_node = meta.get("_venv_node")
+            if venv_node:
+                _extract_payload_wheels(package_path, os.path.join(tmp, "wheels"))
             if os.path.isdir(plugin_dir):
                 shutil.rmtree(plugin_dir)
             shutil.move(tmp, plugin_dir)
         except Exception as exc:
             _rm(tmp)
             return {"ok": False, "error": "替换代码失败（可回滚）：%s" % exc, "backup": backup}
+
+        # ④′ venv 建环境（deps_mode=venv；venv 在数据根——插件目录整目录替换不伤它）
+        if venv_node:
+            base_python = sup.worker_cfg().get("python") or sys.executable
+            vr = venv_mgr.ensure_venv(data_root, plugin_id,
+                                      os.path.join(plugin_dir, "wheels"), base_python,
+                                      log=lambda m: _log(sup, m))
+            if not vr.get("ok"):
+                return _rollback_after_failed_apply(sup, data_root, plugins_dir, plugin_id,
+                                                    backup, "venv 建环境失败：%s" % vr.get("error"))
+            unit["interpreter"] = vr["venv_python"]      # venv 解释器拉起（§4）
+            unit["deps_mode"] = "venv"
+            sc.save_registry(data_root, registry)
+        elif unit.get("deps_mode") == "venv":
+            unit["interpreter"] = "main"                 # 新包退回共享运行时
+            unit["deps_mode"] = "shared"
+            sc.save_registry(data_root, registry)
 
         # ⑤ 同端口起新 + 健康；失败 → 回滚备份再起旧版
         res = sup.start_unit(plugin_id)

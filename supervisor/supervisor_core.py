@@ -432,6 +432,7 @@ class Supervisor:
                 "crash_streak": self._crash.get(name, 0),
                 "enabled": bool(unit.get("enabled", True)),
                 "installed_version": unit.get("installed_version") or "",
+                "deps_mode": unit.get("deps_mode") or "shared",
             })
         return {"ok": True, "data_root": self.data_root, "units": rows}
 

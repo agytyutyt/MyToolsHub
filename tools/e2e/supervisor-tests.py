@@ -17,6 +17,7 @@ r"""批次 8b（T-O2-11/12 插件运行架构 E）台架。
 退出码：0 = 全过；1 = 有 FAIL。
 """
 
+import hashlib
 import io
 import json
 import os
@@ -85,20 +86,36 @@ def write_backend(pkg_dir, version):
             "    @app.get(API_PREFIX + '/die')\n"
             "    def fp_die():\n"
             "        os._exit(1)\n"
+            "    @app.get(API_PREFIX + '/depcheck')\n"
+            "    def fp_depcheck():\n"
+            "        from flask import jsonify\n"
+            "        try:\n"
+            "            import dbgmod\n"
+            "            return jsonify({'ok': True, 'dbgmod': dbgmod.MARKER})\n"
+            "        except Exception as e:\n"
+            "            return jsonify({'ok': False, 'error': str(e)}), 500\n"
         )
 
 
-def make_backend_zip(pkg_dir, version):
+def make_backend_zip(pkg_dir, version, venv_wheels=None):
     """server 后端包（plugin-package.json + payload/plugins/fixture-p/**）。
 
     包内 manifest.json 的 version 覆写为包版本（D 组「新版生效」断言的依据）。
+    venv_wheels：{wheel 文件名: bytes}——deps_mode=venv 包的 wheel 闭包（§4）。
     """
     pdir = os.path.join(pkg_dir, "plugins", PLUGIN_ID)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("plugin-package.json", json.dumps(
-            {"schema": 1, "kind": "plugin-upgrade", "id": PLUGIN_ID,
-             "version": version, "api_version": 1, "requires_restart": False}))
+        meta = {"schema": 1, "kind": "plugin-upgrade", "id": PLUGIN_ID,
+                "version": version, "api_version": 1, "requires_restart": False}
+        if venv_wheels:
+            sha = {}
+            for name, data in venv_wheels.items():
+                sha[name] = hashlib.sha256(data).hexdigest()
+                zf.writestr("payload/wheels/" + name, data)
+            meta["venv"] = {"python": "%d.%d" % sys.version_info[:2],
+                            "wheels": sorted(venv_wheels), "wheel_sha256": sha}
+        zf.writestr("plugin-package.json", json.dumps(meta))
         for root, _dirs, files in os.walk(pdir):
             for name in files:
                 full = os.path.join(root, name)
@@ -113,6 +130,24 @@ def make_backend_zip(pkg_dir, version):
     out = os.path.join(pkg_dir, "JZToolsHub-插件-%s-v%s.zip" % (PLUGIN_ID, version))
     with open(out, "wb") as f:
         f.write(buf.getvalue())
+    return out
+
+
+def make_minimal_wheel(dest_dir, name="dbgmod", version="1.0.0"):
+    """手工造一个最小合法 wheel（py3-none-any；RECORD 允许空哈希）——离线测试用。"""
+    files = {
+        "%s/__init__.py" % name: "MARKER = '%s-%s'\n" % (name, version),
+        "%s-%s.dist-info/METADATA" % (name, version):
+            "Metadata-Version: 2.1\nName: %s\nVersion: %s\n" % (name, version),
+        "%s-%s.dist-info/WHEEL" % (name, version):
+            "Wheel-Version: 1.0\nGenerator: rig\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+        "%s-%s.dist-info/RECORD" % (name, version):
+            "%s/__init__.py,,\n%s-%s.dist-info/RECORD,,\n" % (name, name, version),
+    }
+    out = os.path.join(dest_dir, "%s-%s-py3-none-any.whl" % (name, version))
+    with zipfile.ZipFile(out, "w") as zf:
+        for arc, data in files.items():
+            zf.writestr(arc, data)
     return out
 
 
@@ -376,6 +411,62 @@ def main():
         pend = (state.get("plugins") or {}).get(PLUGIN_ID, {}).get("restart_pending")
         check("D4 全程不打 restart_pending（§2 拍板）", not pend, str(state.get("plugins")))
 
+        # ---------- D5. venv 建环境（deps_mode=venv，§4） ----------
+        print("==> D5. venv 建环境（wheel 闭包 → venv 解释器拉起 → 私有依赖生效）")
+        wheels_dir = os.path.join(work, "wheels")
+        os.makedirs(wheels_dir, exist_ok=True)
+        make_minimal_wheel(wheels_dir, "dbgmod", "1.0.0")
+        with open(os.path.join(wheels_dir, "dbgmod-1.0.0-py3-none-any.whl"), "rb") as f:
+            whl_bytes = f.read()
+        zipv = make_backend_zip(pkg_dir, "4.0.0",
+                                venv_wheels={"dbgmod-1.0.0-py3-none-any.whl": whl_bytes})
+        rd4 = sup2.apply_package(PLUGIN_ID, zipv)
+        check("D5 venv 包 apply 成功", rd4.get("ok"), str(rd4))
+        regv = sc.load_registry(data_root)
+        uv = sc.find_unit(regv, PLUGIN_ID) or {}
+        check("D5 单元 deps_mode=venv + venv 解释器登记",
+              uv.get("deps_mode") == "venv" and "venvs" in str(uv.get("interpreter")),
+              str(uv.get("deps_mode")) + " / " + str(uv.get("interpreter")))
+        check("D5 venv worker 健康", bool(wait_health(port, 30)),
+              str(wait_health(port, 10)))
+        code7, d7 = whoami(port, ck)
+        check("D5 venv 拉起下业务 API 仍走两级会话", code7 == 200 and d7.get("version") == "4.0.0",
+              "%s %s" % (code7, d7.get("version")))
+        try:
+            with urllib.request.urlopen(
+                    "http://127.0.0.1:%d/api/%s/depcheck" % (port, PLUGIN_ID),
+                    timeout=10) as resp:
+                dep = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            dep = {"error": str(e)}
+        check("D5 插件私有依赖（dbgmod）venv 内可导入",
+              dep.get("ok") and dep.get("dbgmod") == "dbgmod-1.0.0", str(dep))
+        bad_wheel = os.path.join(work, "wheels-bad")
+        os.makedirs(bad_wheel, exist_ok=True)
+        make_minimal_wheel(bad_wheel, "dbgmod", "2.0.0")
+        with open(os.path.join(bad_wheel, "dbgmod-2.0.0-py3-none-any.whl"), "rb") as f:
+            bad_bytes = f.read()
+        zipbad = make_backend_zip(pkg_dir, "5.0.0",
+                                  venv_wheels={"dbgmod-1.0.0-py3-none-any.whl": bad_bytes})
+        # 声明 sha 改成全零（模拟清单与介质不符）——make_backend_zip 的 sha 是诚实的
+        _buf = io.BytesIO()
+        with zipfile.ZipFile(zipbad) as zin, zipfile.ZipFile(_buf, "w") as zout:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                if info.filename == "plugin-package.json":
+                    m = json.loads(data.decode("utf-8"))
+                    m["venv"]["wheel_sha256"] = {k: "0" * 64
+                                                 for k in m["venv"]["wheels"]}
+                    data = json.dumps(m).encode("utf-8")
+                zout.writestr(info, data)
+        with open(zipbad, "wb") as f:
+            f.write(_buf.getvalue())
+        rd5 = sup2.apply_package(PLUGIN_ID, zipbad)
+        code8, d8 = whoami(port, ck)
+        check("D5 wheel sha256 不符 → apply 拒绝且旧版继续服务",
+              not rd5.get("ok") and code8 == 200 and d8.get("version") == "4.0.0",
+              "%s / %s" % (rd5.get("error"), d8.get("version")))
+
         # ---------- E. 控制接口 ----------
         print("==> E. 控制接口（令牌 / status / stop-start / clear-circuit）")
         from supervisor import control_api
@@ -406,8 +497,9 @@ def main():
         check("E1 错令牌 → 401", s1 == 401, str(s1))
         s2, b2 = ctl_req("GET", "/status")
         u_e = next((x for x in b2.get("units", []) if x["name"] == PLUGIN_ID), {})
-        check("E2 status 200 且单元在列（含版本）",
-              s2 == 200 and u_e.get("installed_version") == "2.0.0", str(b2)[:120])
+        check("E2 status 200 且单元在列（含版本；venv 模式可见）",
+              s2 == 200 and u_e.get("installed_version") == "4.0.0"
+              and u_e.get("deps_mode") == "venv", str(b2)[:140])
         s3, _ = ctl_req("POST", "/stop", {"unit": PLUGIN_ID})
         time.sleep(0.5)
         u3 = next((x for x in sup2.status()["units"] if x["name"] == PLUGIN_ID), {})

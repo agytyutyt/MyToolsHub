@@ -38,6 +38,7 @@ param(
     [string]$RegistryFile = "",       # 发布登记文件（缺省 <仓库>\tools\plugin-packages.json；沙箱/CI 可另指）
     [string]$Python = "python",       # 打包机解释器（依赖扫描 / 自测用）
     [string]$Publish = "",            # 发布目录（内网共享盘）：投放 zip + .sha256 + index.json（阶段三）
+    [string]$VenvWheels = "",         # venv wheel 闭包目录（需求⑩：deps_mode=venv 的后端包必带）
     [switch]$RunTests,
     [switch]$Strict,                  # 自测失败即中止（缺省仅警告）
     [switch]$SkipChecks,
@@ -237,6 +238,30 @@ Get-ChildItem -LiteralPath $srcDir -Recurse -Force | ForEach-Object {
     [void]$copied.Add($rel)
 }
 Write-Host ("  payload   ：{0} 个文件（剔除 {1} 个运行态/构建产物）" -f $copied.Count, $excluded.Count)
+
+# ---------------- venv wheel 载荷（需求⑩，批次 8b T-O2-12c）：-VenvWheels <目录> ----------------
+# deps_mode=venv 的后端包：把 wheel 闭包带进 payload\wheels\，plugin-package.json 记
+# venv 节（清单 + sha256）；supervisor apply 时校验（tag/在场/sha256）后
+# pip --no-index --find-links 离线建 venv（--system-site-packages：基线随主包，设计文档 §4）。
+$venvNode = $null
+if ($VenvWheels) {
+    if (-not (Test-Path -LiteralPath $VenvWheels)) { Die "-VenvWheels 目录不存在：$VenvWheels" }
+    $whlDir = Join-Path $payloadRoot "wheels"
+    New-Item -ItemType Directory -Force -Path $whlDir | Out-Null
+    $whlFiles = @(Get-ChildItem -LiteralPath $VenvWheels -Filter *.whl -File)
+    if ($whlFiles.Count -eq 0) { Die "-VenvWheels 里没有 .whl 文件：$VenvWheels" }
+    $whlSha = [ordered]@{}
+    foreach ($w in $whlFiles) {
+        Copy-Item -LiteralPath $w.FullName -Destination (Join-Path $whlDir $w.Name) -Force
+        $whlSha[$w.Name] = Get-Sha256 (Join-Path $whlDir $w.Name)
+    }
+    $venvNode = [ordered]@{
+        python       = (& $PythonCmd -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Select-Object -First 1)
+        wheels       = @($whlFiles.Name)
+        wheel_sha256 = $whlSha
+    }
+    Say ("  venv 载荷  ：{0} 个 wheel（闭包，apply 时离线建 venv）" -f $whlFiles.Count)
+}
 
 # ---------------- C-5：运行态数据零夹带（拷贝阶段已剔除，这里复核） ----------------
 $violations = @($excluded | Where-Object { $_ -match '(^|/)(\.env)$' -or $_ -match 'config\.json$' -or $_ -match 'config\.local\.json$' })
@@ -687,6 +712,7 @@ $pkgMeta = [ordered]@{
     }
 }
 if ($reqObj) { $pkgMeta["requires"] = $reqObj }   # 声明快照（与 manifest.json 同源，C-10 已校验一致）
+if ($venvNode) { $pkgMeta["venv"] = $venvNode }   # 需求⑩：deps_mode=venv 的后端包带 wheel 闭包（§4）
 if ($FromMin) { $pkgMeta["upgrade_from_min"] = $FromMin }
 if ($FromMax) { $pkgMeta["upgrade_from_max"] = $FromMax }
 if ($MinApp)  { $pkgMeta["min_app_version"] = $MinApp }
