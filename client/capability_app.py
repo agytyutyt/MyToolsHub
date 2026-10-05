@@ -345,9 +345,11 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         f = request.files.get("file")
         if f is None:
             return jsonify({"error": "未选择插件包"}), 400
-        # 校验+落盘收口到 pkg_install 单入口（批次 8 接缝③；外部行为不变）
-        spool = os.path.join(local_plugins_dir, ".upload.tmp")
+        # 校验+落盘收口到 pkg_install 单入口（批次 8 接缝③；外部行为不变）。
+        # 临时名唯一（P2）：并发上传不互踩（原固定 .upload.tmp 有对撞风险）。
         os.makedirs(local_plugins_dir, exist_ok=True)
+        fd, spool = tempfile.mkstemp(prefix="upload-", suffix=".zip", dir=local_plugins_dir)
+        os.close(fd)
         try:
             f.save(spool)
             result = pkg_install.install_local_zip(spool, local_plugins_dir,
@@ -497,32 +499,47 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         if err:
             return jsonify({"error": err, "installable": False, "deps": []}), 200
         manifest = {"requires": ver.get("requires") or {}}
-        verdict = jz_deps.evaluate("store:" + pid, "", manifest,
-                                   app_dir=_program_dir,
-                                   app_version=(build_cfg.get("product") or {}).get("version"),
-                                   plugin_api=build_cfg.get("plugin_api", "1.0"))
-        # 缺依赖 → 商店依赖类别有对应包则标 resolve=dep-package（页面给「同时安装」勾选）
+        try:
+            verdict = jz_deps.evaluate("store:" + pid, "", manifest,
+                                       app_dir=_program_dir,
+                                       app_version=(build_cfg.get("product") or {}).get("version"),
+                                       plugin_api=build_cfg.get("plugin_api", "1.0"))
+        except Exception as exc:      # 预检是建议性面（D-8：提示不阻断），评估炸了不拦安装
+            _log("preflight 依赖评估异常（按可安装继续）：%s" % exc)
+            return jsonify({"installable": True, "reason": "", "deps": [],
+                            "preflight_error": str(exc)})
+        # 缺依赖 → 商店依赖类别有对应包则标 resolve=dep-package（页面给「同时安装」勾选）；
+        # external/vendored 行作提示性返回（P2-5）：不触发确认联动——vendored 随包自带此刻
+        # 必然「缺失」（尚未安装），external 由插件挂载时的三态判定兜底展示。
         dep_entries = [p for p in catalog.get("packages") or []
                        if p.get("runtime") == "dep-slot"]
         deps = []
         for row in verdict.get("detail") or []:
-            if row.get("kind") != "python_package" or row.get("state") == "ok":
+            if row.get("state") == "ok":
                 continue
-            name = str(row.get("name") or "")
-            resolve = "missing"
-            for dep in dep_entries:
-                provides = [str(x) for x in (dep.get("provides") or [])]
-                if dep.get("id") == name or name in provides:
-                    resolve = "dep-package"
+            kind = row.get("kind")
+            if kind == "python_package":
+                name = str(row.get("name") or "")
+                resolve = "missing"
+                for dep in dep_entries:
+                    provides = [str(x) for x in (dep.get("provides") or [])]
+                    if dep.get("id") == name or name in provides:
+                        deps.append({"name": name, "require": row.get("require"),
+                                     "state": row.get("state"),
+                                     "required": row.get("required", True),
+                                     "resolve": "dep-package", "dep_id": dep.get("id"),
+                                     "dep_version": dep.get("version")})
+                        break
+                else:
                     deps.append({"name": name, "require": row.get("require"),
-                                 "state": row.get("state"), "required": row.get("required", True),
-                                 "resolve": resolve, "dep_id": dep.get("id"),
-                                 "dep_version": dep.get("version")})
-                    break
-            if resolve == "missing":
-                deps.append({"name": name, "require": row.get("require"),
-                             "state": row.get("state"), "required": row.get("required", True),
-                             "resolve": resolve})
+                                 "state": row.get("state"),
+                                 "required": row.get("required", True),
+                                 "resolve": "missing"})
+            elif kind in ("external", "vendored"):
+                deps.append({"name": str(row.get("name") or ""),
+                             "require": row.get("require"), "state": row.get("state"),
+                             "required": row.get("required", True),
+                             "resolve": "manual", "informational": True})
         blocked_framework = bool(verdict.get("reason"))
         return jsonify({"installable": not blocked_framework,
                         "reason": verdict.get("reason", ""),

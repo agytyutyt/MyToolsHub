@@ -244,7 +244,7 @@
       .catch(function () { /* 预检失败不阻断安装（D-8 口径：提示不阻断） */ })
       .then(function () {
         var missing = (pre.deps || []).filter(function (d) {
-          return d.state !== 'ok' && d.required !== false;
+          return d.state !== 'ok' && d.required !== false && !d.informational;
         });
         var resolvable = missing.filter(function (d) { return d.resolve === 'dep-package'; });
         var unresolvable = missing.filter(function (d) { return d.resolve !== 'dep-package'; });
@@ -257,6 +257,8 @@
             + '\n\n继续安装「' + e.name + '」吗？')) return;
         } else if (st_upgradableConfirm(e)) {
           if (!confirm('升级到 v' + e.version + '？hybrid 插件将触发能力层秒级重启（会话已保留，免重登）。')) return;
+        } else if (!confirm('安装「' + e.name + '」v' + e.version + '？')) {
+          return;                                    // 全新安装也确认（P2：与升级/带依赖路径口径一致）
         }
         proceed();
       });

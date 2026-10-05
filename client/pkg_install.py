@@ -217,19 +217,18 @@ def remove_frontend(frontends_dir, pid):
 
 # ===================== 依赖组件包（dep-slot） =====================
 
-def _component_entry(zip_path):
-    """读依赖组件包清单（dep-component.json / manifest.json components），与主包同口径。"""
-    try:
-        zf = zipfile.ZipFile(zip_path)
-    except zipfile.BadZipFile:
-        return None, None, None
+def _component_entry(zf):
+    """读依赖组件包清单（dep-component.json / manifest.json components），与主包同口径。
+
+    zf 由调用方打开并管理生命周期（P2-3：原实现自开自漏，临时包文件会被句柄短暂锁住）。
+    """
     meta = read_zip_json(zf, "dep-component.json") or {}
     inner = read_zip_json(zf, "manifest.json") or {}
     cs = inner.get("components")
     if isinstance(cs, dict):
         cs = [cs]
     entry = (cs or [None])[0]
-    return meta, entry, zf
+    return meta, entry
 
 
 def _extract_pylibs_payload(zf, dest_dir):
@@ -259,8 +258,20 @@ def install_component_zip(zip_path, program_dir, apply_now=None):
 
     返回 {ok, id?, version?, pending?, native?, error?}。
     """
+    try:
+        zf = zipfile.ZipFile(zip_path)
+    except zipfile.BadZipFile:
+        return {"ok": False, "error": "依赖包不是有效的 zip"}
+    try:
+        return _install_component_zip_inner(zf, program_dir, apply_now)
+    finally:
+        zf.close()
+
+
+def _install_component_zip_inner(zf, program_dir, apply_now=None):
+    """install_component_zip 的实际逻辑（zf 生命周期由外层管理）。"""
     import jz_deps
-    meta, entry, zf = _component_entry(zip_path)
+    meta, entry = _component_entry(zf)
     if not entry or not entry.get("id"):
         return {"ok": False, "error": "包内缺少组件清单（dep-component.json / manifest.json）"}
     cid = str(entry["id"])

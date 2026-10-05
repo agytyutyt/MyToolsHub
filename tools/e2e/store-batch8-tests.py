@@ -259,12 +259,18 @@ def part_b(work):
     check("B4 后端包被篡改 → SHA256SUMS 核对拒绝", not r.get("ok")
           and any("哈希" in e or "校验" in e for e in r.get("errors", [])))
 
-    # ---- E1 投影：server published 才进 index-server.json ----
+    # ---- E1 投影：server published 才进 index-server.json；read_index 闭环消费 ----
     r = sa.review(root, "svc-bar", "2.0.0", "approve", "bob")
     idx = sa.read_json(sa.index_server_path(root))
     check("B5 E1 投影：published server 条目进入（schema-1 同构）",
           idx and [p["id"] for p in idx["packages"]] == ["svc-bar"]
-          and idx["packages"][0]["file"] == "JZToolsHub-插件-svc-bar-v2.0.0.zip")
+          and idx["packages"][0]["file"] == "packages/JZToolsHub-插件-svc-bar-v2.0.0.zip")
+    idx_read = sa.plugin_admin.read_index(sa.index_server_path(root))
+    svc_row = next((p for p in idx_read["packages"] if p["id"] == "svc-bar"), None)
+    check("B5 E1→read_index 闭环：包文件可解析且哈希对上（P1 回归位）",
+          idx_read["ok"] and svc_row is not None and svc_row["exists"]
+          and svc_row["hash_ok"] is True,
+          str(svc_row and (svc_row["exists"], svc_row["hash_ok"])))
 
     # ---- 下架回退：再发一个旧版本，下架新版后投影回落 ----
     bz3, fz3 = build_server_pair(work, "svc-bar", "2.0.0")   # 同版本占号应拒绝
@@ -466,7 +472,10 @@ def part_d(work):
          "api_version": 1, "min_app_version": "", "requires_restart": False, "changelog": "",
          "published_at": "2026-10-05T10:00:00"},
         {"id": "local-needs", "name": "带缺失依赖的插件", "runtime": "local", "deps_mode": "shared",
-         "requires": {"python_packages": [{"name": "no_such_dep_xyz", "version": ">=1.0"}]},
+         "requires": {"python_packages": [{"name": "no_such_dep_xyz", "version": ">=1.0"}],
+                      "external": [{"id": "no-such-ext-app", "version": "",
+                                    "required": True,
+                                    "hint": "测试用外部程序组件"}]},
          **{k: v for k, v in put_pkg("pkg-local-needs.zip", foo_body).items()},
          "version": "1.0.0", "api_version": 1, "min_app_version": "",
          "requires_restart": False, "changelog": "", "published_at": "2026-10-05T10:00:00"},
@@ -553,6 +562,11 @@ def part_d(work):
     check("D3 preflight 缺依赖 → resolve=dep-package（O1 会合点）",
           bool(dep_rows) and dep_rows[0]["resolve"] == "dep-package"
           and dep_rows[0].get("dep_id") == "depmod", json.dumps(d.get("deps", []), ensure_ascii=False))
+    info_rows = [x for x in d.get("deps", []) if x.get("informational")]
+    check("D3 外部依赖作提示性行（manual，不触发确认联动）",
+          len(info_rows) >= 1 and all(x.get("resolve") == "manual" for x in info_rows)
+          and info_rows[0]["name"] == "no-such-ext-app",
+          json.dumps(info_rows, ensure_ascii=False))
     r = c.post("/local-api/store/install",
                json={"id": "local-needs", "version": "1.0.0", "include_deps": True,
                      "deps": dep_rows})

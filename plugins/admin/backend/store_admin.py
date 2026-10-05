@@ -21,6 +21,7 @@ plugin-package.json 结构 + SHA256SUMS 全量核对 / 依赖包组件清单 + w
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -241,8 +242,12 @@ def check_server_backend_zip(zip_path):
                     errors.append("SHA256SUMS 含 plugins 外路径：%s" % rel)
                     continue
                 try:
-                    actual = __import__("hashlib").sha256(
-                        zf.read("payload/" + rel)).hexdigest()
+                    # 分块流式哈希（P2-1）：单文件可达几十 MB，整读入内存不可取
+                    h = hashlib.sha256()
+                    with zf.open("payload/" + rel) as fh:
+                        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                            h.update(chunk)
+                    actual = h.hexdigest()
                 except KeyError:
                     bad_files.append("%s（包内缺失）" % rel)
                     continue
@@ -622,7 +627,12 @@ def deploy_backend_package(base_dir, data_root, pid, version):
 # ======================== E1：index-server.json 投影 ========================
 
 def _write_index_server(data_root, catalog):
-    """E1（§3.7）：仅 server 条目的 schema-1 flat 投影——admin read_index/batch_apply 零改造消费。"""
+    """E1（§3.7）：仅 server 条目的 schema-1 flat 投影——admin read_index/batch_apply 零改造消费。
+
+    ★ `file` 写 `packages/<文件名>` 相对路径：read_index 以索引文件所在目录
+    （store\\）为基准解析，包文件在 store\\packages\\ 下——裸文件名会全部
+    「包文件不存在」（2026-10-05 修复，台架 B5 有 read_index 闭环断言）。
+    """
     pkgs = []
     for entry in catalog.get("packages") or []:
         if entry.get("runtime") != "server":
@@ -632,7 +642,8 @@ def _write_index_server(data_root, catalog):
             continue
         pkgs.append({
             "id": entry.get("id"), "version": ver.get("version"),
-            "file": ver.get("file", ""), "sha256": ver.get("sha256", ""),
+            "file": "packages/" + str(ver.get("file") or ""),
+            "sha256": ver.get("sha256", ""),
             "size": ver.get("size") or 0,
             "requires_restart": bool(ver.get("requires_restart")),
             "min_app_version": str(ver.get("min_app_version") or ""),
