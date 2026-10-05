@@ -15,13 +15,18 @@ class RelayError(PermissionError):
     """白名单外路径 / 远程未配置 / 会话不可用。"""
 
 
-class JzRelay:
-    def __init__(self, upstream, address_getter, mirror, whitelist, log=None):
-        self._upstream = upstream
-        self._addr = address_getter
-        self._mirror = mirror
-        self._whitelist = whitelist or {}
-        self._log = log or (lambda m: None)
+class _OwnRelay:
+    """自身插件命名空间视图（需求⑨，批次 8 T-O2-10）。
+
+    类 C 本地部分经 ``jz_relay.own(<自身插件 id>)`` 取得本视图：只放行「自身 id 去
+    local- 前缀」对应的服务器端点前缀（/api/<server_id> 及其子路径），附用户会话，
+    权限=用户本人；框架级白名单面照常可用，其他插件端点仍 RelayError
+    （跨插件禁调用铁律不变）。服务器工件 id 与客户端 id 的映射见设计文档 §3.5.1。
+    """
+
+    def __init__(self, relay, prefix):
+        self._relay = relay
+        self._prefix = prefix.rstrip("/")
 
     def get(self, path, **kw):
         return self.request("GET", path, **kw)
@@ -32,7 +37,48 @@ class JzRelay:
     def request(self, method, path, **kw):
         if not path.startswith("/"):
             path = "/" + path
-        if not self._allowed(method, path):
+        p = path.rstrip("/") if path != "/" else path
+        if p != self._prefix and not p.startswith(self._prefix + "/"):
+            self._relay._log("jz_relay.own 拒绝（自身命名空间外）：%s %s" % (method, path))
+            raise RelayError("路径不在自身插件命名空间（%s）：%s %s"
+                             % (self._prefix, method, path))
+        return self._relay.request(method, path, _bypass_whitelist=True, **kw)
+
+
+class JzRelay:
+    def __init__(self, upstream, address_getter, mirror, whitelist, log=None):
+        self._upstream = upstream
+        self._addr = address_getter
+        self._mirror = mirror
+        self._whitelist = whitelist or {}
+        self._log = log or (lambda m: None)
+
+    def own(self, local_id):
+        """类 C 专用：返回自身插件命名空间视图（需求⑨）。
+
+        local_id 传本插件 id（local- 前缀或裸 id 均可）；白名单 own_namespace.enabled=false
+        时该通道整体关闭。用法：``relay = jz_relay.own("local-report-suite")``。
+        """
+        cfg = self._whitelist.get("own_namespace") or {}
+        if cfg.get("enabled") is False:
+            raise RelayError("own_namespace 通道未启用（relay_whitelist.json）")
+        base = str(local_id or "")
+        if base.startswith("local-"):
+            base = base[len("local-"):]
+        if not base:
+            raise RelayError("own() 需要本插件 id")
+        return _OwnRelay(self, "/api/" + base)
+
+    def get(self, path, **kw):
+        return self.request("GET", path, **kw)
+
+    def post(self, path, json=None, **kw):
+        return self.request("POST", path, json=json, **kw)
+
+    def request(self, method, path, _bypass_whitelist=False, **kw):
+        if not path.startswith("/"):
+            path = "/" + path
+        if not _bypass_whitelist and not self._allowed(method, path):
             self._log("jz_relay 拒绝（白名单外）：%s %s" % (method, path))
             raise RelayError("路径不在 jz_relay 白名单：%s %s" % (method, path))
         addr = self._addr()

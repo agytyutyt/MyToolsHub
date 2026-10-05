@@ -31,8 +31,8 @@ REQUIRED = ["JZToolsHub.exe", "start.bat", "一键安装.bat", "一键卸载.bat
             "config/tools.json", "config/installed-deps.json", "version.json", "README.md", "HANDOFF.md",
             "插件设计规范.md", "移动端APP.md", "docs/README.md", "_internal/python3*"]
 TEMPLATE_MIN = 0   # 解耦后主包只带核心插件（admin 无 *.template.json）；模板随业务插件包分发
-# 核心插件白名单：主包 plugins/ 内只允许出现它（口径与 build-deploy.ps1 的 $CorePlugins 一致）
-CORE_PLUGINS = ["admin"]
+# 核心插件白名单：主包 plugins/ 内只允许出现它（口径与 build-deploy-local.py 的 CORE_PLUGINS 一致）
+CORE_PLUGINS = ["admin", "store"]
 # 不随主包（解耦后）：业务插件目录、wheels（无运行时消费方）、tools 下除 plugin-upgrade 的子目录
 ALLOWED_TOOLS_SUBDIRS = ["plugin-upgrade"]
 BAD_IN_PLUGINS = re.compile(r"(__pycache__|/data/|/out/|\.task_cache/|/config\.json$|\.pyc$)")

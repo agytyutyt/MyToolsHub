@@ -61,7 +61,7 @@ _LEGACY_MAP = [
 
 # 程序目录下随插件一起分发的 data 目录清单（打包时不携带，但源码开发时存在，
 # 用于「首次启动把开发期旧数据也一并搬进数据根目录」，与 _LEGACY_MAP 一致）。
-_DATA_SUBDIRS = ("config", "logs", "plugins")
+_DATA_SUBDIRS = ("config", "logs", "plugins", "store")
 
 # 随版本升级同步的「程序目录模板 -> 数据根目录运行配置」清单。
 # 模式：

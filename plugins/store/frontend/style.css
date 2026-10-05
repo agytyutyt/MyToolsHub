@@ -1,0 +1,71 @@
+/* 插件商店页样式（零构建原生 CSS；?v=1 起版，改动须递增引用处） */
+:root{
+  --line:#e0e3e7; --ink:#202124; --ink2:#5f6368; --bg:#f6f8fa; --card:#fff;
+  --blue:#1a73e8; --blue-dk:#1558b0; --green:#137333; --green-bg:#e6f4ea;
+  --red:#c5221f; --red-bg:#fce8e6; --gray-bg:#f1f3f4; --purple:#7b1fa2; --purple-bg:#f3e5f5;
+}
+*{box-sizing:border-box}
+body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);
+  margin:0;padding:16px 20px 40px}
+.st-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;
+  max-width:1080px;margin:0 auto 14px}
+.st-head h1{font-size:20px;margin:0 0 4px}
+.st-sub{font-size:13px;color:var(--ink2);margin:0;max-width:560px}
+.st-head-right{display:flex;gap:10px;align-items:center}
+#st-q{padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-width:220px}
+.st-manage{font-size:13px;color:var(--blue);text-decoration:none;white-space:nowrap}
+.st-manage:hover{text-decoration:underline}
+
+.st-tabs{display:flex;gap:6px;align-items:center;max-width:1080px;margin:0 auto 14px;
+  border-bottom:1px solid var(--line);padding-bottom:0}
+.st-tab{border:0;background:none;font-size:14px;padding:8px 14px;cursor:pointer;color:var(--ink2);
+  border-bottom:2px solid transparent}
+.st-tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+#st-msg{margin-left:auto;font-size:13px;color:var(--green);min-height:16px;padding:4px 2px}
+#st-msg.err{color:var(--red)}
+
+.st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;
+  max-width:1080px;margin:0 auto}
+.st-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+  display:flex;flex-direction:column;gap:8px;min-width:0}
+.st-card-top{display:flex;gap:10px;align-items:flex-start}
+.st-icon{font-size:26px;line-height:1;flex:none}
+.st-title{min-width:0}
+.st-name{font-size:15px;font-weight:600;margin:0 0 2px;overflow-wrap:anywhere}
+.st-badges{display:flex;gap:4px;flex-wrap:wrap}
+.st-badge{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px}
+.st-badge.local{background:var(--green-bg);color:var(--green)}
+.st-badge.server{background:#e8f0fe;color:var(--blue)}
+.st-badge.dep{background:var(--purple-bg);color:var(--purple)}
+.st-badge.venv{background:var(--gray-bg);color:var(--ink2)}
+.st-badge.up{background:#fef7e0;color:#b06000}
+.st-desc{font-size:13px;color:var(--ink2);margin:0;overflow-wrap:anywhere}
+.st-meta{font-size:12px;color:var(--ink2)}
+.st-meta .miss{color:var(--red)}
+.st-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+.st-actions button{padding:6px 12px;border:0;border-radius:6px;font-size:13px;cursor:pointer}
+.st-btn-install{background:var(--blue);color:#fff}
+.st-btn-install:hover{background:var(--blue-dk)}
+.st-btn-warn{background:#e8f0fe;color:var(--blue)}
+.st-btn-danger{background:var(--red-bg);color:var(--red)}
+.st-btn-ghost{background:var(--gray-bg);color:var(--ink2)}
+.st-actions button:disabled{opacity:.5;cursor:default}
+.st-detail{border-top:1px dashed var(--line);padding-top:8px;font-size:12px;color:var(--ink2);
+  display:none;overflow-wrap:anywhere}
+.st-card.open .st-detail{display:block}
+.st-detail h4{margin:6px 0 2px;font-size:12px;color:var(--ink)}
+.st-detail-toggle{background:none;border:0;color:var(--blue);font-size:12px;cursor:pointer;
+  padding:0;text-align:left}
+.st-empty{grid-column:1/-1;text-align:center;color:var(--ink2);padding:40px 0;font-size:14px}
+
+/* 桌面端专属操作：浏览器路径默认隐藏，壳内（html.jz-shell）才出现——红线 2 门控。
+   反向同理：浏览器下载按钮（跳转 /plugin/store/api/download）在壳内隐藏（走能力层落数据目录）。 */
+.jz-only{display:none !important}
+html.jz-shell .jz-only{display:inline-block !important}
+html.jz-shell .st-browser-dl{display:none !important}
+
+@media (max-width:480px){
+  body{padding:12px 10px 32px}
+  .st-grid{grid-template-columns:1fr}
+  #st-q{min-width:0;flex:1}
+}

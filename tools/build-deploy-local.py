@@ -51,8 +51,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY_BASELINE = "3.14"
 # 核心插件白名单：解耦后主包**只带核心插件**，业务插件走插件包 / 插件集独立分发
 # （见 docs/design/主体与插件解耦-设计文档.md §3.3 / §3.5）。口径与 build-deploy.ps1 的
-# $CorePlugins 一致 —— 改一处要两处一起改。
-CORE_PLUGINS = ["admin"]
+# $CorePlugins 一致 —— 改一处要两处一起改。store=第二核心插件（插件商店，O2）。
+CORE_PLUGINS = ["admin", "store"]
 
 # §3.2 复制清单（顺序与 build-deploy.ps1 一致，勿随意增删）
 # ★ docs 只列「随包层」：guide（交付手册）+ design（设计文档）+ 根索引

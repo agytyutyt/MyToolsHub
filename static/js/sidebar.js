@@ -74,8 +74,8 @@
       className: PAGE === 'home' ? 'active' : '',
       extra: PAGE === 'home' ? ' aria-current="page"' : '',
     })
-      // 插件商店：设计稿已入库、功能未落地，先占位（点击轻提示，见下方绑定）
-      + itemHtml({ id: 'side-store', icon: 'store', label: '插件商店', className: 'side-store', extra: ' aria-disabled="true"' })
+      // 插件商店：第二核心插件（批次 8 T-O2-2），主界面/插件页/后台三类页同款入口
+      + itemHtml({ id: 'side-store', icon: 'store', label: '插件商店', href: '/tool/store' })
       // 大模型设置：默认隐藏，llm-settings.js 按后端「用户各自设置」模式动态放开
       + itemHtml({ id: 'side-act-llm', icon: 'bulb', label: '大模型设置', extra: ' hidden' })
       + (PAGE === 'home'
@@ -142,11 +142,6 @@
   }
   window.addEventListener('resize', syncAuto);
   applyCollapsed(window.innerWidth < AUTO_COLLAPSE_WIDTH ? true : readStoredCollapsed(), false);
-
-  // 插件商店占位：功能未落地，点击给一句可预期的反馈
-  aside.querySelector('#side-store').addEventListener('click', function () {
-    if (window.AdminCommon) window.AdminCommon.showToast('插件商店尚未开放，敬请期待');
-  });
 
   // admin-common 的 loadSiteTitle 在本文件之前自动跑过（当时侧栏还不存在），
   // 这里补一次把配置的站点名写进侧栏标题（管理后台页连后缀一起）

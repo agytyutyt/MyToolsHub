@@ -45,7 +45,7 @@ docs/
 | 实现轨迹速写 v3 算法 / 查其口径与结果预测 | `docs/design/轨迹速写v3算法-设计文档.md` + `docs/plan/轨迹速写v3算法-TODO清单.md` |
 | 打 Android APP 包 | `android-app/InfoParse/InfoParse-APP打包手册.md` |
 | 做桌面端客户端（三层拓扑 / 三类插件 / 主界面适配 / 会话中继） | `docs/eval/桌面端适配方案（GLM）.md`（已拍板，GD1–GD8 全收口）+ 实施清单 `docs/plan/桌面端适配-TODO清单.md`（T01–T28 ✅，T29 出包 ✅，T30–T33 批次 7 收口中） |
-| 设计桌面端插件商店（形态 / catalog 契约 / 上架与分发） | `docs/design/桌面端插件商店-设计文档.md`（O2，设计稿 v2 待拍板） |
+| 设计桌面端插件商店（形态 / catalog 契约 / 上架与分发） | `docs/design/桌面端插件商店-设计文档.md`（O2，v3.0 已拍板）+ 运行架构 `docs/design/服务端插件运行架构-设计文档.md`（需求⑩） |
 | 设计桌面端依赖版本槽（多版本共存 / 类 C 降格 / cp314 边界） | `docs/design/桌面端依赖版本槽-设计文档.md`（O1，设计稿待拍板） |
 | 部署到目标机 / 卸载 / 换数据目录 | `docs/项目管理手册.md` §6 + `docs/guide/离线部署包说明.md` |
 | 在干净机器上验收部署（含依赖自足性） | `docs/guide/干净机器部署验收手册.md` |
@@ -206,7 +206,8 @@ docs/
 | `design/管理后台批量导入导出-设计文档.md` | 现行 | batch_io 列规格、dry-run 两步式、单元格健壮性加固 |
 | `design/统一大模型模块-设计文档.md` | 现行 | `jz_llm` 统一大模型：两级配置与两种模式、四种调用格式、插件调用契约与线程纪律、设置入口（后台页 + 首页设置对话框）、三个业务插件迁移口径、兼容桥 |
 | `design/数据迁移-设计文档.md` | 现行 | 后台数据迁移：包结构与分段、整包口令加密 + 字段信封（跨机器可用）、导入白名单/备份/幂等、接口与界面、安全清单 |
-| `design/桌面端插件商店-设计文档.md` | 现行（**设计稿 v2，待拍板未排期**） | 桌面端 O2 插件商店：**主包第二核心插件**形态（随包、独立完整用例）、admin 后台管理上架/下架/审核/统计、`数据根\store\` 数据契约（admin 写/store 读/stats 反向，零跨插件调用）、依赖与插件两类别（local/server/dep-slot）、客户端经中继浏览+拉包安装闭环、四接缝兑现现状与补完任务 |
+| `design/桌面端插件商店-设计文档.md` | 现行（**v3.0 已拍板定稿**） | 桌面端 O2 插件商店：**主包第二核心插件**形态（随包、独立完整用例）、admin 后台管理上架/下架/审核/统计、`数据根\store\` 数据契约（admin 写/store 读/stats 反向，零跨插件调用）、依赖与插件两类别（local/server/dep-slot）、server 双包模型（前端包/后端包）、流程状态机与台账（§3.7）、客户端经中继浏览+拉包安装闭环、四接缝兑现现状与补完任务 |
+| `design/服务端插件运行架构-设计文档.md` | 现行（**v1.0 已拍板定稿**） | 需求⑩隔离架构：**E=管理进程+并列进程**（supervisor 统一托管主应用与插件后端包 worker，插件崩溃不连坐主应用、主应用兜底 503）、身份=共享 SECRET_KEY+Cookie 透传+worker 会话自验（业务插件零改动）、依赖默认共享运行时+venv 可选（`deps_mode` 商店标注）、热插拔语义（按形态）；自商店设计文档 §3.8/§3.9 拆出 |
 | `design/桌面端依赖版本槽-设计文档.md` | 现行（**设计稿，待拍板未排期**） | 桌面端 O1 依赖多版本共存：`.slots` 槽布局与解析口径（内核零改动）、执行器注入、槽包安装/GC、类 C 一键降格、cp314 硬边界；触发条件见桌面端 TODO 清单 O1 |
 
 ### eval/ —— 评估层（不随包）
@@ -255,7 +256,7 @@ docs/
 | `docs/README.md` + `docs/guide/` + `docs/design/` | ✅ 是 | `tools/build-deploy-local.py` 的 `COPY_DIRS`/`COPY_FILES`；`build-deploy.ps1` §3.2 |
 | `docs/eval/` `docs/plan/` `docs/archive/` | ❌ 否 | 同上（内部评估稿与活清单不进交付包） |
 | 根契约四文档（README/HANDOFF/插件设计规范/移动端APP） | ✅ 是 | `tools/verify-package.py` 的 `REQUIRED` 断言 |
-| 业务插件（除核心插件 `admin`） | ❌ 否 | 主包只带核心插件白名单：`build-deploy.ps1` 的 `$CorePlugins`、`tools/build-deploy-local.py` 的 `CORE_PLUGINS`；由 `verify-package.py` 断言「`plugins/` 仅含核心插件」|
+| 业务插件（除核心插件 `admin`、`store`） | ❌ 否 | 主包只带核心插件白名单：`tools/build-deploy-local.py` 的 `CORE_PLUGINS`（当前=admin+store，商店为第二核心插件）；由 `verify-package.py` 断言「`plugins/` 仅含核心插件」|
 | `wheels/`（zfec 预编译 wheel） | ❌ 否 | `build-deploy.ps1` 明确不拷；由 `verify-package.py` 断言「不含 `wheels/`」。zfec 改由「依赖组件包」提供 |
 | `tools/`（仅带 `plugin-upgrade/`） | ❌ 否 | `COPY_DIRS` 根本不含 `tools`；仅显式拷 `tools/plugin-upgrade`，由 `verify-package.py` 断言「`tools/` 仅含 `plugin-upgrade`」|
 | 插件的 `test_*.py` / `conftest.py` / `_build_phase8.py` | ❌ 否 | `tools/plugin-payload-rules.json` 的 `exclude_globs`/`exclude_files` |

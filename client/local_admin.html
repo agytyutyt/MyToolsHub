@@ -24,11 +24,22 @@
 <div class="card">
   <h1>本地插件管理</h1>
   <p><a class="back" href="/">← 返回主界面</a> ·
-     本地插件运行于本机：类 C（混合）可访问服务器数据，类 B 纯本地。</p>
+     本地插件运行于本机：类 C（混合）可访问服务器数据，类 B 纯本地。
+     <b>安装 / 升级 / 停用 / 卸载请优先使用「插件商店」</b>（主界面或左侧栏入口）；
+     本页保留为兜底（离线装包）与依赖页签。</p>
   <input type="file" id="pkg" accept=".zip">
   <button class="warn" onclick="install()">安装 / 升级插件包</button>
-  <button class="warn" onclick="checkUpdate()">检查共享盘更新</button>
+  <button class="warn" onclick="checkUpdate()">检查更新</button>
+  <button class="warn" onclick="loadDeps()">查看依赖组件</button>
   <div id="msg"></div>
+</div>
+<div class="card" id="dep-card" hidden>
+  <h3>依赖组件（runtime/pylibs）</h3>
+  <table id="dep-tbl"><thead><tr>
+    <th>组件</th><th>版本</th><th>状态</th>
+  </tr></thead><tbody></tbody></table>
+  <p style="font-size:12px;color:#5f6368">依赖组件的安装/升级走「插件商店 · 依赖」页签（含联合安装）；
+     DLL 类组件在下次启动能力层时生效。</p>
 </div>
 <div class="card">
   <table id="tbl"><thead><tr>
@@ -80,8 +91,24 @@ function install(){
 }
 function checkUpdate(){
   fetch("/local-api/plugins/check-update",{method:"POST"}).then(r=>r.json()).then(d=>{
-    msg(d.error?("检查更新："+d.error):("可用更新："+(d.updates||[]).length+" 项"
-        + ((d.updates||[]).map(u=>" "+u.id+"@"+u.version).join(";")||"")));
+    if(d.error){msg("检查更新："+d.error);return;}
+    const up=d.updates||[];
+    msg("检查更新（来源："+(d.source||"-")+"）："+(up.length+" 项"
+        + up.map(u=>" "+u.id+"@"+u.version).join(";")||"暂无"));
+  });
+}
+function loadDeps(){
+  fetch("/local-api/plugins").then(r=>r.json()).then(d=>{
+    document.getElementById("dep-card").hidden=false;
+    const tb=document.querySelector("#dep-tbl tbody"); tb.innerHTML="";
+    const rows=d.components||[];
+    rows.forEach(c=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML="<td>"+esc(c.id)+"</td><td>"+esc(c.version||"-")+"</td><td>"
+        +(c.pending?"<span class='tag warn'>暂存中（重启生效）</span>":"<span class='tag ok'>已装</span>")+"</td>";
+      tb.appendChild(tr);
+    });
+    if(!rows.length) tb.innerHTML="<tr><td colspan=3>尚未安装依赖组件</td></tr>";
   });
 }
 load();

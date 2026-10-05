@@ -861,6 +861,23 @@ def _load_plugin_admin():
         return mod
 
 
+def _load_store_admin():
+    """载入同包 store_admin 子模块（商店管理写面：上架/审核/发布/下架/统计 + 数据契约）。
+
+    与 store 插件（读面）零跨插件 import——同包子模块属 admin 自有命名空间（设计文档 §3.3）。
+    """
+    try:
+        from . import store_admin  # noqa: WPS433 - 包内相对导入为常规路径
+        return store_admin
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "store_admin.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_store_admin", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
 def _spawn_self_restart():
     """冻结模式自重启：派出分离的助手进程，等本进程退出后按原工作目录重新拉起 exe。
 
@@ -2352,6 +2369,159 @@ def register(app):
             return jsonify({"ok": False, "pending": pending, "error": err}), 500
         return jsonify({"ok": True, "pending": pending,
                         "message": "服务正在重启，约 5~10 秒后本页会自动重新加载"})
+
+    # ---------------- 商店管理（O2 写面：上架/审核/发布/下架/统计） ----------------
+    # 设计：docs/design/桌面端插件商店-设计文档.md §3.3 / §3.7。
+    # 权限口径（需求⑦拍板）：不设角色门槛——全部登录用户同权（机器校验+内网信任模型兜底）。
+    # 与 store 插件（读面）唯一交互面 = 数据根\store\ 数据契约；端点挂 /plugin/admin/store/*
+    # （admin 自有命名空间）；管理页 /admin/store（浏览器与桌面端同页）。
+
+    store_admin = _load_store_admin()
+
+    @app.get("/admin/store")
+    @login_required
+    def admin_store_page():
+        """商店管理页（登录即可，不分角色）。"""
+        return send_from_directory(FRONTEND_DIR, "admin-store.html")
+
+    def _store_root():
+        return jztools_data.get_data_root()
+
+    @app.get("/plugin/admin/store/list")
+    @login_required
+    def admin_store_list():
+        """全量目录（含 pending/delisted，管理视角）+ 服务器侧部署状态。"""
+        set_operation("查询商店目录")
+        root = _store_root()
+        catalog = store_admin.load_catalog(root)
+        rows = []
+        for entry in catalog.get("packages") or []:
+            row = dict(entry)
+            if entry.get("runtime") == "server":
+                row["installed_version"] = plugin_admin.installed_version(PROJECT_DIR, entry.get("id"))
+                state_entry = plugin_admin.read_state(root).get("plugins", {}).get(entry.get("id")) or {}
+                row["restart_pending"] = bool(state_entry.get("restart_pending"))
+                row["backups"] = len(plugin_admin.list_backups(root, entry.get("id")))
+            rows.append(row)
+        return jsonify({"ok": True, "packages": rows,
+                        "index_server_path": store_admin.index_server_path(root),
+                        "data_root": root})
+
+    @app.post("/plugin/admin/store/upload")
+    @login_required
+    def admin_store_upload():
+        """上架第 1 步：包上传 + 机器校验 + 元数据落库（pending）。"""
+        set_operation("商店上架")
+        user = get_session_user() or {}
+        runtime = request.form.get("runtime") or ""
+        form = {k: (request.form.get(k) or "") for k in
+                ("name", "description", "changelog", "icon", "deps_mode", "provides",
+                 "requires_json")}
+        pkg = request.files.get("file")
+        frontend = request.files.get("frontend_file")
+        if pkg is None or not pkg.filename:
+            return jsonify({"ok": False, "errors": ["未选择包文件"]}), 400
+        root = _store_root()
+        staging = os.path.join(root, ".staging", "store")
+        os.makedirs(staging, exist_ok=True)
+        stamp = plugin_admin.now_stamp()
+        pkg_path = os.path.join(staging, "%s-%s" % (stamp, os.path.basename(pkg.filename)))
+        pkg.save(pkg_path)
+        frontend_path = ""
+        if frontend is not None and frontend.filename:
+            frontend_path = os.path.join(staging, "%s-fe-%s" % (stamp, os.path.basename(frontend.filename)))
+            frontend.save(frontend_path)
+        try:
+            report = store_admin.submit(root, runtime, pkg_path, form,
+                                        str(user.get("username") or ""),
+                                        frontend_zip_path=frontend_path or None)
+        finally:
+            for p in (pkg_path, frontend_path):
+                if p and os.path.isfile(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+        if not report.get("ok"):
+            return jsonify(report), 400
+        return jsonify(report)
+
+    @app.post("/plugin/admin/store/review")
+    @login_required
+    def admin_store_review():
+        """审核：approve（发布；server 条目含发布即部署）/ reject / republish。"""
+        set_operation("商店审核")
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        action = str(data.get("action") or "")
+        note = str(data.get("note") or "")
+        by = str((get_session_user() or {}).get("username") or "")
+        root = _store_root()
+        if action == "approve":
+            catalog = store_admin.load_catalog(root)
+            entry = store_admin.find_entry(catalog, pid)
+            record = store_admin.find_version_record(entry, version) if entry else None
+            if record is None:
+                return jsonify({"ok": False, "error": "版本不存在：%s v%s" % (pid, version)}), 404
+            if entry.get("runtime") == "server":
+                # 需求⑧：审核通过即发布，发布即自动部署后端包（当前形态=进程内 inspect/apply；
+                # E 架构落地后此处换 supervisor 编排）。上传/待审核阶段绝不部署。
+                dep = store_admin.deploy_backend_package(PROJECT_DIR, root, pid, version)
+                if not dep.get("ok"):
+                    store_admin.mark_deploy_result(root, pid, version, False,
+                                                   dep.get("error", ""), by)
+                    return jsonify({"ok": False,
+                                    "error": "后端包部署失败，发布已回退待审核：%s" % dep.get("error"),
+                                    "deploy": dep}), 500
+                res = store_admin.review(root, pid, version, "approve", by, note)
+                if res.get("ok"):
+                    store_admin.mark_deploy_result(root, pid, version, True,
+                                                   "v%s 自动部署成功" % version, by)
+                return jsonify(res)
+        res = store_admin.review(root, pid, version, action, by, note)
+        if not res.get("ok"):
+            return jsonify(res), 400
+        return jsonify(res)
+
+    @app.post("/plugin/admin/store/redeploy")
+    @login_required
+    def admin_store_redeploy():
+        """部署运行面板「重新部署」：把指定版本的 server 后端包重新应用到服务器（当前形态）。"""
+        set_operation("商店重新部署")
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        res = store_admin.deploy_backend_package(PROJECT_DIR, _store_root(), pid, version)
+        return jsonify(res) if res.get("ok") else (jsonify(res), 500)
+
+    @app.post("/plugin/admin/store/delist")
+    @login_required
+    def admin_store_delist():
+        """下架（version 留空 = 最新已上架版；下架最新版 = 投影自动回落旧版）。"""
+        set_operation("商店下架")
+        data = request.get_json(silent=True) or {}
+        res = store_admin.delist(_store_root(), str(data.get("id") or ""),
+                                 str(data.get("version") or ""),
+                                 str((get_session_user() or {}).get("username") or ""),
+                                 str(data.get("note") or ""))
+        return jsonify(res) if res.get("ok") else (jsonify(res), 400)
+
+    @app.post("/plugin/admin/store/meta")
+    @login_required
+    def admin_store_meta():
+        """元数据编辑（name/description/icon），记 history 台账。"""
+        set_operation("商店元数据编辑")
+        data = request.get_json(silent=True) or {}
+        res = store_admin.meta_edit(_store_root(), str(data.get("id") or ""), data,
+                                    str((get_session_user() or {}).get("username") or ""))
+        return jsonify(res) if res.get("ok") else (jsonify(res), 400)
+
+    @app.get("/plugin/admin/store/stats")
+    @login_required
+    def admin_store_stats():
+        """下载统计聚合（读 stats.jsonl——store 插件写、admin 只读，单一写方纪律）。"""
+        return jsonify({"ok": True, **store_admin.stats_summary(_store_root())})
 
     # ---------------- 批量导入导出（单位 / 部门 / 人员） ----------------
 

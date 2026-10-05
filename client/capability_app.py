@@ -3,16 +3,17 @@
 
 路由分区（方案 §6.1 表；业务逻辑禁入本层）：
   ① 本地直出：/ 、/tool/<id>（客户端自带 static 副本）、/plugin/local-*/ 、/local-admin（批次 4）
-  ② 清单合并：/api/tools*（批次 3 T16 实现合并，本批次先原样中继）
+  ①′ server 前端包直出：/plugin/<id>/<file> 且命中已装前端包文件清单（批次 8 T-O2-4，
+      需求⑧：未装/停用自动回退中继直出）
+  ② 清单合并：/api/tools*（批次 3 T16；批次 8 起隐藏已停用条目）
   ③ 本地插件 API：/api/local/<id>/*（批次 4 T20 执行器，本批次占位）
   ④ 中继远程：其余 /api/* 与类 A /plugin/<id>/*
-  ⑤ /local-api/*：客户端自有本地接口（配置/健康），永不中继
+  ⑤ /local-api/*：客户端自有本地接口（配置/健康/商店安装），永不中继
 
 中继实现沿用 T03 spike 已验证口径：请求体 spool 临时文件按确切 Content-Length
 转发（直传 werkzeug 流会被 requests 判为未知长度转 chunked 而挂起）；响应流式回传；
 REST 无 WS（方案 §2.1 已核实）。
 """
-import io
 import json
 import os
 import re
@@ -21,7 +22,6 @@ import sys as _sys
 import tempfile
 import threading
 import time
-import zipfile
 
 import requests
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -29,6 +29,8 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 import jz_deps
 import jz_plugin_host
 import local_registry
+import pkg_install
+import plugin_source
 from jz_relay import JzRelay
 from plugin_executor import PluginExecutor
 from session_mirror import SessionMirror
@@ -93,16 +95,32 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     # ---- 类 C 子应用派发 + 类 B 执行器状态（批次 4 T19/T20；pylibs 注入复用主包机制） ----
     import jz_deps
-    jz_plugin_host.setup_dep_components(build_cfg.get("_program_dir") or os.getcwd(), _log)
+    _program_dir = build_cfg.get("_program_dir") or os.getcwd()
+    # 暂存中的依赖组件先应用（与主包 app.py 同口径：setup 之前、DLL 未映射时），再注入路径
+    try:
+        _applied = jz_deps.apply_pending_components(_program_dir)
+        if _applied:
+            _log("已应用暂存依赖组件：%s" % ", ".join(_applied))
+    except Exception as _exc:
+        _log("应用暂存依赖组件失败（保留暂存，下次启动再试）：%s" % _exc)
+    jz_plugin_host.setup_dep_components(_program_dir, _log)
+    # 装依赖组件后免重启：jz_deps.refresh_flags 重算前先补注入路径（与主包同款注册）
+    jz_deps.register_component_rescanner(
+        lambda: jz_plugin_host.setup_dep_components(_program_dir, _log))
+    # server 前端包目录（需求⑧：<数据目录>\server-frontends\，与 local-plugins\ 同级）
+    frontends_dir = os.path.join(_data_dir, "server-frontends")
+    frontends = {f["id"]: f for f in pkg_install.scan_frontends(frontends_dir)}
     local_states = {}
     hybrid_apps = {}      # id → Flask 子应用（进程内；装卸/升级=字典操作，天然全热插拔）
 
     def _refresh_local_states():
+        from client_config import load_client_config
+        # 停用状态读磁盘最新配置（lp_state 免重启写盘后 rescan 立即生效，不用启动快照）
+        states_cfg = (load_client_config(build_cfg).get("local_state") or {})
         for m in local_manifests:
             pid = m.get("id")
             pdir = os.path.join(local_plugins_dir, m.get("_dir", ""))
-            enabled = (client_cfg.get("local_state") or {}).get(pid, True) \
-                and m.get("enabled", True)
+            enabled = states_cfg.get(pid, True) and m.get("enabled", True)
             if not enabled:
                 local_states[pid] = {"status": "disabled"}
                 hybrid_apps.pop(pid, None)
@@ -234,6 +252,16 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def local_plugin_assets(plugin_id, filename):
         return send_from_directory(local_plugins_dir, "local-%s/frontend/%s" % (plugin_id, filename))
 
+    @app.get("/plugin/<plugin_id>/<path:filename>")
+    def server_frontend_assets(plugin_id, filename):
+        """server 前端包本地直出（需求⑧）：仅 GET 且文件命中已装前端包清单才本地伺服；
+        其余（未安装/已停用/清单外路径/非 GET）照旧中继——零安装体验与浏览器路径不破坏。"""
+        fe = frontends.get(plugin_id)
+        if request.method == "GET" and fe and _frontend_enabled(plugin_id) \
+                and filename in (fe.get("files") or []):
+            return send_from_directory(os.path.join(frontends_dir, plugin_id), filename)
+        return forward("plugin/%s/%s" % (plugin_id, filename))
+
     @app.get("/local-admin")
     def local_admin():
         return send_from_directory(fallback_dir_or(app), "local_admin.html")
@@ -300,66 +328,55 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "mount": (m.get("entry") or {}).get("mount"),
                         "enabled": st.get("status") != "disabled", "state": st,
                         "requires": m.get("requires") or {}})
-        return jsonify({"plugins": out, "store": build_cfg.get("plugin_store") or {}})
+        # server 前端包（需求⑧）与已装依赖组件（dep-slot）：商店页状态感知的依据
+        from client_config import load_client_config
+        cfg_states = (load_client_config(build_cfg).get("local_state") or {})
+        fronts = []
+        for fid, f in frontends.items():
+            fronts.append({"id": fid, "version": f.get("version"),
+                           "files": len(f.get("files") or []),
+                           "enabled": bool(cfg_states.get(fid, True))})
+        return jsonify({"plugins": out, "store": build_cfg.get("plugin_store") or {},
+                        "server_frontends": fronts,
+                        "components": pkg_install.installed_components(_program_dir)})
 
     @app.post("/local-api/plugins/install")
     def lp_install():
         f = request.files.get("file")
         if f is None:
             return jsonify({"error": "未选择插件包"}), 400
+        # 校验+落盘收口到 pkg_install 单入口（批次 8 接缝③；外部行为不变）
+        spool = os.path.join(local_plugins_dir, ".upload.tmp")
+        os.makedirs(local_plugins_dir, exist_ok=True)
         try:
-            zf = zipfile.ZipFile(io.BytesIO(f.read()))
-        except zipfile.BadZipFile:
-            return jsonify({"error": "插件包不是有效的 zip"}), 400
-        names = zf.namelist()
-        if "manifest.json" not in names:
-            return jsonify({"error": "包根缺少 manifest.json"}), 400
-        for n in names:                                    # 路径安全（防 ../ 逃逸）
-            if n.startswith("/") or ".." in n.split("/"):
-                return jsonify({"error": "插件包含不安全路径：%s" % n}), 400
-        try:
-            m = json.loads(zf.read("manifest.json").decode("utf-8"))
-        except Exception as exc:
-            return jsonify({"error": "manifest.json 不可解析：%s" % exc}), 400
-        pid = m.get("id", "")
-        if m.get("runtime") != "local" or not pid.startswith("local-") \
-                or not _is_safe_id(pid):
-            return jsonify({"error": "id 必须 local- 前缀且 runtime=local"}), 400
-        kind = m.get("kind", "local")
-        if kind not in ("local", "hybrid"):
-            return jsonify({"error": "kind 仅支持 local / hybrid"}), 400
-        frontend = (m.get("entry") or {}).get("frontend") or "index.html"
-        if "frontend/" + frontend not in names:
-            return jsonify({"error": "包内缺少 frontend/%s" % frontend}), 400
-        if kind == "hybrid":
-            backend = (m.get("entry") or {}).get("backend")
-            if not backend or "backend/" + backend.split("/")[-1] not in names:
-                return jsonify({"error": "hybrid 插件缺少 backend"}), 400
-        mount = ((m.get("entry") or {}).get("mount") or "").rstrip("/")
-        if kind == "hybrid" and not mount.startswith("/api/local/" + pid):
-            return jsonify({"error": "mount 必须以 /api/local/%s 开头" % pid}), 400
-        for other in local_manifests:                       # mount 冲突检查（双方均非空才比）
-            om = ((other.get("entry") or {}).get("mount") or "").rstrip("/")
-            if other.get("id") != pid and om and mount and (
-                    mount == om or mount.startswith(om + "/")
-                    or om.startswith(mount + "/")):
-                return jsonify({"error": "mount 与 %s 冲突" % other.get("id")}), 400
-        target = os.path.join(local_plugins_dir, pid)
-        if os.path.isdir(target):
-            shutil.rmtree(target)                           # 升级 = 覆盖替换（zip 根即包根）
-        zf.extractall(target)
+            f.save(spool)
+            result = pkg_install.install_local_zip(spool, local_plugins_dir,
+                                                   local_manifests, _log)
+        finally:
+            try:
+                os.remove(spool)
+            except OSError:
+                pass
+        if not result.get("ok"):
+            return jsonify({"error": result.get("error", "安装失败")}), 400
         _rescan()
-        restart_required = kind == "hybrid"
-        return jsonify({"ok": True, "id": pid, "restart_required": restart_required,
-                        "hint": "类 C 插件需重启能力层生效（会话已持久化，免重登）"
-                        if restart_required else ""})
+        return jsonify({"ok": True, "id": result["id"],
+                        "restart_required": result.get("restart_required"),
+                        "hint": result.get("hint", "")})
 
     @app.post("/local-api/plugins/uninstall")
     def lp_uninstall():
         data = request.get_json(force=True, silent=True) or {}
         pid = data.get("id", "")
+        if not pid.startswith("local-"):
+            # server 前端本地副本（需求⑧生命周期）：删副本 → 自动回退中继直出
+            r = pkg_install.remove_frontend(frontends_dir, pid)
+            if not r.get("ok"):
+                return jsonify({"error": r.get("error", "卸载失败")}), 404
+            _rescan_frontends()
+            return jsonify({"ok": True, "restart_required": False})
         target = os.path.join(local_plugins_dir, pid)
-        if not pid.startswith("local-") or not os.path.isdir(target):
+        if not os.path.isdir(target):
             return jsonify({"error": "本地插件不存在"}), 404
         kind = next((m.get("kind") for m in local_manifests if m.get("id") == pid), "local")
         shutil.rmtree(target, ignore_errors=True)
@@ -370,7 +387,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def lp_state():
         data = request.get_json(force=True, silent=True) or {}
         pid = data.get("id", "")
-        if not pid.startswith("local-"):
+        if not pid.startswith("local-") and pid not in frontends:
             return jsonify({"error": "非法 id"}), 400
         from client_config import load_client_config, save_client_config
         cfg = dict(load_client_config(build_cfg))
@@ -378,29 +395,36 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         states[pid] = bool(data.get("enabled"))
         cfg["local_state"] = states
         save_client_config(build_cfg, cfg)
-        _rescan()
-        kind = next((m.get("kind") for m in local_manifests if m.get("id") == pid), "local")
-        return jsonify({"ok": True, "restart_required": kind == "hybrid" and data.get("enabled")})
+        if pid.startswith("local-"):
+            _rescan()
+            kind = next((m.get("kind") for m in local_manifests if m.get("id") == pid), "local")
+            return jsonify({"ok": True,
+                            "restart_required": kind == "hybrid" and data.get("enabled")})
+        # server 前端：停用 = 本地伺服关闭自动回退中继直出（副本保留），即时生效
+        return jsonify({"ok": True, "restart_required": False})
 
     @app.post("/local-api/plugins/check-update")
     def lp_check_update():
-        store = build_cfg.get("plugin_store") or {}
-        idx = store.get("index_path") or ""
-        if not idx or not os.path.isfile(idx):
-            return jsonify({"error": "未配置共享盘索引或索引不存在", "updates": []}), 200
-        try:
-            with open(idx, "r", encoding="utf-8") as f:
-                index = json.load(f)
-        except Exception as exc:
-            return jsonify({"error": "索引不可解析：%s" % exc, "updates": []}), 200
+        """检查更新：经 Source 抽象读目录（server=商店 / share=共享盘，接缝①②收口）。"""
+        from client_config import load_client_config
+        src = plugin_source.make_source(build_cfg, load_client_config(build_cfg),
+                                        upstream, lambda: state["address"], mirror, _log)
+        catalog, err = src.get_catalog()
+        if err:
+            return jsonify({"error": err, "source": src.type, "updates": []}), 200
         updates = []
-        for entry in index.get("packages", []):
-            pid = entry.get("id", "")
-            cur = next((m.get("version") for m in local_manifests if m.get("id") == pid), None)
+        installed = {m.get("id"): m.get("version") for m in local_manifests}
+        for fid, f in frontends.items():                 # server 前端本地副本也参与比对
+            installed.setdefault(fid, f.get("version"))
+        for entry in catalog.get("packages") or []:
+            pid = str(entry.get("id") or "")
+            cur = installed.get(pid)
             if cur is None or _ver_lt(cur, entry.get("version", "")):
                 updates.append({"id": pid, "version": entry.get("version"),
-                                "file": entry.get("file", ""), "changelog": entry.get("changelog", "")})
-        return jsonify({"updates": updates})
+                                "file": entry.get("file", ""),
+                                "changelog": entry.get("changelog", ""),
+                                "runtime": entry.get("runtime", "local")})
+        return jsonify({"updates": updates, "source": src.type})
 
     @app.post("/local-api/restart")
     def lp_restart():
@@ -421,9 +445,235 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return [int(x) for x in re.findall(r"\d+", str(v))]
         return nums(a) < nums(b) if nums(a) and nums(b) else False
 
-    def _is_safe_id(pid):
-        import re as _re
-        return bool(_re.fullmatch(r"local-[A-Za-z0-9_-]+", pid))
+    # ---------------- 插件商店安装闭环（批次 8 T-O2-4，需求⑤⑧；§3.5） ----------------
+    # 能力层独立取 catalog 与拉包（以用户会话；不信任页面传参的 URL/哈希，只收 id+version），
+    # sha256 必校验，安装按 runtime 分派：local=完整插件 / server=前端包 / dep-slot=依赖包。
+
+    def _store_source():
+        from client_config import load_client_config
+        return plugin_source.make_source(build_cfg, load_client_config(build_cfg),
+                                         upstream, lambda: state["address"], mirror, _log)
+
+    def _find_catalog_entry(catalog, pid, version):
+        entry = next((p for p in catalog.get("packages") or []
+                      if str(p.get("id")) == pid), None)
+        if entry is None:
+            return None, "商店目录中没有条目：%s" % pid
+        if version:
+            ver = entry if str(entry.get("version")) == str(version) else None
+            if ver is None:
+                return None, "条目 %s 没有版本 %s（可能已下架）" % (pid, version)
+        else:
+            ver = entry
+        return ver, None
+
+    def _pull_and_verify(src, pid, version, expect_sha, filename, artifact=None):
+        """拉包 → spool 落盘 → sha256 对 catalog 声明值（防传输损坏，C7）。返回本地路径或 (None, err)。"""
+        spool_dir = os.path.join(_data_dir, "downloads")
+        dest = os.path.join(spool_dir, os.path.basename(filename or ("%s-%s.zip" % (pid, version))))
+        path, err = src.download(pid, version, dest, artifact=artifact)
+        if err:
+            return None, err
+        if expect_sha:
+            actual = pkg_install.sha256_file(path)
+            if actual.lower() != str(expect_sha).lower():
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+                return None, "包 sha256 与目录声明不符（介质损坏或被篡改）"
+        return path, None
+
+    @app.post("/local-api/store/preflight")
+    def store_preflight():
+        """依赖三态预检（§3.5 ①）：requires 逐项评估 + 缺依赖映射到可装依赖包（O1 会合点）。"""
+        data = request.get_json(force=True, silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        catalog, err = _store_source().get_catalog()
+        if err:
+            return jsonify({"error": err, "installable": False, "deps": []}), 200
+        ver, err = _find_catalog_entry(catalog, pid, version)
+        if err:
+            return jsonify({"error": err, "installable": False, "deps": []}), 200
+        manifest = {"requires": ver.get("requires") or {}}
+        verdict = jz_deps.evaluate("store:" + pid, "", manifest,
+                                   app_dir=_program_dir,
+                                   app_version=(build_cfg.get("product") or {}).get("version"),
+                                   plugin_api=build_cfg.get("plugin_api", "1.0"))
+        # 缺依赖 → 商店依赖类别有对应包则标 resolve=dep-package（页面给「同时安装」勾选）
+        dep_entries = [p for p in catalog.get("packages") or []
+                       if p.get("runtime") == "dep-slot"]
+        deps = []
+        for row in verdict.get("detail") or []:
+            if row.get("kind") != "python_package" or row.get("state") == "ok":
+                continue
+            name = str(row.get("name") or "")
+            resolve = "missing"
+            for dep in dep_entries:
+                provides = [str(x) for x in (dep.get("provides") or [])]
+                if dep.get("id") == name or name in provides:
+                    resolve = "dep-package"
+                    deps.append({"name": name, "require": row.get("require"),
+                                 "state": row.get("state"), "required": row.get("required", True),
+                                 "resolve": resolve, "dep_id": dep.get("id"),
+                                 "dep_version": dep.get("version")})
+                    break
+            if resolve == "missing":
+                deps.append({"name": name, "require": row.get("require"),
+                             "state": row.get("state"), "required": row.get("required", True),
+                             "resolve": resolve})
+        blocked_framework = bool(verdict.get("reason"))
+        return jsonify({"installable": not blocked_framework,
+                        "reason": verdict.get("reason", ""),
+                        "deps": deps})
+
+    @app.post("/local-api/store/install")
+    def store_install():
+        """商店安装（§3.5 ③）：拉包 → sha256 → pkg_install 单入口 → 落位 → rescan。"""
+        data = request.get_json(force=True, silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        include_deps = bool(data.get("include_deps"))
+        src = _store_source()
+        catalog, err = src.get_catalog()
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        ver, err = _find_catalog_entry(catalog, pid, version)
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        runtime = ver.get("runtime") or "local"
+
+        # ① 联合安装依赖（include_deps 勾选；dep-slot 条目逐个装，失败不阻断主件）
+        dep_results = []
+        if include_deps:
+            for dep in (data.get("deps") or []):
+                dep_id = str(dep.get("dep_id") or "")
+                dep_ver = str(dep.get("dep_version") or "")
+                if not dep_id:
+                    continue
+                d_entry = next((p for p in catalog.get("packages") or []
+                                if p.get("id") == dep_id and p.get("runtime") == "dep-slot"), None)
+                if d_entry is None or (dep_ver and str(d_entry.get("version")) != dep_ver):
+                    dep_results.append({"id": dep_id, "ok": False, "error": "目录中找不到该依赖包"})
+                    continue
+                d_path, d_err = _pull_and_verify(src, dep_id, d_entry.get("version"),
+                                                 d_entry.get("sha256"), d_entry.get("file"))
+                if d_err:
+                    dep_results.append({"id": dep_id, "ok": False, "error": d_err})
+                    continue
+                d_res = pkg_install.install_component_zip(d_path, _program_dir)
+                try:
+                    os.remove(d_path)
+                except OSError:
+                    pass
+                dep_results.append(dict(d_res, id=dep_id))
+
+        # ② 主件按 runtime 分派
+        if runtime == "server":
+            # 需求⑧：桌面端「安装」server 条目 = 仅装前端包（页面本地直出，API 照旧中继）
+            if not ver.get("frontend_file"):
+                return jsonify({"ok": False,
+                                "error": "该条目没有前端包工件（服务器侧尚未发布前端包）"}), 200
+            path, err = _pull_and_verify(src, pid, ver.get("version"),
+                                         ver.get("frontend_sha256"), ver.get("frontend_file"),
+                                         artifact="frontend")
+            if err:
+                return jsonify({"ok": False, "error": err, "dep_results": dep_results}), 200
+            res = pkg_install.install_frontend_zip(path, frontends_dir)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            if not res.get("ok"):
+                return jsonify({"ok": False, "error": res.get("error"),
+                                "dep_results": dep_results}), 200
+            _rescan_frontends()
+            return jsonify({"ok": True, "id": res["id"], "frontend": True,
+                            "version": res.get("version"), "restart_required": False,
+                            "dep_results": dep_results})
+
+        if runtime == "dep-slot":
+            path, err = _pull_and_verify(src, pid, ver.get("version"),
+                                         ver.get("sha256"), ver.get("file"))
+            if err:
+                return jsonify({"ok": False, "error": err, "dep_results": dep_results}), 200
+            res = pkg_install.install_component_zip(path, _program_dir)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            if not res.get("ok"):
+                return jsonify({"ok": False, "error": res.get("error"),
+                                "dep_results": dep_results}), 200
+            return jsonify({"ok": True, "id": res["id"], "kind": "component",
+                            "restart_required": res.get("pending", False),
+                            "hint": "组件含 DLL，下次启动能力层时生效"
+                            if res.get("pending") else "",
+                            "dep_results": dep_results})
+
+        # runtime=local：完整本地插件包
+        if not str(pid).startswith("local-"):
+            return jsonify({"ok": False,
+                            "error": "目录条目类别与包形态不符（local 条目须 local- 前缀）"}), 200
+        path, err = _pull_and_verify(src, pid, ver.get("version"), ver.get("sha256"),
+                                     ver.get("file"))
+        if err:
+            return jsonify({"ok": False, "error": err, "dep_results": dep_results}), 200
+        res = pkg_install.install_local_zip(path, local_plugins_dir, local_manifests, _log)
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        if not res.get("ok"):
+            return jsonify({"ok": False, "error": res.get("error"),
+                            "dep_results": dep_results}), 200
+        _rescan()
+        return jsonify({"ok": True, "id": res["id"],
+                        "restart_required": res.get("restart_required"),
+                        "hint": res.get("hint", ""), "dep_results": dep_results})
+
+    @app.post("/local-api/store/download")
+    def store_download():
+        """桌面端「下载包」：拉包落数据目录 downloads\\（留档/转移；安装不走此按钮）。"""
+        data = request.get_json(force=True, silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        src = _store_source()
+        catalog, err = src.get_catalog()
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        ver, err = _find_catalog_entry(catalog, pid, version)
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        # server 条目下载 = 后端包（管理员留档用）；其余 = 自身包
+        filename = ver.get("file") or ("%s-%s.zip" % (pid, ver.get("version")))
+        path, err = _pull_and_verify(src, pid, ver.get("version"), ver.get("sha256"), filename)
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        return jsonify({"ok": True, "path": path})
+
+    @app.get("/local-api/config/plugin-source")
+    def plugin_source_get():
+        from client_config import load_client_config
+        cfg = plugin_source.load_source_config(build_cfg, load_client_config(build_cfg))
+        return jsonify({"ok": True, "plugin_source": cfg})
+
+    @app.post("/local-api/config/plugin-source")
+    def plugin_source_set():
+        data = request.get_json(force=True, silent=True) or {}
+        ptype = data.get("type")
+        if ptype not in ("server", "share"):
+            return jsonify({"error": "type 仅支持 server / share"}), 400
+        if ptype == "share" and not str(data.get("index_path") or "").strip():
+            return jsonify({"error": "share 源需要 index_path"}), 400
+        from client_config import load_client_config, save_client_config
+        cfg = dict(load_client_config(build_cfg))
+        cfg["plugin_source"] = {"type": ptype,
+                                "index_path": str(data.get("index_path") or "")}
+        save_client_config(build_cfg, cfg)
+        return jsonify({"ok": True, "plugin_source": cfg["plugin_source"],
+                        "note": "已写入客户端配置，立即生效（免重启）"})
 
     def _rescan():
         nonlocal local_manifests
@@ -435,6 +685,16 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         for pid in list(hybrid_apps):
             if pid not in alive:
                 hybrid_apps.pop(pid, None)    # 卸载即弹（热插拔 L2/L3）
+
+    def _rescan_frontends():
+        """重扫 server 前端包注册表（装卸后调用；停用只读配置，无需重扫）。"""
+        frontends.clear()
+        frontends.update({f["id"]: f for f in pkg_install.scan_frontends(frontends_dir)})
+
+    def _frontend_enabled(pid):
+        """server 前端本地直出开关：客户端配置 local_state（停用 = 回退中继直出）。"""
+        from client_config import load_client_config
+        return bool((load_client_config(build_cfg).get("local_state") or {}).get(pid, True))
 
     # ---------------- 中继（其余全部转发远程） ----------------
 
@@ -533,7 +793,10 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         base = data.get("tools") if isinstance(data, dict) else data
         base = base if isinstance(base, list) else []
         start = max([t.get("order", 0) for t in base] or [0]) + 1000
-        merged = local_registry.tool_items(local_manifests, start)
+        # 停用即从工具网格隐藏（需求⑦：停用为一等操作；本地 API 404 语义保留作兜底）
+        enabled_manifests = [m for m in local_manifests
+                             if local_states.get(m.get("id"), {}).get("status") != "disabled"]
+        merged = local_registry.tool_items(enabled_manifests, start)
         categories = data.get("categories") if isinstance(data, dict) else None
         if isinstance(categories, list) and all(c.get("id") != "local" for c in categories):
             categories.append(dict(local_registry.LOCAL_CATEGORY))

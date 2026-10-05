@@ -784,6 +784,46 @@ if ($NoZip) {
     Say ("    体积 {0} MB；sha256 {1}" -f [math]::Round($zipSize / 1MB, 2), $zipSha)
 }
 
+# ---------------- 前端包工件（需求⑧，批次 8 T-O2-9）：与后端包同版本成对 ----------------
+# JZToolsHub-前端-<id>-v<版本>.zip = frontend/ 静态文件 + frontend-manifest.json（文件清单）。
+# 消费方：商店目录 server 条目；桌面端「安装」server 条目 = 仅装前端包（落
+# <数据目录>\server-frontends\<id>\，页面本地直出、API 经既有中继；设计文档 §3.5.1）。
+$frontendZipName = "JZToolsHub-前端-$Id-v$Version.zip"
+$frontendZipPath = Join-Path $OutDir $frontendZipName
+$feSha = ""; $feSize = 0; $feCount = 0
+$frontendDir = Join-Path $payloadPlugin "frontend"
+if (-not $NoZip -and (Test-Path -LiteralPath $frontendDir)) {
+    $feFiles = @(Get-ChildItem -LiteralPath $frontendDir -Recurse -File -Force)
+    $feList = @($feFiles | ForEach-Object { (Get-RelPath $frontendDir $_.FullName) -replace '\\', '/' })
+    $feManifest = [ordered]@{
+        id       = $Id
+        version  = $Version
+        built_at = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+        files    = $feList
+    }
+    $feStaging = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-fe-" + $Id + "-" + $ts)
+    New-Item -ItemType Directory -Force -Path (Join-Path $feStaging "frontend") | Out-Null
+    foreach ($f in $feFiles) {
+        $rel = Get-RelPath $frontendDir $f.FullName
+        $dst = Join-Path (Join-Path $feStaging "frontend") ($rel -replace '/', '\')
+        $dstDir = Split-Path -Parent $dst
+        if (-not (Test-Path -LiteralPath $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
+        Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
+    }
+    Write-Utf8NoBom (Join-Path $feStaging "frontend-manifest.json") (($feManifest | ConvertTo-Json -Depth 5) + "`n")
+    if (Test-Path -LiteralPath $frontendZipPath) { Remove-Item -LiteralPath $frontendZipPath -Force }
+    [IO.Compression.ZipFile]::CreateFromDirectory($feStaging, $frontendZipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
+    Remove-Item -LiteralPath $feStaging -Recurse -Force -ErrorAction SilentlyContinue
+    $feSha = Get-Sha256 $frontendZipPath
+    $feSize = (Get-Item -LiteralPath $frontendZipPath).Length
+    $feCount = $feList.Count
+    Write-Utf8NoBom "$frontendZipPath.sha256" ("$feSha  $frontendZipName`n")
+    Say "==> 已产出前端包：$frontendZipPath"
+    Say ("    {0} 个文件，{1} MB；sha256 {2}" -f $feCount, [math]::Round($feSize / 1MB, 2), $feSha)
+} elseif (-not $NoZip) {
+    Warn "插件没有 frontend/ 目录，未产出前端包（server 条目上架时需要前端包，需求⑧）"
+}
+
 # ---------------- 登记（入库）+ 发布索引（随介质） ----------------
 $fileHashes = [ordered]@{}
 foreach ($f in ($payloadFiles | Sort-Object FullName)) {
@@ -808,6 +848,12 @@ $regEntry = [ordered]@{
     assets           = $assetMap
 }
 if ($MinApp) { $regEntry["min_app_version"] = $MinApp }
+if ($feCount -gt 0) {
+    # 需求⑧：前端包与后端包同版本成对（商店 server 条目消费）
+    $regEntry["frontend_file"] = $frontendZipName
+    $regEntry["frontend_sha256"] = $feSha
+    $regEntry["frontend_size"] = [long]$feSize
+}
 
 $regObj = $Registry
 if (-not $regObj.packages) { $regObj | Add-Member -NotePropertyName packages -NotePropertyValue ([pscustomobject]@{}) -Force }
@@ -834,6 +880,11 @@ $list += [pscustomobject][ordered]@{
     published_at     = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
     changelog        = ($changelog -split "`n" | Select-Object -First 3) -join "；"
 }
+if ($feCount -gt 0) {
+    $list[-1] | Add-Member -NotePropertyName frontend_file -NotePropertyValue $frontendZipName
+    $list[-1] | Add-Member -NotePropertyName frontend_sha256 -NotePropertyValue $feSha
+    $list[-1] | Add-Member -NotePropertyName frontend_size -NotePropertyValue ([long]$feSize)
+}
 [pscustomobject]@{ schema = 1; updated_at = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"); packages = @($list) } |
     ConvertTo-Json -Depth 8 | ForEach-Object { Write-Utf8NoBom $indexPath ($_ + "`n") }
 
@@ -842,9 +893,14 @@ if ($Publish) {
     Copy-Item -LiteralPath $zipPath -Destination $Publish -Force
     Copy-Item -LiteralPath "$zipPath.sha256" -Destination $Publish -Force
     Copy-Item -LiteralPath $indexPath -Destination $Publish -Force
+    if ($feCount -gt 0) {
+        Copy-Item -LiteralPath $frontendZipPath -Destination $Publish -Force
+        Copy-Item -LiteralPath "$frontendZipPath.sha256" -Destination $Publish -Force
+    }
     Say ""
     Say "==> 已投递到共享目录：$Publish"
-    Say "    内容：$(Split-Path -Leaf $zipPath) + .sha256 + index.json"
+    Say ("    内容：{0} + .sha256 + index.json{1}" -f (Split-Path -Leaf $zipPath),
+         $(if ($feCount -gt 0) { " + " + (Split-Path -Leaf $frontendZipPath) + " + .sha256" } else { "" }))
     Say "    目标机「插件管理」页填索引路径即可检查更新/批量升级："
     Say "      $(Join-Path $Publish 'index.json')"
 }
@@ -855,6 +911,10 @@ Say ""
 Say "==> 构建完成。"
 Say "    包         ：$zipPath"
 Say "    旁挂哈希   ：$zipPath.sha256"
+if ($feCount -gt 0) {
+    Say "    前端包     ：$frontendZipPath（与后端包同版本成对，商店 server 条目上架用）"
+    Say "    前端旁挂   ：$frontendZipPath.sha256"
+}
 Say "    发布索引   ：$indexPath"
 Say "    登记（入库）：$RegistryFile"
 Say "    目标机操作 ：解压包 → 双击「安装插件.bat」；回滚用 -Rollback $Id"

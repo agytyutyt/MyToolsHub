@@ -1,0 +1,27 @@
+{
+  "id": "store",
+  "name": "插件商店",
+  "version": "1.0.0",
+  "author": "JZToolsHub 团队",
+  "icon": "🛍️",
+  "accent": "#1A73E8",
+  "entry": "index.html",
+  "features": [
+    "插件浏览",
+    "依赖安装",
+    "下载统计",
+    "生命周期管理"
+  ],
+  "form": "source",
+  "core": true,
+  "requires": {
+    "python_packages": [
+      {
+        "name": "flask",
+        "version": ">=3.0",
+        "required": true,
+        "hint": "缺少 flask：插件商店不可用。该依赖随主包分发，请重新安装主包（或联系维护者）。"
+      }
+    ]
+  }
+}

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商店管理 · 管理后台</title>
+  <link rel="stylesheet" href="/static/css/style.css?v=19">
+  <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=26">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
+</head>
+<body data-page="admin" data-side-suffix=" · 管理后台">
+
+  <main class="admin-content" id="app">
+    <div class="admin-head">
+      <div>
+        <h1>商店管理</h1>
+        <div class="admin-sub">
+          插件商店的写面：上架 / 审核 / 发布 / 下架 / 统计（全流程不设角色门槛，机器校验 + 审核纪律兜底）。
+          上架 = 包上传 + 机器校验 → <b>待审核</b> → 审核通过即发布（server 条目发布时自动部署后端包）；
+          下架最新版 = 客户端可见性自动回落旧版；同版本号含已驳回即拒绝重提（版本占号）。
+          <b>装机冒烟为审核必做项</b>（白名单外取数等运行期问题在此暴露）。
+        </div>
+      </div>
+      <a class="admin-btn" href="/tool/store">← 商店首页</a>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>上架新包</h3>
+      <p class="settings-desc">
+        按包形态上传：<code>local</code>=本地插件包（<code>JZClient-本地插件-*.zip</code>，六连校验）；
+        <code>server</code>=服务器插件后端包 + <b>前端包成对上传</b>（同版本号，需求⑧）；
+        <code>dep-slot</code>=依赖组件包（wheel tag 预检）。依赖版本声明从包 manifest 自动提取，可人工改。
+      </p>
+      <div class="settings-form">
+        <div class="form-row">
+          <label for="up-runtime">类别 runtime</label>
+          <select id="up-runtime" class="admin-input">
+            <option value="local">local（本地插件，类 B/C）</option>
+            <option value="server">server（服务器插件，类 A/C）</option>
+            <option value="dep-slot">dep-slot（依赖组件包）</option>
+          </select>
+        </div>
+        <div class="form-row" id="row-frontend" hidden>
+          <label for="up-frontend">前端包</label>
+          <input type="file" id="up-frontend" class="admin-input" accept=".zip">
+        </div>
+        <div class="form-row">
+          <label for="up-file">包文件</label>
+          <input type="file" id="up-file" class="admin-input" accept=".zip">
+        </div>
+        <div class="form-row">
+          <label for="up-name">显示名</label>
+          <input type="text" id="up-name" class="admin-input" placeholder="缺省取包内 manifest">
+        </div>
+        <div class="form-row">
+          <label for="up-desc">描述</label>
+          <input type="text" id="up-desc" class="admin-input">
+        </div>
+        <div class="form-row" id="row-icon">
+          <label for="up-icon">图标</label>
+          <input type="text" id="up-icon" class="admin-input" placeholder="🧩">
+        </div>
+        <div class="form-row">
+          <label for="up-changelog">变更说明</label>
+          <textarea id="up-changelog" class="admin-input" rows="3"></textarea>
+        </div>
+        <div class="form-row" id="row-deps-mode">
+          <label for="up-deps-mode">依赖模式</label>
+          <select id="up-deps-mode" class="admin-input">
+            <option value="shared">shared（共享运行时，默认）</option>
+            <option value="venv">venv（独立依赖环境，E 架构）</option>
+          </select>
+        </div>
+        <div class="form-row" id="row-provides" hidden>
+          <label for="up-provides">provides（提供的 import 名，逗号分隔）</label>
+          <input type="text" id="up-provides" class="admin-input" placeholder="缺省取组件清单">
+        </div>
+      </div>
+      <p>
+        <button type="button" class="admin-btn primary" id="btn-upload">上传并提交审核</button>
+        <span id="upload-result"></span>
+      </p>
+    </div>
+
+    <div class="settings-card wide">
+      <h3>目录管理</h3>
+      <div class="st-tabs">
+        <button type="button" class="admin-btn small st-filter active" data-f="pending">待审核</button>
+        <button type="button" class="admin-btn small st-filter" data-f="published">已上架</button>
+        <button type="button" class="admin-btn small st-filter" data-f="off">已下架 · 已驳回</button>
+        <button type="button" class="admin-btn small st-filter" data-f="stats">统计</button>
+      </div>
+      <div class="data-table-wrap" id="st-table-wrap">
+        <table class="data-table" id="st-table">
+          <thead><tr id="st-thead"></tr></thead>
+          <tbody id="st-rows"><tr><td class="admin-empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+      <div id="st-stats" hidden></div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="/plugin/admin/js/admin-common.js?v=8"></script>
+  <script src="/static/js/sidebar.js?v=3"></script>
+  <script src="/plugin/admin/js/admin-store.js?v=1"></script>
+  <script src="/static/js/llm-settings.js?v=3"></script>
+</body>
+</html>

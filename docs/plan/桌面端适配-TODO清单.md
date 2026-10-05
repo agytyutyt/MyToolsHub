@@ -189,16 +189,26 @@
 
 | # | 任务 | 锚点 | 状态 |
 | --- | --- | --- | --- |
-| T-O2-0 | 拍板项收口 | 设计文档 §7 / §1.3 | ✅（14 项拍 13 项；第 10 项 server 条目边界解释确认中） |
-| T-O2-1 | 数据契约冻结 + `数据根\store\` 落地（内核零改动 + 可选一行随迁） | §3.1 / §3.4 / §7 Q8 | ☐ |
-| T-O2-2 | store 插件（读面 + 全生命周期操作矩阵 + 合并清单隐藏已停用条目修正 + server 前端包本地伺服路由） | §3.2 / §3.5 / §3.5.1 | ☐ |
-| T-O2-3 | admin 商店管理面（§3.7 状态机 + 台账 + 统计；E1 index-server.json 投影） | §3.3 / §3.7 | ☐ |
-| T-O2-4 | 客户端安装收口（pkg_install 单入口 + preflight/install + 上游拉包；install 按 runtime 分派：local=完整插件 / server=前端包 / dep-slot=依赖包）——先行 | §3.5 / §3.5.1 / §4.3 | ☐ |
-| T-O2-5 | 依赖联合安装（组件包 .pending 语义；槽包部分依赖 O1 触发） | §3.5 | ☐ |
-| T-O2-6 | 本地包出包工具（JZClient-本地插件-*.zip + sha256 旁挂） | §4.5 | ☐ |
-| T-O2-7 | Source 抽象 + `plugin_source` 配置链（ServerSource 默认 / ShareSource 兜底） | §3.6 / §4.3 | ☐ |
-| T-O2-8 | 验收（C1–C12，含红线 1/2/3/5/6 与商店特有两条） | §6 | ☐ |
-| T-O2-9 | 服务器插件出包链增产前端包工件（与后端包同版本成对） | §3.5.1 | ☐ |
+| T-O2-0 | 拍板项收口 | 设计文档 §7 / §1.3 | ✅（14 项+需求⑧⑨⑩全落定；审核纪律暂按建议） |
+| T-O2-1 | 数据契约冻结 + `数据根\store\` 落地（内核零改动 + 可选一行随迁） | §3.1 / §3.4 / §7 Q8 | ✅（Q8 拍板做：`_DATA_SUBDIRS` 追加 store，jztools_data.py 一行；主包启动回归绿） |
+| T-O2-2 | store 插件（读面 + 全生命周期操作矩阵 + 合并清单隐藏已停用条目修正 + server 前端包本地伺服路由） | §3.2 / §3.5 / §3.5.1 | ✅（`plugins/store/`；CORE_PLUGINS 两处 + verify 断言 + tools.json 条目 grant_all；停用过滤修正随 `/api/tools` 合并落地；sidebar 商店入口激活 ?v2→v3） |
+| T-O2-3 | admin 商店管理面（§3.7 状态机 + 台账 + 统计；部署运行面板=supervisor 控制接口薄客户端；E1 index-server.json 投影） | §3.3 / §3.7 / §3.9 | ✅（`store_admin.py` + `admin-store.html/js` + 7 端点；部署运行面板按**当前形态**=inspect/apply 链（重新部署/已部署版本/待重启徽标），supervisor 编排待 T-O2-11 接管；E1 随发布/下架同步投影） |
+| T-O2-4 | 客户端安装收口（pkg_install 单入口 + preflight/install + 上游拉包；install 按 runtime 分派：local=完整插件 / server=前端包 / dep-slot=依赖包）——先行 | §3.5 / §3.5.1 / §4.3 | ✅（`client/pkg_install.py` 唯一链（本地上传同改走）；`/local-api/store/preflight\|install\|download`；server 前端包落 `server-frontends\` + 清单圈定本地伺服、停用/卸载回退中继；下载接口增 `artifact=frontend` 参数区分双包工件） |
+| T-O2-5 | 依赖联合安装（组件包 .pending 语义；槽包部分依赖 O1 触发） | §3.5 | ✅（组件包部分：preflight 缺依赖→provides 映射依赖包→一键同装；纯 Python 立即生效/DLL 类留 `.pending` 下次启动生效；槽包部分随 O1 触发） |
+| T-O2-6 | 本地包出包工具（JZClient-本地插件-*.zip + sha256 旁挂） | §4.5 | ✅（`tools/client/build-local-plugin-package.py`，实测过；含登记片段输出） |
+| T-O2-7 | Source 抽象 + `plugin_source` 配置链（ServerSource 默认 / ShareSource 兜底） | §3.6 / §4.3 | ✅（`client/plugin_source.py`；`/local-api/config/plugin-source` GET/POST 免重启；旧构建配置 `plugin_store.index_path` 自动映射 share；check-update 经源抽象） |
+| T-O2-8 | 验收（C1–C12，含红线 1/2/3/5/6 与商店特有两条） | §6 | ◐（台架 `tools/e2e/store-batch8-tests.py` 57 项全过：A 读面/B 状态机+占号+下架回退+E1+部署/C 六连校验/D 能力层端到端；C6 解耦 grep 干净；主包启动回归绿；**待人工**：真机浏览器路径走查、装机冒烟、干净机切源演示） |
+| T-O2-9 | 服务器插件出包链增产前端包工件（与后端包同版本成对） | §3.5.1 | ✅（build-plugin-package.ps1 增产 `JZToolsHub-前端-*.zip` + frontend-manifest.json 文件清单 + sha256 旁挂；登记/索引/-Publish 同步带出） |
+| T-O2-10 | jz_relay 白名单扩展：自身插件服务器端点（类 C 动态规则，id 去 local- 前缀映射） | §3.5.1 | ✅（`jz_relay.own(<id>)` 返回命名空间视图；白名单增 `own_namespace` 节（enabled 开关）；框架级面与其他插件端点不变） |
+| T-O2-11 | 管理进程 supervisor（启动编排/健康探针/熔断拉起/升级停换起+回滚/孤儿收割/日志归集/控制接口/Windows 服务化；**独立安装包**） | `服务端插件运行架构-设计文档.md` §2 | ☐（批次 8 收尾后单开） |
+| T-O2-12 | worker 运行形态（自有 Flask 实例 + 会话自验 provider + 懒启动 + venv 拉起可选 + 主应用反代与统一 errorhandler） | `服务端插件运行架构-设计文档.md` §3–§4 | ☐（批次 8 收尾后单开） |
+
+### 批次 8 实施记录（2026-10-05，T-O2-0~10）
+
+- **改动面**：`jztools_data.py`（一行）/ 新建 `plugins/store/`（manifest+backend+frontend 三件套）/ `plugins/admin/backend/{store_admin.py,routes.py,frontend/admin-store.html,frontend/admin-store.js}` / `client/{pkg_install.py,plugin_source.py,capability_app.py,jz_relay.py,relay_whitelist.json,local_admin.html}` / `tools/{build-deploy-local.py,verify-package.py,build-plugin-package.ps1}` / 新建 `tools/client/build-local-plugin-package.py`、`tools/e2e/store-batch8-tests.py` / `config/tools.json`（store 条目 grant_all）/ `static/js/sidebar.js`（商店入口激活，?v2→v3 共 11 处 HTML 同步）。
+- **设计落定外的两个增量**：① 商店下载接口增 `artifact=frontend` 查询参数（server 条目双包工件选择，客户端装 server 条目取前端包必须）——已记入设计文档 §4.2；② `local_state` 停用状态改读磁盘最新配置（原读启动快照，停用后 rescan 不生效的隐性 bug 顺带修复）。
+- **契约要点**：catalog schema 2 原样落地（versions[]/status/submit/review/history 台账）；flat 投影 = 每 id 最新 published，附加字段 icon/deps_mode/provides/frontend_*（向后兼容，老客户端忽略）；E1 index-server.json 仅 server 条目 published 版本。
+- **遗留**：T-O2-11/12（supervisor/worker）；真机人工项见 T-O2-8 ◐ 注记；商店页暂未在主包 config.template 层面做模板同步测试（tools.json 经 merge-tools 链随主包发版合并，出包门验证）。
 
 ## 门控关系（未决 GD → 批次）
 
@@ -223,4 +233,4 @@
 | # | 方向 | 评估结论（设计存档见方案 §6.6） | 触发条件 |
 | --- | --- | --- | --- |
 | O1 | 依赖多版本共存（版本化槽） | 机制成立：`runtime/pylibs/<name>__<version>/` 共享槽+版本槽并存，解析顺序共享→版本化→缺；plugin_host 按插件拼 `sys.path`（只影响本插件子进程，原生 DLL 跨进程无冲突，同版本多插件去重共用）；**硬边界=旧版本须有客户端运行时 Python 的 wheel（cp314）**，否则走 exe 例外通道或插件升版；类 C 进程内不能双版本→灰显或一键降格子进程（同源码零迁移）。**本期版本不符=三态判定提示，不做槽**。深化设计已备：`docs/design/桌面端依赖版本槽-设计文档.md`（2026-10-04，槽挂 `pylibs/.slots/` 内核零改动 + 执行器注入 + 类 C 降格 + cp314 边界，待拍板） | 出现真实的「插件钉旧版依赖」需求且共享槽无法满足时重评（GD4 复议） |
-| O2 | **插件商店（已立项，下一步）** | 平台化插件**上架/分发/下载/安装更新**，升级 GD7 的 C 通道（共享盘索引→商店目录）。**客户端侧四接缝已随批次 4 T21 预留**：索引 schema 与商店目录同构、更新源可配置（`plugin_source`）、安装收口 `install(pkg_source)` 单入口、`runtime` 类别中立字段（方案 §6.8）；包格式与 `plugin-packages.json` 同构，上架即原包。**服务端形态已另立设计文档并定稿（v2.1，2026-10-05 需求方拍板：六条需求 + ⑦全生命周期同权）**：`docs/design/桌面端插件商店-设计文档.md`——商店=**主包第二核心插件**（随包、独立完整用例）、admin 后台管理上架/下架/审核/统计、`数据根\store\` 数据契约解耦（admin 写/store 读/统计反向）、客户端经中继浏览+`/local-api/store/install` 拉包安装；商店页为生命周期主入口（下载/安装/升级/卸载/停用——停用只停包留本地），全部操作不区分管理员/办事员；**v2.2 需求⑧：server 插件双包模型**（后端包发布即自动部署服务器、前端包可装客户端本地直出+API 经中继、未装回退中继直出）。**已拍板定稿（2026-10-05，拍板记录见设计文档 §1.3），批次 8 排入本清单** | ~~商店阶段启动设计时~~ 已启动：批次 8 |
+| O2 | **插件商店（已立项，下一步）** | 平台化插件**上架/分发/下载/安装更新**，升级 GD7 的 C 通道（共享盘索引→商店目录）。**客户端侧四接缝已随批次 4 T21 预留**：索引 schema 与商店目录同构、更新源可配置（`plugin_source`）、安装收口 `install(pkg_source)` 单入口、`runtime` 类别中立字段（方案 §6.8）；包格式与 `plugin-packages.json` 同构，上架即原包。**服务端形态已另立设计文档并定稿（v2.1，2026-10-05 需求方拍板：六条需求 + ⑦全生命周期同权）**：`docs/design/桌面端插件商店-设计文档.md`——商店=**主包第二核心插件**（随包、独立完整用例）、admin 后台管理上架/下架/审核/统计、`数据根\store\` 数据契约解耦（admin 写/store 读/统计反向）、客户端经中继浏览+`/local-api/store/install` 拉包安装；商店页为生命周期主入口（下载/安装/升级/卸载/停用——停用只停包留本地），全部操作不区分管理员/办事员；**v2.2 需求⑧：server 插件双包模型**（后端包发布即自动部署服务器、前端包可装客户端本地直出+API 经中继、未装回退中继直出）。**已拍板定稿（2026-10-05，拍板记录见设计文档 §1.3），批次 8 排入本清单** | ~~商店阶段启动设计时~~ **T-O2-0~10 已落地（2026-10-05，见批次 8 实施记录）；T-O2-11/12（supervisor/worker 运行架构）待单开** |
