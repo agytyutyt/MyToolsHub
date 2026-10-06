@@ -21,6 +21,15 @@ SPEC = os.path.join(ROOT, "client", "JZClient.spec")
 
 def main():
     skip_build = "--skip-build" in sys.argv
+    # 构建环境前置断言（批次 10 补充）：UI 层依赖缺失时 PyInstaller 会静默少收集、
+    # 直到 smoke 才拦（本轮实测：环境漂移丢 pywebview/pythonnet）——把失败提前到打包前。
+    import importlib.util
+    missing = [m for m in ("webview", "pythonnet", "pystray")
+               if importlib.util.find_spec(m) is None]
+    if missing and not skip_build:
+        print("构建环境缺 UI 层依赖：%s" % missing)
+        print("  修复：pip install pywebview==6.2.1 pythonnet==3.2.0（批次 0 定案版本，pystray 随装）")
+        return 1
     with open(CFG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
     product = cfg["product"]
