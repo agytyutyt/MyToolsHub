@@ -223,6 +223,16 @@
 
 ## 批次 9–11：存量插件适配（设计已定稿；**批次 9 进行中**，2026-10-06 开工）
 
+### 批次 10 实施记录（2026-10-06，提交 89367f2）
+
+| 项 | 状态 |
+| --- | --- |
+| B-light 4 个本地包 | ✅ 派生出包（color-picker/json-formatter/md5-generator/map-marker，零 api 引用） |
+| B-heavy 2 个懒加载改造 | ✅ info-transfer/trajectory-convert cv2/numpy → 真值哨兵 "lazy" + _load_cv2/_load_numpy 闸门首用装载；/status 旗标改 jz_deps 判定数据源（**发现 None 哨兵会被 jz_deps 刷新器请求期探测清零——哨兵必须真值**）；实测请求期零装载 |
+| B-heavy 2 个本地包 | ✅ 派生出包（info-transfer 改写 17 处 / trajectory-convert 7 处，resident+timeout） |
+| A 类 4 个双包重打 | ✅ -Force 补前端工件（knowledge-base/shared-docs/notice-board/case-report，C-13 全过——**顺带落地注释剥离**：notice-board 解耦迁移说明里的历史路径不算违规） |
+| 待办 | 真机项：admin 商店管理面上架（local 包×7 + 服务器双包）→ 装包走查 → 批次 11（C 类收尾 + worker 迁移 Q7 顺序） |
+
 > 权威设计：`docs/design/存量插件三类适配-设计文档.md`（2026-10-06 定稿，Q1–Q7 全部拍板）。分类 A×6/B-light×5/B-heavy×3/C×3、四条改造模式（M-A/M-B1/M-B2/M-C）、逐插件方案（§3）、框架增补 F1–F6（§2.5）、验收 V1–V10（§5）均以该文为准——本节只登记批次骨架，任务分解随排期展开。后续优化已列 O3–O6。
 
 | 批次 | 任务骨架（任务号排期时分配） | 设计依据 |
