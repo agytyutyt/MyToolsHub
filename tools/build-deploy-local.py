@@ -174,9 +174,9 @@ def main():
     ap.add_argument("-DeployName", dest="deploy_name", default=os.path.join("服务端", "JZToolsHub"), help="部署目录名")
     args = ap.parse_args()
 
-    dist = os.path.join(ROOT, "dist", args.deploy_name)
+    dist = os.path.join(ROOT, "dist", "JZToolsHub")   # PyInstaller 产物名固定（spec 决定）
     deploy = os.path.join(ROOT, "deploy")
-    app = os.path.join(deploy, args.deploy_name)
+    app = os.path.join(deploy, args.deploy_name)      # 部署子路径（缺省 服务端/JZToolsHub）
     rules = load_rules()
 
     # ---- 前置检查 ----
