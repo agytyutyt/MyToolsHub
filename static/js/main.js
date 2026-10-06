@@ -182,6 +182,7 @@ function updateEditItem() {
 }
 
 function enterEditMode() {
+  if (window.JZSidebar) window.JZSidebar.setActive('side-act-edit', true);
   editing = true;
   document.body.classList.add('editing');
   hint.hidden = false;
@@ -190,6 +191,7 @@ function enterEditMode() {
 }
 
 function exitEditMode() {
+  if (window.JZSidebar) window.JZSidebar.setActive('side-act-edit', false);
   editing = false;
   document.body.classList.remove('editing');
   hint.hidden = true;

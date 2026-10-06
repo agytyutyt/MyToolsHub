@@ -69,13 +69,18 @@
     // 首项：主页/管理后台显示「主界面」，插件外壳页显示「返回」（都离开当前页，
     // 主页与管理后台回首页、插件页回工具箱首页）
     var homeLabel = PAGE === 'tool' ? '返回' : '主界面';
+    // 位置感知高亮：/tool/store（插件商店页）时商店条目为选中态；其他工具页不属于
+    // 侧栏任何条目，不做高亮（条目全部保留可见，不隐藏——2026-10-07 优化口径）
+    var onStore = PAGE === 'tool' && /^\/tool\/store(\/|$)/.test(location.pathname);
     var middle = itemHtml({
       id: 'side-home', icon: PAGE === 'tool' ? 'back' : 'home', label: homeLabel, href: '/',
       className: PAGE === 'home' ? 'active' : '',
       extra: PAGE === 'home' ? ' aria-current="page"' : '',
     })
       // 插件商店：第二核心插件（批次 8 T-O2-2），主界面/插件页/后台三类页同款入口
-      + itemHtml({ id: 'side-store', icon: 'store', label: '插件商店', href: '/tool/store' })
+      + itemHtml({ id: 'side-store', icon: 'store', label: '插件商店', href: '/tool/store',
+                   className: onStore ? 'active' : '',
+                   extra: onStore ? ' aria-current="page"' : '' })
       // 大模型设置：默认隐藏，llm-settings.js 按后端「用户各自设置」模式动态放开
       + itemHtml({ id: 'side-act-llm', icon: 'bulb', label: '大模型设置', extra: ' hidden' })
       + (PAGE === 'home'
@@ -155,6 +160,15 @@
     window.AdminCommon.renderSidebarUser(document.getElementById('side-user-slot'));
   }
 
+  // 选中态切换（点击/弹层类条目用）：on 缺省 true；只作用目标条目，不隐藏其他条目
+  function setActive(id, on) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('active', on !== false);
+    if (on !== false) el.setAttribute('aria-current', 'true');
+    else el.removeAttribute('aria-current');
+  }
+
   // 供 main.js（位置编辑项换图标/文字）与 admin-common（底部条目图标）使用
-  window.JZSidebar = { icon: icon, syncTitles: syncTitles };
+  window.JZSidebar = { icon: icon, syncTitles: syncTitles, setActive: setActive };
 })();

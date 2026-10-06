@@ -197,6 +197,7 @@
     var c = ensureCard();
     c.hidden = false;
     document.body.classList.add('llm-card-open');
+    if (window.JZSidebar) window.JZSidebar.setActive('side-act-llm', true);
     reload().catch(function (err) {
       el('llm-f-status').innerHTML = '<span class="bad">读取失败：'
         + A().esc(err.message) + '</span>';
@@ -206,6 +207,7 @@
   function closeCard() {
     if (card) card.hidden = true;
     document.body.classList.remove('llm-card-open');
+    if (window.JZSidebar) window.JZSidebar.setActive('side-act-llm', false);
   }
 
   // ===================== 保存 / 测试 =====================
