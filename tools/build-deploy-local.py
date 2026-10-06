@@ -13,7 +13,7 @@ r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<Deploy
   §3.2   static/ + docs/guide/ + docs/design/（COPY_DIRS）
          + docs/README.md + README.md + HANDOFF.md + 插件设计规范.md + 移动端APP.md
          + install.ps1 + 一键安装.bat + 一键卸载.bat（COPY_FILES）
-         + plugins/<核心插件白名单>（CORE_PLUGINS，当前仅 admin）+ tools/plugin-upgrade
+         + plugins/<核心插件白名单>（CORE_PLUGINS，admin+store）+ tools/plugin-upgrade
          + config\tools.json（收窄为「site + 分类骨架 + 核心插件条目」）
          复制与清理均按 tools\plugin-payload-rules.json（与「插件包」共用同一份真源）
          ★ plugins / wheels / tools **不再整目录随包**：plugins 只拷核心插件白名单、
