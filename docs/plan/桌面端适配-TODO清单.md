@@ -233,6 +233,12 @@
 - **产物**：`deploy/YFJZ_Client` 85.3 MB；结构断言 9 项过；smoke 通过（兜底页/本地接口/配置落盘）；F2 依赖清单随包（9 包，含 pywebview）；runtime\ 子树保留（内核/程序解耦）。
 - **待真机**：Windows 实机开窗/托盘/拖拽人工复核 + 批次 9/10 的商店上架与装包走查。
 
+### 主包 v2.3.23 出包（2026-10-07）——上架前置
+
+- **触发**：真机验证发现桌面端「插件商店」点击报「工具不存在或未启用」→ 服务器跑的是 9 月 v2.3.22 部署包（store 是批次 8 才进主包的）。
+- **产物**：deploy/JZToolsHub **v2.3.23**（增量组装：覆盖 544/新增 20；plugins/ 含 admin+store；tools.json store 条目 grant_all；含批次 9/10 的 jz_api 内核改动与 file-filter v1.6.0 源）；**verify-package --smoke 全绿**（启动/登录页/匿名 401/数据根隔离）。
+- **待目标机**：按打包部署手册覆盖部署 → 重启 → 验证侧栏「插件商店」可开 → 商店管理面上架三试点与依赖组件包 → 装包走查。
+
 | 项 | 状态 |
 | --- | --- |
 | B-light 4 个本地包 | ✅ 派生出包（color-picker/json-formatter/md5-generator/map-marker，零 api 引用） |
