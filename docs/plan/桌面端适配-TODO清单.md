@@ -225,6 +225,14 @@
 
 ### 批次 10 实施记录（2026-10-06，提交 89367f2）
 
+### 客户端重新出包（2026-10-07，提交 7043c2d）
+
+- **触发**：批次 9/10 改动（F1 身份注入/F5 降级合并/查询串透传/executor 崩溃修复/同源内核 jz_api 兜底）尚未进冻结包。
+- **过程抓到环境漂移**：首次构建 smoke 失败——`ModuleNotFoundError: webview`（pywebview/pythonnet 从构建环境消失，PyInstaller 静默少收集；批次 2 补丁③ UI 存活断言按设计拦截）。修复=按批次 0 定案版本装回（pywebview==6.2.1 + pythonnet==3.2.0；**本机代理 7890 宕，pip 走直连**）。
+- **加固**：build-client.py 增出包前置断言（webview/pythonnet/pystray 缺失即拒打，失败从 smoke 前移到打包前，7043c2d）。
+- **产物**：`deploy/YFJZ_Client` 85.3 MB；结构断言 9 项过；smoke 通过（兜底页/本地接口/配置落盘）；F2 依赖清单随包（9 包，含 pywebview）；runtime\ 子树保留（内核/程序解耦）。
+- **待真机**：Windows 实机开窗/托盘/拖拽人工复核 + 批次 9/10 的商店上架与装包走查。
+
 | 项 | 状态 |
 | --- | --- |
 | B-light 4 个本地包 | ✅ 派生出包（color-picker/json-formatter/md5-generator/map-marker，零 api 引用） |
