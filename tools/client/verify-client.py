@@ -128,7 +128,7 @@ def smoke(out, cfg):
 def main():
     with open(CFG_PATH, "r", encoding="utf-8") as f:
         cfg = json.load(f)
-    out = os.path.join(ROOT, "deploy", cfg["product"]["name"])
+    out = os.path.join(ROOT, "deploy", "桌面端", cfg["product"]["name"])
     if not os.path.isdir(out):
         fail("产物目录不存在（先跑 tools/client/build-client.py）：%s" % out)
     structure(out, cfg)

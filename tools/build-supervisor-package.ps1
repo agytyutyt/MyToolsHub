@@ -25,7 +25,7 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 
-if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Join-Path $Root "deploy") "supervisor分件" }
+if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Join-Path (Join-Path $Root "deploy") "服务端") "supervisor分件" }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 function Say { param([string]$m = "") Write-Host $m }

@@ -5,7 +5,7 @@
 #   info-transfer / trajectory-convert 的**视频码流模式**——改为独立组件按需安装。
 #
 # 取源（-From，缺省自动按序尝试）：
-#   1) deploy\JZToolsHub\_internal  —— 最近一次主包构建的产物（版本与主包一致，推荐）
+#   1) deploy\服务端\JZToolsHub\_internal  —— 最近一次主包构建的产物（版本与主包一致，推荐）
 #   2) 当前 Python 的 site-packages —— 开发机直接取（-From 可显式指定）
 #
 # 产物（OutDir 缺省 deploy\依赖组件\）：
@@ -130,7 +130,7 @@ $UNITS = @{
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖组件" }
+if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖包\组件包" }
 $ToolVer = "1.0.0"
 
 function Say { param([string]$m = "") Write-Host $m }

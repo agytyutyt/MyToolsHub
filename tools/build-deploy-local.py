@@ -171,7 +171,7 @@ def main():
     ap.add_argument("-Version", dest="version", default="", help="版本号（缺省在既有部署目录上递增 patch）")
     ap.add_argument("--force", action="store_true", help="允许与上一版同号重出（只改了文档/工具时）")
     ap.add_argument("--check-only", action="store_true", help="只做前置检查与差异报告，不写任何文件")
-    ap.add_argument("-DeployName", dest="deploy_name", default="JZToolsHub", help="部署目录名")
+    ap.add_argument("-DeployName", dest="deploy_name", default=os.path.join("服务端", "JZToolsHub"), help="部署目录名")
     args = ap.parse_args()
 
     dist = os.path.join(ROOT, "dist", args.deploy_name)

@@ -838,7 +838,7 @@ $instVer = (Select-String -LiteralPath (Join-Path $InstallerDir "install-plugin.
 if ($instVer) { Say "  安装器    ：install-plugin.ps1 v$($instVer.Matches[0].Groups[1].Value)（随包）" }
 
 # ---------------- 打包 ----------------
-if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Join-Path $Root "deploy") "插件包" }
+if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Join-Path (Join-Path $Root "deploy") "插件包") "服务器插件" }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $zipName = "$($ToolIds[0])-$Id-v$Version.zip"
 $zipPath = Join-Path $OutDir $zipName

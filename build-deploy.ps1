@@ -22,7 +22,7 @@
 #       （与裁剪核心包并存，包体约 682 MB；默认仅留裁剪核心包）。
 param(
     [string]$Python = "python",
-    [string]$DeployName = "JZToolsHub",
+    [string]$DeployName = "服务端\JZToolsHub",
     [string]$Version = "",
     [switch]$Force,
     [switch]$WithOfflineRuntime,   # 随包携带离线运行组件（Chrome / LibreOffice）；默认不带
@@ -71,7 +71,7 @@ if ($ZipOnly) {
     $Version = $PrevVer
     # 注意：变量名不能叫 $zipOnly —— PowerShell 变量名不区分大小写，
     # 会与开关参数 -ZipOnly 撞成同一个变量（赋值字符串给 SwitchParameter 直接报错）。
-    $zipPath = Join-Path $Deploy "JZToolsHub-v$Version.zip"
+    $zipPath = Join-Path (Join-Path $Deploy "服务端") "JZToolsHub-v$Version.zip"
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Write-Host "==> [-ZipOnly] 压缩既有部署目录（版本 $Version，跳过打包与组装）..."
     Write-Host "    提示：部署目录里若还是旧文档，请先从仓库复制最新文件进去。"

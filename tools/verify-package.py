@@ -68,7 +68,7 @@ def main():
 
     path = args.zipfile
     if not path:
-        cands = [p for p in glob.glob(os.path.join(ROOT, "deploy", "JZToolsHub-v*.zip"))]
+        cands = [p for p in glob.glob(os.path.join(ROOT, "deploy", "服务端", "JZToolsHub-v*.zip"))]
         if not cands:
             raise SystemExit("deploy 下没有 JZToolsHub-v*.zip")
         path = max(cands, key=os.path.getmtime)

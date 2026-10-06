@@ -29,8 +29,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Root       = Split-Path -Parent $PSScriptRoot
-if (-not $From)   { $From   = Join-Path $Root "deploy\插件包" }
-if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\插件集" }
+if (-not $From)   { $From   = Join-Path $Root "deploy\插件包\服务器插件" }
+if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\插件包\插件集" }
 $ToolVer    = "1.0.0"
 
 function Say  { param([string]$m = "") Write-Host $m }

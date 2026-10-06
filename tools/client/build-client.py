@@ -37,7 +37,7 @@ def main():
     version = product["version"]
 
     dist = os.path.join(ROOT, "client", "dist", name)
-    out = os.path.join(ROOT, "deploy", name)
+    out = os.path.join(ROOT, "deploy", "桌面端", name)
 
     if not skip_build:
         print("[1/3] PyInstaller 打包…")
