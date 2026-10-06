@@ -69,8 +69,17 @@ class PluginExecutor:
                     self._residents[pid] = proc
                 lock = self._locks.setdefault(pid, threading.Lock())
             with lock:
-                return self._roundtrip(proc, manifest, method, path, headers, body,
-                                       timeout_ms, resident=True)
+                try:
+                    return self._roundtrip(proc, manifest, method, path, headers, body,
+                                           timeout_ms, resident=True)
+                except WorkerCrash:
+                    # 崩溃后立即弹出常驻项：Windows 下子进程句柄状态滞后（管道 EOF 先到、
+                    # poll() 迟迟不报退出码），不弹出会让下一请求复用死进程管道再吃 502。
+                    # 与超时路径的弹出语义对齐；下次请求经 poll 判死自然重新拉起。
+                    with self._lock_all:
+                        if self._residents.get(pid) is proc:
+                            self._residents.pop(pid, None)
+                    raise
         proc = self._spawn(manifest, resident=False)
         try:
             return self._roundtrip(proc, manifest, method, path, headers, body,

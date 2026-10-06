@@ -69,14 +69,30 @@ def providers_registered():
 
 
 def get_session_user():
-    """当前登录用户的展示信息（含 permissions / super_admin），未登录或 admin 未加载返回 None。"""
+    """当前登录用户的展示信息（含 permissions / super_admin），未登录或 admin 未加载返回 None。
+
+    客户端 worker 兜底（批次 9 F1，Q4 拍板）：无 provider 时（本地插件子进程内）读
+    能力层派发链注入的 ``X-JZ-User`` 身份头（仅本地回环写入，不进中继/服务器链路）。
+    服务器形态 admin 必注册 provider，本兜底不触发；懒 import flask，保持导入无副作用。
+    """
     fn = _PROVIDERS["session_user"]
-    if fn is None:
-        return None
+    if fn is not None:
+        try:
+            return fn()
+        except Exception:  # 会话读取失败按未登录处理，不阻断请求
+            return None
     try:
-        return fn()
-    except Exception:  # 会话读取失败按未登录处理，不阻断请求
-        return None
+        from flask import has_request_context, request
+        if has_request_context():
+            raw = request.headers.get("X-JZ-User") or ""
+            if raw:
+                import json as _json
+                data = _json.loads(raw)
+                if isinstance(data, dict):
+                    return data
+    except Exception:  # 无请求上下文 / flask 缺失 / 头不可解析 → 未登录
+        pass
+    return None
 
 
 def set_operation(op):

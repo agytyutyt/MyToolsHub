@@ -138,6 +138,11 @@ def load_backend_module(plugins_dir, plugin_id):
     if not os.path.isfile(package_file):
         return None
     module_name = "jztools_" + re.sub(r"\W", "_", plugin_id)
+    # 热升级关键：清掉同名父/子模块缓存，否则 import_module 命中旧 .routes——
+    # 升级后跑的仍是旧代码（批次 9 T-O9-8 台架发现的真缺陷）。
+    for stale in [n for n in list(sys.modules)
+                  if n == module_name or n.startswith(module_name + ".")]:
+        sys.modules.pop(stale, None)
     spec = importlib.util.spec_from_file_location(
         module_name, package_file, submodule_search_locations=[backend_dir]
     )

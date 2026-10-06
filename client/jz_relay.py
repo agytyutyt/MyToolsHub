@@ -89,7 +89,7 @@ class JzRelay:
         if cookie:
             headers["Cookie"] = cookie
         r = self._upstream.request(method, addr + path, headers=headers,
-                                   timeout=(5, 120), **kw)
+                                   timeout=kw.pop("timeout", (5, 120)), **kw)
         if r.status_code == 401:
             self._mirror.clear()
         return r

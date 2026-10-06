@@ -89,6 +89,46 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         _log("relay_whitelist.json 加载失败，jz_relay 全拒绝")
     relay = JzRelay(upstream, lambda: state["address"], mirror, whitelist, _log)
     _sys.modules["jz_relay"] = relay          # 插件后端 import jz_relay 即用
+
+    # ---- 本地插件身份注入（批次 9 T-O9-4 / F1，Q4 拍板）----
+    # 登录/续期后经上游 /api/session 缓存真实身份：hybrid 经 jz_api provider 生效，
+    # worker 经派发链 X-JZ-User 头生效（jz_api 垫片兜底读头）；离线/未登录降级匿名。
+    _identity = {"user": None, "ts": 0.0}
+
+    def refresh_identity():
+        if state["address"] and time.time() - _identity["ts"] >= 300:
+            try:
+                r = upstream.get(state["address"] + "/api/session",
+                                 headers=client_headers(), timeout=(3, 8))
+                user = (r.json() or {}).get("user") if r.status_code == 200 else None
+                _identity["user"] = user if isinstance(user, dict) else None
+            except Exception:
+                _identity["user"] = None
+            _identity["ts"] = time.time()
+        return _identity["user"]
+
+    def invalidate_identity():
+        _identity["user"] = None
+        _identity["ts"] = 0.0
+
+    _mirror_update, _mirror_clear = mirror.update_from_set_cookie, mirror.clear
+
+    def _mirror_update_hook(set_cookie):
+        _mirror_update(set_cookie)            # 登录/滑动续期/删除型 Cookie → 身份可能变化
+        invalidate_identity()
+
+    def _mirror_clear_hook():
+        _mirror_clear()                       # 登出/401 → 身份立即作废
+        invalidate_identity()
+
+    mirror.update_from_set_cookie = _mirror_update_hook
+    mirror.clear = _mirror_clear_hook
+
+    try:
+        import jz_api as _jz_api
+        _jz_api.register_providers(get_session_user=refresh_identity)
+    except Exception as exc:
+        _log("jz_api 身份 provider 注册失败（本地插件按匿名降级）：%r" % exc)
     app.config["SESSION_MIRROR"] = mirror
     app.config["JZ_RELAY"] = relay
     app.config["LOCAL_MANIFESTS"] = local_manifests
@@ -292,8 +332,14 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         if not mount:
             mount = "/api/local/" + pid
         worker_path = request.path[len(mount):] or "/"
+        qs = request.query_string.decode("utf-8", "replace")
+        if qs:                                # 查询串随派发透传（file-filter mappings?limit 等在用）
+            worker_path += "?" + qs
         worker_headers = {k: v for k, v in request.headers.items()
                           if k.lower() not in ("host", "content-length")}
+        user = refresh_identity()             # F1：worker 链身份注入（仅本地回环派发链写入）
+        if user:
+            worker_headers["X-JZ-User"] = json.dumps(user, ensure_ascii=False)
         if m.get("kind") == "hybrid":
             sub = hybrid_apps.get(pid)
             if sub is None:
@@ -783,16 +829,25 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     # ---------------- 清单合并与本地工具元数据（T16） ----------------
 
     @app.get("/api/tools")
+    def _local_only_tools_response():
+        # F5（批次 9 T-O9-5，Q3 配套）：远程不可达/未配置时降级为仅本地条目——
+        # 本地条目（local-plugins）是离线网格的唯一载体，A 类离线显兜底页（既有口径）
+        enabled = [m for m in local_manifests
+                   if local_states.get(m.get("id"), {}).get("status") != "disabled"]
+        return jsonify({"tools": local_registry.tool_items(enabled, 1000),
+                        "categories": [dict(local_registry.LOCAL_CATEGORY)],
+                        "degraded": True})
+
     def api_tools_merged():
         if not state["address"]:
-            return _fallback_response()
+            return _local_only_tools_response()
         headers = client_headers()
         try:
             r = upstream.get(state["address"] + "/api/tools",
                              headers=headers, timeout=(5, 60))
         except requests.RequestException as exc:
             health.mark(False, "%s: %s" % (type(exc).__name__, exc))
-            return _fallback_response(upstream_error=str(exc))
+            return _local_only_tools_response()
         health.mark(True)
         sc = r.headers.get("Set-Cookie")
         if sc:

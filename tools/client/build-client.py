@@ -85,6 +85,27 @@ def main():
     with open(os.path.join(out, "build-info.json"), "w", encoding="utf-8") as f:
         json.dump(info, f, ensure_ascii=False, indent=2)
 
+    # F2（批次 9 T-O9-6）：客户端运行时依赖清单——同源 gen-installed-deps 按客户端冻结
+    # 目录采集（jz_deps 三态判定数据源；kernel/config/installed-deps.json）。B-heavy 插件
+    # requires 的 flask 在此落"已安装"，否则装包预检误报缺依赖。
+    # 注意：该工具退出码含「服务器 spec 白名单核对」（PIL/pystray/waitress 等服务器侧包
+    # 不在客户端 _internal 属预期），故成功判据=产物可解析，白名单警告随 stdout 可见。
+    kernel_cfg = os.path.join(out, "_internal", "kernel", "config")
+    os.makedirs(kernel_cfg, exist_ok=True)
+    lock = os.path.join(kernel_cfg, "installed-deps.json")
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "gen-installed-deps.py"),
+                        "--internal", os.path.join(out, "_internal"), "--out", lock],
+                       capture_output=True, text=True)
+    print((r.stdout or "").strip())
+    lock_ok = False
+    try:
+        with open(lock, encoding="utf-8-sig") as f:
+            lock_ok = bool(json.load(f).get("packages"))
+    except Exception:
+        pass
+    if not lock_ok:
+        print("警告：客户端 installed-deps 未生成（依赖三态判定将按缺失处理）：%s" % (r.stderr or "").strip())
+
     total = sum(os.path.getsize(os.path.join(dp, fn))
                 for dp, _, fns in os.walk(out) for fn in fns)
     print("完成：%s（%.1f MB）" % (out, total / 1e6))

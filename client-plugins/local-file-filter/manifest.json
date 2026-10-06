@@ -1,0 +1,39 @@
+{
+  "id": "local-file-filter",
+  "name": "过滤器（本地）",
+  "icon": "🧹",
+  "accent": "#00897B",
+  "version": "1.6.0",
+  "author": "JZToolsHub 团队",
+  "runtime": "local",
+  "kind": "hybrid",
+  "server_data": true,
+  "entry": {
+    "frontend": "index.html",
+    "backend": "routes.py",
+    "mount": "/api/local/local-file-filter"
+  },
+  "features": [
+    "表格过滤（本地引擎）",
+    "脱敏数据不出机",
+    "LLM 语义建议（经中继）",
+    "自学习映射（服务器共享）",
+    "离线精确/正则过滤"
+  ],
+  "requires": {
+    "python_packages": [
+      {
+        "name": "openpyxl",
+        "version": ">=3.1",
+        "required": false,
+        "hint": "缺少 openpyxl：xlsx 表格过滤不可用。请在插件商店「依赖」页签安装 openpyxl 组件包。"
+      },
+      {
+        "name": "xlrd",
+        "version": ">=2.0",
+        "required": false,
+        "hint": "缺少 xlrd：xls 表格过滤不可用。请在插件商店「依赖」页签安装 xlrd 组件包。"
+      }
+    ]
+  }
+}

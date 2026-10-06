@@ -525,6 +525,47 @@ if ($depObj -and $depObj.no_backend) {
             $depsFramework.Count, $(if ($depsFramework.Count -gt 0) { "（$($depsFramework -join ', ')）" } else { "" }), $depsVendored.Count)
 }
 
+# ---------------- C-13：L-13 前端 API 路径纪律（规范 §16.10；存量插件适配 Q1 配套） ----------------
+# 前端 API 路径必须「根绝对 + 连续字面量 /api/<id>/…」——本地包由服务器源派生时构建期改写
+# （--api-rewrite）以本纪律为前提；禁用模式（动态拼接/模板插值基址/数组 join/硬编码来源/
+# 跨插件端点）命中即红。与 tools/client/build-local-plugin-package.py 的 Python 侧检查同口径。
+$l13Bad = @()
+$l13Faces = @("tools", "org", "login", "logout", "session")   # 白名单框架面（L-4 现值）
+$l13Banned = @(
+    @{ re = '[''"]/api/[''"]\s*\+';               label = '动态拼接基址（"/api/" + …）' },
+    @{ re = '\+\s*[''"]/api/[''"]';               label = '动态拼接基址（… + "/api/"）' },
+    @{ re = '/api/\$\{';                           label = '模板插值基址（/api/${…}）' },
+    @{ re = '\[\s*[''"]/api';                      label = '数组 join 组装路径' },
+    @{ re = 'https?://[^''"\s`)]*/api/';         label = '硬编码来源（完整 URL）' },
+    @{ re = 'location\.origin[^;\n]*[''"]/api';    label = 'location.origin 拼接 API' }
+)
+$l13Frontend = Join-Path $payloadPlugin "frontend"
+if (Test-Path $l13Frontend) {
+    $l13Files = Get-ChildItem -LiteralPath $l13Frontend -Recurse -File -Include *.js, *.html, *.css
+    foreach ($f in $l13Files) {
+        $rel = Get-RelPath $payloadPlugin $f.FullName
+        $lines = Get-Content -LiteralPath $f.FullName -Encoding UTF8
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            $ln = $lines[$i]
+            foreach ($pat in $l13Banned) {
+                if ($ln -match $pat.re) { $l13Bad += ("{0}:{1} {2}" -f $rel, ($i + 1), $pat.label) }
+            }
+            foreach ($m in [regex]::Matches($ln, "/api/([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])")) {
+                $tok = $m.Groups[1].Value
+                if ($tok -ne $Id -and $l13Faces -notcontains $tok -and $tok -ne "local/$Id") {
+                    $l13Bad += ("{0}:{1} 跨插件端点 /api/{2}（仅允许自身与白名单框架面）" -f $rel, ($i + 1), $tok)
+                }
+            }
+        }
+    }
+}
+if ($l13Bad.Count -gt 0) {
+    $msg = "L-13 前端 API 路径纪律检查未通过（规范 §16.10，$($l13Bad.Count) 处）：`n      " +
+           (($l13Bad | Select-Object -First 20) -join "`n      ")
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
+}
+Say ("  C-13     ：L-13 前端 API 路径纪律（{0} 个前端文件已扫）" -f $l13Files.Count)
+
 # ---------------- 版本与配置模板扫描 ----------------
 # 模板命名/目标映射与 jztools_data._TEMPLATE_SYNC 保持一致：
 #   plugins/<id>/backend/config.template.json → 数据根 plugins/<id>/config.json

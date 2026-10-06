@@ -31,6 +31,9 @@
 | 6 | 流式布局改造——插件层 | 16 插件前端统一响应式 + 出包 | 批次 5 |
 | 7 | 验收与出包 | resize sweep、干净机器部署、样例插件端到端、手册增补 | 批次 4+6 |
 | 8 | 插件商店 S1（O2 落地） | store 插件 + admin 商店管理面 + 客户端安装收口 + 依赖联合安装/出包/Source 抽象 | 设计已拍板（2026-10-05，`docs/design/桌面端插件商店-设计文档.md`）；T-O2-5 槽包部分依赖 O1 触发 |
+| 9 | 存量插件适配——框架增补 + 三类试点 | F1 身份注入 / F2 依赖组件包补齐 / F3 resident 台架 / F4 出包工具增强（L-13 静态检查）/ F5 清单降级合并；试点 base64（B1）+ qr-video-decode（B2）+ file-filter（C） | **设计已定稿（2026-10-06，`docs/design/存量插件三类适配-设计文档.md` Q1–Q7 全拍板）；待排期** |
+| 10 | 存量插件适配——B 类放量 + A 类上架 | B-light 4 个 + B-heavy 2 个（含懒加载改造）；A 类 4 个出包上架（knowledge-base/shared-docs/notice-board/case-report） | 批次 9 试点通过 |
+| 11 | 存量插件适配——C 类收尾 + 全量验收 | trajectory-sketch/character-graph（Q5 过渡口径）+ A 类可选 worker 迁移（Q7 顺序）+ 全量验收（V1–V10） | 批次 10 |
 
 ---
 
@@ -218,11 +221,39 @@
 - **遗留**：venv 建环境（wheel 清单闭包安装，T-O2-12c 后半）；试点插件真机迁移（迁移流程：注册表加单元 → 重启主应用 → 验证反代 → 逐个切）；supervisor 独立安装包真机服务化验收（NSSM 脚本已备）；懒启动（拍板首期不做）。
 - **同日收口（批次 8b 续）**：①venv 建环境全链落地——`venv_mgr.py`（`--system-site-packages` 基线随主包、wheel 绝对路径离线安装、marker 幂等重建）+ apply 自动 venv 化（`deps_mode=venv` 包→建环境→单元切 venv 解释器）+ `validate_venv_node` 上架校验同源复用 + 出包链 `-VenvWheels`；台架 D5 组（6 项：venv apply/单元登记/健康/业务 API/私有依赖 dbgmod 生效/wheel sha 不符拒装旧版照常），**实施修正：wheel tag 校验须按「末三段」解析且分两类放行（cp314*-cp314*-win_amd64 C 扩展 / py3-none-any 纯 Python）——整名匹配与 "none" 一刀切都会误杀（已回写 §4）**。②试点迁移演练 `tools/e2e/worker-migration-demo.py` 8 项全过——真实主应用 + 真实 notice-board（注册表加单元→重启跳过进程内→supervisor 拉起→真实登录→反代访问公告板 API（worker 回环取**真实** admin 身份 dict）→停 worker 该插件 503 而主应用/登录态/工具清单照常）。③`tools/build-supervisor-package.ps1` 分件组装实测通过（supervisor/ + jz_worker.py + 安装脚本 + 注册表模板）。
 
+## 批次 9–11：存量插件适配（设计已定稿；**批次 9 进行中**，2026-10-06 开工）
+
+> 权威设计：`docs/design/存量插件三类适配-设计文档.md`（2026-10-06 定稿，Q1–Q7 全部拍板）。分类 A×6/B-light×5/B-heavy×3/C×3、四条改造模式（M-A/M-B1/M-B2/M-C）、逐插件方案（§3）、框架增补 F1–F6（§2.5）、验收 V1–V10（§5）均以该文为准——本节只登记批次骨架，任务分解随排期展开。后续优化已列 O3–O6。
+
+| 批次 | 任务骨架（任务号排期时分配） | 设计依据 |
+| --- | --- | --- |
+| 9 | F1 身份注入（provider + X-JZ-User）；F2 组件包盘点补齐（qrcode/olefile 等）；F3 resident 台架用例；F4 出包工具增强（-From 派生 / --api-rewrite / L-13 静态检查+服务器出包链扫描）；F5 清单降级合并；试点三类各一：base64（M-B1）+ qr-video-decode（M-B2）+ file-filter（M-C 全套，含服务器增补端点与客户端工件）；试点中目标机复测 worker 内存定值（Q6） | §2.5 / §3.7 / §3.14 / §3.15 / §5 V6/V8/V9 |
+| 10 | B-light 4 个（color-picker/json-formatter/md5-generator/map-marker）+ B-heavy 2 个（info-transfer/trajectory-convert，含懒加载改造）出包上架；A 类 4 个出包上架（knowledge-base/shared-docs/notice-board/case-report）；B-light 双条目并存口径落地（显示名后缀/浏览器降权显示） | §3.3–§3.6 / §3.8–§3.13 / §5 V2/V3/V7 |
+| 11 | C 类收尾：trajectory-sketch、character-graph 拆分（Q5：file-filter 试点已先行，此二者按过渡口径处理）；A 类可选 worker 迁移按 Q7 顺序（knowledge-base → shared-docs → case-report）；全量验收 V1–V10 + 跨批次红线复检 | §3.16–§3.17 / §4 / §5 |
+
+### 批次 9 任务分解（2026-10-06 开工）
+
+| # | 任务 | 内容 | 状态 |
+| --- | --- | --- | --- |
+| T-O9-1 | F4 出包工具增强 | `build-local-plugin-package.py`：`--derive-local`（manifest 变体派生，entry 字符串/对象双形态兼容）、`--api-rewrite`（幂等改写+边界断言）、L-13 静态检查（5 类禁用模式逐行定位+跨插件端点+改写计数核对）、`-FrontendFrom`；sha256 旁挂/登记片段沿用既有。**✅（2026-10-06）**：base64/qr-video-decode 两试点包实测通过（B1 manifest 变体正确、B2 resident/timeout/backend 入口正确、改写 3 处零残留）；负路径 4 类违规全红。**遗留：服务器出包链 C 系同款扫描（`build-plugin-package.ps1`）未做，随 T-O9-8 前补** | ✅（遗留 1 子项） |
+| T-O9-2 | 试点 M-B1：base64 | **出包 ✅**（`deploy/本地插件包/JZClient-本地插件-local-base64-v1.0.1.zip`，3.1KB，零 api 引用） | 出包完成；**装包走查待客户端台架** |
+| T-O9-3 | 试点 M-B2：qr-video-decode | **出包 ✅**（`…local-qr-video-decode-v1.1.5.zip`，resident=true/timeout=600000/entry.backend 正确，改写 3 处零残留，requires=flask+zfec 原样） | 出包完成；**zfec dep-slot 组件包联动待 T-O9-6；装包/任务轮询走查待台架** |
+| T-O9-4 | F1 身份注入 | capability_app：镜像钩子（更新/清除→身份失效）+ /api/session 惰性缓存（TTL 300s）+ 派发链 X-JZ-User 头 + jz_api.register_providers（hybrid）；根 jz_api（同源内核，GD8）get_session_user 增无 provider 时请求上下文读头兜底（懒 import flask，服务器 provider 路径不变）。**✅（2026-10-06）台架 `tools/e2e/identity-inject-tests.py` 10/10**：匿名/登录双链（provider+头）/登出清空/provider 优先 | ✅ |
+| T-O9-5 | F5 清单降级合并 | api_tools_merged 两处 502 兜底 → `_local_only_tools_response`（200 仅本地条目 + degraded 标记 + 仅本地分类，停用过滤照旧）。**✅（2026-10-06）台架 5a–5e**：死端口 200/仅本地出格/本地元数据可取/停用隐藏。main.js **无需改动**（200 走正常渲染路径，site 字段显式判空） | ✅ |
+| T-O9-6 | F2 依赖组件包盘点 | **✅（2026-10-06）盘点结论：零缺项**——B/C 插件 requires 全集（cv2/numpy/zfec/zxingcpp/qrcode/olefile/openpyxl/xlrd/docx/pypdf/requests）在 `deploy/依赖组件/` 全部有组件包且版本满足各插件下限；flask 走客户端运行时判定。**盘点抓出真缺口并修复**：客户端包内无 installed-deps.json → B-heavy 的 flask（required:true）三态判定误报缺失——build-client.py 接入同源 `gen-installed-deps.py --internal <客户端 _internal>`（产物落 kernel/config/，服务器 spec 白名单警告按「产物可解析」判据兼容），**现有 dist 已补生成 + evaluate 探针验证 flask→ok(3.1.3)、zfec 未装组件时正确 degraded**。偏差记录：客户端 _internal 无 requests/waitress dist-info（客户端工件 requires 不含 requests，无影响） | ✅ |
+| T-O9-7 | F3 resident 台架用例 | **✅（2026-10-06）台架 `tools/e2e/resident-tests.py` 9/9**：resident 状态跨请求存活+同进程复用 / 非 resident 每请求新进程 / 超时 504+击杀后恢复 / 崩溃 502+自动拉起（状态重置）/ 查询串透传。**顺带修两处真缺陷**：①本地派发丢查询串（worker_path 只取 request.path，file-filter 前端 `mappings?limit=` 在用）→ 补 query_string 透传；②executor 崩溃后常驻表不弹出——Windows 下子进程句柄状态滞后（管道 EOF 先到、poll() 迟报退出码），死进程被复用连环 502 → 崩溃路径对齐超时路径同步弹出。**台架隔离坑**：local_state 经 client_config 落真实用户目录（load_client_config 不吃 data_dir 参数）跨运行残留——两台架已用官方 `JZCLIENT_DATA_DIR` 覆盖口隔离，误写目录已清 | ✅ |
+| T-O9-8 | 试点 M-C：file-filter 全套 | **阶段 1+2 ✅（2026-10-06）**：①前置 PS1 侧 L-13 扫描落地（build-plugin-package.ps1 新增 C-13 段，单引号 PS 串规避转义坍缩，桩验证 4/4 违规全红+base64/file-filter 真插件过；**教训：ps1 中文必须 UTF-8 BOM（批次 8b 已知）+ 双引号串内正则字符类转义不可靠**）；②服务器工件两端点已入 routes.py 并冒烟过——`POST /mappings/lookup`（批量查表 confirmed/suggested/remap，键归一化全在服务器）、`POST /llm/match-columns`（无状态 LLM 匹配+record_suggestions 落库+valid_targets/is_rejected 预过滤，Key 不出服务器）。**阶段 3 ✅（出包完成）**：客户端工件落地——`client-plugins/local-file-filter/`（manifest hybrid/mount/server_data=true/requires 仅 openpyxl+xlrd；backend=core+bg_image 同源副本 + **三个 relay 垫片**（llm_gateway=jz_llm 网关/mapping_store=查表垫片/llm_client=匹配垫片）+ routes.py 适配拷贝（adapt-ff-client.py 补丁：load_config/save_config→own 代理、10 个 mappings 管理端点→_passthrough 透明转发、过滤流本地化））；出包 `-FrontendFrom`+`--api-rewrite`（4 处改写零残留）。**顺带修真约定偏差**：entry.backend 按 pkg_install 六连口径应为**末段文件名**（routes.py）而非 GLM 草图的 backend/routes.py——工具推导/校验、file-filter manifest、两台架假插件已同步修正，qr-video-decode 包已重出。**待办**：混合装包冒烟台架（本地 status/config + 透传 + 过滤流离线降级）、双工件上架 | **阶段 4 ✅（2026-10-06）冒烟台架 `tools/e2e/file-filter-c-tests.py` 11/11**：本地 status/config（own 代理）+ mappings 透传 + 过滤全链（confirmed 档 relay 查表命中/exact 本地/LLM 建议删除）+ **敏感数据零出机**（stub 全量请求体无单元内容，V5 取证）+ **离线降级**（mode=llm 任务内 LLM 段失败 → 自动回退 hard 重跑并明示 degraded 原因）。**顺带修两处框架真缺陷**：①jz_relay.request 硬编码 timeout 不许覆盖 → kw.pop 缺省；②**jz_plugin_host 热升级缓存缺陷**——load_backend_module 的子模块 import_module 命中 sys.modules 旧缓存，升级后跑旧代码 → 装载前清同名父/子模块。**批次 9 台架全绿（15/15+9/9+11/11）**；包已按降级修复重出。剩：三试点双工件上架（admin 商店管理面操作）+ 真机装包走查 → T-O9-9 验收销项 | 台架全绿；剩上架与真机项 |
+| T-O9-9 | 批次 9 验收 | 试点三件按 V2/V4/V6/V8/V9 抽验 + 台架回归 + 回写实施记录 | 待办 |
+
+**跨批次纪律**：既有红线 1–6 全部适用（红线 2 为过渡期口径，退役规划见 O6）；适配设计文档 §5 V1–V10 为批次验收真源；F1–F5 先于一切插件适配（F4 是 B 类唯一卡点，F1 是 B-heavy 任务归属与 C 类会话取数前置）。
+
+---
+
 ## 门控关系（未决 GD → 批次）
 
 | 门控 | 影响任务 | 说明 |
 | --- | --- | --- |
-| 批次 0 出口 | 全部 | **T01 已通过（2026-10-03）→ GD1 定案 pywebview**；**GD1–GD8 全部拍板（GD6 维持本期不做），待拍板清单清零，批次 1 解锁**；剩余到点评审项：jz_relay 白名单（已定机械提取口径，T17 产出核对）、本地插件索引路径（T21 前）、断点数值（批次 5 前） |
+| 批次 0 出口 | 全部 | **T01 已通过（2026-10-03）→ GD1 定案 pywebview**；**GD1–GD8 全部拍板（GD6 维持本期不做），待拍板清单清零，批次 1 解锁**；~~剩余到点评审项~~ **全部闭合**：jz_relay 白名单（T17 机械提取落盘 relay_whitelist.json）、本地插件索引路径（T21 定 local-plugins/）、断点数值（批次 5 定 480/767/1023/1440） |
 | GD8（已拍板 2026-10-03） | T06/T07 | 同源内核、双 spec 出包；三档落地口径见方案 §7.3；内核改动双端回归（红线 4） |
 | GD4（已拍板 2026-10-03） | T20 | 源码子进程为主力+执行器保留；exe 例外；常驻 worker 按 manifest 声明；依赖版本槽已列后续优化 O1 |
 | GD7（已拍板 2026-10-03） | T21 | A+C：管理页装包+共享盘索引检查更新；文件关联不做；插件商店适配四接缝随 T21 预留（方案 §6.8） |
@@ -241,4 +272,8 @@
 | # | 方向 | 评估结论（设计存档见方案 §6.6） | 触发条件 |
 | --- | --- | --- | --- |
 | O1 | 依赖多版本共存（版本化槽） | 机制成立：`runtime/pylibs/<name>__<version>/` 共享槽+版本槽并存，解析顺序共享→版本化→缺；plugin_host 按插件拼 `sys.path`（只影响本插件子进程，原生 DLL 跨进程无冲突，同版本多插件去重共用）；**硬边界=旧版本须有客户端运行时 Python 的 wheel（cp314）**，否则走 exe 例外通道或插件升版；类 C 进程内不能双版本→灰显或一键降格子进程（同源码零迁移）。**本期版本不符=三态判定提示，不做槽**。深化设计已备：`docs/design/桌面端依赖版本槽-设计文档.md`（2026-10-04，槽挂 `pylibs/.slots/` 内核零改动 + 执行器注入 + 类 C 降格 + cp314 边界，待拍板） | 出现真实的「插件钉旧版依赖」需求且共享槽无法满足时重评（GD4 复议） |
-| O2 | **插件商店（已立项，下一步）** | 平台化插件**上架/分发/下载/安装更新**，升级 GD7 的 C 通道（共享盘索引→商店目录）。**客户端侧四接缝已随批次 4 T21 预留**：索引 schema 与商店目录同构、更新源可配置（`plugin_source`）、安装收口 `install(pkg_source)` 单入口、`runtime` 类别中立字段（方案 §6.8）；包格式与 `plugin-packages.json` 同构，上架即原包。**服务端形态已另立设计文档并定稿（v2.1，2026-10-05 需求方拍板：六条需求 + ⑦全生命周期同权）**：`docs/design/桌面端插件商店-设计文档.md`——商店=**主包第二核心插件**（随包、独立完整用例）、admin 后台管理上架/下架/审核/统计、`数据根\store\` 数据契约解耦（admin 写/store 读/统计反向）、客户端经中继浏览+`/local-api/store/install` 拉包安装；商店页为生命周期主入口（下载/安装/升级/卸载/停用——停用只停包留本地），全部操作不区分管理员/办事员；**v2.2 需求⑧：server 插件双包模型**（后端包发布即自动部署服务器、前端包可装客户端本地直出+API 经中继、未装回退中继直出）。**已拍板定稿（2026-10-05，拍板记录见设计文档 §1.3），批次 8 排入本清单** | ~~商店阶段启动设计时~~ **T-O2-0~10 已落地（2026-10-05，见批次 8 实施记录）；T-O2-11/12（supervisor/worker 运行架构）待单开** |
+| O2 | **插件商店（已立项，下一步）** | 平台化插件**上架/分发/下载/安装更新**，升级 GD7 的 C 通道（共享盘索引→商店目录）。**客户端侧四接缝已随批次 4 T21 预留**：索引 schema 与商店目录同构、更新源可配置（`plugin_source`）、安装收口 `install(pkg_source)` 单入口、`runtime` 类别中立字段（方案 §6.8）；包格式与 `plugin-packages.json` 同构，上架即原包。**服务端形态已另立设计文档并定稿（v2.1，2026-10-05 需求方拍板：六条需求 + ⑦全生命周期同权）**：`docs/design/桌面端插件商店-设计文档.md`——商店=**主包第二核心插件**（随包、独立完整用例）、admin 后台管理上架/下架/审核/统计、`数据根\store\` 数据契约解耦（admin 写/store 读/统计反向）、客户端经中继浏览+`/local-api/store/install` 拉包安装；商店页为生命周期主入口（下载/安装/升级/卸载/停用——停用只停包留本地），全部操作不区分管理员/办事员；**v2.2 需求⑧：server 插件双包模型**（后端包发布即自动部署服务器、前端包可装客户端本地直出+API 经中继、未装回退中继直出）。**已拍板定稿（2026-10-05，拍板记录见设计文档 §1.3），批次 8 排入本清单** | ~~商店阶段启动设计时~~ **全部落地：T-O2-0~10（批次 8，2026-10-05）+ T-O2-11/12 supervisor/worker/venv（批次 8b，2026-10-06，见批次 8 实施记录）；剩真机项（NSSM 服务化验收/逐插件切换/主包 smoke 出包门）** |
+| O3 | **B-heavy worker 内存优化：懒加载 + idle 回收**（Q6 已拍板，2026-10-06；评估与实测留痕 → `docs/design/存量插件三类适配-设计文档.md` Q6） | 两段组合：①**懒加载**随各插件 M-B2 适配实施——info-transfer/trajectory-convert 的 `import cv2` 后移至首个视频类任务（可用性旗标改由 jz_deps 判定数据源取），空闲 worker 驻留回 ~30MB 轻量态；②**idle 回收=框架增补 F6**——`plugin_executor` 空闲计时收割（manifest 可选 `idle_ttl`，缺省不回收）+ 前置=三插件任务态外置（内存 TASKS → `.task_cache`，含 qr-video-decode 30min TTL 迁移）。组合后稳态=轻量骨架常驻、重依赖只在干活窗口驻留；代价=空闲后首任务秒级冷启动。实测基线（开发机）：单 worker 工作集 47MB/提交 259MB、两 worker 并发物理增量 73MB；**试点时目标机复测定值**。依赖共用备选（共进程/子解释器/共享内存/依赖服务插件）已全部评估否决，留痕同 Q6 | 懒加载：随存量插件适配批次实施；idle 回收：适配批次完成后排期，与运行架构懒启动语义对齐后动工 |
+| O4 | **C 类拆分收尾（先 A 后 C 过渡）**（Q5 已拍板，2026-10-06） | file-filter/trajectory-sketch 先以 M-A 形态上架开张（零迁移），双包拆分随存量插件适配收尾批次实施（file-filter=C 类样板先行，端点拆分与客户端工件设计见适配设计文档 §3.15–§3.16）；**character-graph 维持 A 直至出现明确离线/本地化需求**（全文≈原文档信息量、离线无图谱，拆分收益低） | file-filter/trajectory-sketch：适配收尾批次；character-graph：出现明确离线/本地化需求时重评 |
+| O5 | **A 类 worker 迁移排序**（Q7 已拍板，2026-10-06；与商店上架正交） | E 架构逐插件真机切换顺序=knowledge-base 优先（Office 预览渲染 CPU 段，隔离收益最大）→ shared-docs → case-report；notice-board 已完成试点（批次 8b）。属运行架构真机项，随各插件上架后执行 | 逐插件真机切换时（运行架构文档遗留真机项） |
+| O6 | **浏览器端退役规划**（Q3 已拍板方向，2026-10-06；非本期实施） | 用户面终态=仅桌面客户端。过渡期红线 2/3、条目并存、服务器版全保留照旧；退役时：B-light 服务器条目下架（只上本地条目成终态）、A 类「安装前端包」从可选变必选（中继直出兜底退化）、C 类客户端工件成唯一 UI 载体、登录页/admin 管理面等纯服务器 UI 去向属专项范围、红线 2 修订。终态影响表 → 适配设计文档 §6.1 | 桌面端部署渗透率达标（全覆盖且稳定运行）后立项专项设计 |

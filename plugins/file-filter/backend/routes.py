@@ -1196,3 +1196,89 @@ def register(app):
             "replace_count": result["replace_count"],
             "mode": mode,
         })
+
+    # ---------------- 存量插件适配（C 类客户端工件，批次 9 T-O9-8） ----------------
+    # 本地过滤引擎（client-plugins/local-file-filter，kind=hybrid）经 jz_relay.own() 调用
+    # 以下端点；浏览器路径不使用它们（零感知）。单一写方纪律不变：映射库/配置的写仍在
+    # 服务器；本组端点是"查表 + 无状态建议"的正规出口（own 命名空间，跨插件仍不可达）。
+
+    @app.post(f"{API_PREFIX}/mappings/lookup")
+    def ff_mappings_lookup():
+        """批量查表：{headers: [...], valid_keep?: [保留字段原文], include_suggested?: bool,
+        tiers?: "all"|"confirmed"|"suggested", remap?: bool}
+        → {mappings: {表头: {key,target,status,sample} | null}}。
+
+        供本地过滤引擎逐表头查 confirmed/suggested 档与待重映射队列；键归一化
+        （norm_key/compact_key）与命中歧义消解全部在服务器侧执行，客户端零重复实现。
+        remap=true 时返回 lookup_remap 队列项（或 null）。"""
+        data = request.get_json(silent=True) or {}
+        headers = data.get("headers")
+        if not isinstance(headers, list) or not headers:
+            return jsonify({"error": "headers 需为非空数组"}), 400
+        headers = [str(h)[:mapping_store.MAX_KEY_LEN] for h in headers[:500]]
+        keep = data.get("valid_keep") or []
+        keep_fold = {}
+        for k in keep:
+            kc = core.clean_text(str(k))
+            if kc:
+                keep_fold.setdefault(kc.casefold(), kc)
+        valid_targets = set(keep_fold)
+        include_suggested = bool(data.get("include_suggested", True))
+        tiers = str(data.get("tiers") or "all")
+        out = {}
+        if data.get("remap"):
+            for h in headers:
+                out[h] = MAPPINGS.lookup_remap(h)
+        else:
+            for h in headers:
+                out[h] = MAPPINGS.lookup(h, valid_targets,
+                                         include_suggested=include_suggested, tiers=tiers)
+        _set_operation("映射库批量查表")
+        return jsonify({"mappings": out})
+
+    @app.post(f"{API_PREFIX}/llm/match-columns")
+    def ff_llm_match_columns():
+        """无状态 LLM 匹配 + 建议落库：{headers: [...], keep_columns: [...],
+        samples?: {表头: [样本值]}} → {matches: {表头: 匹配字段 or ""}, model: str}。
+
+        语义与 run_filter 的 mode=llm 内联段一致：match_columns → record_suggestions →
+        bump_stats（单一写方不变，建议级仍需用户确认）；返回前已按 valid_targets 与
+        is_rejected 过滤（名单外/被否决对直接清空），客户端拿到即用、无需再查否决表。
+        大模型接入信息经 jz_llm 请求线程内解析，Key 不出服务器。"""
+        data = request.get_json(silent=True) or {}
+        headers = data.get("headers")
+        keep = data.get("keep_columns")
+        if not isinstance(headers, list) or not headers or not isinstance(keep, list):
+            return jsonify({"error": "headers/keep_columns 需为非空数组"}), 400
+        headers = [str(h)[:mapping_store.MAX_KEY_LEN] for h in headers[:500]]
+        keep_fold = {}
+        for k in keep:
+            kc = core.clean_text(str(k))
+            if kc:
+                keep_fold.setdefault(kc.casefold(), kc)
+        valid_targets = set(keep_fold)
+        session = jz_llm.resolve(PLUGIN_ID)
+        if not session.configured():
+            return jsonify({"error": session.reason or "尚未配置大模型",
+                            "llm_configured": False}), 409
+        samples = data.get("samples") if isinstance(data.get("samples"), dict) else None
+        try:
+            mappings = llm_client.match_columns(headers, keep, session=session, samples=samples)
+        except llm_client.LLMError as e:
+            return jsonify({"error": f"大模型匹配失败：{e}"}), 502
+        model = (getattr(session, "provider", {}) or {}).get("model")             if session is not None else ""
+        user = _viewer()
+        MAPPINGS.record_suggestions(headers, mappings, valid_targets, model=model,
+                                    prompt_ver=llm_client.PROMPT_VER,
+                                    user=(user or {}).get("username") or "",
+                                    limit=_mapping_limit())
+        MAPPINGS.bump_stats(llm_calls=1, misses=len(headers))
+        matches = {}
+        for h in headers:
+            m = str(mappings.get(h) or "").strip()
+            if m and (core.clean_text(m).casefold() not in valid_targets
+                      or MAPPINGS.is_rejected(h, m)):
+                m = ""  # 名单外按未匹配；被否决的对不回锅（与 run_filter 内联段同口径）
+            matches[h] = m
+        _set_operation("大模型字段匹配（本地引擎）")
+        return jsonify({"matches": matches, "model": model, "llm_configured": True})
