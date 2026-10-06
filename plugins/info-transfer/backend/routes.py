@@ -114,19 +114,43 @@ except Exception:  # pragma: no cover
     zfec = None
     ZFEC_AVAILABLE = False
 
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except Exception:  # pragma: no cover
-    cv2 = None
-    CV2_AVAILABLE = False
+CV2_AVAILABLE = "lazy"   # 懒加载哨兵（**真值**：jz_deps 刷新器只探测 falsy 旗标，真值哨兵躲过请求期探测）
+cv2 = None
 
-try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except Exception:  # pragma: no cover
-    np = None
-    NUMPY_AVAILABLE = False
+
+def _load_cv2():
+    """首次进入视频/二维码路径时装载 cv2；成功写全局，失败仅置不可用。
+
+    判据用 `cv2 is None or CV2_AVAILABLE is None` 而非只看旗标：jz_deps 刷新器
+    可能单写旗标为 True（组件装好后），此时仍需真实 import 填充模块对象。
+    """
+    global cv2, CV2_AVAILABLE
+    if cv2 is None or CV2_AVAILABLE == "lazy":
+        try:
+            import cv2 as _cv2
+            cv2 = _cv2
+            CV2_AVAILABLE = True
+        except Exception:  # pragma: no cover
+            cv2 = None
+            CV2_AVAILABLE = False
+    return CV2_AVAILABLE
+
+NUMPY_AVAILABLE = "lazy"   # 懒加载哨兵（同上）
+np = None
+
+
+def _load_numpy():
+    """同 _load_cv2：numpy 惰性装载。"""
+    global np, NUMPY_AVAILABLE
+    if np is None or NUMPY_AVAILABLE == "lazy":
+        try:
+            import numpy as _np
+            np = _np
+            NUMPY_AVAILABLE = True
+        except Exception:  # pragma: no cover
+            np = None
+            NUMPY_AVAILABLE = False
+    return NUMPY_AVAILABLE
 
 try:
     import zxingcpp
@@ -1517,6 +1541,8 @@ def _qrformat_encode(share_list, k, m):
 
 
 def _open_video_writer(out_path, size):
+    _load_cv2()
+    _load_numpy()
     """依次尝试编码器候选，返回 (writer, fourcc)；全部失败抛 RuntimeError。"""
     for fourcc in VIDEO_FOURCC_CANDIDATES:
         writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc),
@@ -1532,6 +1558,8 @@ def _open_video_writer(out_path, size):
 
 def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat=1,
                     frames_dir=None, cancel_check=None):
+    _load_cv2()
+    _load_numpy()
     """把字节数据按 QR-transfer 编码为二维码帧序列 / 视频文件。返回 (nframes, k, m)。
 
     out_path：mp4 输出路径；为 None 时**不编码视频**，只把每张二维码 PNG 落盘到
@@ -1613,6 +1641,8 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
 
 def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
                             progress_cb=None, cancel_check=None):
+    _load_cv2()
+    _load_numpy()
     """把已落盘的帧 PNG 序列编码为 mp4（按需生成视频文件用），返回写入的帧数。
 
     与 encode_to_video 的视频口径逐项一致（同帧图、同重复帧数、同帧率与编码器），
@@ -1663,6 +1693,8 @@ def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
 
 
 def _cv2_can_decode(png_bytes, expected=None):
+    _load_cv2()
+    _load_numpy()
     """用 cv2 验证 PNG 字节中的二维码能否被解码（cv2 对个别 mask 有解码缺陷）。
 
     expected 给定时升级为「逐字节比对」：能读出 ≠ 读对（cv2 实测对满容量
@@ -1697,6 +1729,8 @@ def _cv2_can_decode(png_bytes, expected=None):
 
 
 def _zxing_can_decode(png_bytes, expected=None):
+    _load_cv2()
+    _load_numpy()
     """用 zxing-cpp 验证 PNG 中的二维码可解码（返回原始 bytes，二进制载荷无损）。
 
     v2 JZ2 二进制载荷在 cv2 下无法可靠解码（detectAndDecode 输出 str 会破坏
@@ -1721,6 +1755,8 @@ def _zxing_can_decode(png_bytes, expected=None):
 
 
 def _render_verified_qr(data_bytes, version, err, out_path):
+    _load_cv2()
+    _load_numpy()
     """渲染静态二维码并保证桌面解码器可解码：默认 mask 验证失败时逐个换 mask 重试。
 
     OpenCV 的 QRCodeDetector 对个别 mask 图案（如 mask 0/2）的特定数据存在
@@ -1952,6 +1988,8 @@ def _decode_multi(detector, img):
 
 
 def decode_image_file(file_bytes):
+    _load_cv2()
+    _load_numpy()
     """从 PNG/JPG 图片字节中解码二维码，返回内容字节列表（多码图取全部）。
 
     优先 zxing-cpp（返回原始 bytes，v2 二进制载荷无损）；不可用时回退 cv2
@@ -1981,6 +2019,8 @@ def decode_image_file(file_bytes):
 
 
 def decode_video_frames(video_path, progress_cb=None):
+    _load_cv2()
+    _load_numpy()
     """从二维码视频文件逐帧解码，返回内容字节列表（去重保序）。
 
     优先 zxing-cpp（v2 二进制载荷无损）；不可用时回退 cv2（仅 v1 文本可靠）。
@@ -2540,7 +2580,7 @@ def register(app) -> None:
             filename, file_bytes = None, None
         else:
             return jsonify({"ok": False, "detail": "请输入文字或选择文件"}), 400
-        if mode == "video" and not (ZFEC_AVAILABLE and CV2_AVAILABLE and NUMPY_AVAILABLE):
+        if mode == "video" and not (ZFEC_AVAILABLE and _load_cv2() and _load_numpy()):
             return jsonify({"ok": False, "detail": "后端缺少视频编码依赖（zfec / opencv-python / numpy）"}), 503
 
         task_id = uuid.uuid4().hex[:12]

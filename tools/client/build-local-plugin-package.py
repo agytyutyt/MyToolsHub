@@ -117,19 +117,25 @@ def l13_check(frontend_dir, base_id):
         except OSError as exc:
             errors.append("%s: 不可读（%s）" % (rel, exc))
             continue
-        for pat, label in banned:
-            m = re.search(pat, text)
-            if m:
-                line = text[:m.start()].count("\n") + 1
-                errors.append("%s:%d L-13 禁用模式：%s" % (rel, line, label))
+        # 注释剥离：L-13 管的是代码字面量——文档注释里提历史路径（如解耦迁移说明）不算违规
+        text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+        lines = text.splitlines()
+        for li, ln in enumerate(lines, 1):
+            if ln.lstrip().startswith(("//", "*", "<!--")):
+                continue                       # 整行注释不参与判定（块注释已剥）
+            for pat, label in banned:
+                if re.search(pat, ln):
+                    errors.append("%s:%d L-13 禁用模式：%s" % (rel, li, label))
         refs += len(own.findall(text))
-        for m in other.finditer(text):
-            token = m.group(1)
-            if token != base_id and token not in FRAMEWORK_FACES \
-                    and token != "local/%s" % base_id:
-                line = text[:m.start()].count("\n") + 1
-                errors.append("%s:%d L-13 跨插件端点：/api/%s（仅允许自身 api/%s 与白名单框架面）"
-                              % (rel, line, token, base_id))
+        for li, ln in enumerate(lines, 1):
+            if ln.lstrip().startswith(("//", "*", "<!--")):
+                continue
+            for m in other.finditer(ln):
+                token = m.group(1)
+                if token != base_id and token not in FRAMEWORK_FACES \
+                        and token != "local/%s" % base_id:
+                    errors.append("%s:%d L-13 跨插件端点：/api/%s（仅允许自身 api/%s 与白名单框架面）"
+                                  % (rel, li, token, base_id))
     return errors, refs
 
 

@@ -545,8 +545,17 @@ if (Test-Path $l13Frontend) {
     foreach ($f in $l13Files) {
         $rel = Get-RelPath $payloadPlugin $f.FullName
         $lines = Get-Content -LiteralPath $f.FullName -Encoding UTF8
+        $l13InBlock = $false
         for ($i = 0; $i -lt $lines.Count; $i++) {
             $ln = $lines[$i]
+            $t = $ln.TrimStart()
+            # 注释剥离：L-13 管代码字面量；文档注释提历史路径（如解耦迁移说明）不算违规
+            if ($l13InBlock) { if ($ln -match "\*/") { $l13InBlock = $false }; continue }
+            if ($t.StartsWith("/*")) {
+                if ($ln -notmatch "\*/\s*\S") { $l13InBlock = $true }
+                continue
+            }
+            if ($t.StartsWith("//") -or $t.StartsWith("*") -or $t.StartsWith("<!--")) { continue }
             foreach ($pat in $l13Banned) {
                 if ($ln -match $pat.re) { $l13Bad += ("{0}:{1} {2}" -f $rel, ($i + 1), $pat.label) }
             }

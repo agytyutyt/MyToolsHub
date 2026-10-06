@@ -97,19 +97,43 @@ except Exception:  # pragma: no cover
     zfec = None
     ZFEC_AVAILABLE = False
 
-try:
-    import cv2
-    CV2_AVAILABLE = True
-except Exception:  # pragma: no cover
-    cv2 = None
-    CV2_AVAILABLE = False
+CV2_AVAILABLE = "lazy"   # 懒加载哨兵（**真值**：jz_deps 刷新器只探测 falsy 旗标，真值哨兵躲过请求期探测）
+cv2 = None
 
-try:
-    import numpy as np
-    NUMPY_AVAILABLE = True
-except Exception:  # pragma: no cover
-    np = None
-    NUMPY_AVAILABLE = False
+
+def _load_cv2():
+    """首次进入视频/二维码路径时装载 cv2；成功写全局，失败仅置不可用。
+
+    判据用 `cv2 is None or CV2_AVAILABLE is None` 而非只看旗标：jz_deps 刷新器
+    可能单写旗标为 True（组件装好后），此时仍需真实 import 填充模块对象。
+    """
+    global cv2, CV2_AVAILABLE
+    if cv2 is None or CV2_AVAILABLE == "lazy":
+        try:
+            import cv2 as _cv2
+            cv2 = _cv2
+            CV2_AVAILABLE = True
+        except Exception:  # pragma: no cover
+            cv2 = None
+            CV2_AVAILABLE = False
+    return CV2_AVAILABLE
+
+NUMPY_AVAILABLE = "lazy"   # 懒加载哨兵（同上）
+np = None
+
+
+def _load_numpy():
+    """同 _load_cv2：numpy 惰性装载。"""
+    global np, NUMPY_AVAILABLE
+    if np is None or NUMPY_AVAILABLE == "lazy":
+        try:
+            import numpy as _np
+            np = _np
+            NUMPY_AVAILABLE = True
+        except Exception:  # pragma: no cover
+            np = None
+            NUMPY_AVAILABLE = False
+    return NUMPY_AVAILABLE
 
 try:
     import xlrd
@@ -543,12 +567,14 @@ def _qrformat_encode(share_list, k, m):
 
 
 def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
+    _load_cv2()
+    _load_numpy()
     """把字节数据按 QR-transfer 编码为二维码视频文件。返回 (nframes, k, m)。"""
-    if not (QRCODE_AVAILABLE and ZFEC_AVAILABLE and CV2_AVAILABLE and NUMPY_AVAILABLE):
+    if not (QRCODE_AVAILABLE and ZFEC_AVAILABLE and _load_cv2() and _load_numpy()):
         missing = [
             name for name, ok in (
                 ("qrcode", QRCODE_AVAILABLE), ("zfec", ZFEC_AVAILABLE),
-                ("opencv-python(cv2)", CV2_AVAILABLE), ("numpy", NUMPY_AVAILABLE),
+                ("opencv-python(cv2)", CV2_AVAILABLE is True), ("numpy", NUMPY_AVAILABLE is True),
             ) if not ok
         ]
         raise RuntimeError("后端缺少依赖：" + "、".join(missing) +
@@ -583,6 +609,8 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
 
 
 def _open_video_writer(out_path, size):
+    _load_cv2()
+    _load_numpy()
     """依次尝试编码器候选，返回已打开的 writer；全部失败抛 RuntimeError（可读提示）。"""
     for fourcc in VIDEO_FOURCC_CANDIDATES:
         writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc),
@@ -746,6 +774,21 @@ def _run_convert(task_id, filename, file_bytes, interval_minutes, qr_version, cf
 
 # ===================== 路由注册 =====================
 
+
+def _dep_available(import_name, loaded_flag):
+    """懒加载配套旗标：已装载=实际可用；未装载时读 jz_deps 判定（不触发 import）。"""
+    if loaded_flag is not None and loaded_flag != "lazy":
+        return bool(loaded_flag)
+    try:
+        verdict = jz_deps.evaluate(PLUGIN_ID, "", {"requires": {"python_packages": [
+            {"name": import_name, "version": "", "required": False}]}}, app_version=None)
+        for d in verdict.get("detail") or []:
+            if d.get("name") == import_name:
+                return d.get("state") == "ok"
+    except Exception:
+        pass
+    return False
+
 def register(app) -> None:
     """插件入口：由 JZToolsHub 主应用在启动时调用。"""
     # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
@@ -765,8 +808,8 @@ def register(app) -> None:
             "xlrd": XLRD_AVAILABLE,
             "qrcode": QRCODE_AVAILABLE,
             "zfec": ZFEC_AVAILABLE,
-            "cv2": CV2_AVAILABLE,
-            "numpy": NUMPY_AVAILABLE,
+            "cv2": _dep_available("cv2", CV2_AVAILABLE),
+            "numpy": _dep_available("numpy", NUMPY_AVAILABLE),
         })
 
     @app.post(f"{API_PREFIX}/convert")
