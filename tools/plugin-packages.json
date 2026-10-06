@@ -99,25 +99,6 @@
                                                                            }
                                               }
                                },
-                     "base64":  {
-                                    "version":  "1.0.1",
-                                    "api_version":  1,
-                                    "file":  "JZToolsHub-插件-base64-v1.0.1.zip",
-                                    "sha256":  "49be6b71c91f9cba4d1c77d4283e56fc5b54548618cc4213ba18b1dac58b4e0b",
-                                    "size":  25693,
-                                    "built_at":  "2026-10-04T10:09:19+08:00",
-                                    "code_sha256":  "1ff602cc20ec2270d1fbe5b394e30350c9b5f329f8ff6b241c9077afaf526bf4",
-                                    "file_count":  3,
-                                    "requires_restart":  false,
-                                    "file_hashes":  {
-                                                        "plugins/base64/frontend/index.html":  "9aac4441a1c7fbea",
-                                                        "plugins/base64/manifest.json":  "557e42fb2654096d",
-                                                        "plugins/base64/README.md":  "291005a306d54bfb"
-                                                    },
-                                    "assets":  {
-
-                                               }
-                                },
                      "color-picker":  {
                                           "version":  "1.0.1",
                                           "api_version":  1,
@@ -650,48 +631,6 @@
                                                                                }
                                                     }
                                      },
-                     "file-filter":  {
-                                         "version":  "1.5.1",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-插件-file-filter-v1.5.1.zip",
-                                         "sha256":  "266140b69cd4c90997f1e645cf7888b6f11eb2fd6b410acb362bee619ea53735",
-                                         "size":  102839,
-                                         "built_at":  "2026-10-04T10:10:11+08:00",
-                                         "code_sha256":  "1a6c16a2df9754374bb179023e0a18b276bc8a25cc09ead3e3bb7adb3b88b184",
-                                         "file_count":  17,
-                                         "requires_restart":  false,
-                                         "file_hashes":  {
-                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
-                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
-                                                             "plugins/file-filter/backend/config.template.json":  "680664cd3733de4f",
-                                                             "plugins/file-filter/backend/core.py":  "85428560fd387c56",
-                                                             "plugins/file-filter/backend/llm_client.py":  "7128463c4687e665",
-                                                             "plugins/file-filter/backend/mapping_store.py":  "b3fb56a5b6f61f7b",
-                                                             "plugins/file-filter/backend/requirements.txt":  "a3aa74f8009365c1",
-                                                             "plugins/file-filter/backend/routes.py":  "cb9229f754431be6",
-                                                             "plugins/file-filter/frontend/.pytest_cache/.gitignore":  "ae07caff09568018",
-                                                             "plugins/file-filter/frontend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
-                                                             "plugins/file-filter/frontend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
-                                                             "plugins/file-filter/frontend/.pytest_cache/v/cache/nodeids":  "d751713988987e93",
-                                                             "plugins/file-filter/frontend/app.js":  "7ce38b708142adfb",
-                                                             "plugins/file-filter/frontend/index.html":  "549b86e2b451c01e",
-                                                             "plugins/file-filter/frontend/style.css":  "56dde377e540fa4c",
-                                                             "plugins/file-filter/manifest.json":  "2050f5edfec31171",
-                                                             "plugins/file-filter/README.md":  "c38dd3a24acc23ba"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "7ce38b708142adfb",
-                                                                                "v":  7,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "56dde377e540fa4c",
-                                                                                   "v":  9,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    }
-                                     },
                      "notice-board":  {
                                           "version":  "1.0.5",
                                           "api_version":  1,
@@ -724,6 +663,73 @@
                                                                                     "referenced":  true
                                                                                 }
                                                      }
-                                      }
+                                      },
+                     "file-filter":  {
+                                         "version":  "1.6.0",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-插件-file-filter-v1.6.0.zip",
+                                         "sha256":  "5418e2d98b28a899d16763d98208581f98689df3276f58d42c49afcd5c18fa67",
+                                         "size":  104231,
+                                         "built_at":  "2026-10-06T21:28:13+08:00",
+                                         "code_sha256":  "819bf6059591ebf52608bdf4e07653d7b68db707bbe28e4ca922af704200a284",
+                                         "file_count":  17,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
+                                                             "plugins/file-filter/backend/config.template.json":  "680664cd3733de4f",
+                                                             "plugins/file-filter/backend/core.py":  "85428560fd387c56",
+                                                             "plugins/file-filter/backend/llm_client.py":  "7128463c4687e665",
+                                                             "plugins/file-filter/backend/mapping_store.py":  "b3fb56a5b6f61f7b",
+                                                             "plugins/file-filter/backend/requirements.txt":  "a3aa74f8009365c1",
+                                                             "plugins/file-filter/backend/routes.py":  "953948bd549202f0",
+                                                             "plugins/file-filter/frontend/.pytest_cache/.gitignore":  "ae07caff09568018",
+                                                             "plugins/file-filter/frontend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
+                                                             "plugins/file-filter/frontend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
+                                                             "plugins/file-filter/frontend/.pytest_cache/v/cache/nodeids":  "d751713988987e93",
+                                                             "plugins/file-filter/frontend/app.js":  "7ce38b708142adfb",
+                                                             "plugins/file-filter/frontend/index.html":  "549b86e2b451c01e",
+                                                             "plugins/file-filter/frontend/style.css":  "56dde377e540fa4c",
+                                                             "plugins/file-filter/manifest.json":  "7f45150b4337ec29",
+                                                             "plugins/file-filter/README.md":  "c38dd3a24acc23ba"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "7ce38b708142adfb",
+                                                                                "v":  7,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "56dde377e540fa4c",
+                                                                                   "v":  9,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    },
+                                         "frontend_file":  "JZToolsHub-前端-file-filter-v1.6.0.zip",
+                                         "frontend_sha256":  "a39209c33b319aabb1af29b21c394e37a720446ee41a07ed7c0112b274349673",
+                                         "frontend_size":  27114
+                                     },
+                     "base64":  {
+                                    "version":  "1.0.1",
+                                    "api_version":  1,
+                                    "file":  "JZToolsHub-插件-base64-v1.0.1.zip",
+                                    "sha256":  "eac84343c6024870a409dcad209ef0569ed001d21b9cda367a79e2e101cc8341",
+                                    "size":  25721,
+                                    "built_at":  "2026-10-06T21:29:00+08:00",
+                                    "code_sha256":  "1ff602cc20ec2270d1fbe5b394e30350c9b5f329f8ff6b241c9077afaf526bf4",
+                                    "file_count":  3,
+                                    "requires_restart":  false,
+                                    "file_hashes":  {
+                                                        "plugins/base64/frontend/index.html":  "9aac4441a1c7fbea",
+                                                        "plugins/base64/manifest.json":  "557e42fb2654096d",
+                                                        "plugins/base64/README.md":  "291005a306d54bfb"
+                                                    },
+                                    "assets":  {
+
+                                               },
+                                    "frontend_file":  "JZToolsHub-前端-base64-v1.0.1.zip",
+                                    "frontend_sha256":  "bd8d716c037daaee9ac02d8818747be76d37539e8108c9e2596efde9db92db7b",
+                                    "frontend_size":  2977
+                                }
                  }
 }
