@@ -15,6 +15,8 @@ import threading
 import time
 import uuid
 
+WORKER_BODY_LIMIT = 8 * 1024 * 1024   # 规范 §16.3 L-3：worker 响应体上限（大结果写临时文件传路径）
+
 
 class PluginExecutor:
     def __init__(self, runtime_python, host_script, pylibs_dir, data_dir, log=None):
