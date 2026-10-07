@@ -8,6 +8,18 @@
 (function () {
   'use strict';
 
+  // 壳内自判（批次 10）：本页经工具壳 iframe 内嵌 = 桌面端 → 给 <html> 打 jz-shell，
+  // 激活 .jz-only 操作列（安装/下载包）。中继透传不注入该类（A 类页面框架 chrome 由壳页承载），
+  // 不自判则桌面端永远只有浏览器路径按钮——而 iframe 内的下载会静默失败（2026-10-07 真机报告）。
+  // 浏览器路径下本页是顶层窗口 → 不打类 → 只显示浏览器下载按钮（红线 2 不变）。
+  try {
+    if (window.self !== window.top) {
+      document.documentElement.classList.add('jz-shell');
+    }
+  } catch (e) {
+    document.documentElement.classList.add('jz-shell');   // 跨域取不到 top 视同壳内
+  }
+
   var CATALOG_API = '/plugin/store/api/catalog?all=1';
   var IN_SHELL = document.documentElement.classList.contains('jz-shell');
   var catalog = [];              // flat 条目（含 versions 历史）
