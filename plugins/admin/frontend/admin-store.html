@@ -7,6 +7,63 @@
   <link rel="stylesheet" href="/static/css/style.css?v=19">
   <link rel="stylesheet" href="/plugin/admin/css/admin.css?v=26">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234285F4'/><text x='50' y='72' font-family='Arial,Helvetica,sans-serif' font-size='58' font-weight='bold' fill='%23ffffff' text-anchor='middle'>JZ</text></svg>">
+  <style>
+    /* 商店管理页专用样式（2026-10-07 可读性改版；页内块避免动共享 admin.css 缓存戳） */
+    .st-sub { margin-top: 6px; }
+    .st-guide { margin: 10px 0 16px; border: 1px solid rgba(0,0,0,.08); border-radius: 10px;
+                background: rgba(0,0,0,.02); font-size: 13px; }
+    .st-guide > summary { cursor: pointer; padding: 9px 14px; color: #5f6368; user-select: none; }
+    .st-guide > summary::marker { color: var(--md-primary, #4285F4); }
+    .st-guide ul { margin: 0; padding: 2px 18px 12px 34px; color: #5f6368; line-height: 1.9; }
+    .st-guide code { background: rgba(0,0,0,.05); border-radius: 4px; padding: 1px 5px; }
+
+    .st-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; margin-top: 4px; }
+    .st-form-grid .form-row { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+    .st-form-grid .form-row label { font-size: 13px; color: #5f6368; }
+    .st-span2 { grid-column: 1 / -1; }
+    .st-actions { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+    .st-upload-result { font-size: 13px; color: #188038; }
+    .st-upload-result.bad { color: #c5221f; }
+
+    /* 标签页（带计数） */
+    .st-tabs { display: flex; gap: 2px; border-bottom: 1px solid rgba(0,0,0,.09); margin: 10px 0 2px; flex-wrap: wrap; }
+    .st-filter { appearance: none; background: none; border: none; border-bottom: 2px solid transparent;
+                 padding: 10px 14px 8px; font-size: 14px; color: #5f6368; cursor: pointer; }
+    .st-filter:hover { color: #202124; }
+    .st-filter.active { color: var(--md-primary, #4285F4); border-bottom-color: var(--md-primary, #4285F4); font-weight: 600; }
+    .st-count { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 6px; border-radius: 9px;
+                font-size: 11px; line-height: 18px; text-align: center; background: rgba(0,0,0,.07); color: #5f6368; }
+    .st-filter.active .st-count { background: rgba(66,133,244,.15); color: var(--md-primary, #4285F4); }
+    .st-count[hidden] { display: none; }
+
+    /* 色片：状态 / 类别 */
+    .st-chip { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px;
+               line-height: 19px; white-space: nowrap; }
+    .st-chip-ok      { background: rgba(52,168,83,.13);  color: #188038; }
+    .st-chip-warn    { background: rgba(249,171,0,.16);  color: #b06000; }
+    .st-chip-bad     { background: rgba(197,34,31,.10);  color: #c5221f; }
+    .st-chip-muted   { background: rgba(0,0,0,.06);      color: #5f6368; }
+    .st-chip-info    { background: rgba(0,137,123,.12);  color: #00796b; }
+    .st-chip-primary { background: rgba(66,133,244,.12); color: #1a73e8; }
+    .st-chip-purple  { background: rgba(142,36,170,.12); color: #7b1fa2; }
+    .st-muted { color: #5f6368; font-size: 12px; }
+    .st-mono { font-variant-numeric: tabular-nums; }
+    .st-cell-stack > * + * { margin-top: 3px; }
+    .data-table td { vertical-align: top; }
+    .data-table tbody tr:hover { background: rgba(0,0,0,.02); }
+
+    /* 统计页签 */
+    .st-stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 0 4px; }
+    .st-stat-card { border: 1px solid rgba(0,0,0,.08); border-radius: 12px; padding: 14px 16px;
+                    background: #fff; }
+    .st-stat-num { font-size: 26px; font-weight: 600; color: #202124; line-height: 1.3; }
+    .st-stat-label { font-size: 13px; color: #5f6368; }
+    .st-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
+    .st-stats-grid h4 { margin: 4px 0 8px; font-size: 14px; color: #202124; }
+    @media (max-width: 900px) {
+      .st-form-grid, .st-stats-grid, .st-stat-cards { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body data-page="admin" data-side-suffix=" · 管理后台">
 
@@ -14,24 +71,32 @@
     <div class="admin-head">
       <div>
         <h1>商店管理</h1>
-        <div class="admin-sub">
-          插件商店的写面：上架 / 审核 / 发布 / 下架 / 统计（全流程不设角色门槛，机器校验 + 审核纪律兜底）。
-          上架 = 包上传 + 机器校验 → <b>待审核</b> → 审核通过即发布（server 条目发布时自动部署后端包）；
-          下架最新版 = 客户端可见性自动回落旧版；同版本号含已驳回即拒绝重提（版本占号）。
-          <b>装机冒烟为审核必做项</b>（白名单外取数等运行期问题在此暴露）。
+        <div class="admin-sub st-sub">
+          上架 → 审核（<b>装机冒烟必做</b>）→ 发布；server 条目发布时自动部署后端包。
         </div>
       </div>
       <a class="admin-btn" href="/tool/store">← 商店首页</a>
     </div>
 
+    <details class="st-guide">
+      <summary>流程与口径速览（点开查看）</summary>
+      <ul>
+        <li>上架 = 包上传 + 机器校验 → <b>待审核</b>；审核通过即发布，对客户端可见。</li>
+        <li><code>server</code> 条目发布时自动部署后端包（含备份，可回滚）；桌面端「安装」= 仅装前端包。</li>
+        <li>下架最新版 = 客户端可见性自动回落旧版（已装新版客户端不降级）。</li>
+        <li>同 id 同版本号（含已驳回/已下架记录）拒绝重提——版本占号，问题包须升版重来。</li>
+        <li>审核纪律：<b>装机冒烟为必做项</b>（白名单外取数等运行期问题在此暴露）；四眼为软约定。</li>
+        <li>全流程不设角色门槛（内网信任模型 + 会话鉴权 + 机器校验兜底）。</li>
+      </ul>
+    </details>
+
     <div class="settings-card wide">
       <h3>上架新包</h3>
       <p class="settings-desc">
-        按包形态上传：<code>local</code>=本地插件包（<code>JZClient-本地插件-*.zip</code>，六连校验）；
-        <code>server</code>=服务器插件后端包 + <b>前端包成对上传</b>（同版本号，需求⑧）；
-        <code>dep-slot</code>=依赖组件包（wheel tag 预检）。依赖版本声明从包 manifest 自动提取，可人工改。
+        按包形态上传：<code>local</code>=本地插件包 · <code>server</code>=后端包 + <b>前端包成对</b>（同版本号）·
+        <code>dep-slot</code>=依赖组件包。依赖版本声明从包 manifest 自动提取，可人工改。
       </p>
-      <div class="settings-form">
+      <div class="settings-form st-form-grid">
         <div class="form-row">
           <label for="up-runtime">类别 runtime</label>
           <select id="up-runtime" class="admin-input">
@@ -40,8 +105,15 @@
             <option value="dep-slot">dep-slot（依赖组件包）</option>
           </select>
         </div>
-        <div class="form-row" id="row-frontend" hidden>
-          <label for="up-frontend">前端包</label>
+        <div class="form-row" id="row-deps-mode">
+          <label for="up-deps-mode">依赖模式</label>
+          <select id="up-deps-mode" class="admin-input">
+            <option value="shared">shared（共享运行时，默认）</option>
+            <option value="venv">venv（独立依赖环境，E 架构）</option>
+          </select>
+        </div>
+        <div class="form-row st-span2" id="row-frontend" hidden>
+          <label for="up-frontend">前端包（与后端包同版本号成对）</label>
           <input type="file" id="up-frontend" class="admin-input" accept=".zip">
         </div>
         <div class="form-row">
@@ -53,42 +125,35 @@
           <input type="text" id="up-name" class="admin-input" placeholder="缺省取包内 manifest">
         </div>
         <div class="form-row">
-          <label for="up-desc">描述</label>
-          <input type="text" id="up-desc" class="admin-input">
-        </div>
-        <div class="form-row" id="row-icon">
           <label for="up-icon">图标</label>
           <input type="text" id="up-icon" class="admin-input" placeholder="🧩">
         </div>
         <div class="form-row">
-          <label for="up-changelog">变更说明</label>
-          <textarea id="up-changelog" class="admin-input" rows="3"></textarea>
+          <label for="up-desc">描述</label>
+          <input type="text" id="up-desc" class="admin-input">
         </div>
-        <div class="form-row" id="row-deps-mode">
-          <label for="up-deps-mode">依赖模式</label>
-          <select id="up-deps-mode" class="admin-input">
-            <option value="shared">shared（共享运行时，默认）</option>
-            <option value="venv">venv（独立依赖环境，E 架构）</option>
-          </select>
-        </div>
-        <div class="form-row" id="row-provides" hidden>
+        <div class="form-row st-span2" id="row-provides" hidden>
           <label for="up-provides">provides（提供的 import 名，逗号分隔）</label>
           <input type="text" id="up-provides" class="admin-input" placeholder="缺省取组件清单">
         </div>
+        <div class="form-row st-span2">
+          <label for="up-changelog">变更说明</label>
+          <textarea id="up-changelog" class="admin-input" rows="3"></textarea>
+        </div>
       </div>
-      <p>
+      <div class="st-actions">
         <button type="button" class="admin-btn primary" id="btn-upload">上传并提交审核</button>
-        <span id="upload-result"></span>
-      </p>
+        <span id="upload-result" class="st-upload-result"></span>
+      </div>
     </div>
 
     <div class="settings-card wide">
       <h3>目录管理</h3>
       <div class="st-tabs">
-        <button type="button" class="admin-btn small st-filter active" data-f="pending">待审核</button>
-        <button type="button" class="admin-btn small st-filter" data-f="published">已上架</button>
-        <button type="button" class="admin-btn small st-filter" data-f="off">已下架 · 已驳回</button>
-        <button type="button" class="admin-btn small st-filter" data-f="stats">统计</button>
+        <button type="button" class="st-filter active" data-f="pending">待审核<span class="st-count" id="cnt-pending">0</span></button>
+        <button type="button" class="st-filter" data-f="published">已上架<span class="st-count" id="cnt-published">0</span></button>
+        <button type="button" class="st-filter" data-f="off">已下架 · 已驳回<span class="st-count" id="cnt-off">0</span></button>
+        <button type="button" class="st-filter" data-f="stats">统计</button>
       </div>
       <div class="data-table-wrap" id="st-table-wrap">
         <table class="data-table" id="st-table">
@@ -104,7 +169,7 @@
 
   <script src="/plugin/admin/js/admin-common.js?v=8"></script>
   <script src="/static/js/sidebar.js?v=4"></script>
-  <script src="/plugin/admin/js/admin-store.js?v=1"></script>
+  <script src="/plugin/admin/js/admin-store.js?v=2"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>

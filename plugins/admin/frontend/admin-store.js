@@ -39,6 +39,20 @@
   function statusLabel(s) {
     return { pending: '待审核', published: '已上架', rejected: '已驳回', delisted: '已下架' }[s] || s;
   }
+  function chip(text, kind) {
+    return '<span class="st-chip st-chip-' + kind + '">' + esc(text) + '</span>';
+  }
+  var STATUS_KIND = { pending: 'warn', published: 'ok', rejected: 'bad', delisted: 'muted' };
+  var RUNTIME_KIND = { local: 'info', server: 'primary', 'dep-slot': 'purple' };
+
+  function updateCounts() {
+    var rows = flatRows();
+    function n(f) { return rows.filter(f).length; }
+    document.getElementById('cnt-pending').textContent = n(function (r) { return r.status === 'pending'; });
+    document.getElementById('cnt-published').textContent = n(function (r) { return r.status === 'published'; });
+    document.getElementById('cnt-off').textContent =
+      n(function (r) { return r.status === 'delisted' || r.status === 'rejected'; });
+  }
 
   // ---------------- 上架表单 ----------------
   var runtimeSel = document.getElementById('up-runtime');
@@ -131,18 +145,20 @@
     });
     tbody.innerHTML = '';
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">（空）</td></tr>';
+      var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
+                    off: '暂无已下架 / 已驳回条目' };
+      tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
       return;
     }
     rows.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
     rows.forEach(function (r) {
       var tr = document.createElement('tr');
-      var svr = '';
+      var svr = '<span class="st-muted">—</span>';
       if (r.runtime === 'server' && r.status === 'published') {
-        svr = '已部署 v' + esc(r.installed_version || '—')
-          + (r.restart_pending ? ' <span class="dep-badge bad">待重启</span>' : '');
+        svr = chip('已部署 v' + esc(r.installed_version || '—'), 'ok')
+          + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '');
       } else if (r.runtime === 'server') {
-        svr = '待发布自动部署';
+        svr = '<span class="st-muted">发布时自动部署</span>';
       }
       var ops = '';
       if (r.status === 'pending') {
@@ -156,14 +172,16 @@
       } else if (r.status === 'delisted') {
         ops += '<button class="admin-btn small" data-op="republish" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新上架</button>';
       }
-      tr.innerHTML = '<td><b>' + esc(r.name) + '</b><br><span style="color:#5f6368;font-size:12px">' + esc(r.id)
-        + (r.deps_mode === 'venv' ? ' · venv' : '') + '</span></td>'
-        + '<td>v' + esc(r.version) + (r.frontend_file ? '<br><span style="font-size:12px">前端包成对</span>' : '') + '</td>'
-        + '<td>' + runtimeLabel(r.runtime) + '</td>'
-        + '<td>' + statusLabel(r.status) + '<br><span style="color:#5f6368;font-size:12px">'
-        + esc(r.submit_by || '') + '</span></td>'
-        + '<td>' + svr + '</td>'
-        + '<td style="text-align:right">' + ops + '</td>';
+      tr.innerHTML =
+        '<td class="st-cell-stack"><b>' + esc(r.name) + '</b>'
+        + '<span class="st-muted">' + esc(r.id) + (r.deps_mode === 'venv' ? ' · venv' : '') + '</span></td>'
+        + '<td class="st-cell-stack st-mono"><span>v' + esc(r.version) + '</span>'
+        + (r.frontend_file ? chip('前端包成对', 'muted') : '') + '</td>'
+        + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
+        + '<td class="st-cell-stack">' + chip(statusLabel(r.status), STATUS_KIND[r.status] || 'muted')
+        + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
+        + '<td class="st-cell-stack">' + svr + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">' + ops + '</td>';
       tbody.appendChild(tr);
     });
   }
@@ -174,17 +192,24 @@
     fetch(API + '/stats').then(function (r) { return r.json(); }).then(function (d) {
       function list(obj, label) {
         var keys = Object.keys(obj || {});
-        if (!keys.length) return '<p class="settings-desc">' + label + '：暂无数据</p>';
+        if (!keys.length) return '<div><h4>' + label + '</h4><p class="st-muted">暂无数据</p></div>';
         var rows = keys.slice(0, 12).map(function (k) {
           return '<tr><td>' + esc(k) + '</td><td>' + obj[k] + '</td></tr>';
         }).join('');
-        return '<p class="settings-desc">' + label + '</p><div class="data-table-wrap"><table class="data-table"><thead><tr><th>项</th><th>下载次数</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        return '<div><h4>' + label + (keys.length > 12 ? ' <span class="st-muted">（前 12 项）</span>' : '') + '</h4>'
+          + '<div class="data-table-wrap"><table class="data-table"><thead><tr><th>项</th><th style="text-align:right">下载次数</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
       }
-      box.innerHTML = '<p class="settings-desc">口径：仅统计<b>下载事件</b>（下载 ≠ 安装）；按用户列为内网审计口径。'
-        + '总计 <b>' + (d.total || 0) + '</b> 次。'
-        + (d.by_via && d.by_via.client ? '桌面端 ' + d.by_via.client + ' 次 / 浏览器 ' + (d.by_via.browser || 0) + ' 次。' : '')
-        + '</p>'
-        + list(d.by_package, '按条目') + list(d.by_version, '按版本') + list(d.by_day, '按日') + list(d.by_user, '按用户');
+      var via = d.by_via || {};
+      box.innerHTML = '<p class="settings-desc">口径：仅统计<b>下载事件</b>（下载 ≠ 安装）；按用户列为内网审计口径。</p>'
+        + '<div class="st-stat-cards">'
+        +   '<div class="st-stat-card"><div class="st-stat-num">' + (d.total || 0) + '</div><div class="st-stat-label">总下载次数</div></div>'
+        +   '<div class="st-stat-card"><div class="st-stat-num">' + (via.client || 0) + '</div><div class="st-stat-label">桌面端</div></div>'
+        +   '<div class="st-stat-card"><div class="st-stat-num">' + (via.browser || 0) + '</div><div class="st-stat-label">浏览器</div></div>'
+        + '</div>'
+        + '<div class="st-stats-grid">'
+        + list(d.by_package, '按条目') + list(d.by_version, '按版本')
+        + list(d.by_day, '按日') + list(d.by_user, '按用户')
+        + '</div>';
     }).catch(function (e) { box.textContent = '统计加载失败：' + e; });
   }
 
@@ -235,6 +260,7 @@
   function load() {
     fetch(API + '/list').then(function (r) { return r.json(); }).then(function (d) {
       packages = d.packages || [];
+      updateCounts();
       render();
     }).catch(function (e) { toast('目录加载失败：' + e, true); });
   }
