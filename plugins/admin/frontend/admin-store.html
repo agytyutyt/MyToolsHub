@@ -63,6 +63,14 @@
     .st-stat-label { font-size: 13px; color: #5f6368; }
     .st-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
     .st-stats-grid h4 { margin: 4px 0 8px; font-size: 14px; color: #202124; }
+    /* 主包拖拽上传区（包主导：控件置顶，识别命名→自动选类别） */
+    .st-dropzone { border: 2px dashed rgba(0,0,0,.2); border-radius: 12px; padding: 20px 16px;
+                   text-align: center; cursor: pointer; margin-bottom: 12px;
+                   transition: border-color .15s, background .15s; }
+    .st-dropzone:hover, .st-dropzone.dragover { border-color: var(--md-primary, #4285F4);
+                   background: rgba(66,133,244,.06); }
+    .st-file-hidden { display: none; }
+
     @media (max-width: 900px) {
       .st-form-grid, .st-stats-grid, .st-stat-cards { grid-template-columns: 1fr; }
     }
