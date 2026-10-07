@@ -286,7 +286,12 @@
     if (act === 'download-local') {                 // 桌面端：落数据目录 downloads\
       msg('正在下载到本机 downloads\\ …');
       post('/local-api/store/download', { id: id, version: ver }).then(function (d) {
-        msg(d.ok ? ('已保存：' + d.path) : ('下载失败：' + (d.error || '')), !d.ok);
+        if (d.ok) {
+          msg('已保存到本机 downloads\（已打开文件夹）');
+          fetch('/local-api/store/reveal', { method: 'POST' });
+        } else {
+          msg('下载失败：' + (d.error || ''), !d.ok);
+        }
       });
       return;
     }

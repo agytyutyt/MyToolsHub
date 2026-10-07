@@ -716,6 +716,17 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return jsonify({"ok": False, "error": err}), 200
         return jsonify({"ok": True, "path": path})
 
+    @app.post("/local-api/store/reveal")
+    def store_reveal():
+        """下载完成后打开客户端 downloads 目录（定位留档文件）。"""
+        d = os.path.join(data_dir, "downloads")
+        os.makedirs(d, exist_ok=True)
+        try:
+            os.startfile(d)                   # 客户端仅 Windows；打开资源管理器
+            return jsonify({"ok": True})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     @app.get("/local-api/config/plugin-source")
     def plugin_source_get():
         from client_config import load_client_config
