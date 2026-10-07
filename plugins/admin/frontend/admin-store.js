@@ -61,11 +61,82 @@
     document.getElementById('row-frontend').hidden = rt !== 'server';
     document.getElementById('row-provides').hidden = rt !== 'dep-slot';
     document.getElementById('row-deps-mode').hidden = rt === 'dep-slot';
+    document.getElementById('row-deps').hidden = rt === 'dep-slot';   // 依赖包自身无需声明依赖
     document.getElementById('up-file').previousElementSibling && (document
       .querySelector('label[for="up-file"]').textContent = rt === 'server' ? '后端包' : '包文件');
   }
   runtimeSel.addEventListener('change', syncFormByRuntime);
   syncFormByRuntime();
+
+  // ---------------- 依赖声明下拉（选项=已上架 dep-slot 条目；批次 10 需求） ----------------
+  var depSel = {};                       // depId → {name, version, provides0}
+  var ddBtn = document.getElementById('dd-btn');
+  var ddPanel = document.getElementById('dd-panel');
+  var ddList = document.getElementById('dd-list');
+  var ddSummary = document.getElementById('dd-summary');
+
+  function ddRenderSummary() {
+    var ids = Object.keys(depSel).filter(function (k) { return depSel[k].on; });
+    ddSummary.textContent = ids.length
+      ? ('已选 ' + ids.length + ' 项：' + ids.map(function (k) { return depSel[k].name; }).join('、'))
+      : '未选择依赖（按包内 manifest 自动提取）';
+  }
+
+  function loadDepOptions() {
+    fetch('/plugin/store/api/catalog').then(function (r) { return r.json(); }).then(function (d) {
+      var deps = (d.packages || []).filter(function (p) { return p.runtime === 'dep-slot'; });
+      ddList.innerHTML = '';
+      if (!deps.length) {
+        ddList.innerHTML = '<div class="st-dd-empty">暂无已上架的依赖条目——请先在依赖类目上架组件包</div>';
+        return;
+      }
+      deps.forEach(function (p) {
+        var v = (p.versions || []).filter(function (v) { return v.status === 'published'; })[0] || {};
+        var provides0 = (p.provides || [])[0] || p.id;
+        depSel[p.id] = { on: false, name: provides0, version: v.version || '', provides0: provides0 };
+        var row = document.createElement('label');
+        row.innerHTML = '<input type="checkbox" data-dep="' + esc(p.id) + '">'
+          + '<span>' + esc(p.name || p.id) + '</span>'
+          + '<span class="st-muted">v' + esc(v.version || '?') + '</span>'
+          + '<span class="st-muted">提供 ' + esc((p.provides || []).join(', ') || p.id) + '</span>';
+        ddList.appendChild(row);
+      });
+    }).catch(function () {
+      ddList.innerHTML = '<div class="st-dd-empty">依赖列表加载失败（服务器不可达）</div>';
+    });
+  }
+  loadDepOptions();
+
+  ddBtn.addEventListener('click', function () {
+    ddPanel.hidden = !ddPanel.hidden;
+    ddBtn.setAttribute('aria-expanded', String(!ddPanel.hidden));
+  });
+  document.addEventListener('click', function (ev) {
+    if (!ddPanel.hidden && !ddPanel.contains(ev.target) && ev.target !== ddBtn
+        && !ddBtn.contains(ev.target)) {
+      ddPanel.hidden = true;
+      ddBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+  ddList.addEventListener('change', function (ev) {
+    var cb = ev.target.closest ? ev.target.closest('input[data-dep]') : null;
+    if (!cb) return;
+    var depId = cb.getAttribute('data-dep');
+    if (depSel[depId]) depSel[depId].on = cb.checked;
+    ddRenderSummary();
+  });
+
+  function buildRequiresJson() {
+    var ids = Object.keys(depSel).filter(function (k) { return depSel[k].on; });
+    if (!ids.length) return '';
+    var pkgs = ids.map(function (id) {
+      var d = depSel[id];
+      return { name: d.provides0, version: '', required: false,
+               hint: '依赖组件包：' + id + ' v' + (d.version || '?')
+                 + '（插件商店「依赖」类目可一键安装）' };
+    });
+    return JSON.stringify({ python_packages: pkgs });
+  }
 
   document.getElementById('btn-upload').addEventListener('click', function () {
     var file = document.getElementById('up-file').files[0];
@@ -79,6 +150,8 @@
     fd.append('changelog', document.getElementById('up-changelog').value);
     fd.append('deps_mode', document.getElementById('up-deps-mode').value);
     fd.append('provides', document.getElementById('up-provides').value);
+    var requiresJson = buildRequiresJson();
+    if (requiresJson) fd.append('requires_json', requiresJson);
     var fe = document.getElementById('up-frontend').files[0];
     if (fe) fd.append('frontend_file', fe);
     var btn = this;

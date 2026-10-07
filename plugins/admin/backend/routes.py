@@ -1172,14 +1172,6 @@ def register(app):
             "count": 0,
             "allowed": bool(info.get("super_admin")),
         })
-        # 商店管理：上架 / 审核 / 发布 / 下架 / 统计（2026-10-07 入口由商店页迁入
-        # 管理后台模块）；页面 /admin/store 登录即可（批次 8 拍板"管理面不分角色"）
-        modules.append({
-            "id": "store",
-            "name": "商店管理",
-            "count": 0,
-            "allowed": True,
-        })
         return jsonify({
             "modules": modules,
             "user": info,
