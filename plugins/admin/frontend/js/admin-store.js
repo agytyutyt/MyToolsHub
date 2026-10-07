@@ -62,11 +62,51 @@
     var rt = runtimeSel.value;
     document.getElementById('row-frontend').hidden = rt !== 'server';
     document.getElementById('row-deps-mode').hidden = rt === 'dep-slot';
-    document.getElementById('up-file').previousElementSibling && (document
-      .querySelector('label[for="up-file"]').textContent = rt === 'server' ? '后端包' : '包文件');
   }
   runtimeSel.addEventListener('change', syncFormByRuntime);
   syncFormByRuntime();
+
+  // ---------------- 主包拖拽上传区（包主导，批次 10） ----------------
+  var upFile = document.getElementById('up-file');
+  var drop = document.getElementById('st-drop');
+  var dropHint = document.getElementById('st-drop-hint');
+
+  function inferRuntime(filename) {
+    if (filename.indexOf('JZClient-本地插件-') === 0) return 'local';
+    if (filename.indexOf('JZToolsHub-插件-') === 0) return 'server';
+    if (filename.indexOf('JZToolsHub-依赖-') === 0) return 'dep-slot';
+    return '';
+  }
+
+  function assignPackage(f) {
+    if (!f) return;
+    var dt = new DataTransfer();
+    dt.items.add(f);
+    upFile.files = dt.files;
+    var rt = inferRuntime(f.name);
+    if (rt && rt !== runtimeSel.value) {
+      runtimeSel.value = rt;
+      syncFormByRuntime();
+    }
+    var note = rt ? ('已识别类别：' + runtimeLabel(rt)
+      + (rt === 'server' ? '——请在下方选择成对前端包' : '（可手动更改）'))
+      : '未识别命名规范——请手动选择类别';
+    dropHint.innerHTML = '<b>' + esc(f.name) + '</b> <span class="st-muted">' + fmtSize(f.size)
+      + ' · ' + note + '</span>';
+  }
+
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('dragover'); });
+  });
+  drop.addEventListener('dragleave', function (e) {
+    e.preventDefault(); drop.classList.remove('dragover');
+  });
+  drop.addEventListener('drop', function (e) {
+    e.preventDefault(); drop.classList.remove('dragover');
+    if (e.dataTransfer && e.dataTransfer.files.length) assignPackage(e.dataTransfer.files[0]);
+  });
+  drop.addEventListener('click', function () { upFile.click(); });
+  upFile.addEventListener('change', function () { assignPackage(upFile.files[0]); });
 
 
   document.getElementById('btn-upload').addEventListener('click', function () {

@@ -94,6 +94,16 @@
 
     <div class="settings-card wide">
       <h3>上架新包</h3>
+      <div class="st-dropzone" id="st-drop" tabindex="0" role="button"
+           aria-label="拖拽或点击选择包文件">
+        <input type="file" id="up-file" class="st-file-hidden" accept=".zip">
+        <div id="st-drop-hint">
+          <b>拖拽包文件到此处</b>，或点击选择（.zip）<br>
+          <span class="st-muted">命名识别：JZClient-本地插件-*.zip → local ｜
+            JZToolsHub-插件-*.zip → server（需配对前端包）｜
+            JZToolsHub-依赖-*.zip → dep-slot</span>
+        </div>
+      </div>
       <p class="settings-desc">
         按包形态上传：<code>local</code>=本地插件包 · <code>server</code>=后端包 + <b>前端包成对</b>（同版本号）·
         <code>dep-slot</code>=依赖组件包。依赖从包内 manifest 读取，上架时逐项核验展示（<b>✓ 满足</b> / <b>✗ 不满足</b>）：
@@ -118,10 +128,6 @@
         <div class="form-row st-span2" id="row-frontend" hidden>
           <label for="up-frontend">前端包（与后端包同版本号成对）</label>
           <input type="file" id="up-frontend" class="admin-input" accept=".zip">
-        </div>
-        <div class="form-row">
-          <label for="up-file">包文件</label>
-          <input type="file" id="up-file" class="admin-input" accept=".zip">
         </div>
         <div class="form-row">
           <label for="up-name">显示名</label>
@@ -168,7 +174,7 @@
 
   <script src="/plugin/admin/js/admin-common.js?v=8"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
-  <script src="/plugin/admin/js/admin-store.js?v=4"></script>
+  <script src="/plugin/admin/js/admin-store.js?v=5"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
