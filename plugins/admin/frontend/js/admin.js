@@ -13,6 +13,7 @@
     plugins: { icon: '1f9e9.svg', accent: '#009688' },
     llm: { icon: '1f4a1.svg', accent: '#8E24AA' },
     migrate: { icon: '1f4be.svg', accent: '#455A64' },   // 💾（仓库内已有的 Twemoji 图标）
+    store: { icon: '1f4e2.svg', accent: '#F4511E' },     // 📢 上架/发布语义
   };
 
   // 固定文案的模块：卡片不显示"记录数"，改用一句说明
@@ -21,6 +22,7 @@
     plugins: '插件包升级 / 回滚 / 批量更新（仅超级管理员）',
     llm: '统一大模型：调用模式与接入配置',
     migrate: '数据导出 / 导入（按插件打包、口令加密）',
+    store: '插件与依赖：上架 / 审核 / 发布 / 统计',
   };
 
   function hexToRgb(hex) {
