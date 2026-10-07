@@ -7,6 +7,8 @@
   var API = '/plugin/admin/store';
   var filter = 'pending';
   var packages = [];
+  var installedNames = [];   // 主包运行时自带依赖（服务端 installed-deps）
+  var depProvides = {};      // 已上架依赖条目的 provides 集合（name→true）
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
@@ -59,84 +61,13 @@
   function syncFormByRuntime() {
     var rt = runtimeSel.value;
     document.getElementById('row-frontend').hidden = rt !== 'server';
-    document.getElementById('row-provides').hidden = rt !== 'dep-slot';
     document.getElementById('row-deps-mode').hidden = rt === 'dep-slot';
-    document.getElementById('row-deps').hidden = rt === 'dep-slot';   // 依赖包自身无需声明依赖
     document.getElementById('up-file').previousElementSibling && (document
       .querySelector('label[for="up-file"]').textContent = rt === 'server' ? '后端包' : '包文件');
   }
   runtimeSel.addEventListener('change', syncFormByRuntime);
   syncFormByRuntime();
 
-  // ---------------- 依赖声明下拉（选项=已上架 dep-slot 条目；批次 10 需求） ----------------
-  var depSel = {};                       // depId → {name, version, provides0}
-  var ddBtn = document.getElementById('dd-btn');
-  var ddPanel = document.getElementById('dd-panel');
-  var ddList = document.getElementById('dd-list');
-  var ddSummary = document.getElementById('dd-summary');
-
-  function ddRenderSummary() {
-    var ids = Object.keys(depSel).filter(function (k) { return depSel[k].on; });
-    ddSummary.textContent = ids.length
-      ? ('已选 ' + ids.length + ' 项：' + ids.map(function (k) { return depSel[k].name; }).join('、'))
-      : '未选择依赖（按包内 manifest 自动提取）';
-  }
-
-  function loadDepOptions() {
-    fetch('/plugin/store/api/catalog').then(function (r) { return r.json(); }).then(function (d) {
-      var deps = (d.packages || []).filter(function (p) { return p.runtime === 'dep-slot'; });
-      ddList.innerHTML = '';
-      if (!deps.length) {
-        ddList.innerHTML = '<div class="st-dd-empty">暂无已上架的依赖条目——请先在依赖类目上架组件包</div>';
-        return;
-      }
-      deps.forEach(function (p) {
-        var v = (p.versions || []).filter(function (v) { return v.status === 'published'; })[0] || {};
-        var provides0 = (p.provides || [])[0] || p.id;
-        depSel[p.id] = { on: false, name: provides0, version: v.version || '', provides0: provides0 };
-        var row = document.createElement('label');
-        row.innerHTML = '<input type="checkbox" data-dep="' + esc(p.id) + '">'
-          + '<span>' + esc(p.name || p.id) + '</span>'
-          + '<span class="st-muted">v' + esc(v.version || '?') + '</span>'
-          + '<span class="st-muted">提供 ' + esc((p.provides || []).join(', ') || p.id) + '</span>';
-        ddList.appendChild(row);
-      });
-    }).catch(function () {
-      ddList.innerHTML = '<div class="st-dd-empty">依赖列表加载失败（服务器不可达）</div>';
-    });
-  }
-  loadDepOptions();
-
-  ddBtn.addEventListener('click', function () {
-    ddPanel.hidden = !ddPanel.hidden;
-    ddBtn.setAttribute('aria-expanded', String(!ddPanel.hidden));
-  });
-  document.addEventListener('click', function (ev) {
-    if (!ddPanel.hidden && !ddPanel.contains(ev.target) && ev.target !== ddBtn
-        && !ddBtn.contains(ev.target)) {
-      ddPanel.hidden = true;
-      ddBtn.setAttribute('aria-expanded', 'false');
-    }
-  });
-  ddList.addEventListener('change', function (ev) {
-    var cb = ev.target.closest ? ev.target.closest('input[data-dep]') : null;
-    if (!cb) return;
-    var depId = cb.getAttribute('data-dep');
-    if (depSel[depId]) depSel[depId].on = cb.checked;
-    ddRenderSummary();
-  });
-
-  function buildRequiresJson() {
-    var ids = Object.keys(depSel).filter(function (k) { return depSel[k].on; });
-    if (!ids.length) return '';
-    var pkgs = ids.map(function (id) {
-      var d = depSel[id];
-      return { name: d.provides0, version: '', required: false,
-               hint: '依赖组件包：' + id + ' v' + (d.version || '?')
-                 + '（插件商店「依赖」类目可一键安装）' };
-    });
-    return JSON.stringify({ python_packages: pkgs });
-  }
 
   document.getElementById('btn-upload').addEventListener('click', function () {
     var file = document.getElementById('up-file').files[0];
@@ -149,9 +80,6 @@
     fd.append('icon', document.getElementById('up-icon').value);
     fd.append('changelog', document.getElementById('up-changelog').value);
     fd.append('deps_mode', document.getElementById('up-deps-mode').value);
-    fd.append('provides', document.getElementById('up-provides').value);
-    var requiresJson = buildRequiresJson();
-    if (requiresJson) fd.append('requires_json', requiresJson);
     var fe = document.getElementById('up-frontend').files[0];
     if (fe) fd.append('frontend_file', fe);
     var btn = this;
@@ -191,6 +119,7 @@
           submit_by: (v.submit || {}).by, review: v.review || {},
           installed_version: p.installed_version, restart_pending: p.restart_pending,
           frontend_file: v.frontend_file, deps_mode: p.deps_mode,
+          requires: p.requires,
         });
       });
     });
@@ -210,7 +139,7 @@
     }
     wrap.hidden = false;
     statsBox.hidden = true;
-    thead.innerHTML = '<th>条目</th><th>版本</th><th>类别</th><th>状态</th><th>服务器侧</th><th style="text-align:right">操作</th>';
+    thead.innerHTML = '<th>条目</th><th>版本</th><th>类别</th><th>状态</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
     var rows = flatRows().filter(function (r) {
       if (filter === 'pending') return r.status === 'pending';
       if (filter === 'published') return r.status === 'published';
@@ -220,7 +149,7 @@
     if (!rows.length) {
       var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
                     off: '暂无已下架 / 已驳回条目' };
-      tbody.innerHTML = '<tr><td colspan="6" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
       return;
     }
     rows.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
@@ -233,9 +162,28 @@
       } else if (r.runtime === 'server') {
         svr = '<span class="st-muted">发布时自动部署</span>';
       }
+      // 依赖核验（✓ 满足 / ✗ 不满足）：主包自带或已上架依赖条目可满足 → ✓
+      var depsHtml = '<span class="st-muted">—</span>';
+      var unsat = [];
+      var reqs = (r.requires || {}).python_packages || [];
+      if (reqs.length) {
+        depsHtml = '';
+        reqs.forEach(function (x) {
+          var name = String(x.name || '');
+          var ok = depProvides[name.toLowerCase()] || installedNames.indexOf(name.toLowerCase()) >= 0;
+          if (!ok) unsat.push(name);
+          depsHtml += chip((ok ? '✓ ' : '✗ ') + name, ok ? 'ok' : 'bad')
+            + '<span class="st-muted"> </span>';
+        });
+        if (unsat.length && r.status === 'pending') {
+          depsHtml += '<span class="st-muted">待依赖组件包上架（任意用户可传）</span>';
+        }
+      }
       var ops = '';
       if (r.status === 'pending') {
-        ops += '<button class="admin-btn small primary" data-op="approve" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">通过（发布）</button> '
+        ops += '<button class="admin-btn small primary" data-op="approve" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '"'
+          + (unsat.length ? ' disabled title="依赖不满足：' + esc(unsat.join('、')) + '——待对应依赖组件包上架"' : '')
+          + '>通过（发布）</button> '
           + '<button class="admin-btn small" data-op="reject" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">驳回</button>';
       } else if (r.status === 'published') {
         ops += '<button class="admin-btn small" data-op="delist" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">下架</button>';
@@ -253,6 +201,7 @@
         + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
         + '<td class="st-cell-stack">' + chip(statusLabel(r.status), STATUS_KIND[r.status] || 'muted')
         + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
+        + '<td class="st-cell-stack">' + depsHtml + '</td>'
         + '<td class="st-cell-stack">' + svr + '</td>'
         + '<td style="text-align:right;white-space:nowrap">' + ops + '</td>';
       tbody.appendChild(tr);
@@ -333,6 +282,16 @@
   function load() {
     fetch(API + '/list').then(function (r) { return r.json(); }).then(function (d) {
       packages = d.packages || [];
+      installedNames = d.installed_names || [];
+      depProvides = {};
+      packages.forEach(function (p) {
+        if (p.runtime !== 'dep-slot') return;
+        (p.versions || []).forEach(function (v) {
+          if (v.status === 'published') (p.provides || []).forEach(function (x) {
+            depProvides[String(x).toLowerCase()] = true;
+          });
+        });
+      });
       updateCounts();
       render();
     }).catch(function (e) { toast('目录加载失败：' + e, true); });

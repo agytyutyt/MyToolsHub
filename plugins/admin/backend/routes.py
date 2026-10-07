@@ -2403,7 +2403,10 @@ def register(app):
                 row["restart_pending"] = bool(state_entry.get("restart_pending"))
                 row["backups"] = len(plugin_admin.list_backups(root, entry.get("id")))
             rows.append(row)
-        return jsonify({"ok": True, "packages": rows,
+        installed = jz_deps.load_installed_deps(PROJECT_DIR)
+        installed_names = sorted({str(k).casefold() for k in (installed.get("modules") or {})}
+                                 | {str(k).casefold() for k in (installed.get("packages") or {})})
+        return jsonify({"ok": True, "packages": rows, "installed_names": installed_names,
                         "index_server_path": store_admin.index_server_path(root),
                         "data_root": root})
 
@@ -2464,6 +2467,16 @@ def register(app):
             record = store_admin.find_version_record(entry, version) if entry else None
             if record is None:
                 return jsonify({"ok": False, "error": "版本不存在：%s v%s" % (pid, version)}), 404
+            # 依赖满足门槛（2026-10-07）：声明的每个依赖，主包未自带且依赖类目未上架时
+            # 审核不通过（可提交、不可发布）——依赖由插件制作者或其他用户上架补齐
+            installed = jz_deps.load_installed_deps(PROJECT_DIR)
+            avail = {str(k).casefold() for k in (installed.get("modules") or {})}
+            avail |= {str(k).casefold() for k in (installed.get("packages") or {})}
+            unsat = store_admin.unsatisfied_deps(catalog, entry, version, avail)
+            if unsat:
+                return jsonify({"ok": False,
+                                "error": "依赖不满足，审核不通过：%s——请先在「依赖」类目上架对应组件包"
+                                         % "、".join(unsat)}), 409
             if entry.get("runtime") == "server":
                 # 需求⑧：审核通过即发布，发布即自动部署后端包（当前形态=进程内 inspect/apply；
                 # E 架构落地后此处换 supervisor 编排）。上传/待审核阶段绝不部署。

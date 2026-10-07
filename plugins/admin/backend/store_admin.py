@@ -512,8 +512,37 @@ def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
     _write_index_server(data_root, catalog)
     report["ok"] = True
     report.update({"id": pid, "version": version, "file": fname,
-                   "frontend": frontend_fields.get("frontend_file")})
+                   "frontend": frontend_fields.get("frontend_file"),
+                   "provides": entry.get("provides") or []})
     return report
+
+
+def unsatisfied_deps(catalog, entry, version, available_names):
+    """发布门槛（2026-10-07）：依赖声明里的每个 import 名，要么主包运行时自带
+    （available_names，来自 config/installed-deps.json），要么存在**已上架** dep-slot
+    条目的 provides 含该名。返回不满足的名字列表（空=可发布）。
+
+    语义（需求方拍板）：依赖不满足允许提交审核，但审核（发布）不通过，直至依赖由
+    插件制作者或其他用户上架补齐。"""
+    record = find_version_record(entry, version) if entry else None
+    requires = {}
+    for src in (entry or {}, record or {}):
+        r = (src or {}).get("requires")
+        if isinstance(r, dict) and r.get("python_packages"):
+            requires = r
+    names = []
+    for x in requires.get("python_packages") or []:
+        n = str(x.get("name") or "").strip()
+        if n and n not in names:
+            names.append(n)
+    avail = {str(n).strip().casefold() for n in (available_names or [])}
+    for p in catalog.get("packages") or []:
+        if p.get("runtime") != "dep-slot":
+            continue
+        for v in p.get("versions") or []:
+            if v.get("status") == "published":
+                avail.update(str(x).strip().casefold() for x in (p.get("provides") or []))
+    return [n for n in names if n.casefold() not in avail]
 
 
 # ======================== 审核 / 发布 / 下架 ========================
