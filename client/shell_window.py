@@ -171,6 +171,10 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
         _hide_to_tray(tray[0])
         return False                      # 返回 False → 取消关闭（GD5：隐藏到托盘）
 
+    _RELOAD_JS = ("document.addEventListener('keydown',function(e){"
+                  "if(e.key==='F5'||(e.ctrlKey&&(e.key==='r'||e.key==='R'))){"
+                  "e.preventDefault();location.reload();}});")
+
     def on_loaded():
         # 导航锁定兜底（页面侧 shell-bridge 拦截点击/新窗；此处拦 JS 跳转漂移）
         try:
@@ -181,6 +185,12 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
                 window.load_url(origin)
         except Exception:
             log("loaded guard:\n" + traceback.format_exc())
+        # WebView2 壳默认无浏览器刷新键——注入顶层 F5/Ctrl+R；焦点在 iframe 内时
+        # 事件不跨 frame，由托盘「刷新页面」兜底（2026-10-07 联调需求）
+        try:
+            window.evaluate_js(_RELOAD_JS)
+        except Exception:
+            log("刷新快捷键注入失败:\n" + traceback.format_exc())
 
     window.events.closing += on_closing
     window.events.resized += lambda w, h: geo.update(width=w, height=h)
