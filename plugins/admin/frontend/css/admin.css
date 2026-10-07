@@ -140,6 +140,20 @@ select.admin-input {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
 }
 
+/* small 只是尺寸修饰，不得打穿 primary 配色——否则 small+primary 组合
+   白字白底不可见（2026-10-07 真机报告：商店管理「通过（发布）」按钮隐形） */
+.admin-btn.small.primary {
+  color: var(--md-on-primary);
+  background: var(--md-primary);
+  border-color: transparent;
+  box-shadow: var(--md-shadow-1);
+}
+
+.admin-btn.small.primary:hover {
+  background: #3b78e7;
+  box-shadow: var(--md-shadow-2);
+}
+
 .admin-btn.text {
   border: none;
   background: transparent;
