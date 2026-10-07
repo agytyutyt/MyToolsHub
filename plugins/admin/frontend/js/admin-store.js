@@ -243,7 +243,7 @@
         + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
         + '<td class="st-cell-stack">' + depsHtml + '</td>'
         + '<td class="st-cell-stack">' + svr + '</td>'
-        + '<td style="text-align:right;white-space:nowrap">' + ops + '</td>';
+        + '<td class="st-ops">' + ops + '</td>';
       tbody.appendChild(tr);
     });
   }
