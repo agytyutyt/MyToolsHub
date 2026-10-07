@@ -62,7 +62,41 @@ class GeometryStore:
         g = {k: s[k] for k in ("width", "height", "x", "y") if k in s}
         g.setdefault("width", INIT_SIZE[0])
         g.setdefault("height", INIT_SIZE[1])
+        return _clamp_to_screen(g, self._log)
+
+
+def _virtual_screen():
+    """主屏+扩展屏的虚拟桌面范围（ctypes GetSystemMetrics，零依赖）；取不到返回 None。"""
+    try:
+        import ctypes
+        u = ctypes.windll.user32
+        x, y = u.GetSystemMetrics(76), u.GetSystemMetrics(77)
+        w, h = u.GetSystemMetrics(78), u.GetSystemMetrics(79)
+        if w > 0 and h > 0:
+            return int(x), int(y), int(w), int(h)
+    except Exception:
+        pass
+    return None
+
+
+def _clamp_to_screen(g, log):
+    """几何恢复的屏幕内钳制：显示器拓扑变化或保存过最小化坐标（Win32 离屏值）会把
+    窗口还原到屏幕外——任务栏可见而窗口不可见（2026-10-07 真机报告，实测 x/y=-25600）。
+    策略：宽高钳到虚拟桌面；x/y 钳回边界内，保证标题栏至少 120×40 可见。"""
+    vs = _virtual_screen()
+    if not vs:
         return g
+    vx, vy, vw, vh = vs
+    try:
+        g["width"] = max(480, min(int(g.get("width", INIT_SIZE[0])), vw))
+        g["height"] = max(360, min(int(g.get("height", INIT_SIZE[1])), vh))
+        if "x" in g and "y" in g:
+            g["x"] = min(max(int(g["x"]), vx), vx + vw - 120)
+            g["y"] = min(max(int(g["y"]), vy), vy + vh - 40)
+    except (TypeError, ValueError):
+        g.pop("x", None); g.pop("y", None)
+    log("start geometry（屏幕内钳制后）: %s" % json.dumps(g))
+    return g
 
 
 class ShellBridge:
@@ -150,7 +184,17 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
 
     window.events.closing += on_closing
     window.events.resized += lambda w, h: geo.update(width=w, height=h)
-    window.events.moved += lambda x, y: geo.update(x=x, y=y)
+
+    def _on_moved(x, y):
+        # 最小化时 Win32 会上报离屏坐标（本机实测 -25600/-25600）——存了会导致下次
+        # 启动窗口开在屏幕外（任务栏可见而窗口不可见，2026-10-07 真机报告）。
+        # 离屏值直接丢弃（恢复侧另有虚拟桌面钳制兜底）。
+        if x < -8 or y < -8 or x > 100000 or y > 100000:
+            log("moved 事件上报离屏坐标（%s, %s），判定为最小化/异常——不保存" % (x, y))
+            return
+        geo.update(x=x, y=y)
+
+    window.events.moved += _on_moved
     window.events.loaded += on_loaded
 
     tray = [None]
