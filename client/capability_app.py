@@ -477,17 +477,26 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.post("/local-api/restart")
     def lp_restart():
-        """类 C 升级/装卸后的能力层秒级重启（§6.7；会话镜像已持久化，免重登）。"""
+        """类 C 升级 / DLL 依赖安装后的能力层重启（§6.7；会话镜像已持久化，免重登）。
+
+        打包态：拉起新实例（cmd 延迟 1 秒 start exe）后本进程 0.6 秒退出——
+        时间差保证单实例互斥已释放；源码态不支持自重启（提示手动）。"""
         import subprocess as _sp
-        exe = sys.executable if getattr(sys, "frozen", False) else None
-        if not exe:
+        if not getattr(sys, "frozen", False):
             return jsonify({"ok": False, "error": "仅打包态支持自重启（源码态请手动重启）"}), 400
+        exe = sys.executable
+        try:
+            _sp.Popen('cmd /c timeout /t 1 /nobreak >nul & start "" "%s"' % exe,
+                      shell=True, creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+        except Exception as exc:
+            return jsonify({"ok": False, "error": "拉起新实例失败：%s" % exc}), 500
+
         def _reexec():
             time.sleep(0.6)
             os._exit(0)
+
         threading.Thread(target=_reexec, daemon=True).start()
-        # 打包态由外部守护拉起（批次 2 托盘/批次 5 安装器配合）；当前口径：退出即由安装器/脚本重启
-        return jsonify({"ok": True, "note": "能力层即将退出，请由启动器重新拉起"})
+        return jsonify({"ok": True, "note": "客户端即将重启（新实例 1 秒后自动拉起）"})
 
     def _ver_lt(a, b):
         def nums(v):

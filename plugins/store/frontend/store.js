@@ -31,11 +31,20 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
+  var _toastTimer = null;
   function msg(t, isErr) {
-    var el = $('#st-msg');
+    // 浮层 Toast（批次 10 优化）：卡片操作反馈不再写页签行（滚动后不可见即"无反馈"）
+    var el = $('#st-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'st-toast';
+      document.body.appendChild(el);
+    }
     el.textContent = t || '';
     el.classList.toggle('err', !!isErr);
-    if (t) setTimeout(function () { if (el.textContent === t) el.textContent = ''; }, 6000);
+    el.classList.toggle('show', !!t);
+    if (_toastTimer) clearTimeout(_toastTimer);
+    if (t) _toastTimer = setTimeout(function () { el.classList.remove('show'); }, isErr ? 8000 : 4000);
   }
   function fmtSize(n) {
     n = Number(n) || 0;
@@ -194,7 +203,7 @@
       grid.innerHTML = '<div class="st-empty">' + (catalog.length ? '没有匹配的条目' : '商店暂无上架条目') + '</div>';
       return;
     }
-    list.forEach(function (e) {
+    list.forEach(function (e, idx) {
       var st = pluginInstallState(e);
       var badges = '<span class="st-badge ' + runtimeClass(e.runtime) + '">' + humanRuntime(e.runtime) + '</span>'
         + (e.deps_mode === 'venv' ? '<span class="st-badge venv">独立环境</span>' : '')
@@ -202,7 +211,8 @@
         + (st.upgradable ? '<span class="st-badge up">可升级</span>' : '')
         + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '');
       var card = document.createElement('div');
-      card.className = 'st-card';
+      card.className = 'st-card st-rt-' + runtimeClass(e.runtime);
+      card.style.animationDelay = Math.min(idx * 35, 350) + 'ms';
       card.innerHTML = ''
         + '<div class="st-card-top">'
         +   '<span class="st-icon">' + esc(e.icon || '🧩') + '</span>'
@@ -237,15 +247,26 @@
         .then(function (d) {
           if (!d.ok) { msg('安装失败：' + (d.error || '未知错误'), true); return; }
           var note = [];
-          if (d.restart_required) note.push('需重启能力层生效（会话已保留）');
+          var needRestart = !!d.restart_required
+            || !!(d.pending_components && d.pending_components.length);
           if (d.pending_components && d.pending_components.length) {
-            note.push('依赖组件待下次启动生效：' + d.pending_components.join('、'));
+            note.push('依赖组件待重启生效：' + d.pending_components.join('、'));
           }
           (d.dep_results || []).forEach(function (r) {
             if (!r.ok) note.push('依赖 ' + r.id + ' 安装失败：' + (r.error || ''));
           });
           msg('安装成功：' + e.id + (note.length ? '（' + note.join('；') + '）' : ''));
           loadLocalState().then(render);
+          if (needRestart) {
+            if (confirm('本插件/依赖需要重启客户端才能生效（会话保留，免重登）。现在自动重启？')) {
+              msg('正在重启客户端 …');
+              post('/local-api/restart', {}).then(function (r) {
+                if (!r.ok) msg('自动重启不可用：' + (r.error || '') + '——请手动重启客户端', true);
+              }).catch(function () { msg('自动重启请求失败：请手动重启客户端', true); });
+            } else {
+              msg('已安装（重启客户端后生效，会话保留）');
+            }
+          }
         })
         .catch(function (err) { msg('安装异常：' + err, true); });
     };
@@ -369,6 +390,14 @@
     var btn = ev.target.closest ? ev.target.closest('button[data-act]') : null;
     if (btn) onAction(btn.getAttribute('data-act'), btn);
   });
+
+  function renderSkeleton() {
+    var grid = $('#st-grid');
+    var html = '';
+    for (var i = 0; i < 6; i++) html += '<div class="st-skel"><i></i><i></i><i></i><i></i><i></i></div>';
+    grid.innerHTML = html;
+  }
+  renderSkeleton();
 
   loadLocalState().then(function () {
     return fetch(CATALOG_API).then(function (r) { return r.json(); }).then(function (d) {

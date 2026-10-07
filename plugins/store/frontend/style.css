@@ -1,66 +1,123 @@
-/* 插件商店页样式（零构建原生 CSS；?v=1 起版，改动须递增引用处） */
+/* 插件商店页样式（零构建原生 CSS；?v=4 起在与项目整体视觉语言对齐的动效层）
+   视觉基调：与主界面一致——白卡片、12px 圆角、悬浮抬升、克制的过渡动画（.15-.25s），
+   主色沿用项目蓝 #1a73e8；图标按类目着色（本地绿/服务器蓝/依赖紫）。 */
 :root{
   --line:#e0e3e7; --ink:#202124; --ink2:#5f6368; --bg:#f6f8fa; --card:#fff;
   --blue:#1a73e8; --blue-dk:#1558b0; --green:#137333; --green-bg:#e6f4ea;
   --red:#c5221f; --red-bg:#fce8e6; --gray-bg:#f1f3f4; --purple:#7b1fa2; --purple-bg:#f3e5f5;
+  --shadow-1:0 1px 2px rgba(60,64,67,.1),0 1px 3px rgba(60,64,67,.08);
+  --shadow-2:0 2px 6px rgba(60,64,67,.15),0 6px 16px rgba(60,64,67,.12);
+  --ease:cubic-bezier(.2,.7,.3,1);
 }
 *{box-sizing:border-box}
 body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--ink);
   margin:0;padding:16px 20px 40px}
+
+/* ---------- 头部 ---------- */
 .st-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between;
   max-width:1080px;margin:0 auto 14px}
 .st-head h1{font-size:20px;margin:0 0 4px}
 .st-sub{font-size:13px;color:var(--ink2);margin:0;max-width:560px}
 .st-head-right{display:flex;gap:10px;align-items:center}
-#st-q{padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-width:220px}
-.st-manage{border:0;background:none;font-size:14px;padding:8px 14px;color:var(--ink2);text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent}
-.st-manage:hover{color:var(--blue);border-bottom-color:var(--blue)}
-.st-manage:hover{text-decoration:underline}
+#st-q{padding:8px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;min-width:220px;
+  background:#fff;transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
+#st-q:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,115,232,.15)}
 
+/* 商店管理：与「插件 / 依赖」页签同款（单条 hover 规则，勿再叠加） */
+.st-manage{border:0;background:none;font-size:14px;padding:8px 14px;color:var(--ink2);
+  text-decoration:none;white-space:nowrap;border-bottom:2px solid transparent;cursor:pointer;
+  transition:color .15s var(--ease),border-color .15s var(--ease)}
+.st-manage:hover{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* ---------- 页签 ---------- */
 .st-tabs{display:flex;gap:6px;align-items:center;max-width:1080px;margin:0 auto 14px;
-  border-bottom:1px solid var(--line);padding-bottom:0}
+  border-bottom:1px solid var(--line)}
 .st-tab{border:0;background:none;font-size:14px;padding:8px 14px;cursor:pointer;color:var(--ink2);
-  border-bottom:2px solid transparent}
+  border-bottom:2px solid transparent;transition:color .15s var(--ease),border-color .15s var(--ease)}
+.st-tab:hover{color:var(--ink)}
 .st-tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 #st-msg{margin-left:auto;font-size:13px;color:var(--green);min-height:16px;padding:4px 2px}
 #st-msg.err{color:var(--red)}
 
+/* ---------- 浮层提示（操作反馈始终可见，不受滚动位置影响） ---------- */
+#st-toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(12px);
+  max-width:min(680px,calc(100vw - 40px));background:#202124;color:#fff;font-size:13px;
+  padding:10px 18px;border-radius:10px;box-shadow:var(--shadow-2);opacity:0;pointer-events:none;
+  transition:opacity .2s var(--ease),transform .2s var(--ease);z-index:90;overflow-wrap:anywhere}
+#st-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#st-toast.err{background:var(--red)}
+
+/* ---------- 卡片网格 ---------- */
 .st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;
   max-width:1080px;margin:0 auto}
-.st-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
-  display:flex;flex-direction:column;gap:8px;min-width:0}
+.st-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px;
+  display:flex;flex-direction:column;gap:8px;min-width:0;box-shadow:var(--shadow-1);
+  transition:box-shadow .2s var(--ease),transform .2s var(--ease),border-color .2s var(--ease);
+  animation:stIn .28s var(--ease) both}
+.st-card:hover{box-shadow:var(--shadow-2);transform:translateY(-2px);border-color:#d7dbe0}
+@keyframes stIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 .st-card-top{display:flex;gap:10px;align-items:flex-start}
-.st-icon{font-size:26px;line-height:1;flex:none}
-.st-title{min-width:0}
-.st-name{font-size:15px;font-weight:600;margin:0 0 2px;overflow-wrap:anywhere}
+.st-icon{font-size:22px;line-height:1;flex:none;width:40px;height:40px;display:flex;
+  align-items:center;justify-content:center;border-radius:10px;background:var(--gray-bg)}
+.st-rt-local .st-icon{background:var(--green-bg)}
+.st-rt-server .st-icon{background:#e8f0fe}
+.st-rt-dep .st-icon{background:var(--purple-bg)}
+.st-title{min-width:0;padding-top:1px}
+.st-name{font-size:15px;font-weight:600;margin:0 0 3px;overflow-wrap:anywhere}
 .st-badges{display:flex;gap:4px;flex-wrap:wrap}
-.st-badge{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px}
+.st-badge{display:inline-block;padding:1px 8px;border-radius:9px;font-size:11px;line-height:17px}
 .st-badge.local{background:var(--green-bg);color:var(--green)}
 .st-badge.server{background:#e8f0fe;color:var(--blue)}
 .st-badge.dep{background:var(--purple-bg);color:var(--purple)}
 .st-badge.venv{background:var(--gray-bg);color:var(--ink2)}
 .st-badge.up{background:#fef7e0;color:#b06000}
-.st-desc{font-size:13px;color:var(--ink2);margin:0;overflow-wrap:anywhere}
+.st-desc{font-size:13px;color:var(--ink2);margin:0;overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .st-meta{font-size:12px;color:var(--ink2)}
 .st-meta .miss{color:var(--red)}
+
+/* ---------- 操作按钮 ---------- */
 .st-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
-.st-actions button{padding:6px 12px;border:0;border-radius:6px;font-size:13px;cursor:pointer}
+.st-actions button{padding:6px 12px;border:0;border-radius:7px;font-size:13px;cursor:pointer;
+  transition:background .15s var(--ease),box-shadow .15s var(--ease),transform .08s var(--ease)}
+.st-actions button:active{transform:scale(.97)}
+.st-actions button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .st-btn-install{background:var(--blue);color:#fff}
-.st-btn-install:hover{background:var(--blue-dk)}
+.st-btn-install:hover{background:var(--blue-dk);box-shadow:0 1px 4px rgba(26,115,232,.4)}
 .st-btn-warn{background:#e8f0fe;color:var(--blue)}
+.st-btn-warn:hover{background:#d7e5fb}
 .st-btn-danger{background:var(--red-bg);color:var(--red)}
+.st-btn-danger:hover{background:#f6d4d1}
 .st-btn-ghost{background:var(--gray-bg);color:var(--ink2)}
-.st-actions button:disabled{opacity:.5;cursor:default}
-.st-detail{border-top:1px dashed var(--line);padding-top:8px;font-size:12px;color:var(--ink2);
-  display:none;overflow-wrap:anywhere}
-.st-card.open .st-detail{display:block}
+.st-btn-ghost:hover{background:#e6e9ec;color:var(--ink)}
+.st-actions button:disabled{opacity:.5;cursor:default;transform:none;box-shadow:none}
+
+/* ---------- 详情展开（max-height 过渡，WebView2 100 代内核兼容） ---------- */
+.st-detail{border-top:1px dashed var(--line);font-size:12px;color:var(--ink2);
+  overflow-wrap:anywhere;max-height:0;opacity:0;overflow:hidden;
+  transition:max-height .25s var(--ease),opacity .2s var(--ease),padding .25s var(--ease)}
+.st-card.open .st-detail{max-height:420px;opacity:1;padding-top:8px;overflow-y:auto}
 .st-detail h4{margin:6px 0 2px;font-size:12px;color:var(--ink)}
 .st-detail-toggle{background:none;border:0;color:var(--blue);font-size:12px;cursor:pointer;
-  padding:0;text-align:left}
-.st-empty{grid-column:1/-1;text-align:center;color:var(--ink2);padding:40px 0;font-size:14px}
+  padding:0;text-align:left;transition:color .15s var(--ease)}
+.st-detail-toggle:hover{color:var(--blue-dk);text-decoration:underline}
+
+/* ---------- 空态与骨架屏 ---------- */
+.st-empty{grid-column:1/-1;text-align:center;color:var(--ink2);padding:48px 0 40px;font-size:14px}
+.st-empty::before{content:'🛍️';display:block;font-size:34px;margin-bottom:10px;opacity:.5}
+.st-skel{border-radius:12px;border:1px solid var(--line);background:#fff;padding:14px 16px;
+  box-shadow:var(--shadow-1)}
+.st-skel i{display:block;border-radius:6px;background:linear-gradient(90deg,#eef1f4 25%,#e4e8ec 50%,#eef1f4 75%);
+  background-size:200% 100%;animation:stShim 1.2s linear infinite}
+.st-skel i:nth-child(1){width:42px;height:40px;border-radius:10px;margin-bottom:10px}
+.st-skel i:nth-child(2){width:62%;height:14px;margin-bottom:8px}
+.st-skel i:nth-child(3){width:90%;height:11px;margin-bottom:6px}
+.st-skel i:nth-child(4){width:78%;height:11px;margin-bottom:14px}
+.st-skel i:nth-child(5){width:46%;height:26px}
+@keyframes stShim{from{background-position:200% 0}to{background-position:-200% 0}}
 
 /* 桌面端专属操作：浏览器路径默认隐藏，壳内（html.jz-shell）才出现——红线 2 门控。
-   反向同理：浏览器下载按钮（跳转 /plugin/store/api/download）在壳内隐藏（走能力层落数据目录）。 */
+   反向同理：浏览器下载按钮在壳内隐藏（走能力层落数据目录）。 */
 .jz-only{display:none !important}
 html.jz-shell .jz-only{display:inline-block !important}
 html.jz-shell .st-browser-dl{display:none !important}
@@ -70,5 +127,3 @@ html.jz-shell .st-browser-dl{display:none !important}
   .st-grid{grid-template-columns:1fr}
   #st-q{min-width:0;flex:1}
 }
-
-.st-manage:hover{background:rgba(66,133,244,.12)}
