@@ -21,6 +21,9 @@
 
   var PAGE = document.body.getAttribute('data-page') || 'home';
   var SUFFIX = document.body.getAttribute('data-side-suffix') || '';
+  // 页级返回覆盖（2026-10-07）：非 tool 页声明 data-side-back="<href>" 时，首项渲染为
+  // 「返回」（如商店管理页从商店页进入 → data-side-back="/tool/store"）
+  var BACK_HREF = document.body.getAttribute('data-side-back') || '';
   var STORE_KEY = 'jz_sidebar_collapsed';
   var AUTO_COLLAPSE_WIDTH = 900;   // 窄于此宽度自动精简（客户端最小窗 480，展开档放不下）
 
@@ -68,12 +71,14 @@
 
     // 首项：主页/管理后台显示「主界面」，插件外壳页显示「返回」（都离开当前页，
     // 主页与管理后台回首页、插件页回工具箱首页）
-    var homeLabel = PAGE === 'tool' ? '返回' : '主界面';
+    var backMode = PAGE === 'tool' || BACK_HREF;
+    var homeLabel = backMode ? '返回' : '主界面';
+    var homeHref = backMode && BACK_HREF ? BACK_HREF : '/';
     // 位置感知高亮：/tool/store（插件商店页）时商店条目为选中态；其他工具页不属于
     // 侧栏任何条目，不做高亮（条目全部保留可见，不隐藏——2026-10-07 优化口径）
     var onStore = PAGE === 'tool' && /^\/tool\/store(\/|$)/.test(location.pathname);
     var middle = itemHtml({
-      id: 'side-home', icon: PAGE === 'tool' ? 'back' : 'home', label: homeLabel, href: '/',
+      id: 'side-home', icon: backMode ? 'back' : 'home', label: homeLabel, href: homeHref,
       className: PAGE === 'home' ? 'active' : '',
       extra: PAGE === 'home' ? ' aria-current="page"' : '',
     })
