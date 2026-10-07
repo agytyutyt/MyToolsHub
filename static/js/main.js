@@ -82,7 +82,10 @@ async function render() {
     document.getElementById('footer').textContent = site.footer || '';
 
     const tools = data.tools || [];
-    if (tools.length === 0) {
+    // 插件商店不在网格重复展示：侧栏已有常驻入口（2026-10-07）；
+    // 元数据保留在 /api/tools 里，/tool/store 壳页仍需要它
+    const gridTools = tools.filter(t => t.id !== "store");
+    if (gridTools.length === 0) {
       // 首装引导（主体与插件解耦后，主包只带核心插件 admin）：
       // 业务插件由「插件集 / 插件包」安装——给出可执行的下一步，而不是让管理员面对空白页。
       grid.innerHTML = '<div class="loading">暂无可用工具。<br>'
@@ -95,7 +98,7 @@ async function render() {
     // 按分类分组渲染；分类下无工具则跳过该区块
     content.innerHTML = '';
     for (const cat of data.categories || []) {
-      const catTools = tools.filter(t => t.category_id === cat.id);
+      const catTools = gridTools.filter(t => t.category_id === cat.id);
       if (catTools.length === 0) continue;
 
       const section = document.createElement('section');
@@ -229,7 +232,9 @@ async function openHideModal() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     hideCats.innerHTML = (data.categories || []).map(c => hideRowHtml('category', c)).join('');
-    hideTools.innerHTML = (data.tools || []).map(t => hideRowHtml('tool', t)).join('');
+    // 隐藏插件面板同样排除商店（网格已无商店卡，隐藏它无意义）
+    hideTools.innerHTML = (data.tools || []).filter(t => t.id !== "store")
+      .map(t => hideRowHtml('tool', t)).join('');
     modalHide.hidden = false;
     document.body.classList.add('modal-open');
   } catch (err) {
