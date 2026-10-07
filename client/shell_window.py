@@ -200,6 +200,15 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
     tray = [None]
 
     def _start_tray():
+        def on_refresh(icon, item):
+            # 重新加载当前 URL（HTML no-cache → 引用与 v 戳随之刷新；联调期服务端改版后用）
+            try:
+                url = window.get_current_url() or origin
+                window.load_url(url)
+                log("tray refresh: %s" % url)
+            except Exception:
+                log("tray refresh failed:\n" + traceback.format_exc())
+
         def on_open(icon, item):
             window.show()
 
@@ -215,6 +224,7 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
         icon = pystray.Icon(
             product.get("name", "JZClient"), _tray_image(), display,
             menu=pystray.Menu(
+                pystray.MenuItem("刷新页面", on_refresh),
                 pystray.MenuItem("打开窗口", on_open, default=True),
                 pystray.MenuItem("用浏览器打开", on_browser),
                 pystray.MenuItem("退出", on_exit),
