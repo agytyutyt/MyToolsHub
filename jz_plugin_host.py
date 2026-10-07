@@ -38,7 +38,16 @@ def setup_dep_components(base_dir, logger=None):
     幂等：sys.path 无条件注入（目录可能"服务运行中才装出来"，不存在的路径条目无害），
     DLL 目录按已注入集合去重——**装完组件刷新页面即生效，不必重启服务**。
     """
-    logger = logger or log
+    # 日志出口归一化（2026-10-08）：主包传 logging.Logger、客户端传普通函数——
+    # 直接调 logger.info 会在客户端「装了组件后的首次启动」抛 AttributeError（真机报告：
+    # 安装 docx 后重启，line 83 'function' object has no attribute 'info'）。
+    _sink = logger or log
+    if hasattr(_sink, "info"):
+        _emit = lambda m: _sink.info(m)
+    elif callable(_sink):
+        _emit = _sink
+    else:
+        _emit = lambda m: None
     base = os.path.join(base_dir, "runtime", "pylibs")
     if base not in sys.path:
         sys.path.insert(0, base)
@@ -80,7 +89,7 @@ def setup_dep_components(base_dir, logger=None):
             importlib.invalidate_caches()
         except Exception:                      # 缓存清理失败不影响主流程
             pass
-        logger.info("依赖组件已注入：%s（%s）", "、".join(found), base)
+        _emit("依赖组件已注入：%s（%s）" % ("、".join(found), base))
     return found
 
 
