@@ -21,6 +21,7 @@ import shutil
 import sys as _sys
 import tempfile
 import threading
+import uuid
 import time
 
 import requests
@@ -515,11 +516,11 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             ver = entry
         return ver, None
 
-    def _pull_and_verify(src, pid, version, expect_sha, filename, artifact=None):
+    def _pull_and_verify(src, pid, version, expect_sha, filename, artifact=None, progress=None):
         """拉包 → spool 落盘 → sha256 对 catalog 声明值（防传输损坏，C7）。返回本地路径或 (None, err)。"""
         spool_dir = os.path.join(_data_dir, "downloads")
         dest = os.path.join(spool_dir, os.path.basename(filename or ("%s-%s.zip" % (pid, version))))
-        path, err = src.download(pid, version, dest, artifact=artifact)
+        path, err = src.download(pid, version, dest, artifact=artifact, progress=progress)
         if err:
             return None, err
         if expect_sha:
@@ -696,9 +697,11 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "restart_required": res.get("restart_required"),
                         "hint": res.get("hint", ""), "dep_results": dep_results})
 
+    _dl_jobs = {}   # dl_id → {received,total,status,path,error,filename}（下载进度台账）
+
     @app.post("/local-api/store/download")
     def store_download():
-        """桌面端「下载包」：拉包落数据目录 downloads\\（留档/转移；安装不走此按钮）。"""
+        """桌面端「下载包」：启动后台拉包任务，返回任务 id（前端轮询 /download/progress）。"""
         data = request.get_json(force=True, silent=True) or {}
         pid = str(data.get("id") or "")
         version = str(data.get("version") or "")
@@ -711,21 +714,37 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return jsonify({"ok": False, "error": err}), 200
         # server 条目下载 = 后端包（管理员留档用）；其余 = 自身包
         filename = ver.get("file") or ("%s-%s.zip" % (pid, ver.get("version")))
-        path, err = _pull_and_verify(src, pid, ver.get("version"), ver.get("sha256"), filename)
-        if err:
-            return jsonify({"ok": False, "error": err}), 200
-        return jsonify({"ok": True, "path": path})
+        dl_id = uuid.uuid4().hex
+        _dl_jobs[dl_id] = {"received": 0, "total": None, "status": "running",
+                           "path": "", "error": "", "filename": filename}
 
-    @app.post("/local-api/store/reveal")
-    def store_reveal():
-        """下载完成后打开客户端 downloads 目录（定位留档文件）。"""
-        d = os.path.join(data_dir, "downloads")
-        os.makedirs(d, exist_ok=True)
-        try:
-            os.startfile(d)                   # 客户端仅 Windows；打开资源管理器
-            return jsonify({"ok": True})
-        except Exception as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 500
+        def _worker():
+            st = _dl_jobs.get(dl_id)
+            if st is None:
+                return
+            try:
+                def _prog(received, total):
+                    st["received"], st["total"] = received, total
+                path, err = _pull_and_verify(src, pid, ver.get("version"),
+                                             ver.get("sha256"), filename, progress=_prog)
+                if err:
+                    st["status"], st["error"] = "error", err
+                else:
+                    st.update(status="done", path=path)
+            except Exception as exc:
+                st["status"], st["error"] = "error", str(exc)
+
+        threading.Thread(target=_worker, daemon=True, name="store-dl-" + dl_id[:8]).start()
+        return jsonify({"ok": True, "id": dl_id, "filename": filename})
+
+    @app.get("/local-api/store/download/progress")
+    def store_download_progress():
+        st = _dl_jobs.get(request.args.get("id") or "")
+        if st is None:
+            return jsonify({"ok": False, "status": "error", "error": "任务不存在"}), 200
+        return jsonify({"ok": True, "received": st["received"], "total": st["total"],
+                        "status": st["status"], "path": st["path"], "error": st["error"],
+                        "filename": st["filename"]})
 
     @app.get("/local-api/config/plugin-source")
     def plugin_source_get():

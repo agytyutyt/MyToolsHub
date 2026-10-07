@@ -283,16 +283,41 @@
         + '/' + encodeURIComponent(ver) + '?via=browser';
       return;
     }
-    if (act === 'download-local') {                 // 桌面端：落数据目录 downloads\
-      msg('正在下载到本机 downloads\\ …');
-      post('/local-api/store/download', { id: id, version: ver }).then(function (d) {
-        if (d.ok) {
-          msg('已保存到本机 downloads\（已打开文件夹）');
-          fetch('/local-api/store/reveal', { method: 'POST' });
-        } else {
-          msg('下载失败：' + (d.error || ''), !d.ok);
-        }
-      });
+        if (act === 'download-local') {                 // 桌面端：启动后台任务，轮询进度（批次 10）
+      if (btn.dataset.busy) return;
+      btn.dataset.busy = '1';
+      var restore = function () { btn.textContent = btn.getAttribute('data-label') || '下载包';
+        delete btn.dataset.busy; };
+      msg('准备下载…');
+      fetch('/local-api/store/download', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id, version: ver }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { restore(); msg('下载失败：' + (d.error || ''), true); return; }
+          btn.setAttribute('data-label', btn.textContent);
+          var timer = setInterval(function () {
+            fetch('/local-api/store/download/progress?id=' + d.id)
+              .then(function (r2) { return r2.json(); })
+              .then(function (p) {
+                if (p.status === 'running') {
+                  var pct = p.total ? Math.round(p.received / p.total * 100) + '%'
+                                    : fmtSize(p.received);
+                  btn.textContent = '下载中 ' + pct;
+                  msg('下载中 ' + pct + (p.total ? ('（' + fmtSize(p.received) + ' / '
+                    + fmtSize(p.total) + '）') : ''));
+                } else if (p.status === 'done') {
+                  clearInterval(timer); restore();
+                  msg('已保存到本机 downloads（已打开文件夹）');
+                  fetch('/local-api/store/reveal', { method: 'POST' });
+                } else if (p.status === 'error') {
+                  clearInterval(timer); restore();
+                  msg('下载失败：' + (p.error || ''), true);
+                }
+              });
+          }, 400);
+        })
+        .catch(function (e) { restore(); msg('下载请求异常：' + e, true); });
       return;
     }
     if (act === 'install') { preflightAndInstall(e); return; }

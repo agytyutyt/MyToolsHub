@@ -68,10 +68,11 @@ class ServerSource:
         except Exception as exc:
             return None, "商店目录不可解析：%s" % exc
 
-    def download(self, pid, version, dest_path, artifact=None):
+    def download(self, pid, version, dest_path, artifact=None, progress=None):
         """拉包（via=client，计入下载统计）流式落盘到 dest_path。
 
         artifact：server 条目双包工件选择（None/"backend"=后端包；"frontend"=前端包）。
+        progress：可选回调 progress(received, total|None)——分块上报（下载进度条用）。
         → (path, None) | (None, err)
         """
         addr = self._addr()
@@ -87,11 +88,19 @@ class ServerSource:
         if r.status_code != 200:
             return None, "拉包失败（HTTP %s）" % r.status_code
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        total = int(r.headers.get("Content-Length") or 0) or None
+        received = 0
         try:
             with open(dest_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=1024 * 1024):
                     if chunk:
                         f.write(chunk)
+                        received += len(chunk)
+                        if progress:
+                            try:
+                                progress(received, total)
+                            except Exception:
+                                pass
         except OSError as exc:
             return None, "拉包落盘失败：%s" % exc
         return dest_path, None
@@ -132,7 +141,7 @@ class ShareSource:
             pkgs.append(item)
         return {"schema": 1, "packages": pkgs}, None
 
-    def download(self, pid, version, dest_path, artifact=None):
+    def download(self, pid, version, dest_path, artifact=None, progress=None):
         """共享盘 = 文件复制（sha256 由调用方对索引声明值校验）；artifact 忽略（单包形态）。"""
         catalog, err = self.get_catalog()
         if err:
