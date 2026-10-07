@@ -138,8 +138,14 @@ class PluginExecutor:
         resp = json.loads(line)
         if "error" in resp:
             raise WorkerCrash(resp["error"])
-        return resp.get("status", 200), resp.get("headers", {}), \
-            base64.b64decode(resp.get("body_b64") or "")
+        body = base64.b64decode(resp.get("body_b64") or "")
+        if len(body) > WORKER_BODY_LIMIT:
+            # L-3 响应体上限 8MB（规范 §16.3）：超限回 502 并提示写临时文件传路径——
+            # 此前该上限只在规范里声明、链路无强制（批次 10 适配核对发现）。
+            return 502, {"Content-Type": "application/json"}, json.dumps(
+                {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——大结果请写临时文件传路径"
+                          % (WORKER_BODY_LIMIT // 1048576)}).encode()
+        return resp.get("status", 200), resp.get("headers", {}), body
 
     def _audit(self, plugin_id, method, path, seconds, outcome):
         try:
