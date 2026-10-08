@@ -431,6 +431,19 @@ def migrate_admin_case_handler_role(cfg):
     return changed
 
 
+def can_review_store(info):
+    """商店审核/下架/部署权限（2026-10-08 需求方修订）：仅超级管理员或管理员角色。
+
+    与历史「全流程不分角色」不同——**提交上架仍全员可用（不设门槛）**，
+    审核 / 驳回 / 下架 / 重新部署收紧到本判据（发布即部署属服务器敏感操作）。
+    """
+    if not info:
+        return False
+    if info.get("super_admin"):
+        return True
+    return info.get("role_id") in ("role-admin",) or info.get("role") == "管理员"
+
+
 def _role_super_admin(cfg, role_id):
     """判断角色是否为超级管理员（拥有全部管理模块）。"""
     role = next((r for r in cfg.get("permissions", []) if r.get("id") == role_id), None)
@@ -2407,6 +2420,7 @@ def register(app):
         installed_names = sorted({str(k).casefold() for k in (installed.get("modules") or {})}
                                  | {str(k).casefold() for k in (installed.get("packages") or {})})
         return jsonify({"ok": True, "packages": rows, "installed_names": installed_names,
+                        "can_review": can_review_store(get_session_user()),
                         "index_server_path": store_admin.index_server_path(root),
                         "data_root": root})
 
@@ -2452,8 +2466,13 @@ def register(app):
     @app.post("/plugin/admin/store/review")
     @login_required
     def admin_store_review():
-        """审核：approve（发布；server 条目含发布即部署）/ reject / republish。"""
+        """审核：approve（发布；server 条目含发布即部署）/ reject / republish。
+
+        权限（2026-10-08 修订）：仅管理员 / 超级管理员；提交上架不受此限。
+        """
         set_operation("商店审核")
+        if not can_review_store(get_session_user()):
+            return jsonify({"ok": False, "error": "仅管理员或超级管理员可审核（提交上架不受限）"}), 403
         data = request.get_json(silent=True) or {}
         pid = str(data.get("id") or "")
         version = str(data.get("version") or "")
@@ -2500,8 +2519,13 @@ def register(app):
     @app.post("/plugin/admin/store/redeploy")
     @login_required
     def admin_store_redeploy():
-        """部署运行面板「重新部署」：把指定版本的 server 后端包重新应用到服务器（当前形态）。"""
+        """部署运行面板「重新部署」：把指定版本的 server 后端包重新应用到服务器（当前形态）。
+
+        权限（2026-10-08 修订）：仅管理员 / 超级管理员（发布即部署属服务器敏感操作）。
+        """
         set_operation("商店重新部署")
+        if not can_review_store(get_session_user()):
+            return jsonify({"ok": False, "error": "仅管理员或超级管理员可重新部署"}), 403
         data = request.get_json(silent=True) or {}
         pid = str(data.get("id") or "")
         version = str(data.get("version") or "")
@@ -2511,8 +2535,13 @@ def register(app):
     @app.post("/plugin/admin/store/delist")
     @login_required
     def admin_store_delist():
-        """下架（version 留空 = 最新已上架版；下架最新版 = 投影自动回落旧版）。"""
+        """下架（version 留空 = 最新已上架版；下架最新版 = 投影自动回落旧版）。
+
+        权限（2026-10-08 修订）：仅管理员 / 超级管理员。
+        """
         set_operation("商店下架")
+        if not can_review_store(get_session_user()):
+            return jsonify({"ok": False, "error": "仅管理员或超级管理员可下架"}), 403
         data = request.get_json(silent=True) or {}
         res = store_admin.delist(_store_root(), str(data.get("id") or ""),
                                  str(data.get("version") or ""),

@@ -8,6 +8,7 @@
   var filter = 'pending';
   var packages = [];
   var installedNames = [];   // 主包运行时自带依赖（服务端 installed-deps）
+  var canReview = true;      // 审核/下架/部署权限（2026-10-08：仅管理员/超管；提交全员）
   var depProvides = {};      // 已上架依赖条目的 provides 集合（name→true）
 
   function esc(s) {
@@ -265,7 +266,10 @@
         }
       }
       var ops = '';
-      if (r.status === 'pending') {
+      if (!canReview) {
+        // 权限门控（2026-10-08 修订）：非管理员仅可提交上架；审核/下架/部署按钮不出现
+        ops = '<span class="st-muted">待管理员审核</span>';
+      } else if (r.status === 'pending') {
         ops += '<button class="admin-btn small primary" data-op="approve" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '"'
           + (unsat.length ? ' disabled title="依赖不满足：' + esc(unsat.join('、')) + '——待对应依赖组件包上架"' : '')
           + '>通过（发布）</button> '
@@ -373,6 +377,7 @@
     fetch(API + '/list').then(function (r) { return r.json(); }).then(function (d) {
       packages = d.packages || [];
       installedNames = d.installed_names || [];
+      canReview = d.can_review !== false;
       depProvides = {};
       packages.forEach(function (p) {
         if (p.runtime !== 'dep-slot') return;
