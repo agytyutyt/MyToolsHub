@@ -178,8 +178,10 @@ def smoke(out, cfg):
             pass
         time.sleep(1)
         try:                                          # 兜底：smoke 只认自己的实例，残留即清
-            tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s.exe" % name,
-                                 "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout
+            p = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s.exe" % name,
+                                "/FO", "CSV", "/NH"], capture_output=True,
+                               text=True, encoding="utf-8", errors="replace")
+            tl = p.stdout or ""                       # tasklist 出 OEM 编码，按 utf-8 replace 兜底
             if name.lower() in tl.lower():
                 print("注意：仍有 %s.exe 残留，按镜像名清理（smoke 专属实例）" % name)
                 subprocess.run(["taskkill", "/IM", name + ".exe", "/F", "/T"], capture_output=True)
