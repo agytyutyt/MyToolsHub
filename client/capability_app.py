@@ -490,24 +490,36 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def lp_restart():
         """类 C 升级 / DLL 依赖安装后的能力层重启（§6.7；会话镜像已持久化，免重登）。
 
-        打包态：拉起新实例（cmd 延迟 1 秒 start exe）后本进程 0.6 秒退出——
-        时间差保证单实例互斥已释放；源码态不支持自重启（提示手动）。"""
+        接棒方式（2026-10-08 改版）：新实例带 --await-pid <本进程 pid> 拉起，由**新实例**
+        用 WaitForSingleObject 等旧进程真实退出后再抢单实例互斥——不看时间差，不用 cmd。
+        原实现两处致命伤：①裸名 sys（本文件是 import sys as _sys）→ NameError → 端点
+        从未成功执行过（前端只见 500 HTML，报「自动重启失败」）；②cmd+timeout 的 1 秒
+        延迟在无控制台进程里不可靠。现打包态与源码态同法支持。"""
         import subprocess as _sp
-        if not getattr(sys, "frozen", False):
-            return jsonify({"ok": False, "error": "仅打包态支持自重启（源码态请手动重启）"}), 400
-        exe = sys.executable
+        my_pid = os.getpid()
+        if getattr(_sys, "frozen", False):
+            argv = [_sys.executable, "--await-pid", str(my_pid)]
+            cwd = os.path.dirname(_sys.executable)
+        else:
+            script = os.path.abspath(_sys.argv[0])
+            argv = [_sys.executable, script, "--await-pid", str(my_pid)]
+            cwd = os.path.dirname(script)
+        flags = getattr(_sp, "DETACHED_PROCESS", 0) | getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0)
         try:
-            _sp.Popen('cmd /c timeout /t 1 /nobreak >nul & start "" "%s"' % exe,
-                      shell=True, creationflags=getattr(_sp, "CREATE_NO_WINDOW", 0))
+            proc = _sp.Popen(argv, cwd=cwd, creationflags=flags, close_fds=True)
         except Exception as exc:
+            _log("restart：拉起新实例失败：%r（argv=%r）" % (exc, argv))
             return jsonify({"ok": False, "error": "拉起新实例失败：%s" % exc}), 500
+        _log("restart：新实例已拉起 pid=%s（%s）；本进程 pid=%s 将于 0.5s 后退出接棒"
+             % (proc.pid, " ".join(argv), my_pid))
 
         def _reexec():
-            time.sleep(0.6)
+            time.sleep(0.5)
+            _log("restart：旧进程退出（os._exit 0）")
             os._exit(0)
 
-        threading.Thread(target=_reexec, daemon=True).start()
-        return jsonify({"ok": True, "note": "客户端即将重启（新实例 1 秒后自动拉起）"})
+        threading.Thread(target=_reexec, daemon=True, name="restart-exit").start()
+        return jsonify({"ok": True, "note": "客户端即将重启（新实例待本进程退出后接棒）"})
 
     def _ver_lt(a, b):
         def nums(v):
@@ -612,6 +624,79 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "reason": verdict.get("reason", ""),
                         "deps": deps})
 
+    # 安装进度台账（2026-10-08：安装按钮内的进度条）。token 由前端生成随 install 请求带上，
+    # 只读展示面：拉包占每包权重 35%、解压占 65%，按目录声明 size 加权折算单调百分比。
+    _install_jobs = {}   # token → {status, phase, pct, error}
+
+    @app.get("/local-api/store/install/progress")
+    def store_install_progress():
+        st = _install_jobs.get(request.args.get("id") or "")
+        return jsonify(st or {"status": "unknown"})
+
+    class _InstallProgress(object):
+        """多包安装 → 单调百分比（权重=目录 size，缺省等权）。写台账失败静默，绝不影响安装。"""
+
+        def __init__(self, token):
+            self.token = token
+            self.weights = [1]
+            self.total = 1.0
+            self.idx = 0
+            self.done_w = 0.0
+            self.pct = 0
+            self.label = ""
+
+        def set_plan(self, weights):
+            self.weights = [max(int(w or 0), 1) for w in weights] or [1]
+            self.total = float(sum(self.weights))
+            self.idx, self.done_w = 0, 0.0
+            self._push("准备", 0)
+
+        def _push(self, phase, pct):
+            self.pct = max(self.pct, min(99, int(pct)))
+            if not self.token:
+                return
+            try:
+                _install_jobs[self.token] = {"status": "running", "phase": phase,
+                                             "pct": self.pct, "error": ""}
+                while len(_install_jobs) > 200:          # 台账上界（淘汰最旧）
+                    _install_jobs.pop(next(iter(_install_jobs)))
+            except Exception:
+                pass
+
+        def _w(self):
+            return self.weights[min(self.idx, len(self.weights) - 1)]
+
+        def begin(self, idx, label):
+            self.idx, self.label = idx, label
+            self._push("准备安装 %s" % label, self.done_w / self.total * 100)
+
+        def pull(self, received, total):
+            frac = (float(received) / float(total)) if total else 0.0
+            self._push("下载 %s" % self.label, (self.done_w + self._w() * 0.35 * frac)
+                       / self.total * 100)
+
+        def extract(self, done, total):
+            frac = (float(done) / float(total)) if total else 0.0
+            self._push("解压 %s" % self.label, (self.done_w + self._w() * (0.35 + 0.65 * frac))
+                       / self.total * 100)
+
+        def pkg_done(self):
+            self.done_w += self._w()
+            self._push("%s 完成" % self.label, self.done_w / self.total * 100)
+
+    def _prog_cb(prog, kind):
+        """进度回调包装（prog 为空返回 None；回调内异常吞掉，绝不打断安装）。"""
+        if prog is None:
+            return None
+
+        def _cb(a, b):
+            try:
+                getattr(prog, kind)(a, b)
+            except Exception:
+                pass
+
+        return _cb
+
     @app.post("/local-api/store/install")
     def store_install():
         """商店安装（§3.5 ③）：拉包 → sha256 → pkg_install 单入口 → 落位 → rescan。"""
@@ -628,30 +713,51 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return jsonify({"ok": False, "error": err}), 200
         runtime = ver.get("runtime") or "local"
 
+        # 进度台账（可选）：权重 = 依赖包 size（按序）+ 主件 size；顺序与下方安装顺序一致
+        prog = None
+        main_idx = 0
+        if data.get("progress_id"):
+            prog = _InstallProgress(str(data.get("progress_id"))[:64])
+            dep_w = []
+            for dep in (data.get("deps") or []):
+                dep_id = str(dep.get("dep_id") or "")
+                if not dep_id:
+                    continue
+                de = next((p for p in catalog.get("packages") or []
+                           if p.get("id") == dep_id and p.get("runtime") == "dep-slot"), None)
+                dep_w.append((de or {}).get("size"))
+            prog.set_plan(dep_w + [ver.get("size")])
+            main_idx = len(dep_w)
+
         # ① 联合安装依赖（include_deps 勾选；dep-slot 条目逐个装，失败不阻断主件）
         dep_results = []
         if include_deps:
-            for dep in (data.get("deps") or []):
+            dep_list = [d for d in (data.get("deps") or []) if str(d.get("dep_id") or "")]
+            for i, dep in enumerate(dep_list):
                 dep_id = str(dep.get("dep_id") or "")
                 dep_ver = str(dep.get("dep_version") or "")
-                if not dep_id:
-                    continue
                 d_entry = next((p for p in catalog.get("packages") or []
                                 if p.get("id") == dep_id and p.get("runtime") == "dep-slot"), None)
                 if d_entry is None or (dep_ver and str(d_entry.get("version")) != dep_ver):
                     dep_results.append({"id": dep_id, "ok": False, "error": "目录中找不到该依赖包"})
                     continue
+                if prog:
+                    prog.begin(i, "依赖 %s" % dep_id)
                 d_path, d_err = _pull_and_verify(src, dep_id, d_entry.get("version"),
-                                                 d_entry.get("sha256"), d_entry.get("file"))
+                                                 d_entry.get("sha256"), d_entry.get("file"),
+                                                 progress=_prog_cb(prog, "pull"))
                 if d_err:
                     dep_results.append({"id": dep_id, "ok": False, "error": d_err})
                     continue
-                d_res = pkg_install.install_component_zip(d_path, _program_dir)
+                d_res = pkg_install.install_component_zip(d_path, _program_dir,
+                                                          progress=_prog_cb(prog, "extract"))
                 try:
                     os.remove(d_path)
                 except OSError:
                     pass
                 dep_results.append(dict(d_res, id=dep_id))
+                if prog:
+                    prog.pkg_done()
 
         # ② 主件按 runtime 分派
         if runtime == "server":
@@ -659,12 +765,16 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             if not ver.get("frontend_file"):
                 return jsonify({"ok": False,
                                 "error": "该条目没有前端包工件（服务器侧尚未发布前端包）"}), 200
+            if prog:
+                prog.begin(main_idx, "前端包 %s" % pid)
             path, err = _pull_and_verify(src, pid, ver.get("version"),
                                          ver.get("frontend_sha256"), ver.get("frontend_file"),
-                                         artifact="frontend")
+                                         artifact="frontend",
+                                         progress=_prog_cb(prog, "pull"))
             if err:
                 return jsonify({"ok": False, "error": err, "dep_results": dep_results}), 200
-            res = pkg_install.install_frontend_zip(path, frontends_dir)
+            res = pkg_install.install_frontend_zip(path, frontends_dir,
+                                                   progress=_prog_cb(prog, "extract"))
             try:
                 os.remove(path)
             except OSError:
@@ -678,11 +788,15 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                             "dep_results": dep_results})
 
         if runtime == "dep-slot":
+            if prog:
+                prog.begin(main_idx, "依赖包 %s" % pid)
             path, err = _pull_and_verify(src, pid, ver.get("version"),
-                                         ver.get("sha256"), ver.get("file"))
+                                         ver.get("sha256"), ver.get("file"),
+                                         progress=_prog_cb(prog, "pull"))
             if err:
                 return jsonify({"ok": False, "error": err, "dep_results": dep_results}), 200
-            res = pkg_install.install_component_zip(path, _program_dir)
+            res = pkg_install.install_component_zip(path, _program_dir,
+                                                    progress=_prog_cb(prog, "extract"))
             try:
                 os.remove(path)
             except OSError:
@@ -700,11 +814,14 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         if not str(pid).startswith("local-"):
             return jsonify({"ok": False,
                             "error": "目录条目类别与包形态不符（local 条目须 local- 前缀）"}), 200
+        if prog:
+            prog.begin(main_idx, "插件包 %s" % pid)
         path, err = _pull_and_verify(src, pid, ver.get("version"), ver.get("sha256"),
-                                     ver.get("file"))
+                                     ver.get("file"), progress=_prog_cb(prog, "pull"))
         if err:
             return jsonify({"ok": False, "error": err, "dep_results": dep_results}), 200
-        res = pkg_install.install_local_zip(path, local_plugins_dir, local_manifests, _log)
+        res = pkg_install.install_local_zip(path, local_plugins_dir, local_manifests, _log,
+                                            progress=_prog_cb(prog, "extract"))
         try:
             os.remove(path)
         except OSError:

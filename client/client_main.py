@@ -73,10 +73,45 @@ def handle_stop(build_cfg):
     return 0
 
 
+def await_prev_instance():
+    """重启接棒（--await-pid <pid>；由 /local-api/restart 拉起的新实例带上）。
+
+    用 OpenProcess(SYNCHRONIZE)+WaitForSingleObject 等旧实例**真实退出**再继续抢
+    单实例互斥——不看时间差、不用 cmd（2026-10-08 改版，旧实现靠 timeout 延迟 + 0.6s
+    赛跑，在无控制台进程里不可靠）。拿不到句柄（进程已不在）直接放行。
+    """
+    try:
+        i = sys.argv.index("--await-pid")
+        pid = sys.argv[i + 1] if i + 1 < len(sys.argv) else ""
+    except ValueError:
+        return
+    if not str(pid).isdigit():
+        return
+    why = "未等待"
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x00100000, False, int(pid))     # SYNCHRONIZE
+        if not h:
+            why = "旧进程已不存在"
+        else:
+            try:
+                rc = k32.WaitForSingleObject(h, 20000)
+                why = "旧进程已退出" if rc == 0 else "等待超时（20s，仍继续启动）"
+            finally:
+                k32.CloseHandle(h)
+    except Exception as exc:
+        why = "等待异常（按已退出继续）：%r" % exc
+    log("重启接棒：等待旧进程 pid=%s → %s" % (pid, why))
+    time.sleep(0.6)          # webview2 子进程退出 / 配置目录释放的收尾宽限
+
+
 def main():
     build_cfg = load_build_config()
     if "--stop" in sys.argv:
         return handle_stop(build_cfg)
+    if "--await-pid" in sys.argv:
+        await_prev_instance()
     product = build_cfg.get("product") or {}
     if not acquire_or_exit("JZClient-" + product.get("name", "JZClient")):
         log("已有实例在运行，本实例退出")

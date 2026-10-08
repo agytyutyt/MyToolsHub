@@ -50,11 +50,26 @@ def _paths_safe(names):
     return True, ""
 
 
+def _report(progress, done, total):
+    """进度上报（防御式）：回调为空原样返回；回调抛异常 → 吞掉并摘除（绝不打断安装）。
+
+    返回应继续使用的回调（或 None）。调用处写法：progress = _report(progress, i, total)
+    """
+    if progress is None:
+        return None
+    try:
+        progress(done, total)
+    except Exception:
+        return None
+    return progress
+
+
 # ===================== 本地插件包（类 B/C） =====================
 
-def install_local_zip(zip_path, local_plugins_dir, manifests, log=None):
+def install_local_zip(zip_path, local_plugins_dir, manifests, log=None, progress=None):
     """安装本地插件包（zip 根即插件目录）。六连校验与原 capability_app.lp_install 逐条一致；
     校验全过才落盘（升级 = 整目录替换）。调用方负责安装后 rescan。
+    progress：可选 (done_files, total_files) 回调（解压进度，供安装按钮进度条）。
 
     返回 {ok, id?, restart_required?, hint?, error?}。
     """
@@ -63,12 +78,12 @@ def install_local_zip(zip_path, local_plugins_dir, manifests, log=None):
     except zipfile.BadZipFile:
         return {"ok": False, "error": "插件包不是有效的 zip"}
     try:
-        return _install_local_zip_inner(zf, local_plugins_dir, manifests, log)
+        return _install_local_zip_inner(zf, local_plugins_dir, manifests, log, progress)
     finally:
         zf.close()
 
 
-def _install_local_zip_inner(zf, local_plugins_dir, manifests, log=None):
+def _install_local_zip_inner(zf, local_plugins_dir, manifests, log=None, progress=None):
     """install_local_zip 的实际逻辑（zf 生命周期由外层管理）。"""
     names = _zip_names(zf)
     if "manifest.json" not in names:
@@ -104,7 +119,11 @@ def _install_local_zip_inner(zf, local_plugins_dir, manifests, log=None):
     if os.path.isdir(target):
         shutil.rmtree(target)                            # 升级 = 覆盖替换（zip 根即包根）
     os.makedirs(local_plugins_dir, exist_ok=True)
-    zf.extractall(target)
+    members = [zi for zi in zf.infolist()
+               if not zi.filename.replace("\\", "/").endswith("/")]
+    for i, zi in enumerate(members, 1):
+        zf.extract(zi, target)
+        progress = _report(progress, i, len(members))
     return {"ok": True, "id": pid, "restart_required": kind == "hybrid",
             "hint": "类 C 插件需重启能力层生效（会话已持久化，免重登）"
             if kind == "hybrid" else ""}
@@ -143,23 +162,24 @@ def load_frontend_manifest(frontends_dir, pid):
         return None
 
 
-def install_frontend_zip(zip_path, frontends_dir):
+def install_frontend_zip(zip_path, frontends_dir, progress=None):
     """安装 server 前端包 → frontends_dir\\<id>\\（frontend/ 内容 + frontend-manifest.json）。
 
     校验：清单存在且可解析 / id 合法且非 local- 前缀（命名空间铁律）/ 路径安全 /
     清单声明的每个文件都真实存在于包内 frontend/（清单即本地伺服白名单）。
+    progress：可选 (done_files, total_files) 回调（解压进度）。
     """
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile:
         return {"ok": False, "error": "前端包不是有效的 zip"}
     try:
-        return _install_frontend_zip_inner(zf, frontends_dir)
+        return _install_frontend_zip_inner(zf, frontends_dir, progress)
     finally:
         zf.close()
 
 
-def _install_frontend_zip_inner(zf, frontends_dir):
+def _install_frontend_zip_inner(zf, frontends_dir, progress=None):
     """install_frontend_zip 的实际逻辑（zf 生命周期由外层管理）。"""
     names = _zip_names(zf)
     ok, bad = _paths_safe(names)
@@ -183,14 +203,16 @@ def _install_frontend_zip_inner(zf, frontends_dir):
     if os.path.isdir(target):
         shutil.rmtree(target)
     os.makedirs(target, exist_ok=True)
-    for info in zf.infolist():
+    members = [info for info in zf.infolist()
+               if not info.filename.replace("\\", "/").endswith("/")
+               and info.filename.replace("\\", "/").startswith("frontend/")]
+    for i, info in enumerate(members, 1):
         rel = info.filename.replace("\\", "/")
-        if rel.endswith("/") or not rel.startswith("frontend/"):
-            continue
         dest = os.path.join(target, *rel[len("frontend/"):].split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with zf.open(info) as src, open(dest, "wb") as dst:
             shutil.copyfileobj(src, dst, 1024 * 1024)
+        progress = _report(progress, i, len(members))
     # 落盘清单（含 files 白名单与版本，供本地伺服路由与升级比对）
     with open(os.path.join(target, FRONTEND_MANIFEST), "w", encoding="utf-8") as f:
         json.dump({"id": pid, "version": str(m.get("version") or ""), "files": files},
@@ -231,9 +253,13 @@ def _component_entry(zf):
     return meta, entry
 
 
-def _extract_pylibs_payload(zf, dest_dir):
-    """把 payload/pylibs/** 解压到 dest_dir（.pending 暂存语义的载荷部分）。"""
-    n = 0
+def _extract_pylibs_payload(zf, dest_dir, progress=None):
+    """把 payload/pylibs/** 解压到 dest_dir（.pending 暂存语义的载荷部分）。
+
+    progress：可选 (done_files, total_files) 回调（依赖组件包动辄数十 MB / 几千文件，
+    安装按钮的进度条主要靠它走动）。
+    """
+    members = []
     for info in zf.infolist():
         rel = info.filename.replace("\\", "/")
         if rel.endswith("/") or not rel.startswith("payload/pylibs/"):
@@ -241,20 +267,23 @@ def _extract_pylibs_payload(zf, dest_dir):
         tail = rel[len("payload/pylibs/"):]
         if not tail or tail == "manifest.json":
             continue
+        members.append((info, tail))
+    for i, (info, tail) in enumerate(members, 1):
         dest = os.path.join(dest_dir, *tail.split("/"))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with zf.open(info) as src, open(dest, "wb") as dst:
             shutil.copyfileobj(src, dst, 1024 * 1024)
-        n += 1
-    return n
+        progress = _report(progress, i, len(members))
+    return len(members)
 
 
-def install_component_zip(zip_path, program_dir, apply_now=None):
+def install_component_zip(zip_path, program_dir, apply_now=None, progress=None):
     """依赖组件包 → runtime/pylibs/.pending/<id>/ 暂存（复用主包 jz_deps 机制）。
 
     apply_now：立即应用回调（缺省用 jz_deps.apply_pending_components）。纯 Python 组件
     （entry.files 无 .pyd/.dll）暂存后立即应用、刷新即生效；DLL 类留在暂存区，
     下次能力层启动时应用（应用逻辑同一份 jz_deps.apply_pending_components）。
+    progress：可选 (done_files, total_files) 回调（解压进度）。
 
     返回 {ok, id?, version?, pending?, native?, error?}。
     """
@@ -263,12 +292,12 @@ def install_component_zip(zip_path, program_dir, apply_now=None):
     except zipfile.BadZipFile:
         return {"ok": False, "error": "依赖包不是有效的 zip"}
     try:
-        return _install_component_zip_inner(zf, program_dir, apply_now)
+        return _install_component_zip_inner(zf, program_dir, apply_now, progress)
     finally:
         zf.close()
 
 
-def _install_component_zip_inner(zf, program_dir, apply_now=None):
+def _install_component_zip_inner(zf, program_dir, apply_now=None, progress=None):
     """install_component_zip 的实际逻辑（zf 生命周期由外层管理）。"""
     import jz_deps
     meta, entry = _component_entry(zf)
@@ -283,7 +312,7 @@ def _install_component_zip_inner(zf, program_dir, apply_now=None):
         shutil.rmtree(stage, ignore_errors=True)
     os.makedirs(stage, exist_ok=True)
     try:
-        n = _extract_pylibs_payload(zf, os.path.join(stage, "payload"))
+        n = _extract_pylibs_payload(zf, os.path.join(stage, "payload"), progress)
     except Exception as e:
         shutil.rmtree(stage, ignore_errors=True)
         return {"ok": False, "error": "暂存组件载荷失败：%s" % e}

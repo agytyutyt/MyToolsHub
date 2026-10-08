@@ -71,7 +71,15 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {})
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      // 非 JSON 响应（如 500 HTML 错误页）也给出可读错误——2026-10-08：重启端点曾因
+      // NameError 返回 500 HTML，被 r.json() 解析异常吞成「请求失败」，真因不可见。
+      return r.text().then(function (t) {
+        try { return JSON.parse(t); } catch (e) {
+          return { ok: false, error: 'HTTP ' + r.status + '（服务端响应不可解析）' };
+        }
+      });
+    });
   }
   function humanRuntime(rt) {
     return rt === 'server' ? '服务器' : rt === 'dep-slot' ? '依赖' : '本地';
@@ -144,14 +152,21 @@
       + '<span class="st-dl-label">' + esc(label || '下载包') + '</span></button>';
   }
 
+  function installBtnHtml(e, label) {
+    // 安装按钮 = 按钮内进度条容器（2026-10-08）：fill 随服务端安装台账 pct 填充，label 叠上层
+    return '<button class="st-btn-install st-btn-prog" data-act="install" data-id="' + esc(e.id)
+      + '" data-label="' + esc(label) + '">'
+      + '<span class="st-dl-fill"></span><span class="st-dl-label">' + esc(label) + '</span></button>';
+  }
+
   function buttonsHtml(e) {
     var st = pluginInstallState(e);
     var html = '';
     if (IN_SHELL && e.runtime !== 'server') {
       if (!st.installed) {
-        html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">安装</button>';
+        html += installBtnHtml(e, '安装');
       } else if (st.upgradable) {
-        html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">升级到 ' + esc(e.version) + '</button>';
+        html += installBtnHtml(e, '升级到 ' + e.version);
       } else if (e.runtime === 'dep-slot') {
         html += '<button class="st-btn-install" disabled title="依赖组件已在本机生效">已安装</button>';
       }
@@ -161,9 +176,9 @@
     }
     if (IN_SHELL && e.runtime === 'server') {
       if (!st.installed && !st.disabled) {
-        html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">安装前端</button>';
+        html += installBtnHtml(e, '安装前端');
       } else if (st.upgradable) {
-        html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">升级前端到 ' + esc(e.version) + '</button>';
+        html += installBtnHtml(e, '升级前端到 ' + e.version);
       }
       if (st.installed) {
         html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id) + '" data-en="0">停用（回退中继）</button>';
@@ -288,7 +303,7 @@
     return catalog.filter(function (e) { return e.id === id; })[0] || null;
   }
 
-  async function preflightAndInstall(e) {
+  async function preflightAndInstall(e, btn) {
     if (!IN_SHELL) { return; }
     var wantDeps = false;
     msg('正在预检依赖 …');
@@ -325,9 +340,36 @@
       if (!ok) return;
     }
     msg('正在安装 ' + e.name + ' …');
-    post('/local-api/store/install', { id: e.id, version: e.version, include_deps: wantDeps })
+    // 按钮内进度（2026-10-08）：本页生成 token，服务端按包权重折算百分比写安装台账，400ms 轮询
+    var token = 'ins-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    var idleLabel = (btn && btn.getAttribute('data-label')) || '安装';
+    function setProg(state, text, pct) {
+      if (!btn) return;
+      btn.classList.remove('prog', 'done');
+      if (state) btn.classList.add(state);
+      btn.disabled = state === 'prog';
+      var fill = btn.querySelector('.st-dl-fill');
+      var lab = btn.querySelector('.st-dl-label');
+      if (fill) fill.style.width = (pct || 0) + '%';
+      if (lab) lab.textContent = text || idleLabel;
+    }
+    setProg('prog', '安装中 0%', 0);
+    var progTimer = setInterval(function () {
+      fetch('/local-api/store/install/progress?id=' + encodeURIComponent(token))
+        .then(function (r) { return r.json(); })
+        .then(function (p) {
+          if (p.status !== 'running') return;
+          if (btn) btn.title = p.phase || '';
+          setProg('prog', '安装中 ' + (p.pct || 0) + '%', p.pct || 0);
+        })
+        .catch(function () { /* 进度轮询失败不影响安装 */ });
+    }, 400);
+    post('/local-api/store/install', { id: e.id, version: e.version,
+                                       include_deps: wantDeps, progress_id: token })
       .then(async function (d) {
-        if (!d.ok) { msg('安装失败：' + (d.error || '未知错误'), true); return; }
+        clearInterval(progTimer);
+        if (!d.ok) { setProg('', null, 0); msg('安装失败：' + (d.error || '未知错误'), true); return; }
+        setProg('done', '已完成', 100);
         var note = [];
         var needRestart = !!d.restart_required
           || !!(d.pending_components && d.pending_components.length);
@@ -430,7 +472,7 @@
         .catch(function (err) { dlSet('', idleLabel, 0); dlRelease(); msg('下载校验失败：' + err, true); });
       return;
     }
-    if (act === 'install') { preflightAndInstall(e); return; }
+    if (act === 'install') { preflightAndInstall(e, btn); return; }
     if (act === 'toggle') {
       post('/local-api/plugins/state', { id: id, enabled: btn.getAttribute('data-en') === '1' })
         .then(function (d) {
