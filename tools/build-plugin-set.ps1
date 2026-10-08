@@ -11,7 +11,7 @@
 #     ├── 安装插件集.bat         # 双击入口（以 -Set . 调用 install-plugin.ps1）
 #     ├── install-plugin.ps1    # 目标机安装器（从仓库 tools\plugin-upgrade\ 原样拷贝）
 #     ├── 升级说明.md            # 人工可读：包含哪些插件、怎么装、怎么回滚
-#     └── JZToolsHub-插件-<id>-v<版本>.zip (+ .sha256) × N
+#     └── JZToolsHub-<id>-后端-v<版本>.zip (+ .sha256) × N
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File tools\build-plugin-set.ps1
@@ -55,8 +55,9 @@ if (-not (Test-Path -LiteralPath $From)) {
 }
 
 # ---------------- 1. 选包：每个插件取最新版本 ----------------
-$zips = @(Get-ChildItem -LiteralPath $From -Filter "JZToolsHub-插件-*.zip" -File -ErrorAction SilentlyContinue)
-if ($zips.Count -eq 0) { Die "来源目录里没有插件包（JZToolsHub-插件-*.zip）：$From" }
+$zips = @(Get-ChildItem -LiteralPath $From -Filter "*.zip" -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match "^JZToolsHub-(.+)-后端-v\d|^JZToolsHub-插件-" })   # 兼容旧名
+if ($zips.Count -eq 0) { Die "来源目录里没有插件包（JZToolsHub-<id>-后端-v*.zip）：$From" }
 
 function Get-PkgMeta {
     param([string]$ZipPath)
@@ -188,7 +189,7 @@ if ($NoZip) {
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 # ★ 用 .NET ZipFile 的 4 参重载（不传编码）：默认按 UTF-8 写条目名，并对非 ASCII 名置
-#   UTF-8 标志位（bit 11）——中文文件名（JZToolsHub-插件-<id>-v<版本>.zip）在资源管理器 /
+#   UTF-8 标志位（bit 11）——中文文件名（JZToolsHub-<id>-后端-v<版本>.zip）在资源管理器 /
 #   7-Zip / Python 里都能正确显示。若显式传 UTF8Encoding，.NET 反而**不置标志位**，
 #   在中文系统上会被按 GBK 解码成乱码。
 Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue

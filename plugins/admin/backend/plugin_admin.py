@@ -1222,7 +1222,7 @@ def batch_apply(base_dir, data_root, index_path, ids, verify_hash=True):
 #     （按组件清理旧文件 → 覆盖解压 payload → 合并 pylibs/manifest.json → 清空目录），
 #     装完由主体在下次请求时自动补注入 sys.path / DLL 目录（jz_deps.refresh_flags），**无需重启**。
 
-PKG_PLUGIN_RE = re.compile(r"^JZToolsHub-插件-(?P<id>[A-Za-z0-9._-]+)-v(?P<ver>\d+(?:\.\d+)*)\.zip$")
+PKG_PLUGIN_RE = re.compile(r"^JZToolsHub-(?:(?P<id0>[A-Za-z0-9._-]+)-后端|插件-(?P<id1>[A-Za-z0-9._-]+))-v(?P<ver>\d+(?:\.\d+)*)\.zip$")   # 兼容旧名（插件-<id>）与新名（<id>-后端）
 PKG_COMPONENT_RE = re.compile(r"^JZToolsHub-依赖-(?P<id>[A-Za-z0-9._-]+)-v(?P<ver>\d+(?:\.\d+)*)\.zip$")
 COMPONENT_REL = os.path.join("runtime", "pylibs")
 # 暂存目录：组件文件被运行中的服务占用时，先放这里，主体下次启动时应用
@@ -1342,7 +1342,7 @@ def scan_packages(base_dir, data_root=None, dirs=None, max_files=600, force=Fals
                     continue
                 if m_pl:
                     meta = _zip_json(full, "plugin-package.json") or {}
-                    pid = str(meta.get("id") or m_pl.group("id"))
+                    pid = str(meta.get("id") or m_pl.group("id0") or m_pl.group("id1"))
                     cur_ver = installed_version(base_dir, pid)
                     abi_ok, abi_reason = True, ""
                     api_req = meta.get("api_version")

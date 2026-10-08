@@ -55,11 +55,12 @@ VERSION_RE = re.compile(r"^\d+(\.\d+)+$")
 RUNTIMES = ("local", "server", "dep-slot")
 STATUSES = ("pending", "rejected", "published", "delisted")
 
-# 包文件命名族（设计文档 §4.1 注）：上架落 packages\ 时统一改名，消费方按名辨形态
+# 包文件命名族（设计文档 §4.1 注）：上架落 packages\ 时统一改名，消费方按名辨形态。
+# 2026-10-08 改版（方案 A）：id 前置到「后端/前端」之前——同插件两包按名排序相邻；
 NAME_TEMPLATES = {
     "local": "JZClient-本地插件-{id}-v{version}.zip",
-    "server": "JZToolsHub-插件-{id}-v{version}.zip",
-    "server_frontend": "JZToolsHub-前端-{id}-v{version}.zip",
+    "server": "JZToolsHub-{id}-后端-v{version}.zip",
+    "server_frontend": "JZToolsHub-{id}-前端-v{version}.zip",
     "dep-slot": "JZToolsHub-依赖-{id}-v{version}.zip",
 }
 # 依赖包 wheel tag 预检（O1 口径）：仅接受 cp314 / py3-none-any

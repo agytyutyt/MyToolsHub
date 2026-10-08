@@ -62,7 +62,8 @@ if ([string]::IsNullOrWhiteSpace($RegistryFile)) { $RegistryFile = Join-Path $PS
 if (-not [System.IO.Path]::IsPathRooted($RegistryFile)) { $RegistryFile = Join-Path $Root $RegistryFile }
 $InstallerDir = Join-Path $PSScriptRoot "plugin-upgrade"
 $SpecFile  = Join-Path $Root "JZToolsHub.spec"
-$ToolIds   = @("JZToolsHub-插件")
+# 命名族（2026-10-08 改版）：JZToolsHub-<id>-后端-v<版本>.zip —— id 前置使前后端包排序相邻
+$NameTail  = "后端"
 
 function Say { param([string]$m = "") Write-Host $m }
 function Warn { param([string]$m) Write-Warning $m }
@@ -840,7 +841,7 @@ if ($instVer) { Say "  安装器    ：install-plugin.ps1 v$($instVer.Matches[0]
 # ---------------- 打包 ----------------
 if ([string]::IsNullOrWhiteSpace($OutDir)) { $OutDir = Join-Path (Join-Path (Join-Path $Root "deploy") "插件包") "服务器插件" }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$zipName = "$($ToolIds[0])-$Id-v$Version.zip"
+$zipName = "JZToolsHub-$Id-$NameTail-v$Version.zip"
 $zipPath = Join-Path $OutDir $zipName
 
 if ($NoZip) {
@@ -861,10 +862,10 @@ if ($NoZip) {
 }
 
 # ---------------- 前端包工件（需求⑧，批次 8 T-O2-9）：与后端包同版本成对 ----------------
-# JZToolsHub-前端-<id>-v<版本>.zip = frontend/ 静态文件 + frontend-manifest.json（文件清单）。
+# JZToolsHub-<id>-前端-v<版本>.zip = frontend/ 静态文件 + frontend-manifest.json（文件清单）。
 # 消费方：商店目录 server 条目；桌面端「安装」server 条目 = 仅装前端包（落
 # <数据目录>\server-frontends\<id>\，页面本地直出、API 经既有中继；设计文档 §3.5.1）。
-$frontendZipName = "JZToolsHub-前端-$Id-v$Version.zip"
+$frontendZipName = "JZToolsHub-$Id-前端-v$Version.zip"
 $frontendZipPath = Join-Path $OutDir $frontendZipName
 $feSha = ""; $feSize = 0; $feCount = 0
 $frontendDir = Join-Path $payloadPlugin "frontend"

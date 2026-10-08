@@ -618,7 +618,9 @@ def r07(cl, ctx):
 @case("S-01", "S", "被篡改的插件包必须被拒绝", needs=("media",))
 def s01(cl, ctx):
     media = ctx["media"]
-    pkgs = [f for f in os.listdir(media) if f.startswith("JZToolsHub-插件-") and f.endswith(".zip")]
+    pkgs = [f for f in os.listdir(media)
+            if f.endswith(".zip") and (re.search(r"^JZToolsHub-.+-后端-v\d", f)
+                                        or f.startswith("JZToolsHub-插件-"))]   # 兼容旧名
     need(pkgs, "介质目录里没有插件包：%s" % media)
     src = os.path.join(media, sorted(pkgs)[0])
     data = bytearray(open(src, "rb").read())
