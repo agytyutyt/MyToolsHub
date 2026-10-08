@@ -15,6 +15,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import threading
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -58,7 +59,7 @@ def register(app):
 '''
 
 
-def make_plugin(lp_dir, pid, resident, timeout_ms):
+def make_plugin(lp_dir, pid, resident, timeout_ms, idle_ttl=0):
     d = os.path.join(lp_dir, pid)
     os.makedirs(os.path.join(d, "backend"), exist_ok=True)
     os.makedirs(os.path.join(d, "frontend"), exist_ok=True)
@@ -68,6 +69,8 @@ def make_plugin(lp_dir, pid, resident, timeout_ms):
          "timeout_ms": timeout_ms}
     if resident:
         m["resident"] = True
+    if idle_ttl:
+        m["idle_ttl"] = idle_ttl          # F6：空闲回收阈值（秒；缺省不回收）
     with open(os.path.join(d, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, ensure_ascii=False)
     with open(os.path.join(d, "backend", "__init__.py"), "w", encoding="utf-8") as f:
@@ -91,6 +94,7 @@ def main():
         os.makedirs(lp_dir)
         make_plugin(lp_dir, "local-res-r", resident=True, timeout_ms=2500)
         make_plugin(lp_dir, "local-res-n", resident=False, timeout_ms=2500)
+        make_plugin(lp_dir, "local-res-t", resident=True, timeout_ms=2500, idle_ttl=2)
 
         import capability_app
         from plugin_executor import PluginExecutor
@@ -139,6 +143,21 @@ def main():
         check("5a 崩溃回 502", resp.status_code == 502, (resp.status_code, resp.get_json()))
         rc = count("local-res-r")
         check("5b 崩溃后自动拉起（n 重置=1）", rc.get("n") == 1, rc)
+
+        # 6) F6 idle 回收：ttl>0 的常驻 worker 空闲后**干净收回**（常驻表弹出、非崩溃路径），
+        #    下次请求静默重启（新 pid、状态重置）；对照：未声明 idle_ttl 的常驻不回收。
+        t1 = count("local-res-t")
+        pid1 = t1["pid"]
+        count("local-res-r")                      # 确保对照项有活着的常驻（5b 后已重启）
+        time.sleep(4.5)                           # > ttl(2s) + 收割节拍（自适应 ttl/2=1s）
+        check("6a 空闲超 ttl 已干净收回（常驻表弹出）",
+              executor._residents.get("local-res-t") is None,
+              executor._residents.get("local-res-t"))
+        t2 = count("local-res-t")
+        check("6b 回收后请求静默重启（新进程、状态重置 n=1）",
+              t2["pid"] != pid1 and t2["n"] == 1, (t1, t2))
+        check("6c 对照：未声明 idle_ttl 的常驻不回收",
+              executor._residents.get("local-res-r") is not None)
 
         ok = all(RESULTS)
         print("== F3 resident 语义台架：%d/%d 通过 ==" % (sum(RESULTS), len(RESULTS)))

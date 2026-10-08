@@ -4,6 +4,10 @@
 - 默认「源码包子进程」：runtime python + plugin_host.py（注入共享 pylibs → 加载插件源码
   → mini-WSGI 派发其 register(app) 路由）；entry.backend 以 .exe 结尾走例外通道（同协议）。
 - 默认用完退出；manifest `resident: true` 声明常驻 → 进程存活复用，死亡自动拉起（热插拔 L3）。
+- **idle 回收（F6，2026-10-09）**：manifest 可选 `idle_ttl`（秒）——常驻 worker 空闲超过该值
+  由收割线程**干净收回**（弹出常驻表 + kill，非崩溃路径：下次请求静默重启，不弹"崩溃"），
+  归还内存；缺省不回收（=既有行为不变）。**前置纪律**：任务态必须已外置到 `.task_cache`
+  （内存 TASKS 字典会随回收丢失）——只有任务态外置后的插件才可声明 idle_ttl。
 - `timeout_ms` 超时即杀；崩溃 → 审计日志 + 错误回传前端（不炸页面）。
 - 审计：data_dir/plugin-audit.log（插件 id/时刻/方法路径/耗时/结果）。
 """
@@ -28,6 +32,10 @@ class PluginExecutor:
         self._residents = {}          # plugin_id → Popen
         self._locks = {}              # plugin_id → Lock（常驻串行化）
         self._lock_all = threading.Lock()
+        self._resident_ttl = {}       # plugin_id → idle_ttl 秒（manifest 声明；0/缺省=不回收）
+        self._last_used = {}          # plugin_id → 最近一次请求时刻（回收判据）
+        self._reaper = None           # 空闲收割线程（有 ttl>0 的常驻单元才起）
+        self._reaper_stop = threading.Event()
 
     # ---------------- 对外 ----------------
 
@@ -50,6 +58,7 @@ class PluginExecutor:
 
     def shutdown(self):
         """收割全部常驻 worker（托盘退出/关机路径）。"""
+        self._reaper_stop.set()
         with self._lock_all:
             for pid, proc in list(self._residents.items()):
                 try:
@@ -69,6 +78,12 @@ class PluginExecutor:
                 if proc is None or proc.poll() is not None:
                     proc = self._spawn(manifest, resident=True)
                     self._residents[pid] = proc
+                    self._last_used[pid] = time.time()
+                try:
+                    self._resident_ttl[pid] = max(0, int(manifest.get("idle_ttl") or 0))
+                except (TypeError, ValueError):
+                    self._resident_ttl[pid] = 0
+                self._ensure_reaper()
                 lock = self._locks.setdefault(pid, threading.Lock())
             with lock:
                 try:
@@ -82,6 +97,8 @@ class PluginExecutor:
                         if self._residents.get(pid) is proc:
                             self._residents.pop(pid, None)
                     raise
+                finally:
+                    self._last_used[pid] = time.time()   # 在途/异常也算活动（避免误回收）
         proc = self._spawn(manifest, resident=False)
         try:
             return self._roundtrip(proc, manifest, method, path, headers, body,
@@ -91,6 +108,65 @@ class PluginExecutor:
                 proc.kill()
             except Exception:
                 pass
+
+    # ---------------- 空闲收割（F6） ----------------
+
+    def _ensure_reaper(self):
+        """有 ttl>0 的常驻单元时才起收割线程（一次；客户端最简形态，避免无谓线程）。"""
+        if self._reaper is not None or not any(t > 0 for t in self._resident_ttl.values()):
+            return
+        self._reaper = threading.Thread(target=self._reaper_loop, daemon=True,
+                                        name="worker-idle-reaper")
+        self._reaper.start()
+
+    def _tick(self):
+        """收割节拍：随最小 ttl 自适应（ttl/2），夹在 1-15s（单测用小 ttl 也能秒级收敛）。"""
+        ttls = [t for t in self._resident_ttl.values() if t > 0]
+        return max(1.0, min(15.0, (min(ttls) / 2.0) if ttls else 15.0))
+
+    def _reaper_loop(self):
+        while not self._reaper_stop.wait(self._tick()):
+            try:
+                self._reap_idle()
+            except Exception as exc:                      # 收割绝不影响正常请求
+                self._log("idle 收割线程异常（继续运行）：%r" % exc)
+
+    def _reap_idle(self):
+        """把空闲 ≥ idle_ttl 的常驻 worker **干净收回**（非崩溃路径：静默重启、不弹崩溃）。
+
+        拿不到该插件的串行锁 = 有在途请求 → 本拍跳过；弹出与 kill 同持 _lock_all，
+        并使 _last_used 复位，避免与在途请求竞态（在途结束会再刷一次活动时刻）。
+        """
+        now = time.time()
+        with self._lock_all:
+            ids = list(self._residents.keys())
+        for pid in ids:
+            ttl = self._resident_ttl.get(pid, 0)
+            if ttl <= 0:
+                continue
+            if now - self._last_used.get(pid, now) < ttl:
+                continue
+            lock = self._locks.get(pid)
+            if lock is None or not lock.acquire(blocking=False):
+                continue                                  # 在途请求：跳过
+            try:
+                with self._lock_all:
+                    proc = self._residents.get(pid)
+                    if proc is None:
+                        continue
+                    idle = now - self._last_used.get(pid, now)
+                    if idle < ttl:                        # 二查（拿锁期间可能刚有活动）
+                        continue
+                    self._residents.pop(pid, None)
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                self._log("worker idle 回收：%s（空闲 %.0fs ≥ idle_ttl %ss；下次请求静默重启）"
+                          % (pid, idle, ttl))
+                self._audit(pid, "-", "-", idle, "idle-reap")
+            finally:
+                lock.release()
 
     def _spawn(self, manifest, resident):
         plugin_dir = manifest.get("_dir_abs") or ""
