@@ -70,8 +70,21 @@ def smoke(out, cfg):
     tmp = tempfile.mkdtemp(prefix="jzclient-smoke-")
     env = dict(os.environ, JZCLIENT_DATA_DIR=tmp)
     log_path = os.path.join(out, "client.log")
-    if os.path.isfile(log_path):
-        os.remove(log_path)
+    for stale in ("client.log", "port.txt", "client.pid"):   # 硬杀残留会误导探针（陈旧端口）
+        p = os.path.join(out, stale)
+        if os.path.isfile(p):
+            os.remove(p)
+
+    def _log_tail():
+        return open(log_path, encoding="utf-8", errors="replace").read()
+
+    def _pid_file():
+        try:
+            t = open(os.path.join(out, "client.pid"), encoding="utf-8").read().strip()
+            return int(t) if t.isdigit() else None
+        except OSError:
+            return None
+
     proc = subprocess.Popen([exe], env=env, cwd=out)
     try:
         port = None
@@ -116,12 +129,62 @@ def smoke(out, cfg):
         cfgfile = os.path.join(tmp, "config.json")
         if not os.path.isfile(cfgfile):
             fail("地址未落地到客户端配置文件 config.json")
-        print("smoke 通过：端口 %d，兜底页/本地接口/配置落盘全过" % port)
+
+        # 自重启链路（2026-10-08 加固）：该端点曾因裸名 sys（NameError→500 HTML）从未
+        # 生效过，前端只见「自动重启失败」。断言：旧进程退出 → 新实例带 --await-pid
+        # 接棒（等旧进程真实退出再抢单实例互斥）→ 新实例起能力层。
+        print("smoke：自重启链路断言（旧 pid=%s）…" % proc.pid)
+        req = urllib.request.Request(base + "/local-api/restart", data=b"{}",
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        r = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        if not r.get("ok"):
+            fail("重启端点拒绝：%s" % r)
+
+        old_pid = proc.pid
+        new_pid = None
+        deadline = time.time() + 40
+        while time.time() < deadline:
+            if proc.poll() is not None:              # 旧进程已退出
+                cur = _pid_file()
+                if cur and cur != old_pid:
+                    new_pid = cur
+                    break
+            time.sleep(0.5)
+        if new_pid is None:
+            fail("重启后 40s 内未见新实例接棒（旧进程 %s，日志尾部：\n%s）"
+                 % ("已退出" if proc.poll() is not None else "仍在运行", _log_tail()[-600:]))
+        deadline = time.time() + 30
+        ok_new = False
+        while time.time() < deadline:
+            t = _log_tail()
+            if "重启接棒" in t and "CAPABILITY listening" in t.split("重启接棒")[-1]:
+                ok_new = True
+                break
+            time.sleep(0.5)
+        if not ok_new:
+            fail("新实例未在 30s 内完成能力层启动（日志尾部：\n%s）" % _log_tail()[-600:])
+
+        print("smoke 通过：端口 %d，兜底页/本地接口/配置落盘/自重启接棒（%s→%s）全过"
+              % (port, old_pid, new_pid))
         return 0
     finally:
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/F", "/T"],
                        capture_output=True)
+        try:                                          # 重启后 proc 已死：按 pid 文件收尾新实例
+            cur = _pid_file()
+            if cur and cur != proc.pid:
+                subprocess.run(["taskkill", "/PID", str(cur), "/F", "/T"], capture_output=True)
+        except (OSError, ValueError):
+            pass
         time.sleep(1)
+        try:                                          # 兜底：smoke 只认自己的实例，残留即清
+            tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq %s.exe" % name,
+                                 "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout
+            if name.lower() in tl.lower():
+                print("注意：仍有 %s.exe 残留，按镜像名清理（smoke 专属实例）" % name)
+                subprocess.run(["taskkill", "/IM", name + ".exe", "/F", "/T"], capture_output=True)
+        except OSError:
+            pass
         shutil.rmtree(tmp, ignore_errors=True)
 
 
