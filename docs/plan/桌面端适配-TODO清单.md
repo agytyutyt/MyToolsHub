@@ -254,6 +254,7 @@
 | 9 | F1 身份注入（provider + X-JZ-User）；F2 组件包盘点补齐（qrcode/olefile 等）；F3 resident 台架用例；F4 出包工具增强（-From 派生 / --api-rewrite / L-13 静态检查+服务器出包链扫描）；F5 清单降级合并；试点三类各一：base64（M-B1）+ qr-video-decode（M-B2）+ file-filter（M-C 全套，含服务器增补端点与客户端工件）；试点中目标机复测 worker 内存定值（Q6） | §2.5 / §3.7 / §3.14 / §3.15 / §5 V6/V8/V9 |
 | 10 | B-light 4 个（color-picker/json-formatter/md5-generator/map-marker）+ B-heavy 2 个（info-transfer/trajectory-convert，含懒加载改造）出包上架；A 类 4 个出包上架（knowledge-base/shared-docs/notice-board/case-report）；B-light 双条目并存口径落地（显示名后缀/浏览器降权显示） | §3.3–§3.6 / §3.8–§3.13 / §5 V2/V3/V7 |
 | 11 | C 类收尾：trajectory-sketch、character-graph 拆分（Q5：file-filter 试点已先行，此二者按过渡口径处理）；A 类可选 worker 迁移按 Q7 顺序（knowledge-base → shared-docs → case-report）；全量验收 V1–V10 + 跨批次红线复检 | §3.16–§3.17 / §4 / §5 |
+| ↳ | **trajectory-sketch 拆分 ✅（2026-10-09）**：服务器增补 `POST /api/trajectory-sketch/llm/match-columns`（无状态·不落库）+ `/status` 增 `llm_configured`（客户端网关探测用）；客户端工件 `client-plugins/local-trajectory-sketch/`（llm_client=own() 网关、config=服务器权威+本地缓存兜底、保存透传服务器、适配脚本 tools/e2e/adapt-ts-client.py）+ 本地 manifest（hybrid/mount=`/api/local/local-trajectory-sketch`/server_data，requires=openpyxl/xlrd）；双包出包 **v1.3.0**（服务器后端+前端成对 + 本地包，`-FrontendFrom`+`--api-rewrite` 改写 3 处零残留）并装客户端实测：上传自检 → **hard 档分析 done**（停留点结果正常）→ **llm 档明示**「需先配置大模型/改用硬过滤」（不静默）。顺带加固：本地包漏开 `--api-rewrite` 且前端含 `api/<base>` 引用 → 出包即红（此前仅打印计数，人工易漏）。**剩**：上架（本地包 + server 双包）+ llm 联网实测（需先在管理后台配模型） | 本行 |
 
 ### 批次 9 任务分解（2026-10-06 开工）
 

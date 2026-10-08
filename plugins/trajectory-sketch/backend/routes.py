@@ -231,6 +231,7 @@ def register(app):
         return jsonify({
             "ok": all(deps.values()),
             "dependencies": deps,
+            "llm_configured": llm_client.available(),   # 客户端工件网关据此判可用性（2026-10-08 C 类拆分）
             "filter_plugin": filter_bridge.filter_status(app),
             "keep_columns": cfg["filter"].get("keep_columns") or [],
             "algorithms": available_algorithms(),
@@ -314,6 +315,32 @@ def register(app):
         config_store.save_config(cfg)
         _set_operation("保存轨迹速写配置")
         return jsonify({"ok": True})
+
+    @app.post(f"{API_PREFIX}/llm/match-columns")
+    def ts_llm_match_columns():
+        """无状态 LLM 字段匹配（C 类客户端工件经 jz_relay.own() 调用；本插件无映射库，不落库）。
+
+        {headers: [...], keep_columns: [...]} → {matches: {表头: 保留字段原文 or ""}, model, llm_configured}。
+        防幻觉口径与 llm_client.match_columns 一致（名单外值按未匹配）；大模型接入信息经
+        jz_llm 请求线程内解析，Key 不出服务器（红线 5 / L-10）。
+        """
+        data = request.get_json(silent=True) or {}
+        headers = data.get("headers")
+        keep = data.get("keep_columns")
+        if not isinstance(headers, list) or not headers or not isinstance(keep, list) or not keep:
+            return jsonify({"error": "headers/keep_columns 需为非空数组"}), 400
+        headers = [str(h)[:120] for h in headers[:500]]
+        session = llm_client.session()
+        if not session.configured():
+            return jsonify({"error": session.reason or "尚未配置大模型",
+                            "llm_configured": False}), 409
+        try:
+            matches = llm_client.match_columns(headers, keep, session=session)
+        except llm_client.LLMError as e:
+            return jsonify({"error": f"大模型匹配失败：{e}"}), 502
+        model = (getattr(session, "provider", {}) or {}).get("model") or ""
+        _set_operation("大模型字段匹配（轨迹速写）")
+        return jsonify({"matches": matches, "model": model, "llm_configured": True})
 
     @app.post(f"{API_PREFIX}/algorithm")
     def ts_algorithm_set():

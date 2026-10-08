@@ -279,6 +279,11 @@ def main():
             if api_refs and rewrite_count == 0:
                 die("源码含 %d 处 api/%s 引用但改写计数为 0（L-13 执行点，规范 §16.10）"
                     % (api_refs, base_id))
+        elif api_refs:
+            # 2026-10-08 加闸：本地/客户端工件漏传 --api-rewrite 时，前端会继续打中继
+            # （=服务器后端），本地化静默失效——此前仅靠计数打印，人工易漏。
+            die("前端含 %d 处 api/%s 引用但未启用改写：加 --api-rewrite 重出"
+                "（C 类客户端工件必开；规范 §16.10）" % (api_refs, base_id))
         print("  L-13 静态检查：通过（api/%s 引用 %d 处，改写 %d 处）" % (base_id, api_refs, rewrite_count))
 
         kind = manifest.get("kind", "local")
