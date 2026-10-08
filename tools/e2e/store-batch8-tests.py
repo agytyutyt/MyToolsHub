@@ -228,13 +228,13 @@ def part_b(work):
             body = data.encode("utf-8") if isinstance(data, str) else data
             sums.append("%s  %s" % (hashlib.sha256(body).hexdigest(), name[len("payload/"):]))
         files["SHA256SUMS"] = "\n".join(sums) + "\n"
-        backend_zip = os.path.join(work, "JZToolsHub-插件-%s-v%s.zip" % (pid, version))
+        backend_zip = os.path.join(work, "JZToolsHub-%s-后端-v%s.zip" % (pid, version))
         with open(backend_zip, "wb") as f:
             f.write(make_zip(files).getvalue())
         fe_files = {"frontend/index.html": "<h1>svc</h1>",
                     "frontend-manifest.json": json.dumps(
                         {"id": pid, "version": fe_version, "files": ["index.html"]})}
-        fe_zip = os.path.join(work, "JZToolsHub-前端-%s-v%s.zip" % (pid, fe_version))
+        fe_zip = os.path.join(work, "JZToolsHub-%s-前端-v%s.zip" % (pid, fe_version))
         with open(fe_zip, "wb") as f:
             f.write(make_zip(fe_files).getvalue())
         return backend_zip, fe_zip
@@ -264,7 +264,7 @@ def part_b(work):
     idx = sa.read_json(sa.index_server_path(root))
     check("B5 E1 投影：published server 条目进入（schema-1 同构）",
           idx and [p["id"] for p in idx["packages"]] == ["svc-bar"]
-          and idx["packages"][0]["file"] == "packages/JZToolsHub-插件-svc-bar-v2.0.0.zip")
+          and idx["packages"][0]["file"] == "packages/JZToolsHub-svc-bar-后端-v2.0.0.zip")
     idx_read = sa.plugin_admin.read_index(sa.index_server_path(root))
     svc_row = next((p for p in idx_read["packages"] if p["id"] == "svc-bar"), None)
     check("B5 E1→read_index 闭环：包文件可解析且哈希对上（P1 回归位）",
@@ -444,7 +444,7 @@ def part_d(work):
                                      "entry": {"frontend": "index.html"}}),
         "frontend/index.html": "<h1>local-foo</h1>"}).getvalue()
     foo_meta = put_pkg("JZClient-本地插件-local-foo-v1.0.0.zip", foo_body)
-    fe_zip_name = "JZToolsHub-前端-svc-bar-v2.0.0.zip"
+    fe_zip_name = "JZToolsHub-svc-bar-前端-v2.0.0.zip"
     fe_body = make_zip({"frontend/index.html": "<h1>LOCAL svc-bar</h1>",
                         "frontend-manifest.json": json.dumps(
                             {"id": "svc-bar", "version": "2.0.0", "files": ["index.html"]})}).getvalue()
@@ -542,7 +542,7 @@ def part_d(work):
     check("D1 商店安装 local 插件成功", r.get_json().get("ok"), str(r.get_json()))
     r = c.get("/api/tools")
     ids = [t["id"] for t in r.get_json()["tools"]]
-    check("D1 合并清单出现新装本地插件", "local-foo" in ids and "remote-one" in ids)
+    check("D1 合并清单出现新装本地插件", "local-foo" in ids and "remote-one" in ids, str(ids))
     check("D1 下载统计 via=client 已计", any(x[2] == "client" for x in stats))
 
     # D2 停用 → 网格隐藏 + 本地 API 404

@@ -978,7 +978,6 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     # ---------------- 清单合并与本地工具元数据（T16） ----------------
 
-    @app.get("/api/tools")
     def _local_only_tools_response():
         # F5（批次 9 T-O9-5，Q3 配套）：远程不可达/未配置时降级为仅本地条目——
         # 本地条目（local-plugins）是离线网格的唯一载体，A 类离线显兜底页（既有口径）
@@ -988,7 +987,10 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "categories": [dict(local_registry.LOCAL_CATEGORY)],
                         "degraded": True})
 
+    @app.get("/api/tools")
     def api_tools_merged():
+        # 注意：本装饰器必须紧跟本函数——F5 曾把辅助函数插在两者之间，致 /api/tools
+        # 全局误走降级分支（2026-10-08 台架抓出；插入带装饰器函数前一律锚定装饰器行）
         if not state["address"]:
             return _local_only_tools_response()
         headers = client_headers()

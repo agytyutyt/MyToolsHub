@@ -76,6 +76,11 @@ def main():
             resp.headers["Set-Cookie"] = "sid=admin1; Path=/"
             return resp
 
+        @upstream.get("/api/tools")
+        def _tools():
+            return jsonify({"tools": [{"id": "remote-tool-x", "name": "远程工具", "order": 1}],
+                            "categories": [{"id": "office", "name": "办公", "enabled": True}]})
+
         @upstream.get("/api/session")
         def _session():
             print("    [stub] /api/session Cookie=%r" % (request.headers.get("Cookie"),))
@@ -174,6 +179,14 @@ def main():
         c2.post("/local-api/plugins/state", json={"id": "local-idprobe-w", "enabled": False})
         ids = [t["id"] for t in c2.get("/api/tools").get_json()["tools"]]
         check("5e 停用条目降级清单同样隐藏", "local-idprobe-w" not in ids, ids)
+
+        # 5f 上游可达 → 合并清单含远程条目（F5 曾因装饰器错挂致 /api/tools 全局降级——
+        # 该断言即为此类"路由断裂"兜底；只测降级路径会漏掉健康路径的回归）
+        r = c.get("/api/tools")
+        d3 = r.get_json()
+        ids3 = [t["id"] for t in (d3.get("tools") or [])]
+        check("5f 上游可达时合并清单含远程与本地", "remote-tool-x" in ids3
+              and "local-idprobe-h" in ids3 and not d3.get("degraded"), (r.status_code, ids3))
 
         ok = all(RESULTS)
         print("== F1+F5 台架：%d/%d 通过 ==" % (sum(RESULTS), len(RESULTS)))
