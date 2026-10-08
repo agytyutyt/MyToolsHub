@@ -107,6 +107,54 @@ def version_satisfies(actual, require):
 # 已安装依赖清单 / 声明读取
 # --------------------------------------------------------------------------- #
 
+def _layout_roots(app_dir=None):
+    """布局候选根目录（找 config/installed-deps.json 与 runtime/pylibs/manifest.json 用）。
+
+    覆盖三种部署形态（2026-10-08：客户端打包态曾整体找不到清单 → 依赖全判 unknown，
+    商店安装必弹「缺少依赖」）：
+      ① 主包/服务端程序目录：config/ 与 runtime/ 都在根（调用方 app_dir=程序目录）；
+      ② 客户端打包态：清单在 <程序目录>/_internal/kernel/config/，pylibs 在 <程序目录>/runtime/；
+      ③ worker 形态：jz_deps.py 位于 <bundle>/_internal/kernel/，父级两层才是程序根。
+    模块自身目录及其父级优先（worker 形态清单就在它旁边），其后是 app_dir 与常见变体。
+    """
+    roots, seen = [], set()
+
+    def _add(p):
+        if not p:
+            return
+        try:
+            p = os.path.abspath(p)
+        except (TypeError, ValueError):
+            return
+        if p not in seen:
+            seen.add(p)
+            roots.append(p)
+
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except NameError:                      # 极端冻结形态无 __file__：退回 cwd
+        here = os.getcwd()
+    _add(here)
+    _add(os.path.dirname(here))
+    _add(os.path.dirname(os.path.dirname(here)))
+    _add(os.path.dirname(os.path.dirname(os.path.dirname(here))))
+    if app_dir:
+        _add(app_dir)
+        _add(os.path.join(app_dir, "kernel"))
+        _add(os.path.join(app_dir, "_internal"))
+        _add(os.path.join(app_dir, "_internal", "kernel"))
+    return roots
+
+
+def _first_file(roots, rel):
+    """候选根中第一个存在的相对文件路径；都不存在返回首候选下的路径（供报错展示）。"""
+    for r in roots:
+        p = os.path.join(r, rel)
+        if os.path.isfile(p):
+            return p
+    return os.path.join(roots[0], rel) if roots else rel
+
+
 def load_installed_deps(app_dir=None):
     """读主体已安装依赖清单；返回 {'available','packages','modules',...}。
 
@@ -116,7 +164,7 @@ def load_installed_deps(app_dir=None):
     文件不存在或不可解析时 available=False（源码开发环境属正常，判定侧不阻断）。
     """
     app_dir = app_dir or os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(app_dir, DEPS_LOCK_REL)
+    path = _first_file(_layout_roots(app_dir), DEPS_LOCK_REL)
     if not os.path.isfile(path):
         comp = _load_component_deps(app_dir)
         return {"available": False, "packages": comp.get("packages") or {}, "modules": comp.get("modules") or {},
@@ -148,8 +196,12 @@ def load_installed_deps(app_dir=None):
 
 
 def _load_component_deps(app_dir):
-    """读「依赖组件包」清单（runtime/pylibs/manifest.json），未装则返回空。"""
-    path = os.path.join(app_dir, DEPS_COMPONENT_REL)
+    """读「依赖组件包」清单（runtime/pylibs/manifest.json），未装则返回空。
+
+    布局候选同 load_installed_deps：客户端打包态 pylibs 在程序目录、内核模块在
+    _internal/kernel/——worker 内调用（app_dir 缺省=内核目录）也要能找到 pylibs。
+    """
+    path = _first_file(_layout_roots(app_dir), DEPS_COMPONENT_REL)
     if not os.path.isfile(path):
         return {"packages": {}, "modules": {}, "components": []}
     try:

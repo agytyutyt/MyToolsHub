@@ -592,6 +592,9 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         # 必然「缺失」（尚未安装），external 由插件挂载时的三态判定兜底展示。
         dep_entries = [p for p in catalog.get("packages") or []
                        if p.get("runtime") == "dep-slot"]
+        # 服务端（A 类）条目的依赖属服务器侧：客户端装的是前端包，本地有没有 docx/flask
+        # 不决定安装结果——行标 informational（前端不联动本地「同时安装」，2026-10-08）。
+        server_side = (ver.get("runtime") == "server")
         deps = []
         for row in verdict.get("detail") or []:
             if row.get("state") == "ok":
@@ -606,6 +609,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         deps.append({"name": name, "require": row.get("require"),
                                      "state": row.get("state"),
                                      "required": row.get("required", True),
+                                     "informational": server_side,
                                      "resolve": "dep-package", "dep_id": dep.get("id"),
                                      "dep_version": dep.get("version")})
                         break
@@ -613,6 +617,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     deps.append({"name": name, "require": row.get("require"),
                                  "state": row.get("state"),
                                  "required": row.get("required", True),
+                                 "informational": server_side,
                                  "resolve": "missing"})
             elif kind in ("external", "vendored"):
                 deps.append({"name": str(row.get("name") or ""),

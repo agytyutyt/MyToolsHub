@@ -311,8 +311,12 @@
     try {
       pre = (await post('/local-api/store/preflight', { id: e.id, version: e.version })) || pre;
     } catch (err) { /* 预检失败不阻断安装（D-8 口径：提示不阻断） */ }
+    // 三态纪律（2026-10-08）：unknown=清单不可核验 → 不阻断（与 jz_deps 口径一致，
+    // 此前把 unknown 当"缺"导致打包客户端必弹「缺少依赖」）；只有 missing/mismatch 才算缺。
+    // 服务端条目的依赖属服务器侧（客户端装的是前端包），行上标 informational 不联动本地安装。
     var missing = (pre.deps || []).filter(function (d) {
-      return d.state !== 'ok' && d.required !== false && !d.informational;
+      return (d.state === 'missing' || d.state === 'mismatch')
+        && d.required !== false && !d.informational;
     });
     var resolvable = missing.filter(function (d) { return d.resolve === 'dep-package'; });
     var unresolvable = missing.filter(function (d) { return d.resolve !== 'dep-package'; });
@@ -365,7 +369,11 @@
         .catch(function () { /* 进度轮询失败不影响安装 */ });
     }, 400);
     post('/local-api/store/install', { id: e.id, version: e.version,
-                                       include_deps: wantDeps, progress_id: token })
+                                       include_deps: wantDeps,
+                                       deps: resolvable.map(function (d) {
+                                         return { dep_id: d.dep_id, dep_version: d.dep_version };
+                                       }),
+                                       progress_id: token })
       .then(async function (d) {
         clearInterval(progTimer);
         if (!d.ok) { setProg('', null, 0); msg('安装失败：' + (d.error || '未知错误'), true); return; }
