@@ -24,7 +24,7 @@ _DEP_DLL_HANDLES = []
 _DEP_DLL_DIRS = set()
 
 
-def setup_dep_components(base_dir, logger=None):
+def setup_dep_components(base_dir=None, logger=None, pylibs_dir=None):
     """把「依赖组件包」注入 sys.path 与 DLL 搜索路径（设计文档 §3.4 / T25 第 1 步）。
 
     cv2(opencv-python) 与 numpy 不再随主包（压缩后约 60 MB），改由独立组件包按需安装到
@@ -48,7 +48,10 @@ def setup_dep_components(base_dir, logger=None):
         _emit = _sink
     else:
         _emit = lambda m: None
-    base = os.path.join(base_dir, "runtime", "pylibs")
+    # pylibs 目录：显式给（worker 侧执行器传的就是完整 pylibs 路径）优先，
+    # 否则按主应用/服务端形态拼 <base_dir>/runtime/pylibs（2026-10-08：worker 侧旧写法
+    # setup_dep_components(dirname(pylibs)) 多拼一层 runtime → 依赖组件全 import 不到）
+    base = os.path.abspath(pylibs_dir) if pylibs_dir else os.path.join(base_dir, "runtime", "pylibs")
     if base not in sys.path:
         sys.path.insert(0, base)
     if not os.path.isdir(base):

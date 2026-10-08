@@ -107,8 +107,11 @@ class PluginExecutor:
                 argv += ["--pylibs", self._pylibs]
         err = self._stderr_file(pid)      # stderr 归日志（T20 契约）
         try:
+            # CREATE_NO_WINDOW：运行时 python.exe 是控制台子系统程序，GUI 父进程不加该标志
+            # 会弹出黑色控制台窗口（真机报告：打开插件弹黑窗，2026-10-08）；stdio 管道不受影响。
             return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=err)
+                                    stderr=err,
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         finally:
             err.close()
 

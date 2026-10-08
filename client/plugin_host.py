@@ -81,7 +81,10 @@ def main():
 
     plugin_dir = os.path.abspath(args.plugin)
     if args.pylibs and os.path.isdir(args.pylibs):
-        jz_plugin_host.setup_dep_components(os.path.dirname(args.pylibs))
+        # 执行器传的是**完整 pylibs 目录** → 显式 pylibs_dir（旧写法 dirname() 会多拼一层
+        # runtime：<prog>/runtime/runtime/pylibs → 依赖组件全 import 不到、插件误报
+        # 「依赖未满足」——2026-10-08 真机报告）
+        jz_plugin_host.setup_dep_components(pylibs_dir=args.pylibs)
     app, _manifest = build_app(plugin_dir)
 
     if args.resident:
