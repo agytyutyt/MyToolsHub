@@ -623,31 +623,6 @@
                                          "frontend_sha256":  "2e70c18d8e8b14624d0a27798e04bc58f1bf7dafaa5540eacc8cf88cad833b8d",
                                          "frontend_size":  22383
                                      },
-                     "info-transfer":  {
-                                           "version":  "1.2.8",
-                                           "api_version":  1,
-                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.8.zip",
-                                           "sha256":  "54009516c2023a21f0ca51b67c519c6343b5c358fb04ff5b53d89567250ab651",
-                                           "size":  97157,
-                                           "built_at":  "2026-10-08T19:17:05+08:00",
-                                           "code_sha256":  "f5bf0885217244743336c471cc2cddd5dbeedf917645f8cc5fffb96f58d60e82",
-                                           "file_count":  6,
-                                           "requires_restart":  true,
-                                           "file_hashes":  {
-                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
-                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
-                                                               "plugins/info-transfer/backend/routes.py":  "53bc6e14696c2f76",
-                                                               "plugins/info-transfer/frontend/index.html":  "05de42f40d264a58",
-                                                               "plugins/info-transfer/manifest.json":  "1c78cf7295804f0f",
-                                                               "plugins/info-transfer/README.md":  "ee78e626f9f85a19"
-                                                           },
-                                           "assets":  {
-
-                                                      },
-                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.8.zip",
-                                           "frontend_sha256":  "89bcefb3a44bdf15917c7c0c68c0532b502a64fca14f4cacbc7081e0cba8142d",
-                                           "frontend_size":  24966
-                                       },
                      "trajectory-convert":  {
                                                 "version":  "1.1.9",
                                                 "api_version":  1,
@@ -751,6 +726,31 @@
                                                "frontend_file":  "JZToolsHub-trajectory-sketch-前端-v1.3.0.zip",
                                                "frontend_sha256":  "7391a661599f4c4354c6b3d7bbeca4f0cc24748620413d784e6b647923b896a3",
                                                "frontend_size":  28247
-                                           }
+                                           },
+                     "info-transfer":  {
+                                           "version":  "1.2.9",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.9.zip",
+                                           "sha256":  "8d8be9c6038eb92cdbd374204ce531924e2fed381584294a12409e84db3395f8",
+                                           "size":  98306,
+                                           "built_at":  "2026-10-09T00:44:31+08:00",
+                                           "code_sha256":  "64959819fa53e28c35b52732f0a2df20ca9ff1f68604b3824e65205ef77049c7",
+                                           "file_count":  6,
+                                           "requires_restart":  true,
+                                           "file_hashes":  {
+                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
+                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
+                                                               "plugins/info-transfer/backend/routes.py":  "8c97575f81782cb2",
+                                                               "plugins/info-transfer/frontend/index.html":  "05de42f40d264a58",
+                                                               "plugins/info-transfer/manifest.json":  "0b05ac5f43dac0a4",
+                                                               "plugins/info-transfer/README.md":  "ee78e626f9f85a19"
+                                                           },
+                                           "assets":  {
+
+                                                      },
+                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.9.zip",
+                                           "frontend_sha256":  "055dd7068edbd3d2c915ee9661ad7df1573df6966745c37ca002e6623c18da42",
+                                           "frontend_size":  24966
+                                       }
                  }
 }

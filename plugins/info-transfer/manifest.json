@@ -1,11 +1,12 @@
 {
   "id": "info-transfer",
   "name": "信息传输",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "author": "JZToolsHub 团队",
   "icon": "📨",
   "accent": "#00897b",
   "entry": "index.html",
+  "idle_ttl": 600,
   "features": [
     "信息封装",
     "信息解析",

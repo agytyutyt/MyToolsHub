@@ -291,11 +291,58 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
 # ===================== 后台任务 =====================
 WORKERS = 2
 _executor = ThreadPoolExecutor(max_workers=WORKERS)
-TASKS = {}
+TASKS = {}                      # 内存镜像（热路径）；worker 启动时从 .task_cache/*.json 载回
 TASKS_LOCK = threading.Lock()
 TASK_TTL_SECONDS = 30 * 60
 
 _TASK_DIR = jztools_data.get_data_root_dir("plugins", "info-transfer", ".task_cache")
+
+
+def _task_path(task_id):
+    return os.path.join(_TASK_DIR, "%s.json" % task_id)
+
+
+def _task_persist(task_id, t):
+    """任务态写穿到磁盘（供 idle 回收/重启后载回；失败不打断任务——内存镜像照常）。"""
+    try:
+        os.makedirs(_TASK_DIR, exist_ok=True)
+        tmp = _task_path(task_id) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(t, f, ensure_ascii=False)
+        os.replace(tmp, _task_path(task_id))
+    except Exception:
+        pass
+
+
+def _task_load_all():
+    """启动（含 idle 回收后重启）把磁盘任务态载回内存镜像——任务态外置（F6 前置，2026-10-09）。
+
+    中断归一：载回时仍为 running/pending 的任务（其执行线程已随上次进程结束）显式置
+    error「因能力层回收/重启而中断」，避免轮询永远停在 running。
+    """
+    try:
+        names = os.listdir(_TASK_DIR)
+    except OSError:
+        return
+    for name in names:
+        if not name.endswith(".json") or name.endswith(".tmp"):
+            continue
+        tid = name[: -len(".json")]
+        try:
+            with open(os.path.join(_TASK_DIR, name), "r", encoding="utf-8-sig") as f:
+                t = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(t, dict):
+            continue
+        if t.get("status") in ("running", "pending"):
+            t["status"] = "error"
+            t["detail"] = "任务因能力层回收/重启而中断（可重新封装）"
+            _task_persist(tid, t)
+        TASKS[tid] = t
+
+
+_task_load_all()
 
 
 class TaskCanceled(Exception):
@@ -330,12 +377,14 @@ def _remove_task_files(task_id):
 
 def set_task(task_id, **kwargs):
     with TASKS_LOCK:
-        TASKS[task_id] = {**TASKS.get(task_id, {}), **kwargs}
+        t = {**TASKS.get(task_id, {}), **kwargs}
+        TASKS[task_id] = t
+        _task_persist(task_id, t)
 
 
 def get_task(task_id):
     with TASKS_LOCK:
-        return TASKS.get(task_id)
+        return TASKS.get(task_id)      # 内存镜像（启动已载回）；磁盘态由 _task_persist 保证
 
 
 def cleanup_tasks():
