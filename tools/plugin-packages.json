@@ -200,50 +200,6 @@
                                                                                    }
                                                         }
                                          },
-                     "info-transfer":  {
-                                           "version":  "1.2.7",
-                                           "api_version":  1,
-                                           "file":  "JZToolsHub-插件-info-transfer-v1.2.7.zip",
-                                           "sha256":  "4465814af53df40cf76a6237e338ac242849e6c9a04371a705151945b36db70b",
-                                           "size":  96057,
-                                           "built_at":  "2026-10-04T10:09:37+08:00",
-                                           "code_sha256":  "c97d792830820d51add33c6a4f49e4efb6ff8cce001806a307c06102e817050c",
-                                           "file_count":  6,
-                                           "requires_restart":  false,
-                                           "file_hashes":  {
-                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
-                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
-                                                               "plugins/info-transfer/backend/routes.py":  "bc8077575f5aa127",
-                                                               "plugins/info-transfer/frontend/index.html":  "05de42f40d264a58",
-                                                               "plugins/info-transfer/manifest.json":  "8eacf39afb27ad2f",
-                                                               "plugins/info-transfer/README.md":  "ee78e626f9f85a19"
-                                                           },
-                                           "assets":  {
-
-                                                      }
-                                       },
-                     "trajectory-convert":  {
-                                                "version":  "1.1.8",
-                                                "api_version":  1,
-                                                "file":  "JZToolsHub-插件-trajectory-convert-v1.1.8.zip",
-                                                "sha256":  "db3dbfb69ad05a8030e5c050fee2ec29ecda0859a23244e0acab60f8552fc5ec",
-                                                "size":  49325,
-                                                "built_at":  "2026-10-04T10:09:41+08:00",
-                                                "code_sha256":  "4910343a74e72385295d3704a136e3495269646b1f3bc981a40a1e5fd8277a49",
-                                                "file_count":  6,
-                                                "requires_restart":  false,
-                                                "file_hashes":  {
-                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "6e1cb6fa65e2c01c",
-                                                                    "plugins/trajectory-convert/backend/routes.py":  "2c4598a3f19f3046",
-                                                                    "plugins/trajectory-convert/frontend/index.html":  "7eb258b58c19aebf",
-                                                                    "plugins/trajectory-convert/manifest.json":  "e14ad4c7c9ca5ac0",
-                                                                    "plugins/trajectory-convert/README.md":  "76e0b3c7b37d5bdc"
-                                                                },
-                                                "assets":  {
-
-                                                           }
-                                            },
                      "map-marker":  {
                                         "version":  "1.0.2",
                                         "api_version":  1,
@@ -742,6 +698,56 @@
                                          "frontend_file":  "JZToolsHub-case-report-前端-v1.3.1.zip",
                                          "frontend_sha256":  "2e70c18d8e8b14624d0a27798e04bc58f1bf7dafaa5540eacc8cf88cad833b8d",
                                          "frontend_size":  22383
-                                     }
+                                     },
+                     "info-transfer":  {
+                                           "version":  "1.2.8",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.8.zip",
+                                           "sha256":  "54009516c2023a21f0ca51b67c519c6343b5c358fb04ff5b53d89567250ab651",
+                                           "size":  97157,
+                                           "built_at":  "2026-10-08T19:17:05+08:00",
+                                           "code_sha256":  "f5bf0885217244743336c471cc2cddd5dbeedf917645f8cc5fffb96f58d60e82",
+                                           "file_count":  6,
+                                           "requires_restart":  true,
+                                           "file_hashes":  {
+                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
+                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
+                                                               "plugins/info-transfer/backend/routes.py":  "53bc6e14696c2f76",
+                                                               "plugins/info-transfer/frontend/index.html":  "05de42f40d264a58",
+                                                               "plugins/info-transfer/manifest.json":  "1c78cf7295804f0f",
+                                                               "plugins/info-transfer/README.md":  "ee78e626f9f85a19"
+                                                           },
+                                           "assets":  {
+
+                                                      },
+                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.8.zip",
+                                           "frontend_sha256":  "89bcefb3a44bdf15917c7c0c68c0532b502a64fca14f4cacbc7081e0cba8142d",
+                                           "frontend_size":  24966
+                                       },
+                     "trajectory-convert":  {
+                                                "version":  "1.1.9",
+                                                "api_version":  1,
+                                                "file":  "JZToolsHub-trajectory-convert-后端-v1.1.9.zip",
+                                                "sha256":  "27211641da42350a28f4f2cff383a05dcd689254c838273f2e9b59605f68b239",
+                                                "size":  50410,
+                                                "built_at":  "2026-10-08T19:21:28+08:00",
+                                                "code_sha256":  "d3496b4331607ed45faea973dd6e28ae890607da81c52a8d93f94c6533e087e8",
+                                                "file_count":  6,
+                                                "requires_restart":  true,
+                                                "file_hashes":  {
+                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "6e1cb6fa65e2c01c",
+                                                                    "plugins/trajectory-convert/backend/routes.py":  "b76e4a9bcf50dce7",
+                                                                    "plugins/trajectory-convert/frontend/index.html":  "7eb258b58c19aebf",
+                                                                    "plugins/trajectory-convert/manifest.json":  "03f6e8041ac1fd26",
+                                                                    "plugins/trajectory-convert/README.md":  "76e0b3c7b37d5bdc"
+                                                                },
+                                                "assets":  {
+
+                                                           },
+                                                "frontend_file":  "JZToolsHub-trajectory-convert-前端-v1.1.9.zip",
+                                                "frontend_sha256":  "62ca16edca494123064a702b0fdb503c5140ea6be3bc24e03f00e801baf890e7",
+                                                "frontend_size":  9281
+                                            }
                  }
 }

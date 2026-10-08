@@ -593,8 +593,9 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None):
             qr = qrcode.QRCode(version=version, error_correction=err, box_size=BOX_SIZE)
             qr.add_data(code, optimize=0)
             qr.make(fit=False)
-            gray = np.array(qr.make_image(fill_color="black", back_color="white")
-                            .convert("L"), dtype=np.uint8)
+            # 2026-10-08：不再走 qrcode 的 PIL 渲染（pillow 不在依赖清单，客户端 worker 必 ImportError），
+            # 改 qrcode 出矩阵 → numpy 放大（含静区），只用清单内已有的 numpy/cv2。
+            gray = _qr_matrix_gray(qr)
             img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
             if writer is None:
                 h, w = img.shape[:2]
@@ -624,13 +625,37 @@ def _open_video_writer(out_path, size):
     )
 
 
+def _qr_matrix_gray(qr):
+    """QR 矩阵 → uint8 灰度数组（1=黑；numpy 最近邻放大 box_size；矩阵已含 border 静区）。"""
+    _load_numpy()
+    if np is None:
+        raise RuntimeError("缺少二维码渲染依赖（numpy）")
+    mat = np.asarray(qr.get_matrix(), dtype=np.uint8)
+    img = np.where(mat > 0, 0, 255).astype(np.uint8)       # 黑=0 / 白=255
+    box = int(getattr(qr, "box_size", None) or BOX_SIZE)
+    if box > 1:
+        img = np.kron(img, np.ones((box, box), dtype=np.uint8))
+    return img
+
+
+def _qr_png_bytes(qr):
+    """灰度矩阵 → PNG 字节（cv2 编码，压缩级别 9：二值图体积与旧 PIL 渲染同档）。"""
+    _load_cv2()
+    if cv2 is None:
+        raise RuntimeError("缺少二维码渲染依赖（opencv-python）")
+    ok, buf = cv2.imencode(".png", _qr_matrix_gray(qr), [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    if not ok:
+        raise RuntimeError("二维码 PNG 编码失败")
+    return buf.tobytes()
+
+
 def _render_qr_image(data_bytes, version, err, out_path):
-    """按固定版本把字节数据渲染为一张二维码 PNG 图片。"""
+    """按固定版本把字节数据渲染为一张二维码 PNG 图片（矩阵渲染，不依赖 pillow）。"""
     qr = qrcode.QRCode(version=version, error_correction=err, box_size=BOX_SIZE, border=4)
     qr.add_data(data_bytes, optimize=0)
     qr.make(fit=False)
-    img = qr.make_image(fill_color="black", back_color="white")
-    img.save(out_path)
+    with open(out_path, "wb") as f:
+        f.write(_qr_png_bytes(qr))
     return out_path
 
 

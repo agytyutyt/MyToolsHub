@@ -1679,7 +1679,13 @@ def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
 # ===================== 静态二维码 =====================
 
 def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
-    """渲染二维码为 PNG 字节（可指定 mask 图案；None=自动选优）。"""
+    """渲染二维码为 PNG 字节（可指定 mask 图案；None=自动选优）。
+
+    2026-10-08：不再走 qrcode 的 PIL 渲染——pillow 不在依赖清单内（真机
+    「开启封装」即 ImportError → 封装失败）；改「qrcode 出矩阵 → numpy 放大 →
+    cv2 编码 PNG」，只用清单内已有的 numpy / opencv-python；产物照旧交
+    _cv2_can_decode / _zxing_can_decode 回读验证，质量口径不变。
+    """
     kwargs = {}
     if mask_pattern is not None:
         kwargs["mask_pattern"] = mask_pattern
@@ -1687,9 +1693,25 @@ def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
                        box_size=BOX_SIZE, border=4, **kwargs)
     qr.add_data(data_bytes, optimize=0)
     qr.make(fit=False)
-    buf = io.BytesIO()
-    qr.make_image(fill_color="black", back_color="white").save(buf, format="PNG")
-    return buf.getvalue()
+    return _qr_matrix_png(qr)
+
+
+def _qr_matrix_png(qr):
+    """QR 矩阵 → 8 位灰度 PNG（含静区；numpy 最近邻放大 box_size，模块边界锐利）。"""
+    _load_numpy()
+    _load_cv2()
+    if np is None or cv2 is None:                   # 依赖缺失时由上层按旗标给出友好提示
+        raise RuntimeError("缺少二维码渲染依赖（numpy / opencv-python）")
+    mat = np.asarray(qr.get_matrix(), dtype=np.uint8)      # 1=黑（已含 border 静区）
+    img = np.where(mat > 0, 0, 255).astype(np.uint8)       # 黑=0 / 白=255
+    box = int(getattr(qr, "box_size", None) or BOX_SIZE)
+    if box > 1:
+        img = np.kron(img, np.ones((box, box), dtype=np.uint8))
+    # 压缩级别 9：二值图体积与旧 PIL 渲染同档（默认级别 1 会大一个数量级）
+    ok, buf = cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    if not ok:
+        raise RuntimeError("二维码 PNG 编码失败")
+    return buf.tobytes()
 
 
 def _cv2_can_decode(png_bytes, expected=None):
