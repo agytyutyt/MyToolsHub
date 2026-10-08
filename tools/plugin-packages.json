@@ -468,10 +468,10 @@
                      "knowledge-base":  {
                                             "version":  "1.3.6",
                                             "api_version":  1,
-                                            "file":  "JZToolsHub-插件-knowledge-base-v1.3.6.zip",
-                                            "sha256":  "dbb6ac67b4e5029422a065c872f7d1dcfe21b32dca7dd7881e826b1a31a616fa",
-                                            "size":  1288760,
-                                            "built_at":  "2026-10-06T23:25:40+08:00",
+                                            "file":  "JZToolsHub-knowledge-base-后端-v1.3.6.zip",
+                                            "sha256":  "7a337d820d17205aa28ef405a7fb42b77f7f4930bfa5ec5acf90c7e399ea8de5",
+                                            "size":  1288757,
+                                            "built_at":  "2026-10-08T13:06:59+08:00",
                                             "code_sha256":  "ca5dd44fa2c448d3e8c1e6af555a8b0192f53cab797c35f7414f34a2251fe225",
                                             "file_count":  77,
                                             "requires_restart":  false,
@@ -626,17 +626,17 @@
                                                                                                          "referenced":  false
                                                                                                      }
                                                        },
-                                            "frontend_file":  "JZToolsHub-前端-knowledge-base-v1.3.6.zip",
-                                            "frontend_sha256":  "0cea6f91226f97db02916a1deaeb231b647d24f6ce9e48a33a984992203dbb19",
-                                            "frontend_size":  1049856
+                                            "frontend_file":  "JZToolsHub-knowledge-base-前端-v1.3.6.zip",
+                                            "frontend_sha256":  "b666eb9c61406f143bf675c849e44dbd51f50d11c49b88f6f559e43e44274f36",
+                                            "frontend_size":  1049855
                                         },
                      "shared-docs":  {
                                          "version":  "1.2.5",
                                          "api_version":  1,
-                                         "file":  "JZToolsHub-插件-shared-docs-v1.2.5.zip",
-                                         "sha256":  "7b43a237ce47ccb693d3c13ee16068a85787a7b89a5a9118db6a4c48fde1b60f",
-                                         "size":  48675,
-                                         "built_at":  "2026-10-06T23:25:46+08:00",
+                                         "file":  "JZToolsHub-shared-docs-后端-v1.2.5.zip",
+                                         "sha256":  "ee43289cba4ea4242475f65eae1546ae66b17b7a0aaca642da9d8301f3d93af9",
+                                         "size":  48677,
+                                         "built_at":  "2026-10-08T13:07:02+08:00",
                                          "code_sha256":  "76f1482d30e3383b9c275cc49c352cd6c0f7bd6ca158e87c4078450f49e232a1",
                                          "file_count":  8,
                                          "requires_restart":  false,
@@ -662,17 +662,53 @@
                                                                                    "referenced":  true
                                                                                }
                                                     },
-                                         "frontend_file":  "JZToolsHub-前端-shared-docs-v1.2.5.zip",
-                                         "frontend_sha256":  "2aa2ecb7b511e8805a9870baeca6ca6d6819358d3658073ab77301fb98a435a5",
+                                         "frontend_file":  "JZToolsHub-shared-docs-前端-v1.2.5.zip",
+                                         "frontend_sha256":  "2da8cf717edd13bffc5e077d4c353c3c46d96f7b125a98115366194e5fbeb8b2",
                                          "frontend_size":  14567
                                      },
+                     "notice-board":  {
+                                          "version":  "1.0.5",
+                                          "api_version":  1,
+                                          "file":  "JZToolsHub-notice-board-后端-v1.0.5.zip",
+                                          "sha256":  "2ccde0c9e12aaad5db697db62e33c6f9d1979bb69b7c0a395c74dde5eb09f2fe",
+                                          "size":  41794,
+                                          "built_at":  "2026-10-08T13:07:04+08:00",
+                                          "code_sha256":  "83375bb5a3fe5994ce0943dbe96383562ce42fc16a0057f41355a2c584511501",
+                                          "file_count":  8,
+                                          "requires_restart":  false,
+                                          "file_hashes":  {
+                                                              "plugins/notice-board/backend/__init__.py":  "921c5aff5a59a039",
+                                                              "plugins/notice-board/backend/requirements.txt":  "f45d6e3e2af5e605",
+                                                              "plugins/notice-board/backend/routes.py":  "c420c5e92c4d9c64",
+                                                              "plugins/notice-board/frontend/app.js":  "b79fa62337dfe692",
+                                                              "plugins/notice-board/frontend/index.html":  "4ee174cdbab6d394",
+                                                              "plugins/notice-board/frontend/style.css":  "2fff2e3daa1dfa61",
+                                                              "plugins/notice-board/manifest.json":  "b41715c0c944202d",
+                                                              "plugins/notice-board/README.md":  "ab1c408d0992543b"
+                                                          },
+                                          "assets":  {
+                                                         "frontend/app.js":  {
+                                                                                 "h":  "b79fa62337dfe692",
+                                                                                 "v":  6,
+                                                                                 "referenced":  true
+                                                                             },
+                                                         "frontend/style.css":  {
+                                                                                    "h":  "2fff2e3daa1dfa61",
+                                                                                    "v":  6,
+                                                                                    "referenced":  true
+                                                                                }
+                                                     },
+                                          "frontend_file":  "JZToolsHub-notice-board-前端-v1.0.5.zip",
+                                          "frontend_sha256":  "69b87d3e9257c5de09ae6a6a7fff150404cf5114058c3ccdc87d0ff58b56b07c",
+                                          "frontend_size":  11553
+                                      },
                      "case-report":  {
                                          "version":  "1.3.1",
                                          "api_version":  1,
-                                         "file":  "JZToolsHub-插件-case-report-v1.3.1.zip",
-                                         "sha256":  "967f78e06bf24205f53797e136deed0b232ae68c8f8d78e54ce9c78af68d9152",
-                                         "size":  71394,
-                                         "built_at":  "2026-10-06T23:25:50+08:00",
+                                         "file":  "JZToolsHub-case-report-后端-v1.3.1.zip",
+                                         "sha256":  "8c69ffd354d488b51b1894adf1210457bd6a952bce46a63e3d7b69730e670b1a",
+                                         "size":  71397,
+                                         "built_at":  "2026-10-08T13:07:05+08:00",
                                          "code_sha256":  "1d8cf27520c581bff7ecd39c8f364664d9bec17cf9f158bc2c3f0597667a4934",
                                          "file_count":  13,
                                          "requires_restart":  false,
@@ -703,45 +739,9 @@
                                                                                    "referenced":  true
                                                                                }
                                                     },
-                                         "frontend_file":  "JZToolsHub-前端-case-report-v1.3.1.zip",
-                                         "frontend_sha256":  "24bc82d83ac2fb4e77adc9deb0be575bf512cdce95728fedb1d23794f8faf41a",
+                                         "frontend_file":  "JZToolsHub-case-report-前端-v1.3.1.zip",
+                                         "frontend_sha256":  "2e70c18d8e8b14624d0a27798e04bc58f1bf7dafaa5540eacc8cf88cad833b8d",
                                          "frontend_size":  22383
-                                     },
-                     "notice-board":  {
-                                          "version":  "1.0.5",
-                                          "api_version":  1,
-                                          "file":  "JZToolsHub-插件-notice-board-v1.0.5.zip",
-                                          "sha256":  "4cbd43270907b0d9ab4d40c60c41b55d8fb1f9c107d64d038b8a660a86713078",
-                                          "size":  41793,
-                                          "built_at":  "2026-10-06T23:30:05+08:00",
-                                          "code_sha256":  "83375bb5a3fe5994ce0943dbe96383562ce42fc16a0057f41355a2c584511501",
-                                          "file_count":  8,
-                                          "requires_restart":  false,
-                                          "file_hashes":  {
-                                                              "plugins/notice-board/backend/__init__.py":  "921c5aff5a59a039",
-                                                              "plugins/notice-board/backend/requirements.txt":  "f45d6e3e2af5e605",
-                                                              "plugins/notice-board/backend/routes.py":  "c420c5e92c4d9c64",
-                                                              "plugins/notice-board/frontend/app.js":  "b79fa62337dfe692",
-                                                              "plugins/notice-board/frontend/index.html":  "4ee174cdbab6d394",
-                                                              "plugins/notice-board/frontend/style.css":  "2fff2e3daa1dfa61",
-                                                              "plugins/notice-board/manifest.json":  "b41715c0c944202d",
-                                                              "plugins/notice-board/README.md":  "ab1c408d0992543b"
-                                                          },
-                                          "assets":  {
-                                                         "frontend/app.js":  {
-                                                                                 "h":  "b79fa62337dfe692",
-                                                                                 "v":  6,
-                                                                                 "referenced":  true
-                                                                             },
-                                                         "frontend/style.css":  {
-                                                                                    "h":  "2fff2e3daa1dfa61",
-                                                                                    "v":  6,
-                                                                                    "referenced":  true
-                                                                                }
-                                                     },
-                                          "frontend_file":  "JZToolsHub-前端-notice-board-v1.0.5.zip",
-                                          "frontend_sha256":  "23a9774043cbe8ab1ed6e4b2618b7d3cce74cb3e677501833944a6e149b208a7",
-                                          "frontend_size":  11553
-                                      }
+                                     }
                  }
 }
