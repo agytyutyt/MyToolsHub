@@ -28,6 +28,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 CFG_PATH = os.path.join(HERE, "client-build-config.json")
 
+
+def _read_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _minimize_windows_of(pid):
+    """把指定进程的可见顶层窗口全部最小化（SW_MINIMIZE）；返回命中窗口数。
+
+    供「最小化态几何不得落盘」断言用（真机曾把 159x27 存成真几何）。
+    """
+    import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    hits = []
+    WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def _cb(hwnd, _lp):
+        wpid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(wpid))
+        if wpid.value == pid and u.IsWindowVisible(hwnd):
+            u.ShowWindow(hwnd, 6)                 # SW_MINIMIZE
+            hits.append(int(hwnd))
+        return True
+
+    u.EnumWindows(WNDENUMPROC(_cb), 0)
+    return hits
+
 REQUIRED_BODY = [
     "_internal/client-build-config.json",
     "_internal/fallback.html",
@@ -85,6 +116,9 @@ def smoke(out, cfg):
         except OSError:
             return None
 
+    # 基准几何（供最小化纪律断言）：写一个正常尺寸，最小化后不得被「最小化尺寸」写脏
+    with open(os.path.join(tmp, "geometry.json"), "w", encoding="utf-8") as f:
+        json.dump({"x": 0, "y": 0, "width": 1200, "height": 800}, f)
     proc = subprocess.Popen([exe], env=env, cwd=out)
     try:
         port = None
@@ -129,6 +163,21 @@ def smoke(out, cfg):
         cfgfile = os.path.join(tmp, "config.json")
         if not os.path.isfile(cfgfile):
             fail("地址未落地到客户端配置文件 config.json")
+
+        # 窗口几何纪律（2026-10-08）：最小化态尺寸不得落盘——真机曾把 159x27 存成真几何，
+        # 下次启动窗口只剩钳制下限。最小化本实例 → 等防抖落盘 → 断言未写脏。
+        geom = os.path.join(tmp, "geometry.json")
+        time.sleep(0.8)                       # 防抖 300ms：先让启动期的正常落盘完成
+        before = _read_json(geom)
+        hits = _minimize_windows_of(proc.pid)
+        if hits:
+            time.sleep(1.5)                   # 最小化 resized 事件 + 防抖窗口
+            after = _read_json(geom)
+            if after.get("width", 0) < 400 or after.get("height", 0) < 300:
+                fail("最小化态几何被落盘：%s（最小化前 %s）" % (after, before))
+            print("smoke：窗口最小化几何纪律通过（%s → %s，未被写脏）" % (before, after))
+        else:
+            print("smoke：未找到可最小化的窗口，跳过几何纪律断言")
 
         # 自重启链路（2026-10-08 加固）：该端点曾因裸名 sys（NameError→500 HTML）从未
         # 生效过，前端只见「自动重启失败」。断言：旧进程退出 → 新实例带 --await-pid

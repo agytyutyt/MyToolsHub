@@ -193,7 +193,16 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
             log("刷新快捷键注入失败:\n" + traceback.format_exc())
 
     window.events.closing += on_closing
-    window.events.resized += lambda w, h: geo.update(width=w, height=h)
+    def _on_resized(w, h):
+        # 最小化时 Win32 先报一个「最小化尺寸」（本机实测 159x27）——存了下次启动窗口
+        # 只剩钳制下限（2026-10-08 真机痕迹：geometry.json 被写成 159x27）。
+        # 远小于 MIN_SIZE 的一律判为最小化/异常，不落盘（move 事件侧同理已丢离屏坐标）。
+        if w < 400 or h < 300:
+            log("resized 事件上报异常尺寸（%dx%d），判定为最小化——不保存" % (w, h))
+            return
+        geo.update(width=w, height=h)
+
+    window.events.resized += _on_resized
 
     def _on_moved(x, y):
         # 最小化时 Win32 会上报离屏坐标（本机实测 -25600/-25600）——存了会导致下次
