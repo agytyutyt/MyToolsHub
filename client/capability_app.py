@@ -878,8 +878,19 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         ver, err = _find_catalog_entry(catalog, pid, version)
         if err:
             return jsonify({"ok": False, "error": err}), 200
-        # server 条目下载 = 后端包（管理员留档用）；其余 = 自身包
-        filename = ver.get("file") or ("%s-%s.zip" % (pid, ver.get("version")))
+        # 下载语义（2026-10-08 需求）：全部插件都给「下载」（仅下载不安装）——
+        # server 条目取**客户端工件（前端包）**（后端包不对用户暴露，留档走构建侧）；其余 = 自身包。
+        artifact = None
+        if (ver.get("runtime") or "local") == "server":
+            if not ver.get("frontend_file"):
+                return jsonify({"ok": False,
+                                "error": "该条目没有前端包工件（服务器侧尚未发布前端包）"}), 200
+            artifact = "frontend"
+            filename = ver.get("frontend_file")
+            expect_sha = ver.get("frontend_sha256")
+        else:
+            filename = ver.get("file") or ("%s-%s.zip" % (pid, ver.get("version")))
+            expect_sha = ver.get("sha256")
         dl_id = uuid.uuid4().hex
         _dl_jobs[dl_id] = {"received": 0, "total": None, "status": "running",
                            "path": "", "error": "", "filename": filename}
@@ -892,7 +903,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 def _prog(received, total):
                     st["received"], st["total"] = received, total
                 path, err = _pull_and_verify(src, pid, ver.get("version"),
-                                             ver.get("sha256"), filename, progress=_prog)
+                                             expect_sha, filename, artifact=artifact,
+                                             progress=_prog)
                 if err:
                     st["status"], st["error"] = "error", err
                 else:

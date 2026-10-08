@@ -160,9 +160,9 @@
   function dlButtonHtml(e, label) {
     // 下载按钮 = 进度条容器：fill 随百分比填充背景，label 叠在上层
     return '<button class="st-btn-dl jz-only" data-act="download-local" data-id="' + esc(e.id)
-      + '" data-ver="' + esc(e.version) + '" data-label="' + esc(label || '下载包') + '">'
+      + '" data-ver="' + esc(e.version) + '" data-label="' + esc(label || '下载') + '">'
       + '<span class="st-dl-fill"></span>'
-      + '<span class="st-dl-label">' + esc(label || '下载包') + '</span></button>';
+      + '<span class="st-dl-label">' + esc(label || '下载') + '</span></button>';
   }
 
   function installBtnHtml(e, label) {
@@ -212,12 +212,12 @@
       }
       html += '<button class="st-btn-danger" data-act="uninstall" data-id="' + esc(e.id) + '">卸载</button>';
     }
-    // 下载：server 条目**不提供后端包下载**（2026-10-08 需求，服务器侧工件由管理员留档）；
-    // 本地/依赖条目两端可见：桌面端经能力层落数据目录 downloads\，浏览器直接下载文件。
-    if (e.runtime !== 'server') {
-      html += dlButtonHtml(e);
-      html += '<button class="st-btn-ghost st-browser-dl" data-act="download" data-id="' + esc(e.id) + '" data-ver="' + esc(e.version) + '">下载包</button>';
-    }
+    // 下载（2026-10-08 需求：**全部插件**都提供「安装」「下载」两个按钮，按钮上不写说明）——
+    // 桌面端「下载」= 仅下载不安装（能力层落数据目录 downloads\）；server 条目取**客户端工件
+    // （前端包）**，后端包不对用户暴露；浏览器路径 server 条目走 ?artifact=frontend，其余下载自身包。
+    html += dlButtonHtml(e, '下载');
+    html += '<button class="st-btn-ghost st-browser-dl" data-act="download" data-id="' + esc(e.id)
+      + '" data-ver="' + esc(e.version) + '">下载</button>';
     return html;
   }
 
@@ -438,9 +438,10 @@
     var ver = btn.getAttribute('data-ver');
     var e = findEntry(id);
     if (!e) { msg('条目不存在', true); return; }
-    if (act === 'download') {                       // 浏览器路径：普通文件下载
+    if (act === 'download') {                       // 浏览器路径：普通文件下载（server 条目取前端包工件）
+      var q = '?via=browser' + (e.runtime === 'server' ? '&artifact=frontend' : '');
       window.location = '/plugin/store/api/download/' + encodeURIComponent(id)
-        + '/' + encodeURIComponent(ver) + '?via=browser';
+        + '/' + encodeURIComponent(ver) + q;
       return;
     }
         if (act === 'download-local') {                 // 桌面端：校验 → 进度条下载（批次 10 状态机）
