@@ -68,12 +68,22 @@
     #st-table td:last-child { position: sticky; right: 0; }
     #st-table th:last-child { background: var(--md-surface-container); z-index: 3; }
     #st-table td:last-child {
-      background-color: var(--md-surface); z-index: 2;
+      background: var(--md-surface); z-index: 2;
       box-shadow: -10px 0 10px -10px rgba(0, 0, 0, .16);
     }
-    #st-table tbody tr:hover td:last-child {
-      background-image: linear-gradient(rgba(var(--md-primary-rgb), .04),
-                                        rgba(var(--md-primary-rgb), .04));
+    /* 钉列左侧渐变隐藏带（2026-10-08）：滚动内容滑入钉列下缘前渐隐；
+       仅溢出时显示（JS 的 .is-overflowing），避免无溢出时出现幽灵渐隐。
+       钉列底色恒定（不加 hover 混合），渐隐终点色 = 列底 → 无缝。 */
+    #st-table-wrap.is-overflowing #st-table th:last-child::before,
+    #st-table-wrap.is-overflowing #st-table td:last-child::before {
+      content: ''; position: absolute; left: -26px; top: 0; bottom: 0; width: 26px;
+      pointer-events: none;
+    }
+    #st-table-wrap.is-overflowing #st-table td:last-child::before {
+      background: linear-gradient(to right, rgba(255,255,255,0), var(--md-surface));
+    }
+    #st-table-wrap.is-overflowing #st-table th:last-child::before {
+      background: linear-gradient(to right, rgba(255,255,255,0), var(--md-surface-container));
     }
 
     /* 统计页签 */
