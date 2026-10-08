@@ -159,3 +159,18 @@ html.jz-shell .st-browser-dl{display:none !important}
   .st-grid{grid-template-columns:1fr}
   #st-q{min-width:0;flex:1}
 }
+
+/* ---------- 自绘对话框（替换原生 confirm/prompt） ---------- */
+.st-dlg{z-index:110}
+.st-dlg .st-modal-panel{width:min(400px,100%);padding:18px 20px}
+.st-dlg-title{margin:0 0 10px;font-size:15px}
+.st-dlg-body{font-size:13px;color:var(--ink2);line-height:1.75;overflow-wrap:anywhere;margin-bottom:16px}
+.st-dlg-body b{color:var(--ink)}
+.st-dlg-input{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;
+  margin:-6px 0 14px;background:#fff;transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
+.st-dlg-input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(26,115,232,.15)}
+.st-dlg-btns{display:flex;justify-content:flex-end;gap:8px}
+.st-dlg-btns button{padding:7px 16px;border:0;border-radius:8px;font-size:13px;cursor:pointer;
+  transition:background .15s var(--ease),transform .08s var(--ease)}
+.st-dlg-btns button:active{transform:scale(.97)}
+.st-dlg-btns button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}

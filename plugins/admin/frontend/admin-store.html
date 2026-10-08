@@ -57,6 +57,25 @@
     .data-table td { vertical-align: top; }
     .data-table tbody tr:hover { background: rgba(0,0,0,.02); }
 
+    /* 自绘对话框（替换原生 confirm/prompt；与商店页同款） */
+    .st-dlg{z-index:110}
+    .st-dlg .st-modal-panel{width:min(400px,100%);padding:18px 20px}
+    .st-dlg-title{margin:0 0 10px;font-size:15px}
+    .st-dlg-body{font-size:13px;color:#5f6368;line-height:1.75;overflow-wrap:anywhere;margin-bottom:16px}
+    .st-dlg-body b{color:#202124}
+    .st-dlg-input{width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.15);border-radius:8px;
+      font-size:13px;margin:-6px 0 14px;background:#fff}
+    .st-dlg-input:focus{outline:none;border-color:var(--md-primary,#4285F4);
+      box-shadow:0 0 0 3px rgba(66,133,244,.15)}
+    .st-dlg-btns{display:flex;justify-content:flex-end;gap:8px}
+    .st-dlg-btns button{padding:7px 16px;border:0;border-radius:8px;font-size:13px;cursor:pointer}
+    .st-dlg-no{background:rgba(0,0,0,.06);color:#5f6368}
+    .st-dlg-no:hover{background:rgba(0,0,0,.1)}
+    .st-dlg-ok{background:var(--md-primary,#4285F4);color:#fff}
+    .st-dlg-ok:hover{background:#3b78e7}
+    .st-dlg-danger{background:rgba(197,34,31,.1);color:#c5221f}
+    .st-dlg-danger:hover{background:rgba(197,34,31,.18)}
+
     /* 统计页签 */
     .st-stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 0 4px; }
     .st-stat-card { border: 1px solid rgba(0,0,0,.08); border-radius: 12px; padding: 14px 16px;

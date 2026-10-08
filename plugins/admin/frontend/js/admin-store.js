@@ -41,6 +41,51 @@
   function statusLabel(s) {
     return { pending: '待审核', published: '已上架', rejected: '已驳回', delisted: '已下架' }[s] || s;
   }
+  // 自绘对话框（替换原生 confirm/prompt；与商店页同款交互：ESC/遮罩=取消，Enter=确定）
+  function adDialog(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var dlg = document.createElement('div');
+      dlg.className = 'st-modal st-dlg';
+      dlg.innerHTML = '<div class="st-modal-panel" role="alertdialog">'
+        + '<h3 class="st-dlg-title">' + esc(opts.title || '确认') + '</h3>'
+        + '<div class="st-dlg-body">' + (opts.html || '') + '</div>'
+        + (opts.input ? '<input class="st-dlg-input" type="text" placeholder="'
+            + esc(opts.placeholder || '') + '">' : '')
+        + '<div class="st-dlg-btns">'
+        + '<button type="button" class="st-dlg-no" data-k="0">' + esc(opts.cancelText || '取消') + '</button>'
+        + '<button type="button" class="' + (opts.danger ? 'st-dlg-danger' : 'st-dlg-ok')
+        + '" data-k="1">' + esc(opts.okText || '确定') + '</button>'
+        + '</div></div>';
+      var inp = dlg.querySelector('.st-dlg-input');
+      function cancelVal() { return opts.input ? null : false; }
+      function okVal() { return opts.input ? (inp ? inp.value : '') : true; }
+      function done(val) {
+        dlg.classList.remove('show');
+        setTimeout(function () { if (dlg.parentNode) dlg.parentNode.removeChild(dlg); }, 220);
+        document.removeEventListener('keydown', onKey);
+        resolve(val);
+      }
+      function onKey(ev) {
+        if (ev.key === 'Escape') done(cancelVal());
+        else if (ev.key === 'Enter') done(okVal());
+      }
+      dlg.addEventListener('click', function (ev) {
+        if (ev.target === dlg) return done(cancelVal());
+        var b = ev.target.closest ? ev.target.closest('button[data-k]') : null;
+        if (!b) return;
+        done(b.getAttribute('data-k') === '0' ? cancelVal() : okVal());
+      });
+      document.body.appendChild(dlg);
+      document.addEventListener('keydown', onKey);
+      requestAnimationFrame(function () { dlg.classList.add('show'); });
+      setTimeout(function () {
+        var f = inp || dlg.querySelector('button[data-k="1"]');
+        if (f) f.focus();
+      }, 40);
+    });
+  }
+
   function chip(text, kind) {
     return '<span class="st-chip st-chip-' + kind + '">' + esc(text) + '</span>';
   }
@@ -284,37 +329,42 @@
     });
   });
 
-  document.getElementById('st-rows').addEventListener('click', function (ev) {
+  document.getElementById('st-rows').addEventListener('click', async function (ev) {
     var btn = ev.target.closest ? ev.target.closest('button[data-op]') : null;
     if (!btn) return;
     var op = btn.getAttribute('data-op');
     var id = btn.getAttribute('data-id');
     var v = btn.getAttribute('data-v');
-    var notes = {
-      approve: '确认发布 ' + id + ' v' + v + '？（server 条目将自动部署后端包；装机冒烟请确认已做）',
-      reject: '驳回原因（记入台账）：',
-      delist: '下架 ' + id + ' v' + v + '？（客户端可见性回落到旧版；已装客户端不降级）',
-      republish: '重新上架 ' + id + ' v' + v + '？将回到待审核状态。',
-      redeploy: '重新部署 ' + id + ' v' + v + ' 到服务器？（自动备份，可回滚）',
+    var dlgOpts = {
+      approve: { title: '发布确认', okText: '发布',
+        html: '确认发布 <b>' + esc(id) + ' v' + esc(v) + '</b>？<br>server 条目将自动部署后端包；'
+          + '<b>装机冒烟请确认已做</b>。' },
+      reject: { title: '驳回', input: true, danger: true, okText: '驳回', placeholder: '填写驳回原因（记入台账）',
+        html: '驳回 <b>' + esc(id) + ' v' + esc(v) + '</b>：' },
+      delist: { title: '下架确认', danger: true, okText: '下架',
+        html: '下架 <b>' + esc(id) + ' v' + esc(v) + '</b>？<br>客户端可见性回落到旧版；已装客户端不降级。' },
+      republish: { title: '重新上架', okText: '重新上架',
+        html: '重新上架 <b>' + esc(id) + ' v' + esc(v) + '</b>？将回到待审核状态。' },
+      redeploy: { title: '重新部署', okText: '重新部署',
+        html: '把 <b>' + esc(id) + ' v' + esc(v) + '</b> 重新部署到服务器？<br>自动备份，可回滚。' },
     };
+    var r = await adDialog(dlgOpts[op] || { title: '确认', html: esc(op + '？') });
     var note = '';
     if (op === 'reject') {
-      note = prompt(notes[op]) || '';
-      if (note === null) return;
-    } else {
-      if (!confirm(notes[op] || '确认？')) return;
-    }
+      if (r === null) return;
+      note = r || '';
+    } else if (!r) return;
     var path = op === 'redeploy' ? '/redeploy' : '/review';
     var body = op === 'redeploy' ? { id: id, version: v } : { id: id, version: v, action: op, note: note };
     if (op === 'delist') path = '/delist';
     if (op === 'delist') body = { id: id, version: v, note: note };
-    post(path, body).then(function (r) {
-      if (r.data.ok) {
-        toast(op === 'approve' ? '已发布' + (r.data.status === 'published' ? '：客户端可见' : '')
+    post(path, body).then(function (r2) {
+      if (r2.data.ok) {
+        toast(op === 'approve' ? '已发布' + (r2.data.status === 'published' ? '：客户端可见' : '')
           : op === 'redeploy' ? '重新部署完成' : '操作成功');
         load();
       } else {
-        toast('操作失败：' + (r.data.error || '未知错误'), true);
+        toast('操作失败：' + (r2.data.error || '未知错误'), true);
       }
     }).catch(function (e) { toast('请求异常：' + e, true); });
   });
