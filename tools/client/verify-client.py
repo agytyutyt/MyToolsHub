@@ -5,6 +5,7 @@
 --smoke：临时数据目录启动 exe → 等 client.log 的 CAPABILITY 行 → 探测
   / （未配地址 → 兜底页）与 /local-api/health → 退出码 0/1。
 """
+import base64
 import json
 import os
 import shutil
@@ -92,7 +93,12 @@ def structure(out, cfg):
             fail("缺文件：%s" % rel)
     if os.path.isdir(os.path.join(out, "plugins")):
         fail("客户端包不应含 plugins/ 目录")
-    print("结构断言通过（%d 项必需 + 禁带检查）" % len(required))
+    # 插件 worker 运行时分件（T07 遗留销项，2026-10-08）：打包态 worker 靠它拉起
+    if not os.path.isfile(os.path.join(out, "runtime", "python", "python.exe")):
+        fail("缺插件 worker 运行时：runtime/python/python.exe（先跑 tools/client/build-client-runtime.py）")
+    if not os.path.isdir(os.path.join(out, "runtime", "python", "Lib", "site-packages", "flask")):
+        fail("worker 运行时缺 Flask 栈：runtime/python/Lib/site-packages/flask")
+    print("结构断言通过（%d 项必需 + worker 运行时 + 禁带检查）" % len(required))
 
 
 def smoke(out, cfg):
@@ -178,6 +184,45 @@ def smoke(out, cfg):
             print("smoke：窗口最小化几何纪律通过（%s → %s，未被写脏）" % (before, after))
         else:
             print("smoke：未找到可最小化的窗口，跳过几何纪律断言")
+
+        # 打包态 worker 冒烟（T07 遗留销项，2026-10-08）：自带运行时 python + 包内
+        # plugin_host.py + 最小插件（flask 栈）走一次 stdio-json-v1 往返。这条路径过去只在
+        # 源码态被台架覆盖——打包态曾因「exe 当不了脚本解释器」整体哑火而无人察觉。
+        rt_py = os.path.join(out, "runtime", "python", "python.exe")
+        host = os.path.join(out, "_internal", "plugin_host.py")
+        pdir = os.path.join(tmp, "worker-probe", "local-probe")
+        os.makedirs(os.path.join(pdir, "backend"), exist_ok=True)
+        with open(os.path.join(pdir, "backend", "__init__.py"), "w", encoding="utf-8") as f:
+            f.write("")
+        with open(os.path.join(pdir, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "local-probe", "runtime": "local", "kind": "local",
+                       "entry": {"frontend": "index.html", "backend": "routes.py"}}, f)
+        with open(os.path.join(pdir, "backend", "routes.py"), "w", encoding="utf-8") as f:
+            f.write("import os\nfrom flask import jsonify\n\ndef register(app):\n"
+                    "    @app.get('/ping')\n    def ping():\n"
+                    "        return jsonify({'ok': True, 'pid': os.getpid()})\n")
+        argv = [rt_py, host, "--plugin", pdir]
+        pylibs = os.path.join(out, "runtime", "pylibs")
+        if os.path.isdir(pylibs):
+            argv += ["--pylibs", pylibs]        # 与执行器 _spawn 同口径
+        wp = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, cwd=out)
+        try:
+            ob, eb = wp.communicate(input=(json.dumps({
+                "request_id": "probe", "method": "GET", "path": "/ping",
+                "headers": {}, "body_b64": ""}) + "\n").encode(), timeout=30)
+        except subprocess.TimeoutExpired:
+            wp.kill()
+            fail("打包态 worker 超时无响应（T07 遗留销项回归）")
+        lines = (ob or b"").decode("utf-8", "replace").strip().splitlines()
+        if not lines:
+            fail("打包态 worker 无响应（T07 遗留销项回归）：stderr=%s"
+                 % (eb or b"").decode("utf-8", "replace")[-400:])
+        resp = json.loads(lines[0])
+        wbody = base64.b64decode(resp.get("body_b64") or "").decode("utf-8", "replace")
+        if resp.get("status") != 200 or '"ok"' not in wbody:
+            fail("打包态 worker 往返异常：status=%s body=%s" % (resp.get("status"), wbody[:200]))
+        print("smoke：打包态 worker 往返通过（运行时 python + plugin_host + Flask 栈，status 200）")
 
         # 自重启链路（2026-10-08 加固）：该端点曾因裸名 sys（NameError→500 HTML）从未
         # 生效过，前端只见「自动重启失败」。断言：旧进程退出 → 新实例带 --await-pid

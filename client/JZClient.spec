@@ -36,6 +36,9 @@ a = Analysis(
         (os.path.join(ROOT, "jz_deps.py"), "kernel"),
         (os.path.join(ROOT, "jz_api.py"), "kernel"),
         (os.path.join(ROOT, "jztools_data.py"), "kernel"),
+        # 插件 worker 由自带运行时 python 拉起 plugin_host.py，宿主模块只能吃盘上文件
+        # （冻结 app 走 PYZ 够用）——随包落 kernel/（2026-10-08 T07 遗留销项）
+        (os.path.join(ROOT, "jz_plugin_host.py"), "kernel"),
     ] + _w_datas + _p_datas,
     hiddenimports=["waitress"] + _w_hidden + _p_hidden,
     hookspath=[],

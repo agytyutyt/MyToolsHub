@@ -39,6 +39,26 @@ def main():
     dist = os.path.join(ROOT, "client", "dist", name)
     out = os.path.join(ROOT, "deploy", "桌面端", name)
 
+    # 插件 worker 运行时分件前置断言（T07 遗留销项，2026-10-08）：打包态 worker 靠它拉起，
+    # 缺了则 B-heavy / C 类本地后端在打包态全哑（源码态台架查不出来）。版本须与构建机同 minor。
+    runtime_py = os.path.join(out, "runtime", "python", "python.exe")
+    if not os.path.isfile(runtime_py):
+        print("缺插件 worker 运行时：%s" % runtime_py)
+        print("  先跑：python tools/client/build-client-runtime.py（分件可复用，程序包更新不重下）")
+        return 1
+    try:
+        r = subprocess.run([runtime_py, "-c",
+                            "import sys;print('%d.%d' % sys.version_info[:2])"],
+                           capture_output=True, text=True, timeout=30)
+        rtag = (r.stdout or "").strip()
+    except Exception as exc:
+        rtag = ""
+        print("worker 运行时自检异常：%r" % exc)
+    want = "%d.%d" % (sys.version_info[0], sys.version_info[1])
+    if rtag != want:
+        print("worker 运行时版本不符：%r（构建机 %s）——重跑 build-client-runtime.py" % (rtag, want))
+        return 1
+
     if not skip_build:
         print("[1/3] PyInstaller 打包…")
         cmd = [sys.executable, "-m", "PyInstaller",

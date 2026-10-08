@@ -136,9 +136,16 @@ def program_dir():
 
 
 def runtime_python_exe(build_cfg):
-    """子进程运行时（GD4）：构建配置指明 embeddable 目录则用之，否则当前解释器（源码态）。"""
+    """子进程运行时（GD4）：构建配置指明运行时目录则用之，否则当前解释器（源码态）。
+
+    runtime_python_dir 相对路径按**程序目录**解析（构建配置单源写 `runtime/python` 即可，
+    不因进程 CWD 不同而漂移）。打包态缺 python.exe 属构建缺陷（build-client / verify-client
+    均有前置断言兜底）；此处如实回落当前解释器（源码态语义）。
+    """
     d = (build_cfg.get("paths") or {}).get("runtime_python_dir") or ""
     if d:
+        if not os.path.isabs(d):
+            d = os.path.join(program_dir(), d)
         exe = os.path.join(d, "python.exe")
         if os.path.isfile(exe):
             return exe

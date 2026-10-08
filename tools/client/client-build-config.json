@@ -6,7 +6,8 @@
     "version": "0.0.1-preview"
   },
   "paths": {
-    "data_dirname": "JZClient"
+    "data_dirname": "JZClient",
+    "runtime_python_dir": "runtime/python"
   },
   "server": {
     "default_address": ""

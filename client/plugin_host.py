@@ -20,8 +20,12 @@ import sys
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_here)
-sys.path.insert(0, _ROOT)
-sys.path.insert(0, _here)
+# 两种布局都要能找到内核模块（jz_plugin_host / jz_deps / jz_api / jztools_data）：
+#   源仓库：模块在仓库根（_ROOT）；打包态：模块在 <bundle>/kernel/（随 spec datas 落盘）——
+#   2026-10-08 起打包态 worker 由自带运行时 python 拉起（T07 遗留销项），此处按目录探测。
+for _p in (_here, os.path.join(_here, "kernel"), _ROOT, os.path.join(_ROOT, "kernel")):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import jz_plugin_host  # noqa: E402
 

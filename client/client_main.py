@@ -133,9 +133,12 @@ def main():
     log("数据目录：%s" % data_dir)
 
     from plugin_executor import PluginExecutor
+    worker_python = runtime_python_exe(build_cfg)
     executor = PluginExecutor(
-        runtime_python_exe(build_cfg), host_script_path(),
+        worker_python, host_script_path(),
         os.path.join(program_dir(), "runtime", "pylibs"), data_dir, log)
+    # 插件 worker 运行时留痕（打包态应为 runtime/python/python.exe；缺则回落本进程解释器=构建缺陷）
+    log("插件 worker 运行时：%s" % worker_python)
 
     from capability_app import create_capability_app
     app = create_capability_app(
