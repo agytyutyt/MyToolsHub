@@ -24,6 +24,7 @@ import jz_deps
 _get_session_user = jz_api.get_session_user
 
 import base64
+import json
 import os
 import threading
 import time
@@ -53,6 +54,9 @@ TASKS = {}
 TASKS_LOCK = threading.Lock()
 TASK_TTL_SECONDS = 30 * 60
 
+import jztools_data
+_TASK_DIR = jztools_data.get_data_root_dir("plugins", "qr-video-decode", ".task_cache")
+
 
 def check_zfec_or_raise():
     if not ZFEC_AVAILABLE:
@@ -72,9 +76,59 @@ def decode_fecinfo(b64: str):
     return (n >> 8) & 255, n & 255
 
 
+def _task_path(task_id):
+    return os.path.join(_TASK_DIR, "%s.json" % task_id)
+
+
+def _task_persist(task_id, t):
+    """任务态写穿到磁盘（idle 回收/重启后载回；失败不打断任务——内存镜像照常）。"""
+    try:
+        os.makedirs(_TASK_DIR, exist_ok=True)
+        tmp = _task_path(task_id) + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(t, f, ensure_ascii=False)
+        os.replace(tmp, _task_path(task_id))
+    except Exception:
+        pass
+
+
+def _task_load_all():
+    """启动（含 idle 回收后重启）把磁盘任务态载回内存镜像——任务态外置（F6 前置，2026-10-09）。
+
+    中断归一：仍 running/pending 的任务（其执行线程已随上次进程结束）显式置
+    error「因能力层回收/重启而中断」，避免轮询永远停在 running。
+    """
+    try:
+        names = os.listdir(_TASK_DIR)
+    except OSError:
+        return
+    for name in names:
+        if not name.endswith(".json") or name.endswith(".tmp"):
+            continue
+        tid = name[: -len(".json")]
+        try:
+            with open(os.path.join(_TASK_DIR, name), "r", encoding="utf-8-sig") as f:
+                t = json.load(f)
+        except Exception:
+            continue
+        if not isinstance(t, dict):
+            continue
+        if t.get("status") in ("running", "pending"):
+            t["status"] = "error"
+            t["detail"] = "任务因能力层回收/重启而中断（可重新发起）"
+            _task_persist(tid, t)
+        TASKS[tid] = t
+
+
+_task_load_all()
+
+
 def set_task(task_id: str, **kwargs) -> None:
+    """任务态外置（F6 前置）：内存镜像 + 写穿 .task_cache/<id>.json（回收/重启后载回）。"""
     with TASKS_LOCK:
-        TASKS[task_id] = {**TASKS.get(task_id, {}), **kwargs}
+        t = {**TASKS.get(task_id, {}), **kwargs}
+        TASKS[task_id] = t
+        _task_persist(task_id, t)
 
 
 def get_task(task_id: str):

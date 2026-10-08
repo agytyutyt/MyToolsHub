@@ -161,45 +161,6 @@
                                                                               }
                                                       }
                                        },
-                     "qr-video-decode":  {
-                                             "version":  "1.1.5",
-                                             "api_version":  1,
-                                             "file":  "JZToolsHub-插件-qr-video-decode-v1.1.5.zip",
-                                             "sha256":  "3939efaf905fb5f7e50d0057e781863c76b354b78ca0a76be1822c3acf8c718f",
-                                             "size":  97087,
-                                             "built_at":  "2026-10-04T10:09:33+08:00",
-                                             "code_sha256":  "bdc338bca7b66d236d2fc5f5df7c585bbbd0e22a7f734eae204d96a32d87390c",
-                                             "file_count":  9,
-                                             "requires_restart":  false,
-                                             "file_hashes":  {
-                                                                 "plugins/qr-video-decode/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                 "plugins/qr-video-decode/backend/requirements.txt":  "7500853833af2390",
-                                                                 "plugins/qr-video-decode/backend/routes.py":  "fcee297f798c821f",
-                                                                 "plugins/qr-video-decode/frontend/app.js":  "219a26dacc395eac",
-                                                                 "plugins/qr-video-decode/frontend/index.html":  "0f6e16fee755d50d",
-                                                                 "plugins/qr-video-decode/frontend/jsqr.min.js":  "7c3c379dd1277bce",
-                                                                 "plugins/qr-video-decode/frontend/worker.js":  "fc065914260d3144",
-                                                                 "plugins/qr-video-decode/manifest.json":  "9026510959aa88c4",
-                                                                 "plugins/qr-video-decode/README.md":  "02ade222414094f2"
-                                                             },
-                                             "assets":  {
-                                                            "frontend/app.js":  {
-                                                                                    "h":  "219a26dacc395eac",
-                                                                                    "v":  7,
-                                                                                    "referenced":  true
-                                                                                },
-                                                            "frontend/jsqr.min.js":  {
-                                                                                         "h":  "7c3c379dd1277bce",
-                                                                                         "v":  1,
-                                                                                         "referenced":  true
-                                                                                     },
-                                                            "frontend/worker.js":  {
-                                                                                       "h":  "fc065914260d3144",
-                                                                                       "v":  null,
-                                                                                       "referenced":  false
-                                                                                   }
-                                                        }
-                                         },
                      "map-marker":  {
                                         "version":  "1.0.2",
                                         "api_version":  1,
@@ -623,31 +584,6 @@
                                          "frontend_sha256":  "2e70c18d8e8b14624d0a27798e04bc58f1bf7dafaa5540eacc8cf88cad833b8d",
                                          "frontend_size":  22383
                                      },
-                     "trajectory-convert":  {
-                                                "version":  "1.1.9",
-                                                "api_version":  1,
-                                                "file":  "JZToolsHub-trajectory-convert-后端-v1.1.9.zip",
-                                                "sha256":  "27211641da42350a28f4f2cff383a05dcd689254c838273f2e9b59605f68b239",
-                                                "size":  50410,
-                                                "built_at":  "2026-10-08T19:21:28+08:00",
-                                                "code_sha256":  "d3496b4331607ed45faea973dd6e28ae890607da81c52a8d93f94c6533e087e8",
-                                                "file_count":  6,
-                                                "requires_restart":  true,
-                                                "file_hashes":  {
-                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "6e1cb6fa65e2c01c",
-                                                                    "plugins/trajectory-convert/backend/routes.py":  "b76e4a9bcf50dce7",
-                                                                    "plugins/trajectory-convert/frontend/index.html":  "7eb258b58c19aebf",
-                                                                    "plugins/trajectory-convert/manifest.json":  "03f6e8041ac1fd26",
-                                                                    "plugins/trajectory-convert/README.md":  "76e0b3c7b37d5bdc"
-                                                                },
-                                                "assets":  {
-
-                                                           },
-                                                "frontend_file":  "JZToolsHub-trajectory-convert-前端-v1.1.9.zip",
-                                                "frontend_sha256":  "62ca16edca494123064a702b0fdb503c5140ea6be3bc24e03f00e801baf890e7",
-                                                "frontend_size":  9281
-                                            },
                      "trajectory-sketch":  {
                                                "version":  "1.3.0",
                                                "api_version":  1,
@@ -751,6 +687,73 @@
                                            "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.9.zip",
                                            "frontend_sha256":  "055dd7068edbd3d2c915ee9661ad7df1573df6966745c37ca002e6623c18da42",
                                            "frontend_size":  24966
-                                       }
+                                       },
+                     "trajectory-convert":  {
+                                                "version":  "1.2.0",
+                                                "api_version":  1,
+                                                "file":  "JZToolsHub-trajectory-convert-后端-v1.2.0.zip",
+                                                "sha256":  "7ad1ec8dd9511538c46b01ac1c9244a3066b2a8e4da5e0d6904d15bc9122cb82",
+                                                "size":  51427,
+                                                "built_at":  "2026-10-09T00:47:00+08:00",
+                                                "code_sha256":  "fca7895650d642bbb33a78052bdde859eab8e2d920dc69fcfeafe8691a3ff1dd",
+                                                "file_count":  6,
+                                                "requires_restart":  true,
+                                                "file_hashes":  {
+                                                                    "plugins/trajectory-convert/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                    "plugins/trajectory-convert/backend/requirements.txt":  "6e1cb6fa65e2c01c",
+                                                                    "plugins/trajectory-convert/backend/routes.py":  "93d7209e3c13acca",
+                                                                    "plugins/trajectory-convert/frontend/index.html":  "7eb258b58c19aebf",
+                                                                    "plugins/trajectory-convert/manifest.json":  "0f41f8f325a17d3d",
+                                                                    "plugins/trajectory-convert/README.md":  "76e0b3c7b37d5bdc"
+                                                                },
+                                                "assets":  {
+
+                                                           },
+                                                "frontend_file":  "JZToolsHub-trajectory-convert-前端-v1.2.0.zip",
+                                                "frontend_sha256":  "8baf533f22a28639996f253f5e681b9069be2b123509e6803b3b7269f48995b6",
+                                                "frontend_size":  9280
+                                            },
+                     "qr-video-decode":  {
+                                             "version":  "1.1.6",
+                                             "api_version":  1,
+                                             "file":  "JZToolsHub-qr-video-decode-后端-v1.1.6.zip",
+                                             "sha256":  "ff01a8946f4f6edd4fee853ff7faec2dc0e4c6c8405838b4671ceb05841d0819",
+                                             "size":  97804,
+                                             "built_at":  "2026-10-09T00:48:01+08:00",
+                                             "code_sha256":  "6cc5b5f14e8a055ad613d838dbd7dcf84b9b44f9ffe32ee6ddae58616d5a2bb3",
+                                             "file_count":  9,
+                                             "requires_restart":  true,
+                                             "file_hashes":  {
+                                                                 "plugins/qr-video-decode/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                 "plugins/qr-video-decode/backend/requirements.txt":  "7500853833af2390",
+                                                                 "plugins/qr-video-decode/backend/routes.py":  "91b842469557cd25",
+                                                                 "plugins/qr-video-decode/frontend/app.js":  "219a26dacc395eac",
+                                                                 "plugins/qr-video-decode/frontend/index.html":  "0f6e16fee755d50d",
+                                                                 "plugins/qr-video-decode/frontend/jsqr.min.js":  "7c3c379dd1277bce",
+                                                                 "plugins/qr-video-decode/frontend/worker.js":  "fc065914260d3144",
+                                                                 "plugins/qr-video-decode/manifest.json":  "769cad0e4cd6955a",
+                                                                 "plugins/qr-video-decode/README.md":  "02ade222414094f2"
+                                                             },
+                                             "assets":  {
+                                                            "frontend/app.js":  {
+                                                                                    "h":  "219a26dacc395eac",
+                                                                                    "v":  7,
+                                                                                    "referenced":  true
+                                                                                },
+                                                            "frontend/jsqr.min.js":  {
+                                                                                         "h":  "7c3c379dd1277bce",
+                                                                                         "v":  1,
+                                                                                         "referenced":  true
+                                                                                     },
+                                                            "frontend/worker.js":  {
+                                                                                       "h":  "fc065914260d3144",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   }
+                                                        },
+                                             "frontend_file":  "JZToolsHub-qr-video-decode-前端-v1.1.6.zip",
+                                             "frontend_sha256":  "3809fcbd310dce8cbf6a1b90506b4aae0f7aa5cd57e1261789b876a8f58becc4",
+                                             "frontend_size":  67832
+                                         }
                  }
 }
