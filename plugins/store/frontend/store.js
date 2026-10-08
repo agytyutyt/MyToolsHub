@@ -23,7 +23,7 @@
   var CATALOG_API = '/plugin/store/api/catalog?all=1';
   var IN_SHELL = document.documentElement.classList.contains('jz-shell');
   var catalog = [];              // flat 条目（含 versions 历史）
-  var localState = { plugins: {}, frontends: {}, components: {}, hidden: {}, loaded: false };
+  var localState = { plugins: {}, frontends: {}, components: {}, loaded: false };
 
   function $(s, el) { return (el || document).querySelector(s); }
   function esc(s) {
@@ -91,40 +91,19 @@
   // ---------- 本地状态（仅桌面端） ----------
   function loadLocalState() {
     if (!IN_SHELL) { localState.loaded = true; return Promise.resolve(); }
-    // 工具可见性（与主界面「隐藏插件」同一开关，服务器登记表 enabled）：供 server 条目
-    // 显示「已从主页隐藏/恢复显示」态（2026-10-08）。
-    var vis = fetch('/api/tools/visibility')
-      .then(function (r) { return r.json(); })
-      .catch(function () { return {}; });
-    return Promise.all([fetch('/local-api/plugins').then(function (r) { return r.json(); }), vis])
-      .then(function (arr) {
-        var d = arr[0] || {}, vd = arr[1] || {};
-        var plugins = {}, frontends = {}, components = {}, hidden = {};
-        (d.plugins || []).forEach(function (p) {
-          plugins[p.id] = { version: p.version, enabled: p.enabled !== false, kind: p.kind };
-        });
-        (d.server_frontends || []).forEach(function (f) {
-          frontends[f.id] = { version: f.version, enabled: f.enabled !== false };
-        });
-        (d.components || []).forEach(function (c) {
-          components[c.id] = { version: c.version, pending: !!c.pending };
-        });
-        (vd.tools || []).forEach(function (t) {
-          if (t && t.enabled === false) hidden[t.id] = true;
-        });
-        localState = { plugins: plugins, frontends: frontends, components: components,
-                       hidden: hidden, loaded: true };
-      }).catch(function () { localState.loaded = true; });
-  }
-
-  function setVisible(id, enabled) {
-    // 工具可见性切换（服务器登记表 enabled；桌面端经中继与主页「隐藏插件」同源同效）
-    return fetch('/api/tools/visibility', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'tool', id: id, enabled: enabled }),
-    }).then(function (r) { return r.json().catch(function () { return {}; }); })
-      .catch(function (e) { return { error: String(e) }; });
+    return fetch('/local-api/plugins').then(function (r) { return r.json(); }).then(function (d) {
+      var plugins = {}, frontends = {}, components = {};
+      (d.plugins || []).forEach(function (p) {
+        plugins[p.id] = { version: p.version, enabled: p.enabled !== false, kind: p.kind };
+      });
+      (d.server_frontends || []).forEach(function (f) {
+        frontends[f.id] = { version: f.version, enabled: f.enabled !== false };
+      });
+      (d.components || []).forEach(function (c) {
+        components[c.id] = { version: c.version, pending: !!c.pending };
+      });
+      localState = { plugins: plugins, frontends: frontends, components: components, loaded: true };
+    }).catch(function () { localState.loaded = true; });
   }
 
   // ---------- 渲染 ----------
@@ -206,13 +185,10 @@
       } else if (st.disabled) {
         html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id) + '" data-en="1">启用本地直出</button>';
       }
-      // 卸载 = 删本机副本（若有）+ 从主页隐藏（2026-10-08 需求：卸载后主页不再显示）；
-      // 已隐藏则给「恢复显示」；服务器侧不变（浏览器访问照旧）。
-      if (localState.hidden && localState.hidden[e.id]) {
-        html += '<button class="st-btn-ghost" data-act="show" data-id="' + esc(e.id) + '">恢复显示</button>';
-      } else {
-        html += '<button class="st-btn-danger" data-act="uninstall" data-id="' + esc(e.id) + '">'
-          + ((st.installed || st.disabled) ? '卸载' : '从主页隐藏') + '</button>';
+      // server 条目：桌面端只装/卸**前端包**（2026-10-08 口径）。卸载后页面回退中继直出，
+      // 插件默认在服务器端运行、主页条目照旧——不带任何"隐藏/恢复"开关。
+      if (st.installed || st.disabled) {
+        html += '<button class="st-btn-danger" data-act="uninstall" data-id="' + esc(e.id) + '">卸载</button>';
       }
     }
     if (IN_SHELL && e.runtime === 'local' && st.entry) {
@@ -297,9 +273,7 @@
         + (e.deps_mode === 'venv' ? '<span class="st-badge venv">独立环境</span>' : '')
         + (IN_SHELL && st.installed && !st.upgradable ? '<span class="st-badge local">已安装</span>' : '')
         + (st.upgradable ? '<span class="st-badge up">可升级</span>' : '')
-        + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '')
-        + (e.runtime === 'server' && localState.hidden && localState.hidden[e.id]
-           ? '<span class="st-badge venv">已从主页隐藏</span>' : '');
+        + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '');
       var card = document.createElement('div');
       card.className = 'st-card st-rt-' + runtimeClass(e.runtime);
       card.style.animationDelay = Math.min(idx * 35, 350) + 'ms';
@@ -409,9 +383,6 @@
         clearInterval(progTimer);
         if (!d.ok) { setProg('', null, 0); msg('安装失败：' + (d.error || '未知错误'), true); return; }
         setProg('done', '已完成', 100);
-        if (e.runtime === 'server') {                 // 安装即恢复主页显示（若曾隐藏）
-          setVisible(e.id, true);
-        }
         var note = [];
         var needRestart = !!d.restart_required
           || !!(d.pending_components && d.pending_components.length);
@@ -537,25 +508,15 @@
     if (act === 'uninstall') {
       var ent = findEntry(id);
       if (ent && ent.runtime === 'server') {
-        // 服务器侧插件（2026-10-08 需求：卸载后主页不再显示）：卸载 = 删本机前端副本 +
-        // 从主页隐藏（与主界面「隐藏插件」同一开关）；插件本体在服务器，浏览器访问照旧，
-        // 商店卡片可随时「恢复显示」或重装。
-        var stS = pluginInstallState(ent);
-        var localCopy = stS.installed || stS.disabled;
-        if (!await stDialog({ title: localCopy ? '卸载' : '从主页隐藏', danger: true,
-          okText: localCopy ? '卸载' : '隐藏',
-          html: (localCopy
-              ? '卸载 <b>' + esc(id) + '</b> 的本机副本，并从主页隐藏该插件？<br>'
-              : '从主页隐藏 <b>' + esc(id) + '</b>？（本机未装副本，不删文件）<br>')
-            + '插件本体仍在服务器（浏览器访问不受影响），可随时「恢复显示」。' })) return;
+        // server 条目（2026-10-08 口径）：桌面端只装/卸**前端包**——卸载后页面回退中继直出；
+        // 插件默认在服务器端运行、主页条目不受影响（无本地业务数据，不问"清除数据"）。
+        if (!await stDialog({ title: '卸载', danger: true, okText: '卸载',
+          html: '卸载 <b>' + esc(id) + '</b> 的本机前端包副本？<br>'
+            + '页面将回退中继直出（插件在服务器端照常运行，主页条目不受影响）。' })) return;
         post('/local-api/plugins/uninstall', { id: id, purge_data: false }).then(function (d) {
-          return setVisible(id, false).then(function (v) {
-            var okAll = d.ok && !v.error;
-            msg(okAll ? ('已' + (localCopy ? '卸载本机副本并' : '') + '从主页隐藏：' + id)
-                      : ('本机副本：' + (d.ok ? '已处理' : (d.error || '失败'))
-                         + (v.error ? '；主页隐藏失败：' + v.error : '')), !okAll);
-            loadLocalState().then(render);
-          });
+          msg(d.ok ? ('已卸载前端包副本：' + id + '（页面回退中继直出）')
+                   : ('卸载失败：' + (d.error || '')), !d.ok);
+          loadLocalState().then(render);
         });
         return;
       }
@@ -567,13 +528,6 @@
       post('/local-api/plugins/uninstall', { id: id, purge_data: purge }).then(function (d) {
         msg(d.ok ? ('已卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留在数据目录）'))
                  : ('卸载失败：' + (d.error || '')), !d.ok);
-        loadLocalState().then(render);
-      });
-      return;
-    }
-    if (act === 'show') {
-      setVisible(id, true).then(function (v) {
-        msg(v.error ? ('恢复显示失败：' + v.error) : ('已恢复显示：' + id), !!v.error);
         loadLocalState().then(render);
       });
       return;
