@@ -170,6 +170,23 @@
     return rows;
   }
 
+  // 横向溢出侦测（2026-10-08）：本页不引 admin-plugins.js，需自带；驱动钉列渐变带
+  // （.is-overflowing）与左缘渐隐（.is-scrolled），语义与插件列表页 syncTableOverflow 一致。
+  function syncTableOverflow() {
+    document.querySelectorAll('.data-table-wrap').forEach(function (w) {
+      var overflowing = w.scrollWidth > w.clientWidth + 1;
+      var atStart = w.scrollLeft <= 1;
+      var atEnd = w.scrollLeft + w.clientWidth >= w.scrollWidth - 1;
+      // 右缘渐隐/钉列渐变带 = 有溢出且没到尽头；左缘渐隐 = 有溢出且已向左滚动
+      w.classList.toggle('is-overflowing', overflowing && !atEnd);
+      w.classList.toggle('is-scrolled', overflowing && !atStart);
+      if (!w.dataset.scrollBound) {
+        w.dataset.scrollBound = '1';
+        w.addEventListener('scroll', syncTableOverflow, { passive: true });
+      }
+    });
+  }
+
   function render() {
     var thead = document.getElementById('st-thead');
     var tbody = document.getElementById('st-rows');
@@ -194,6 +211,7 @@
       var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
                     off: '暂无已下架 / 已驳回条目' };
       tbody.innerHTML = '<tr><td colspan="7" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
+      syncTableOverflow();
       return;
     }
     rows.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
@@ -253,6 +271,7 @@
         + '<td class="st-ops">' + ops + '</td>';
       tbody.appendChild(tr);
     });
+    syncTableOverflow();
   }
 
   function renderStats() {
@@ -279,6 +298,7 @@
         + list(d.by_package, '按条目') + list(d.by_version, '按版本')
         + list(d.by_day, '按日') + list(d.by_user, '按用户')
         + '</div>';
+      syncTableOverflow();
     }).catch(function (e) { box.textContent = '统计加载失败：' + e; });
   }
 
@@ -349,5 +369,6 @@
       render();
     }).catch(function (e) { toast('目录加载失败：' + e, true); });
   }
+  window.addEventListener('resize', syncTableOverflow);
   load();
 })();

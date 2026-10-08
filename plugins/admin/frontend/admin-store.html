@@ -58,11 +58,14 @@
     .data-table tbody tr:hover { background: rgba(0,0,0,.02); }
 
     /* 操作列固定（目录管理：数据超长横向滚动时，操作列钉在右侧；2026-10-08）
-       注：固定列与「边缘渐隐」互斥——mask 会把钉列一起渐隐，故溢出时关掉 mask，
-       改用钉列自带左投影表达"内容被覆盖/可滚动"。 */
-    #st-table-wrap.is-overflowing,
-    #st-table-wrap.is-overflowing.is-scrolled {
+       边缘渐隐纪律：mask 会把钉列一起渐隐 → 右缘渐隐关掉（由钉列左缘渐变带表达覆盖），
+       左缘渐隐保留（滚动后左侧内容被隐藏）；两条顺序不可换——同特异性时后置者胜。 */
+    #st-table-wrap.is-overflowing {
       -webkit-mask-image: none; mask-image: none;
+    }
+    #st-table-wrap.is-scrolled {
+      -webkit-mask-image: linear-gradient(to right, transparent, #000 28px);
+      mask-image: linear-gradient(to right, transparent, #000 28px);
     }
     #st-table th:last-child,
     #st-table td:last-child { position: sticky; right: 0; }
@@ -72,7 +75,7 @@
       box-shadow: -10px 0 10px -10px rgba(0, 0, 0, .16);
     }
     /* 钉列左侧渐变隐藏带（2026-10-08）：滚动内容滑入钉列下缘前渐隐；
-       仅溢出时显示（JS 的 .is-overflowing），避免无溢出时出现幽灵渐隐。
+       仅溢出时显示（本页自带 syncTableOverflow 打 .is-overflowing），避免幽灵渐隐。
        钉列底色恒定（不加 hover 混合），渐隐终点色 = 列底 → 无缝。 */
     #st-table-wrap.is-overflowing #st-table th:last-child::before,
     #st-table-wrap.is-overflowing #st-table td:last-child::before {
@@ -214,7 +217,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=8"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=7"></script>
+<script src="/plugin/admin/js/admin-store.js?v=8"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
