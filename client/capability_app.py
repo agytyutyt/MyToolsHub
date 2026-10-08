@@ -755,6 +755,26 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "status": st["status"], "path": st["path"], "error": st["error"],
                         "filename": st["filename"]})
 
+    @app.post("/local-api/store/reveal")
+    def store_reveal():
+        """下载完成后打开 downloads 目录并定位文件（留档定位；失败原因显式返回）。
+
+        用 explorer /select 而非 os.startfile：前者把窗口置前并选中文件，
+        后者常被前台客户端窗口遮挡（真机反馈"提示已打开但看不到文件夹"）。"""
+        import subprocess as _sp
+        d = os.path.join(data_dir, "downloads")
+        os.makedirs(d, exist_ok=True)
+        data = request.get_json(silent=True) or {}
+        p = str(data.get("path") or "")
+        try:
+            if p and os.path.isfile(p) and os.path.abspath(p).lower().startswith(os.path.abspath(d).lower()):
+                _sp.Popen('explorer /select,"%s"' % os.path.abspath(p))
+            else:
+                os.startfile(d)
+            return jsonify({"ok": True})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     @app.get("/local-api/config/plugin-source")
     def plugin_source_get():
         from client_config import load_client_config
