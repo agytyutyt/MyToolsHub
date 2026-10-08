@@ -133,6 +133,14 @@
     return st;
   }
 
+  function dlButtonHtml(e, label) {
+    // 下载按钮 = 进度条容器：fill 随百分比填充背景，label 叠在上层
+    return '<button class="st-btn-dl jz-only" data-act="download-local" data-id="' + esc(e.id)
+      + '" data-ver="' + esc(e.version) + '" data-label="' + esc(label || '下载包') + '">'
+      + '<span class="st-dl-fill"></span>'
+      + '<span class="st-dl-label">' + esc(label || '下载包') + '</span></button>';
+  }
+
   function buttonsHtml(e) {
     var st = pluginInstallState(e);
     var html = '';
@@ -141,6 +149,8 @@
         html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">安装</button>';
       } else if (st.upgradable) {
         html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">升级到 ' + esc(e.version) + '</button>';
+      } else if (e.runtime === 'dep-slot') {
+        html += '<button class="st-btn-install" disabled title="依赖组件已在本机生效">已安装</button>';
       }
     }
     if (IN_SHELL && e.runtime === 'server') {
@@ -168,10 +178,10 @@
     }
     // 下载：两端可见。桌面端经能力层落数据目录 downloads\；浏览器直接下载文件。
     if (e.runtime === 'server') {
-      html += '<button class="st-btn-ghost jz-only" data-act="download-local" data-id="' + esc(e.id) + '" data-ver="' + esc(e.version) + '">下载后端包</button>';
+      html += dlButtonHtml(e, '下载后端包');
       html += '<button class="st-btn-ghost st-browser-dl" data-act="download" data-id="' + esc(e.id) + '" data-ver="' + esc(e.version) + '">下载后端包</button>';
     } else {
-      html += '<button class="st-btn-ghost jz-only" data-act="download-local" data-id="' + esc(e.id) + '" data-ver="' + esc(e.version) + '">下载包</button>';
+      html += dlButtonHtml(e);
       html += '<button class="st-btn-ghost st-browser-dl" data-act="download" data-id="' + esc(e.id) + '" data-ver="' + esc(e.version) + '">下载包</button>';
     }
     return html;
@@ -345,49 +355,64 @@
         + '/' + encodeURIComponent(ver) + '?via=browser';
       return;
     }
-        if (act === 'download-local') {                 // 桌面端：启动后台任务，轮询进度（批次 10）
+        if (act === 'download-local') {                 // 桌面端：校验 → 进度条下载（批次 10 状态机）
       if (btn.dataset.busy) return;
       btn.dataset.busy = '1';
-      var restore = function () { btn.textContent = btn.getAttribute('data-label') || '下载包';
-        delete btn.dataset.busy; };
-      msg('准备下载…');
-      fetch('/local-api/store/download', { method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: id, version: ver }) })
+      var dlLabel = btn.querySelector('.st-dl-label') || btn;
+      var dlFill = btn.querySelector('.st-dl-fill');
+      var idleLabel = btn.getAttribute('data-label') || '下载包';
+      function dlSet(state, text, pct) {
+        btn.classList.remove('checking', 'progress', 'done', 'have');
+        if (state) btn.classList.add(state);
+        dlLabel.textContent = text || idleLabel;
+        if (dlFill) dlFill.style.width = (pct || 0) + '%';
+      }
+      function dlRelease() { delete btn.dataset.busy; }
+      dlSet('checking', '校验中');                 // ① 先校验是否已下载
+      fetch('/local-api/store/downloaded?id=' + encodeURIComponent(id)
+            + '&version=' + encodeURIComponent(ver))
         .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (!d.ok) { restore(); msg('下载失败：' + (d.error || ''), true); return; }
-          btn.setAttribute('data-label', btn.textContent);
-          var timer = setInterval(function () {
-            fetch('/local-api/store/download/progress?id=' + d.id)
-              .then(function (r2) { return r2.json(); })
-              .then(function (p) {
-                if (p.status === 'running') {
-                  var pct = p.total ? Math.round(p.received / p.total * 100) + '%'
-                                    : fmtSize(p.received);
-                  btn.textContent = '下载中 ' + pct;
-                  msg('下载中 ' + pct + (p.total ? ('（' + fmtSize(p.received) + ' / '
-                    + fmtSize(p.total) + '）') : ''));
-                } else if (p.status === 'done') {
-                  clearInterval(timer); restore();
-                  msg('已保存到本机 downloads（已打开文件夹）');
-                  fetch('/local-api/store/reveal', { method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ path: p.path || '' }) })
-                    .then(function (r) { return r.json(); })
-                    .then(function (x) {
-                      if (!x.ok) msg('已保存，但打开文件夹失败：' + (x.error || '')
-                        + '——文件在下载目录 downloads 内', true);
-                    })
-                    .catch(function () { /* 打开动作失败不改变已下载事实 */ });
-                } else if (p.status === 'error') {
-                  clearInterval(timer); restore();
-                  msg('下载失败：' + (p.error || ''), true);
-                }
-              });
-          }, 400);
+        .then(function (chk) {
+          if (chk.downloaded) { dlSet('have', '已下载'); dlRelease(); return; }
+          dlSet('progress', '下载中 0%', 0);       // ② 后台任务 + 进度填充
+          return fetch('/local-api/store/download', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: id, version: ver }) })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (!d.ok) { dlSet('', idleLabel, 0); dlRelease();
+                msg('下载失败：' + (d.error || ''), true); return; }
+              var timer = setInterval(function () {
+                fetch('/local-api/store/download/progress?id=' + d.id)
+                  .then(function (r2) { return r2.json(); })
+                  .then(function (p) {
+                    if (p.status === 'running') {
+                      var pct = p.total ? Math.round(p.received / p.total * 100) : 0;
+                      dlSet('progress', '下载中 ' + pct + '%', pct);
+                    } else if (p.status === 'done') {
+                      clearInterval(timer);
+                      dlSet('done', '已完成', 100);   // ③ 完成态（进度条满）
+                      dlRelease();
+                      msg('已保存到本机 downloads（已打开文件夹）');
+                      fetch('/local-api/store/reveal', { method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ path: p.path || '' }) })
+                        .then(function (r3) { return r3.json(); })
+                        .then(function (x) {
+                          if (!x.ok) msg('已保存，但打开文件夹失败：' + (x.error || '')
+                            + '——文件在下载目录 downloads 内', true);
+                        })
+                        .catch(function () { /* 打开失败不改变已下载事实 */ });
+                    } else if (p.status === 'error') {
+                      clearInterval(timer);
+                      dlSet('', idleLabel, 0); dlRelease();
+                      msg('下载失败：' + (p.error || ''), true);
+                    }
+                  });
+              }, 400);
+            });
         })
-        .catch(function (e) { restore(); msg('下载请求异常：' + e, true); });
+        .catch(function (err) { dlSet('', idleLabel, 0); dlRelease(); msg('下载校验失败：' + err, true); });
       return;
     }
     if (act === 'install') { preflightAndInstall(e); return; }

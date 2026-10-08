@@ -96,6 +96,21 @@ body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);co
 .st-btn-ghost{background:var(--gray-bg);color:var(--ink2)}
 .st-btn-ghost:hover{background:#e6e9ec;color:var(--ink)}
 
+/* 下载按钮状态机：校验中(转圈) → 下载中(进度填充) → 已完成 / 已下载 */
+.st-btn-dl{position:relative;overflow:hidden;background:var(--gray-bg);color:var(--ink2)}
+.st-btn-dl:hover{background:#e6e9ec}
+.st-dl-fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:rgba(26,115,232,.28);
+  transition:width .3s var(--ease)}
+.st-dl-label{position:relative;z-index:1}
+.st-btn-dl.checking::before{content:'';display:inline-block;width:11px;height:11px;margin-right:6px;
+  vertical-align:-1px;border:2px solid rgba(0,0,0,.18);border-top-color:var(--blue);
+  border-radius:50%;animation:stSpin .7s linear infinite;position:relative;z-index:1}
+@keyframes stSpin{to{transform:rotate(360deg)}}
+.st-btn-dl.progress .st-dl-fill{background:rgba(26,115,232,.32)}
+.st-btn-dl.done{color:var(--green)}
+.st-btn-dl.done .st-dl-fill{background:rgba(19,115,51,.28)}
+.st-btn-dl.have{background:var(--green-bg);color:var(--green)}
+
 /* ---------- 详情悬浮窗（点击卡片打开；批次 10 交互改版） ---------- */
 .st-modal{position:fixed;inset:0;background:rgba(32,33,36,.45);display:flex;align-items:center;
   justify-content:center;padding:24px;opacity:0;pointer-events:none;z-index:100;

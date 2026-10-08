@@ -755,6 +755,28 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "status": st["status"], "path": st["path"], "error": st["error"],
                         "filename": st["filename"]})
 
+    @app.get("/local-api/store/downloaded")
+    def store_downloaded():
+        """校验下载状态（点击下载前先查）：catalog 文件名在 downloads 下存在且大小一致 → 已下载。"""
+        pid = request.args.get("id") or ""
+        version = request.args.get("version") or ""
+        src = _store_source()
+        catalog, err = src.get_catalog()
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        ver, err = _find_catalog_entry(catalog, pid, version)
+        if err:
+            return jsonify({"ok": False, "error": err}), 200
+        filename = os.path.basename(str(ver.get("file") or ("%s-%s.zip" % (pid, version))))
+        path = os.path.join(_data_dir, "downloads", filename)
+        exists = os.path.isfile(path)
+        try:
+            size_ok = exists and (not ver.get("size")
+                                  or os.path.getsize(path) == int(ver.get("size")))
+        except (OSError, TypeError, ValueError):
+            size_ok = exists
+        return jsonify({"ok": True, "downloaded": bool(size_ok), "filename": filename})
+
     @app.post("/local-api/store/reveal")
     def store_reveal():
         """下载完成后打开 downloads 目录并定位文件（留档定位；失败原因显式返回）。
