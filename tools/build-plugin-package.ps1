@@ -499,7 +499,7 @@ foreach ($key in @("python_packages", "vendored", "external")) {
     foreach ($d in @($reqObj.$key)) {
         if (-not $d) { continue }
         $h = [string]$d.hint
-        if (-not $h.Trim()) { $noHint += ("$key/$([string]$d.name)$([string]$d.id)") }
+        if (-not ([string]$h).Trim()) { $noHint += ("$key/$([string]$d.name)$([string]$d.id)") }
     }
 }
 if ($noHint.Count -gt 0) {
@@ -549,7 +549,8 @@ if (Test-Path $l13Frontend) {
         $l13InBlock = $false
         for ($i = 0; $i -lt $lines.Count; $i++) {
             $ln = $lines[$i]
-            $t = $ln.TrimStart()
+            # [string] 显式化：PS 会把**单字符行**绑定成 Char，Char 无 TrimStart（file-filter v1.6.1 真机炸出）
+            $t = ([string]$ln).TrimStart()
             # 注释剥离：L-13 管代码字面量；文档注释提历史路径（如解耦迁移说明）不算违规
             if ($l13InBlock) { if ($ln -match "\*/") { $l13InBlock = $false }; continue }
             if ($t.StartsWith("/*")) {

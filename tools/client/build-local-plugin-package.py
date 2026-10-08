@@ -315,16 +315,27 @@ def main():
         zip_name = "JZClient-本地插件-%s-v%s.zip" % (pid, version)
         zip_path = os.path.join(out_dir, zip_name)
         excluded_list, copied = [], 0
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _dirs, files in os.walk(staging):
-                for name in sorted(files):
-                    full = os.path.join(root, name)
-                    rel = os.path.relpath(full, staging).replace(os.sep, "/")
-                    if excluded(rel, rules):
-                        excluded_list.append(rel)
-                        continue
-                    zf.write(full, rel)
-                    copied += 1
+        # 可重现构建（V2 验收抓出：两次派生 sha256 须一致）——时间戳统一、顺序确定、
+        # 压缩级别固定：zip 内不携带构建时刻/文件 mtime（权限位也归固定值）。
+        FIXED_DT = (1980, 1, 1, 0, 0, 0)
+        members = []
+        for root, _dirs, files in os.walk(staging):
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, staging).replace(os.sep, "/")
+                if excluded(rel, rules):
+                    excluded_list.append(rel)
+                    continue
+                members.append((rel, full))
+        members.sort(key=lambda x: x[0])
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            for rel, full in members:
+                zi = zipfile.ZipInfo(rel, date_time=FIXED_DT)
+                zi.compress_type = zipfile.ZIP_DEFLATED
+                zi.external_attr = 0o644 << 16
+                with open(full, "rb") as f:
+                    zf.writestr(zi, f.read())
+                copied += 1
         if copied == 0:
             die("没有可打包的文件（排除规则全部命中？）")
         digest = sha256_file(zip_path)

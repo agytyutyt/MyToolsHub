@@ -1,3 +1,5 @@
+# 同源副本登记（C 类客户端工件，2026-10-09）：本文件与 plugins/trajectory-sketch/backend/engine/algorithms/v2/trip.py 同源、
+# 独立演进（设计文档 §3.15/§3.16；规范 §16.15）。改动请只在本副本内进行。
 # -*- coding: utf-8 -*-
 """v2 · 阶段 E：出行段构建（含"位移 vs 基站切换"判别与 trip chaining）。
 

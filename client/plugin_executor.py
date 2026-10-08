@@ -39,21 +39,24 @@ class PluginExecutor:
 
     # ---------------- 对外 ----------------
 
-    def call(self, manifest, method, path, headers, body, timeout_ms):
-        """派发一次请求；返回 (status, headers_dict, body_bytes)。不抛网络类异常。"""
+    def call(self, manifest, method, path, headers, body, timeout_ms, user=""):
+        """派发一次请求；返回 (status, headers_dict, body_bytes)。不抛网络类异常。
+
+        user：调用者真实登录身份（能力层从会话镜像取；V9「审计日志落真实身份」；离线/未登录传空）。
+        """
         pid = manifest.get("id", "?")
         t0 = time.time()
         try:
             status, hdrs, resp_body = self._call_impl(manifest, method, path, headers, body, timeout_ms)
         except WorkerTimeout as exc:
-            self._audit(pid, method, path, time.time() - t0, "timeout")
+            self._audit(pid, method, path, time.time() - t0, "timeout", user)
             return 504, {"Content-Type": "application/json"}, json.dumps(
                 {"error": "本地插件超时", "plugin": pid, "timeout_ms": timeout_ms}).encode()
         except WorkerCrash as exc:
-            self._audit(pid, method, path, time.time() - t0, "crash: %s" % exc)
+            self._audit(pid, method, path, time.time() - t0, "crash: %s" % exc, user)
             return 502, {"Content-Type": "application/json"}, json.dumps(
                 {"error": "本地插件崩溃退出", "plugin": pid, "detail": str(exc)}).encode()
-        self._audit(pid, method, path, time.time() - t0, status)
+        self._audit(pid, method, path, time.time() - t0, status, user)
         return status, hdrs, resp_body
 
     def shutdown(self):
@@ -228,12 +231,14 @@ class PluginExecutor:
                           % (WORKER_BODY_LIMIT // 1048576)}).encode()
         return resp.get("status", 200), resp.get("headers", {}), body
 
-    def _audit(self, plugin_id, method, path, seconds, outcome):
+    def _audit(self, plugin_id, method, path, seconds, outcome, user=""):
+        # 审计行（V9：落**真实登录身份**——能力层从会话镜像传入；离线/未登录为 "-"）。
         try:
             os.makedirs(os.path.dirname(self._audit_path), exist_ok=True)
             with open(self._audit_path, "a", encoding="utf-8") as f:
-                f.write("%s %s %s %s %.2fs -> %s\n" % (
-                    time.strftime("%Y-%m-%d %H:%M:%S"), plugin_id, method, path, seconds, outcome))
+                f.write("%s user=%s %s %s %s %.2fs -> %s\n" % (
+                    time.strftime("%Y-%m-%d %H:%M:%S"), user or "-", plugin_id, method, path,
+                    seconds, outcome))
         except OSError:
             pass
 

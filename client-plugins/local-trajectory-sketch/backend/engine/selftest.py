@@ -1,3 +1,5 @@
+# 同源副本登记（C 类客户端工件，2026-10-09）：本文件与 plugins/trajectory-sketch/backend/engine/selftest.py 同源、
+# 独立演进（设计文档 §3.15/§3.16；规范 §16.15）。改动请只在本副本内进行。
 # -*- coding: utf-8 -*-
 """引擎自测（不依赖 Flask、不依赖插件其他模块）。
 

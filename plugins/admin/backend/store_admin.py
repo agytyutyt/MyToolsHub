@@ -508,6 +508,7 @@ def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
     requires_restart = False
     min_app_version = ""
     api_version = 1
+    server_data = False
     frontend_fields = {}
     if runtime == "local":
         r = check_local_plugin_zip(zip_path)
@@ -518,6 +519,7 @@ def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
             pid = str(m.get("id"))
             version = str(m.get("version"))
             requires = m.get("requires") or {}
+            server_data = bool(m.get("server_data"))   # V5：数据出机明示随目录下发（红线 5）
             requires_restart = False          # 客户端 hybrid 升级走秒级重启，无需服务重启
             api_version = 1
     elif runtime == "server":
@@ -573,6 +575,8 @@ def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
     if entry is None:
         entry = {"id": pid, "versions": []}
         catalog["packages"].append(entry)
+    if runtime == "local":
+        entry["server_data"] = bool(server_data)   # 客户端商店据此显示「数据出机」徽标与安装明示
     if find_version_record(entry, version) is not None:
         report["errors"].append("版本占号：%s v%s 已存在记录（含已驳回/已下架）——问题包请升版本号重提"
                                 % (pid, version))

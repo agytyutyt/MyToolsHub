@@ -269,4 +269,26 @@ print("routes.py → 保存端点适配（err, status）契约")
 
 for f in ("llm_client.py", "config_store.py", "routes.py"):
     py_compile.compile(os.path.join(DST, f), doraise=True)
+# ---------------- 5) 同源登记头（V2：与服务端逐字节相同的拷贝须带登记，规范 §16.15） ----------------
+_SRV = os.path.join(ROOT, "plugins", "trajectory-sketch", "backend")
+_HDR = ("# 同源副本登记（C 类客户端工件，2026-10-09）：本文件与 {src} 同源、\n"
+        "# 独立演进（设计文档 §3.16；规范 §16.15）。改动请只在本副本内进行。\n")
+for _base, _dirs, _files in os.walk(DST):
+    for _n in sorted(_files):
+        if not _n.endswith(".py"):
+            continue
+        _cp = os.path.join(_base, _n)
+        _rel = os.path.relpath(_cp, DST).replace(os.sep, "/")
+        _sp = os.path.join(_SRV, _rel)
+        if not os.path.isfile(_sp):
+            continue
+        _c = io.open(_cp, encoding="utf-8", newline="").read()
+        if _c.startswith("# 同源副本登记"):
+            continue
+        if _c != io.open(_sp, encoding="utf-8", newline="").read():
+            continue
+        io.open(_cp, "w", encoding="utf-8", newline="").write(
+            _HDR.format(src="plugins/trajectory-sketch/backend/" + _rel) + _c)
+print("同源登记头：已按需补齐")
+
 print("adapt-ts-client：完成 + 编译通过")

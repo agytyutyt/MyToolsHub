@@ -358,7 +358,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return jsonify({"error": "子进程执行器未配置"}), 501
         status, hdrs, body = executor.call(
             m, request.method, worker_path, worker_headers,
-            request.get_data(), m.get("timeout_ms") or 60000)
+            request.get_data(), m.get("timeout_ms") or 60000,
+            user=(user or {}).get("username") or "-")      # V9：审计落真实身份
         hop = {"connection", "keep-alive", "transfer-encoding", "content-length"}
         return Response(body, status=status,
                         headers=[(k, v) for k, v in (hdrs or {}).items()
@@ -375,6 +376,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                         "version": m.get("version"), "kind": m.get("kind"),
                         "mount": (m.get("entry") or {}).get("mount"),
                         "enabled": st.get("status") != "disabled", "state": st,
+                        "server_data": bool(m.get("server_data")),   # V5：数据出机明示
                         "requires": m.get("requires") or {}})
         # server 前端包（需求⑧）与已装依赖组件（dep-slot）：商店页状态感知的依据
         from client_config import load_client_config

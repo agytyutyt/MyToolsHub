@@ -94,7 +94,8 @@
     return fetch('/local-api/plugins').then(function (r) { return r.json(); }).then(function (d) {
       var plugins = {}, frontends = {}, components = {}, hidden = {};
       (d.plugins || []).forEach(function (p) {
-        plugins[p.id] = { version: p.version, enabled: p.enabled !== false, kind: p.kind };
+        plugins[p.id] = { version: p.version, enabled: p.enabled !== false, kind: p.kind,
+                          server_data: !!p.server_data };
       });
       (d.hidden_tools || []).forEach(function (x) { hidden[String(x)] = true; });
       (d.server_frontends || []).forEach(function (f) {
@@ -288,7 +289,11 @@
         + (st.upgradable ? '<span class="st-badge up">可升级</span>' : '')
         + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '')
         + (e.runtime === 'server' && !st.installed && localState.hidden && localState.hidden[e.id]
-           ? '<span class="st-badge venv">已从本机移除</span>' : '');
+           ? '<span class="st-badge venv">已从本机移除</span>' : '')
+        // V5 数据出机明示：server_data 条目（本地数据会发送到服务器）常显徽标
+        + ((e.server_data || (st.entry && st.entry.server_data))
+           ? '<span class="st-badge dep" title="该插件会把必要数据发送到服务器（server_data 明示）">数据出机</span>'
+           : '');
       var card = document.createElement('div');
       card.className = 'st-card st-rt-' + runtimeClass(e.runtime);
       card.style.animationDelay = Math.min(idx * 35, 350) + 'ms';
@@ -359,8 +364,12 @@
                     : (e.runtime === 'server' ? '<br>将更新本机前端副本（页面本地直出）。' : '')) });
       if (!ok) return;
     } else {
+      // V5：server_data 条目安装时**明示弹出**数据出机提示（红线 5）
+      var sdNote = (e.server_data || (st.entry && st.entry.server_data))
+        ? '<br><br><b>数据出机提示</b>：该插件的部分必要数据会发送到服务器（server_data 明示）。'
+        : '';
       ok = await stDialog({ title: '安装确认', okText: '安装',
-        html: '安装「<b>' + esc(e.name) + '</b>」v' + esc(e.version) + '？' });
+        html: '安装「<b>' + esc(e.name) + '</b>」v' + esc(e.version) + '？' + sdNote });
       if (!ok) return;
     }
     msg('正在安装 ' + e.name + ' …');
