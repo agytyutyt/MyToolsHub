@@ -2415,12 +2415,14 @@ def register(app):
                 state_entry = plugin_admin.read_state(root).get("plugins", {}).get(entry.get("id")) or {}
                 row["restart_pending"] = bool(state_entry.get("restart_pending"))
                 row["backups"] = len(plugin_admin.list_backups(root, entry.get("id")))
+                row["srv_enabled"] = store_admin.srv_enabled(root, entry.get("id"))
             rows.append(row)
         installed = jz_deps.load_installed_deps(PROJECT_DIR)
         installed_names = sorted({str(k).casefold() for k in (installed.get("modules") or {})}
                                  | {str(k).casefold() for k in (installed.get("packages") or {})})
         return jsonify({"ok": True, "packages": rows, "installed_names": installed_names,
                         "can_review": can_review_store(get_session_user()),
+                        "super_admin": bool((get_session_user() or {}).get("super_admin")),
                         "index_server_path": store_admin.index_server_path(root),
                         "data_root": root})
 
@@ -2531,6 +2533,63 @@ def register(app):
         version = str(data.get("version") or "")
         res = store_admin.deploy_backend_package(PROJECT_DIR, _store_root(), pid, version)
         return jsonify(res) if res.get("ok") else (jsonify(res), 500)
+
+    @app.post("/plugin/admin/store/srv-state")
+    @login_required
+    def admin_store_srv_state():
+        """停用/启用已上架插件的服务器端运行（**仅超级管理员**）。
+
+        口径（2026-10-08 需求方拍板）：服务器端后端包**只在商店管理的 停用/卸载 时被撤下**——
+        「下架」只动客户端可见性、桌面端卸载只删前端包副本，两者都不碰服务器部署。
+        停用 = 注册条目 enabled:false（清单/主页即时隐藏；路由随下次服务重启卸载）；后端包保留。
+        """
+        set_operation("商店停用/启用插件")
+        info = get_session_user() or {}
+        if not info.get("super_admin"):
+            return jsonify({"ok": False, "error": "仅超级管理员可停用/启用服务器端插件"}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "")
+        enabled = bool(data.get("enabled"))
+        root = _store_root()
+        entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
+        if entry is None or entry.get("runtime") != "server":
+            return jsonify({"ok": False, "error": "仅「服务器」类目已上架条目可停用/启用"}), 400
+        if not plugin_admin.set_plugin_enabled(root, pid, enabled):
+            return jsonify({"ok": False,
+                            "error": "注册表（tools.json）中没有该插件条目——先「重新部署」"}), 400
+        store_admin.record_event(root, pid, str(data.get("version") or ""),
+                                 "srv_enable" if enabled else "srv_disable",
+                                 str(info.get("username") or ""), str(data.get("note") or ""))
+        return jsonify({"ok": True, "enabled": enabled,
+                        "restart_hint": "路由随下次服务重启卸载" if not enabled else "路由随下次服务重启加载"})
+
+    @app.post("/plugin/admin/store/withdraw")
+    @login_required
+    def admin_store_withdraw():
+        """卸载（撤下后端包，**仅超级管理员**）：把已部署后端包从服务器撤下。
+
+        自动备份可「重新部署」原样恢复；条目/版本状态不动（仅记 withdraw 台账）；
+        核心插件（admin/store）由 plugin_admin 拒绝卸载。
+        """
+        set_operation("商店卸载（撤下后端包）")
+        info = get_session_user() or {}
+        if not info.get("super_admin"):
+            return jsonify({"ok": False, "error": "仅超级管理员可卸载（撤下后端包）"}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        root = _store_root()
+        entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
+        if entry is None or entry.get("runtime") != "server":
+            return jsonify({"ok": False, "error": "仅「服务器」类目已上架条目可卸载（撤下后端包）"}), 400
+        res = store_admin.withdraw_backend_package(PROJECT_DIR, root, pid)
+        if not res.get("ok"):
+            return jsonify(res), 500
+        store_admin.record_event(root, pid, version, "withdraw",
+                                 str(info.get("username") or ""), str(data.get("note") or ""))
+        return jsonify({"ok": True, "steps": res.get("steps", []),
+                        "unit_stopped": res.get("unit_stopped"),
+                        "restart_hint": "路由随下次服务重启卸载；可用「重新部署」原样恢复"})
 
     @app.post("/plugin/admin/store/delist")
     @login_required

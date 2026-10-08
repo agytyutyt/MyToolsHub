@@ -138,6 +138,86 @@ def _append_history(record, action, by, note=""):
         {"action": action, "by": by, "at": now_iso(), "note": str(note or "")})
 
 
+def record_event(data_root, pid, version, action, by, note=""):
+    """给条目的指定版本（version 空 = 最新已上架版）追加一条 history 台账。
+
+    用途：部署侧事件（服务器端停用/启用、撤下后端包）——不改条目/版本状态。
+    """
+    catalog = load_catalog(data_root)
+    entry = find_entry(catalog, pid)
+    if entry is None:
+        return {"ok": False, "error": "条目不存在：%s" % pid}
+    record = find_version_record(entry, version) if version else latest_published(entry)
+    if record is None and entry.get("versions"):
+        record = entry["versions"][-1]
+    if record is None:
+        return {"ok": False, "error": "版本记录不存在（%s v%s）" % (pid, version)}
+    _append_history(record, action, by, note)
+    save_catalog(data_root, catalog)
+    return {"ok": True, "id": pid, "version": record.get("version"), "action": action}
+
+
+def srv_enabled(data_root, pid):
+    """注册表（tools.json）里该插件的启用态；无注册条目返回 None（未部署过）。"""
+    path = os.path.join(data_root, "config", "tools.json")
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+        for t in (cfg.get("tools") or []):
+            if isinstance(t, dict) and t.get("id") == pid:
+                return bool(t.get("enabled", True))
+    except Exception:
+        pass
+    return None
+
+
+def withdraw_backend_package(base_dir, data_root, pid):
+    """撤下后端包（商店管理「卸载」·超级管理员）：双形态分派（镜像 deploy_backend_package）。
+
+    - **E 形态**（supervisor 注册表有单元）：控制面 stop 停单元（**单元移除**动作待迁移批次补，
+      注册表条目保留——supervisor 重启会再拉起，故 unit_stopped 如实回报）；
+    - **进程内形态**：plugin_admin.uninstall_plugin 同源链（目录挪备份区 + 注册条目停用；
+      核心插件拒绝卸载）。
+
+    口径（2026-10-08 需求方拍板）：服务器端后端包**只在商店管理的 停用/卸载 时被撤下**——
+    「下架」只动客户端可见性、桌面端卸载只删前端包副本，两者都不碰服务器部署。
+    失败返回 {"ok": False, "error"}。
+    """
+    unit_stopped = None
+    try:
+        from supervisor.mainapp_bridge import supervisor_endpoint, worker_units_snapshot
+    except Exception:
+        supervisor_endpoint = worker_units_snapshot = None      # 分件未随包 → 纯进程内形态
+    if worker_units_snapshot is not None:
+        try:
+            units = worker_units_snapshot(data_root) or {}
+        except Exception:
+            units = {}
+        unit = units.get(pid)
+        if unit is not None:                # E 形态：worker 化插件先停单元（不可达即失败，不静默）
+            ep = supervisor_endpoint(data_root)
+            if ep is None:
+                return {"ok": False,
+                        "error": "插件已 worker 化但 supervisor 控制接口不可达（检查管理进程）"}
+            try:
+                import requests as _rq
+                r = _rq.post(ep["url"] + "/control",
+                             headers={"X-Supervisor-Token": ep["token"]},
+                             json={"action": "stop", "name": str(unit.get("unit") or pid)},
+                             timeout=30)
+                unit_stopped = bool(getattr(r, "ok", False))
+            except Exception as exc:
+                return {"ok": False, "error": "supervisor 停单元失败：%s" % exc}
+    res = plugin_admin.uninstall_plugin(base_dir, data_root, pid,
+                                        purge_entry=False, backup_data=False)
+    if not res.get("ok"):
+        return {"ok": False, "error": res.get("error", "撤下失败")}
+    # 商店口径（2026-10-08）：撤包是**部署动作**——注册条目保持启用（工具清单由「目录/清单
+    # 缺失」自然隐藏），这样「重新部署」即原样恢复、无需再点启用；「停用/启用」是另一个独立开关。
+    plugin_admin.set_plugin_enabled(data_root, pid, True)
+    return {"ok": True, "steps": res.get("steps", []), "unit_stopped": unit_stopped}
+
+
 # ======================== 机器校验（按包形态） ========================
 
 def _zip_json(zip_path, name):

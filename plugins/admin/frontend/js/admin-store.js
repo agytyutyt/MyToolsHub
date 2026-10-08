@@ -9,6 +9,7 @@
   var packages = [];
   var installedNames = [];   // 主包运行时自带依赖（服务端 installed-deps）
   var canReview = true;      // 审核/下架/部署权限（2026-10-08：仅管理员/超管；提交全员）
+  var canSrv = false;        // 服务器端启停/撤包权限（2026-10-08：仅超级管理员）
   var depProvides = {};      // 已上架依赖条目的 provides 集合（name→true）
 
   function esc(s) {
@@ -162,6 +163,7 @@
           changelog: v.changelog, published_at: v.published_at,
           submit_by: (v.submit || {}).by, review: v.review || {},
           installed_version: p.installed_version, restart_pending: p.restart_pending,
+          srv_enabled: p.srv_enabled, backups: p.backups,
           frontend_file: v.frontend_file, deps_mode: p.deps_mode,
           requires: p.requires,
         });
@@ -219,8 +221,15 @@
       var tr = document.createElement('tr');
       var svr = '<span class="st-muted">—</span>';
       if (r.runtime === 'server' && r.status === 'published') {
-        svr = chip('已部署 v' + esc(r.installed_version || '—'), 'ok')
-          + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '');
+        if (r.installed_version) {
+          svr = chip('已部署 v' + esc(r.installed_version), 'ok')
+            + (r.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
+            + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '');
+        } else {
+          svr = chip('未部署（后端包已撤下）', 'muted')
+            + (r.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
+            + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
+        }
       } else if (r.runtime === 'server') {
         svr = '<span class="st-muted">发布时自动部署</span>';
       }
@@ -254,6 +263,16 @@
         ops += '<button class="admin-btn small" data-op="delist" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">下架</button>';
         if (r.runtime === 'server') {
           ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新部署</button>';
+          if (canSrv) {   // 服务器端启停/撤包（2026-10-08 口径）：后端包只在此处被撤下
+            if (r.srv_enabled === false) {
+              ops += ' <button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
+            } else {
+              ops += ' <button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
+            }
+            if (r.installed_version) {
+              ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
+            }
+          }
         }
       } else if (r.status === 'delisted') {
         ops += '<button class="admin-btn small" data-op="republish" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新上架</button>';
@@ -329,6 +348,14 @@
         html: '重新上架 <b>' + esc(id) + ' v' + esc(v) + '</b>？将回到待审核状态。' },
       redeploy: { title: '重新部署', okText: '重新部署',
         html: '把 <b>' + esc(id) + ' v' + esc(v) + '</b> 重新部署到服务器？<br>自动备份，可回滚。' },
+      srv_disable: { title: '停用插件（服务器端）', danger: true, okText: '停用',
+        html: '停用 <b>' + esc(id) + '</b> 的服务器端运行？<br>清单/主页即时隐藏；'
+          + '路由随下次服务重启卸载；后端包保留，可随时启用。' },
+      srv_enable: { title: '启用插件（服务器端）', okText: '启用',
+        html: '启用 <b>' + esc(id) + '</b>？<br>清单/主页即时恢复；路由随下次服务重启加载。' },
+      withdraw: { title: '卸载（撤下后端包）', danger: true, okText: '撤下',
+        html: '把 <b>' + esc(id) + ' v' + esc(v) + '</b> 的后端包从服务器撤下？<br>'
+          + '自动备份，可用「重新部署」原样恢复；条目与客户端前端副本不受影响。' },
     };
     var r = await adDialog(dlgOpts[op] || { title: '确认', html: esc(op + '？') });
     var note = '';
@@ -340,10 +367,21 @@
     var body = op === 'redeploy' ? { id: id, version: v } : { id: id, version: v, action: op, note: note };
     if (op === 'delist') path = '/delist';
     if (op === 'delist') body = { id: id, version: v, note: note };
+    if (op === 'srv_disable' || op === 'srv_enable') {
+      path = '/srv-state';
+      body = { id: id, version: v, enabled: op === 'srv_enable' };
+    }
+    if (op === 'withdraw') {
+      path = '/withdraw';
+      body = { id: id, version: v, note: note };
+    }
     post(path, body).then(function (r2) {
       if (r2.data.ok) {
         toast(op === 'approve' ? '已发布' + (r2.data.status === 'published' ? '：客户端可见' : '')
-          : op === 'redeploy' ? '重新部署完成' : '操作成功');
+          : op === 'redeploy' ? '重新部署完成'
+          : op === 'withdraw' ? '已撤下后端包' + (r2.data.restart_hint ? '（' + r2.data.restart_hint + '）' : '')
+          : op === 'srv_disable' ? '已停用（' + (r2.data.restart_hint || '') + '）'
+          : op === 'srv_enable' ? '已启用' : '操作成功');
         load();
       } else {
         toast('操作失败：' + (r2.data.error || '未知错误'), true);
@@ -356,6 +394,7 @@
       packages = d.packages || [];
       installedNames = d.installed_names || [];
       canReview = d.can_review !== false;
+      canSrv = d.super_admin === true;
       depProvides = {};
       packages.forEach(function (p) {
         if (p.runtime !== 'dep-slot') return;
