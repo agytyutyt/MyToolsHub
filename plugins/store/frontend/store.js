@@ -153,6 +153,9 @@
         html += '<button class="st-btn-install" disabled title="依赖组件已在本机生效">已安装</button>';
       }
     }
+    if (IN_SHELL && e.runtime === 'dep-slot' && (st.installed || st.entry)) {
+      html += '<button class="st-btn-danger" data-act="uninstall-dep" data-id="' + esc(e.id) + '">卸载</button>';
+    }
     if (IN_SHELL && e.runtime === 'server') {
       if (!st.installed && !st.disabled) {
         html += '<button class="st-btn-install" data-act="install" data-id="' + esc(e.id) + '">安装前端</button>';
@@ -425,10 +428,23 @@
         });
       return;
     }
+    if (act === 'uninstall-dep') {
+      if (!confirm('卸载依赖组件 ' + id + '？\n依赖组件无独立业务数据；正在被映射的原生库将在下次启动客户端后清除。')) return;
+      post('/local-api/store/uninstall-dep', { id: id }).then(function (d) {
+        msg(d.ok ? ('已卸载依赖 ' + id + (d.pending_remove ? '（原生库将于下次启动清除）' : ''))
+                 : ('卸载失败：' + (d.error || '')), !d.ok);
+        loadLocalState().then(render);
+      });
+      return;
+    }
     if (act === 'uninstall') {
-      if (!confirm('卸载 ' + id + '？\n本地包副本将被删除；数据默认保留。')) return;
-      post('/local-api/plugins/uninstall', { id: id }).then(function (d) {
-        msg(d.ok ? '已卸载（数据保留在数据目录）' : ('卸载失败：' + (d.error || '')), !d.ok);
+      if (!confirm('卸载 ' + id + '？\n本地包副本将被删除。\n点击「确定」进入下一步（选择是否清除数据）。')) return;
+      var purge = confirm('是否同时清除该插件的数据？\n\n'
+        + '数据 = 数据根 plugins 下的插件目录（配置 / 缓存 / 本地业务数据）。\n'
+        + '确定 = 清除数据；取消 = 保留数据（可稍后再装回）。');
+      post('/local-api/plugins/uninstall', { id: id, purge_data: purge }).then(function (d) {
+        msg(d.ok ? ('已卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留在数据目录）'))
+                 : ('卸载失败：' + (d.error || '')), !d.ok);
         loadLocalState().then(render);
       });
       return;
