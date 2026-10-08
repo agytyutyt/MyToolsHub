@@ -42,50 +42,8 @@
   function statusLabel(s) {
     return { pending: '待审核', published: '已上架', rejected: '已驳回', delisted: '已下架' }[s] || s;
   }
-  // 自绘对话框（替换原生 confirm/prompt；与商店页同款交互：ESC/遮罩=取消，Enter=确定）
-  function adDialog(opts) {
-    opts = opts || {};
-    return new Promise(function (resolve) {
-      var dlg = document.createElement('div');
-      dlg.className = 'st-modal st-dlg';
-      dlg.innerHTML = '<div class="st-modal-panel" role="alertdialog">'
-        + '<h3 class="st-dlg-title">' + esc(opts.title || '确认') + '</h3>'
-        + '<div class="st-dlg-body">' + (opts.html || '') + '</div>'
-        + (opts.input ? '<input class="st-dlg-input" type="text" placeholder="'
-            + esc(opts.placeholder || '') + '">' : '')
-        + '<div class="st-dlg-btns">'
-        + '<button type="button" class="st-dlg-no" data-k="0">' + esc(opts.cancelText || '取消') + '</button>'
-        + '<button type="button" class="' + (opts.danger ? 'st-dlg-danger' : 'st-dlg-ok')
-        + '" data-k="1">' + esc(opts.okText || '确定') + '</button>'
-        + '</div></div>';
-      var inp = dlg.querySelector('.st-dlg-input');
-      function cancelVal() { return opts.input ? null : false; }
-      function okVal() { return opts.input ? (inp ? inp.value : '') : true; }
-      function done(val) {
-        dlg.classList.remove('show');
-        setTimeout(function () { if (dlg.parentNode) dlg.parentNode.removeChild(dlg); }, 220);
-        document.removeEventListener('keydown', onKey);
-        resolve(val);
-      }
-      function onKey(ev) {
-        if (ev.key === 'Escape') done(cancelVal());
-        else if (ev.key === 'Enter') done(okVal());
-      }
-      dlg.addEventListener('click', function (ev) {
-        if (ev.target === dlg) return done(cancelVal());
-        var b = ev.target.closest ? ev.target.closest('button[data-k]') : null;
-        if (!b) return;
-        done(b.getAttribute('data-k') === '0' ? cancelVal() : okVal());
-      });
-      document.body.appendChild(dlg);
-      document.addEventListener('keydown', onKey);
-      requestAnimationFrame(function () { dlg.classList.add('show'); });
-      setTimeout(function () {
-        var f = inp || dlg.querySelector('button[data-k="1"]');
-        if (f) f.focus();
-      }, 40);
-    });
-  }
+  // 自绘对话框 = 框架级组件（static/js/jz-dialog.js；2026-10-08 解耦，样式随脚本注入）
+  var adDialog = function (opts) { return window.JZDialog.open(opts); };
 
   function chip(text, kind) {
     return '<span class="st-chip st-chip-' + kind + '">' + esc(text) + '</span>';
