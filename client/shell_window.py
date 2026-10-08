@@ -225,6 +225,15 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
         def on_browser(icon, item):
             webbrowser.open(origin)       # 用浏览器打开（HTML 版/多屏场景）
 
+        def on_local_admin(icon, item):
+            # 本地插件管理（原主界面悬浮入口迁入托盘，2026-10-08）：主窗口导航到本页
+            try:
+                window.show()
+                window.load_url(origin + "/local-admin")
+                log("tray -> local-admin")
+            except Exception:
+                log("tray local-admin failed:\n" + traceback.format_exc())
+
         def on_exit(icon, item):
             log("exit from tray")
             geo._flush()
@@ -236,6 +245,7 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
             menu=pystray.Menu(
                 pystray.MenuItem("刷新页面", on_refresh),
                 pystray.MenuItem("打开窗口", on_open, default=True),
+                pystray.MenuItem("本地插件管理", on_local_admin),
                 pystray.MenuItem("用浏览器打开", on_browser),
                 pystray.MenuItem("退出", on_exit),
             ),
