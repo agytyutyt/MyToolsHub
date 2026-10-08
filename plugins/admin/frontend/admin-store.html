@@ -57,7 +57,16 @@
     .data-table td { vertical-align: top; }
     .data-table tbody tr:hover { background: rgba(0,0,0,.02); }
 
-    /* 自绘对话框（替换原生 confirm/prompt；与商店页同款） */
+    /* 自绘对话框（替换原生 confirm/prompt；与商店页同款）。
+       基样式必须随页带（管理页不加载商店页 style.css）——缺 .st-modal 定位会让弹层
+       落进普通文档流显示在页面最下方（2026-10-08 真机报告） */
+    .st-modal{position:fixed;inset:0;background:rgba(32,33,36,.45);display:flex;align-items:center;
+      justify-content:center;padding:24px;opacity:0;pointer-events:none;z-index:100;
+      transition:opacity .2s ease}
+    .st-modal.show{opacity:1;pointer-events:auto}
+    .st-modal-panel{background:#fff;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.22);
+      position:relative;transform:translateY(10px) scale(.98);transition:transform .22s ease}
+    .st-modal.show .st-modal-panel{transform:none}
     .st-dlg{z-index:110}
     .st-dlg .st-modal-panel{width:min(400px,100%);padding:18px 20px}
     .st-dlg-title{margin:0 0 10px;font-size:15px}
