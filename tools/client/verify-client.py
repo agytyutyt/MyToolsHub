@@ -224,6 +224,25 @@ def smoke(out, cfg):
             fail("打包态 worker 往返异常：status=%s body=%s" % (resp.get("status"), wbody[:200]))
         print("smoke：打包态 worker 往返通过（运行时 python + plugin_host + Flask 栈，status 200）")
 
+        # 本机工具显示状态（2026-10-08）：桌面端「卸载」写 hidden_tools、「安装」恢复，
+        # /api/tools 合并时按本机清单过滤——冒烟走一次写入 / 回传 / 清除。
+        def _post_hidden(hidden):
+            rq = urllib.request.Request(
+                base + "/local-api/plugins/hidden",
+                data=json.dumps({"id": "smoke-probe", "hidden": hidden}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            return json.loads(urllib.request.urlopen(rq, timeout=10).read())
+        r = _post_hidden(True)
+        if not r.get("ok") or "smoke-probe" not in (r.get("hidden_tools") or []):
+            fail("本机显示状态写入失败：%s" % r)
+        d = json.loads(urllib.request.urlopen(base + "/local-api/plugins", timeout=10).read())
+        if "smoke-probe" not in (d.get("hidden_tools") or []):
+            fail("/local-api/plugins 未回传 hidden_tools：%s" % d.get("hidden_tools"))
+        r = _post_hidden(False)
+        if not r.get("ok") or "smoke-probe" in (r.get("hidden_tools") or []):
+            fail("本机显示状态清除失败：%s" % r)
+        print("smoke：本机工具显示状态往返通过（写入 / 回传 / 清除）")
+
         # 自重启链路（2026-10-08 加固）：该端点曾因裸名 sys（NameError→500 HTML）从未
         # 生效过，前端只见「自动重启失败」。断言：旧进程退出 → 新实例带 --await-pid
         # 接棒（等旧进程真实退出再抢单实例互斥）→ 新实例起能力层。

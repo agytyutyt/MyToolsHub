@@ -23,7 +23,7 @@
   var CATALOG_API = '/plugin/store/api/catalog?all=1';
   var IN_SHELL = document.documentElement.classList.contains('jz-shell');
   var catalog = [];              // flat 条目（含 versions 历史）
-  var localState = { plugins: {}, frontends: {}, components: {}, loaded: false };
+  var localState = { plugins: {}, frontends: {}, components: {}, hidden: {}, loaded: false };
 
   function $(s, el) { return (el || document).querySelector(s); }
   function esc(s) {
@@ -92,17 +92,19 @@
   function loadLocalState() {
     if (!IN_SHELL) { localState.loaded = true; return Promise.resolve(); }
     return fetch('/local-api/plugins').then(function (r) { return r.json(); }).then(function (d) {
-      var plugins = {}, frontends = {}, components = {};
+      var plugins = {}, frontends = {}, components = {}, hidden = {};
       (d.plugins || []).forEach(function (p) {
         plugins[p.id] = { version: p.version, enabled: p.enabled !== false, kind: p.kind };
       });
+      (d.hidden_tools || []).forEach(function (x) { hidden[String(x)] = true; });
       (d.server_frontends || []).forEach(function (f) {
         frontends[f.id] = { version: f.version, enabled: f.enabled !== false };
       });
       (d.components || []).forEach(function (c) {
         components[c.id] = { version: c.version, pending: !!c.pending };
       });
-      localState = { plugins: plugins, frontends: frontends, components: components, loaded: true };
+      localState = { plugins: plugins, frontends: frontends, components: components,
+                     hidden: hidden, loaded: true };
     }).catch(function () { localState.loaded = true; });
   }
 
@@ -142,6 +144,17 @@
                disabled: !!inst && inst.enabled === false, entry: inst || null };
     if (inst && verGt(e.version, inst.version)) st.upgradable = true;
     return st;
+  }
+
+  function setHiddenTool(id, hidden) {
+    // 本机显示状态（客户端 config.json）：桌面端「卸载」置 hidden、「安装」恢复。
+    // 只影响本机主界面显示；服务器端后端包与其运行状态不动（撤下只在商店管理做）。
+    return fetch('/local-api/plugins/hidden', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, hidden: !!hidden }),
+    }).then(function (r) { return r.json().catch(function () { return {}; }); })
+      .catch(function (e) { return { ok: false, error: String(e) }; });
   }
 
   function dlButtonHtml(e, label) {
@@ -273,7 +286,9 @@
         + (e.deps_mode === 'venv' ? '<span class="st-badge venv">独立环境</span>' : '')
         + (IN_SHELL && st.installed && !st.upgradable ? '<span class="st-badge local">已安装</span>' : '')
         + (st.upgradable ? '<span class="st-badge up">可升级</span>' : '')
-        + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '');
+        + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '')
+        + (e.runtime === 'server' && !st.installed && localState.hidden && localState.hidden[e.id]
+           ? '<span class="st-badge venv">已从本机移除</span>' : '');
       var card = document.createElement('div');
       card.className = 'st-card st-rt-' + runtimeClass(e.runtime);
       card.style.animationDelay = Math.min(idx * 35, 350) + 'ms';
@@ -383,6 +398,9 @@
         clearInterval(progTimer);
         if (!d.ok) { setProg('', null, 0); msg('安装失败：' + (d.error || '未知错误'), true); return; }
         setProg('done', '已完成', 100);
+        if (e.runtime === 'server') {
+          setHiddenTool(e.id, false);        // 安装即恢复本机显示（2026-10-08）
+        }
         var note = [];
         var needRestart = !!d.restart_required
           || !!(d.pending_components && d.pending_components.length);
@@ -508,15 +526,17 @@
     if (act === 'uninstall') {
       var ent = findEntry(id);
       if (ent && ent.runtime === 'server') {
-        // server 条目（2026-10-08 口径）：桌面端只装/卸**前端包**——卸载后页面回退中继直出；
-        // 插件默认在服务器端运行、主页条目不受影响（无本地业务数据，不问"清除数据"）。
+        // server 条目（2026-10-08 口径）：桌面端只装/卸**前端包**；卸载同时在本机主界面移除显示
+        // （记客户端 config.json 的 hidden_tools；服务器端后端包照常运行、全局清单不受影响）。
         if (!await stDialog({ title: '卸载', danger: true, okText: '卸载',
-          html: '卸载 <b>' + esc(id) + '</b> 的本机前端包副本？<br>'
-            + '页面将回退中继直出（插件在服务器端照常运行，主页条目不受影响）。' })) return;
+          html: '卸载 <b>' + esc(id) + '</b> 的本机前端包副本，并从本机主界面移除该插件？<br>'
+            + '页面回退中继直出；插件在服务器端照常运行（重新安装即恢复显示）。' })) return;
         post('/local-api/plugins/uninstall', { id: id, purge_data: false }).then(function (d) {
-          msg(d.ok ? ('已卸载前端包副本：' + id + '（页面回退中继直出）')
-                   : ('卸载失败：' + (d.error || '')), !d.ok);
-          loadLocalState().then(render);
+          return setHiddenTool(id, true).then(function () {
+            msg(d.ok ? ('已卸载前端包副本并从本机主界面移除：' + id + '（重新安装即恢复）')
+                     : ('卸载失败：' + (d.error || '')), !d.ok);
+            loadLocalState().then(render);
+          });
         });
         return;
       }

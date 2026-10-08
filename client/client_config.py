@@ -81,6 +81,32 @@ def save_client_config(build_cfg, cfg):
     return path
 
 
+def hidden_tools(build_cfg):
+    """本机从主界面移除的服务器侧工具 id 列表（客户端本机显示状态，不动服务器）。
+
+    语义（2026-10-08 需求方口径）：桌面端「卸载」= 卸本机前端包副本 + 本机不再显示；
+    「安装」= 装回并恢复显示。只影响本机（客户端数据目录的 config.json），
+    服务器端后端包与其运行状态不受任何影响（撤下只在商店管理·超级管理员做）。
+    """
+    cfg = load_client_config(build_cfg) or {}
+    v = cfg.get("hidden_tools")
+    return [str(x) for x in v] if isinstance(v, list) else []
+
+
+def set_hidden_tool(build_cfg, tool_id, hidden):
+    """写入/移除本机工具显示状态；返回最新列表。"""
+    cfg = load_client_config(build_cfg) or {}
+    ids = [str(x) for x in (cfg.get("hidden_tools") or []) if str(x).strip()]
+    if hidden:
+        if tool_id not in ids:
+            ids.append(tool_id)
+    else:
+        ids = [x for x in ids if x != tool_id]
+    cfg["hidden_tools"] = ids
+    save_client_config(build_cfg, cfg)
+    return ids
+
+
 def normalize_address(addr):
     """补协议、去尾斜杠；空值返回 None。"""
     if not addr or not str(addr).strip():

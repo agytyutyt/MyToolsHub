@@ -32,6 +32,7 @@ import jz_plugin_host
 import local_registry
 import pkg_install
 import plugin_source
+from client_config import hidden_tools, set_hidden_tool
 from jz_relay import JzRelay
 from plugin_executor import PluginExecutor
 from session_mirror import SessionMirror
@@ -385,7 +386,30 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                            "enabled": bool(cfg_states.get(fid, True))})
         return jsonify({"plugins": out, "store": build_cfg.get("plugin_store") or {},
                         "server_frontends": fronts,
+                        "hidden_tools": hidden_tools(build_cfg),
                         "components": pkg_install.installed_components(_program_dir)})
+
+    @app.get("/local-api/plugins/hidden")
+    def lp_hidden_list():
+        """本机从主界面移除的服务器侧工具 id 列表（客户端本机显示状态）。"""
+        return jsonify({"hidden_tools": hidden_tools(build_cfg)})
+
+    @app.post("/local-api/plugins/hidden")
+    def lp_hidden_set():
+        """写本机显示状态：{id, hidden}。桌面端「卸载」置 hidden=true、「安装」置 false。
+
+        **只改客户端数据目录的 config.json**（服务器端后端包/运行状态一概不动；
+        服务器端撤下只发生在商店管理·超级管理员的 停用/卸载）。
+        """
+        data = request.get_json(silent=True) or {}
+        tid = str(data.get("id") or "").strip()
+        hidden = bool(data.get("hidden"))
+        if not tid or not re.fullmatch(r"[A-Za-z0-9_-]+", tid):
+            return jsonify({"ok": False, "error": "id 非法：%r" % tid}), 400
+        ids = set_hidden_tool(build_cfg, tid, hidden)
+        _log("本机工具显示状态：%s %s（hidden_tools=%s）"
+             % ("已移除" if hidden else "已恢复", tid, ids))
+        return jsonify({"ok": True, "hidden_tools": ids})
 
     @app.post("/local-api/plugins/install")
     def lp_install():
@@ -1138,6 +1162,14 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                             content_type=r.headers.get("Content-Type", "application/json"))
         base = data.get("tools") if isinstance(data, dict) else data
         base = base if isinstance(base, list) else []
+        # 本机移除（桌面端「卸载」的显示面，2026-10-08）：服务器侧条目在本机不再下发。
+        # 只影响本机（客户端数据目录 config.json），服务器端运行与全局清单不受影响。
+        hidden = set(hidden_tools(build_cfg))
+        if hidden:
+            dropped = [str(t.get("id") or "") for t in base if str(t.get("id") or "") in hidden]
+            base = [t for t in base if str(t.get("id") or "") not in hidden]
+            if dropped:
+                _log("本机已移除的工具不再下发：%s" % "、".join(dropped))
         start = max([t.get("order", 0) for t in base] or [0]) + 1000
         # 停用即从工具网格隐藏（需求⑦：停用为一等操作；本地 API 404 语义保留作兜底）
         enabled_manifests = [m for m in local_manifests
