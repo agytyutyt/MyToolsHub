@@ -57,6 +57,25 @@
     .data-table td { vertical-align: top; }
     .data-table tbody tr:hover { background: rgba(0,0,0,.02); }
 
+    /* 操作列固定（目录管理：数据超长横向滚动时，操作列钉在右侧；2026-10-08）
+       注：固定列与「边缘渐隐」互斥——mask 会把钉列一起渐隐，故溢出时关掉 mask，
+       改用钉列自带左投影表达"内容被覆盖/可滚动"。 */
+    #st-table-wrap.is-overflowing,
+    #st-table-wrap.is-overflowing.is-scrolled {
+      -webkit-mask-image: none; mask-image: none;
+    }
+    #st-table th:last-child,
+    #st-table td:last-child { position: sticky; right: 0; }
+    #st-table th:last-child { background: var(--md-surface-container); z-index: 3; }
+    #st-table td:last-child {
+      background-color: var(--md-surface); z-index: 2;
+      box-shadow: -10px 0 10px -10px rgba(0, 0, 0, .16);
+    }
+    #st-table tbody tr:hover td:last-child {
+      background-image: linear-gradient(rgba(var(--md-primary-rgb), .04),
+                                        rgba(var(--md-primary-rgb), .04));
+    }
+
     /* 统计页签 */
     .st-stat-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 12px 0 4px; }
     .st-stat-card { border: 1px solid rgba(0,0,0,.08); border-radius: 12px; padding: 14px 16px;
