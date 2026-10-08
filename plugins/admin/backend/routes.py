@@ -2416,6 +2416,9 @@ def register(app):
                 row["restart_pending"] = bool(state_entry.get("restart_pending"))
                 row["backups"] = len(plugin_admin.list_backups(root, entry.get("id")))
                 row["srv_enabled"] = store_admin.srv_enabled(root, entry.get("id"))
+            elif entry.get("runtime") == "dep-slot":
+                row["srv_component_version"] = store_admin.srv_component_version(
+                    PROJECT_DIR, entry.get("id"))
             rows.append(row)
         installed = jz_deps.load_installed_deps(PROJECT_DIR)
         installed_names = sorted({str(k).casefold() for k in (installed.get("modules") or {})}
@@ -2512,11 +2515,50 @@ def register(app):
                 if res.get("ok"):
                     store_admin.mark_deploy_result(root, pid, version, True,
                                                    "v%s 自动部署成功" % version, by)
+                    res["dep_deploy"] = _deploy_required_components(root, catalog, entry)
                 return jsonify(res)
         res = store_admin.review(root, pid, version, action, by, note)
         if not res.get("ok"):
             return jsonify(res), 400
+        if action == "approve":
+            # 依赖条目（2026-10-08）：已上架 server 插件需要它 → 发布即部署到服务器
+            catalog2 = store_admin.load_catalog(root)
+            entry2 = store_admin.find_entry(catalog2, pid)
+            if entry2 is not None and entry2.get("runtime") == "dep-slot":
+                need = store_admin.deps_for_published_server(catalog2)
+                provided = {pid.lower()} | {str(x).lower() for x in (entry2.get("provides") or [])}
+                if need & provided:
+                    r = store_admin.deploy_dep_component(PROJECT_DIR, root, pid, version)
+                    res["dep_deploy"] = ["组件已部署到服务器" if r.get("ok")
+                                         else "组件部署失败（%s）" % r.get("error")]
         return jsonify(res)
+
+    def _deploy_required_components(root, catalog, entry):
+        """server 插件发布后：把 requires 里「已上架依赖条目」的组件补装到**服务器**（尽力而为）。
+
+        2026-10-08 真机报告：商店依赖的安装只落桌面客户端，服务器侧插件（shared-docs 等）
+        在服务器上仍需组件——口径与 server 插件一致：上架（发布）即部署到服务器。
+        """
+        notes = []
+        for x in ((entry.get("requires") or {}).get("python_packages") or []):
+            name = str(x.get("name") or "").strip().lower()
+            if not name:
+                continue
+            dep_entry = next((p for p in catalog.get("packages") or []
+                              if p.get("runtime") == "dep-slot"
+                              and (str(p.get("id") or "").lower() == name
+                                   or name in [str(y).lower() for y in (p.get("provides") or [])])), None)
+            if dep_entry is None:
+                continue
+            ver = next((v.get("version") for v in (dep_entry.get("versions") or [])
+                        if v.get("status") == "published"), "")
+            if not ver:
+                continue
+            r = store_admin.deploy_dep_component(PROJECT_DIR, root, dep_entry.get("id"), ver)
+            notes.append("组件 %s %s" % (dep_entry.get("id"),
+                                        "已部署 v%s" % ver if r.get("ok")
+                                        else "部署失败（%s）" % r.get("error")))
+        return notes
 
     @app.post("/plugin/admin/store/redeploy")
     @login_required
@@ -2531,7 +2573,13 @@ def register(app):
         data = request.get_json(silent=True) or {}
         pid = str(data.get("id") or "")
         version = str(data.get("version") or "")
-        res = store_admin.deploy_backend_package(PROJECT_DIR, _store_root(), pid, version)
+        root = _store_root()
+        entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
+        if entry is not None and entry.get("runtime") == "dep-slot":
+            # 依赖条目（2026-10-08）：部署到**服务器**（runtime/pylibs；同 install_component_package 链）
+            res = store_admin.deploy_dep_component(PROJECT_DIR, root, pid, version)
+        else:
+            res = store_admin.deploy_backend_package(PROJECT_DIR, root, pid, version)
         return jsonify(res) if res.get("ok") else (jsonify(res), 500)
 
     @app.post("/plugin/admin/store/srv-state")

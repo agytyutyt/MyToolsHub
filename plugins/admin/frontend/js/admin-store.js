@@ -164,6 +164,7 @@
           submit_by: (v.submit || {}).by, review: v.review || {},
           installed_version: p.installed_version, restart_pending: p.restart_pending,
           srv_enabled: p.srv_enabled, backups: p.backups,
+          srv_component_version: p.srv_component_version,
           frontend_file: v.frontend_file, deps_mode: p.deps_mode,
           requires: p.requires,
         });
@@ -232,6 +233,11 @@
         }
       } else if (r.runtime === 'server') {
         svr = '<span class="st-muted">发布时自动部署</span>';
+      } else if (r.runtime === 'dep-slot' && r.status === 'published') {
+        // 依赖组件：服务器侧（runtime/pylibs）装没装（2026-10-08；客户端安装只落桌面端）
+        svr = r.srv_component_version
+          ? chip('已部署 v' + esc(r.srv_component_version), 'ok')
+          : chip('未部署（服务器端）', 'muted');
       }
       // 依赖核验（✓ 满足 / ✗ 不满足）：主包自带或已上架依赖条目可满足 → ✓
       var depsHtml = '<span class="st-muted">—</span>';
@@ -261,6 +267,9 @@
           + '<button class="admin-btn small" data-op="reject" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">驳回</button>';
       } else if (r.status === 'published') {
         ops += '<button class="admin-btn small" data-op="delist" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">下架</button>';
+        if (r.runtime === 'dep-slot') {
+          ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">部署到服务器</button>';
+        }
         if (r.runtime === 'server') {
           ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新部署</button>';
           if (canSrv) {   // 服务器端启停/撤包（2026-10-08 口径）：后端包只在此处被撤下
@@ -357,6 +366,14 @@
         html: '把 <b>' + esc(id) + ' v' + esc(v) + '</b> 的后端包从服务器撤下？<br>'
           + '自动备份，可用「重新部署」原样恢复；条目与客户端前端副本不受影响。' },
     };
+    if (op === 'redeploy') {                       // 依赖条目 → 部署到服务器（2026-10-08）
+      var prow = packages.filter(function (p) { return p.id === id; })[0] || {};
+      if (prow.runtime === 'dep-slot') {
+        dlgOpts.redeploy = { title: '部署到服务器', okText: '部署',
+          html: '把依赖组件 <b>' + esc(id) + ' v' + esc(v) + '</b> 部署到服务器？<br>'
+            + '装入服务器 runtime/pylibs（客户端安装只落桌面端）；无需重启即生效。' };
+      }
+    }
     var r = await adDialog(dlgOpts[op] || { title: '确认', html: esc(op + '？') });
     var note = '';
     if (op === 'reject') {

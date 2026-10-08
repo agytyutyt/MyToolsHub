@@ -157,6 +157,54 @@ def record_event(data_root, pid, version, action, by, note=""):
     return {"ok": True, "id": pid, "version": record.get("version"), "action": action}
 
 
+def deps_for_published_server(catalog):
+    """已上架 server 插件声明的依赖 import 名集合（用于判断依赖组件该不该上服务器）。"""
+    need = set()
+    for entry in catalog.get("packages") or []:
+        if entry.get("runtime") != "server":
+            continue
+        if not any(v.get("status") == "published" for v in (entry.get("versions") or [])):
+            continue
+        for x in ((entry.get("requires") or {}).get("python_packages") or []):
+            name = str(x.get("name") or "").strip()
+            if name:
+                need.add(name.lower())
+    return need
+
+
+def deploy_dep_component(base_dir, data_root, pid, version):
+    """把依赖组件部署到**服务器**（runtime/pylibs；install_component_package 同源链，无需重启）。
+
+    背景（2026-10-08 真机报告）：商店「依赖」的安装只落**桌面客户端**（供本地插件后端），
+    服务器侧插件（如 shared-docs 需要 docx/openpyxl/xlrd）在服务器上必须有组件——
+    口径与 server 插件一致：**上架（发布）即部署到服务器**；已上架的历史条目用「部署到服务器」补。
+    """
+    path = os.path.join(packages_dir(data_root),
+                        canonical_filename("dep-slot", pid, version))
+    if not os.path.isfile(path):
+        return {"ok": False, "error": "包文件缺失：%s" % path}
+    res = plugin_admin.install_component_package(base_dir, path)
+    return res if res.get("ok") else {"ok": False, "error": res.get("error", "组件部署失败")}
+
+
+def srv_component_version(base_dir, pid):
+    """服务器侧已装组件的版本（runtime/pylibs/manifest.json）；未装返回 ""。"""
+    man = {}
+    try:
+        with open(os.path.join(base_dir, "runtime", "pylibs", "manifest.json"),
+                  "r", encoding="utf-8-sig") as f:
+            man = json.load(f)
+    except Exception:
+        return ""
+    comps = man.get("components") if isinstance(man, dict) else None
+    if isinstance(comps, dict):
+        comps = [comps]
+    for c in comps or []:
+        if isinstance(c, dict) and str(c.get("id")) == pid:
+            return str(c.get("version") or "")
+    return ""
+
+
 def srv_enabled(data_root, pid):
     """注册表（tools.json）里该插件的启用态；无注册条目返回 None（未部署过）。"""
     path = os.path.join(data_root, "config", "tools.json")
