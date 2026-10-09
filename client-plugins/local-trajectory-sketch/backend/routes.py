@@ -74,14 +74,6 @@ def _can_manage(user) -> bool:
             or user.get("role") in MANAGE_ROLE_NAMES)
 
 
-def _cookie() -> str:
-    return request.headers.get("Cookie", "") or ""
-
-
-def _host_url() -> str:
-    return request.host_url or ""
-
-
 # --------------------------------------------------------------------------
 # 自检辅助
 # --------------------------------------------------------------------------
@@ -134,8 +126,8 @@ def _filter_meta(res: Dict[str, Any], mode: str) -> Dict[str, Any]:
 # 异步分析
 # --------------------------------------------------------------------------
 
-def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
-                  cookie: str, host_url: str, session: Any = None) -> None:
+def _run_analysis(task_id: str, stage: Dict[str, Any], mode: str,
+                  session: Any = None) -> None:
     """后台线程：过滤 → 分析 → 写报告 → 置 done。
 
     ``session`` 是**请求线程**取好的大模型接入配置快照（mode=llm 时必需）——
@@ -146,7 +138,6 @@ def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
         cfg = config_store.load_config()
         keep_cols, _notes = config_store.expand_keep_columns(cfg)
         # 过滤已在本插件内自带（filter_local）：后处理规则的唯一来源是本插件配置。
-        # 配置项 use_filter_plugin_rules 保留仅为兼容旧配置，不再有"借用对方规则"这一分支。
         post_rules = cfg["filter"].get("post_rules")
 
         raw_rows = excel_io.read_rows(stage["path"], "upload.%s" % stage.get("ext", "xlsx"))
@@ -154,9 +145,8 @@ def _run_analysis(app, task_id: str, stage: Dict[str, Any], mode: str,
             report_store.set_task(task_id, status="error",
                                   detail="表格只有表头，没有可分析的数据行。")
             return
-        res = filter_bridge.apply_filter(app, raw_rows, mode=mode, columns=keep_cols,
-                                         post_rules=post_rules, cookie=cookie,
-                                         host_url=host_url, session=session)
+        res = filter_bridge.apply_filter(raw_rows, mode=mode, columns=keep_cols,
+                                         post_rules=post_rules, session=session)
         filtered = res.get("rows") or []
         meta = _filter_meta(res, mode)
 
@@ -272,8 +262,6 @@ def register(app):
                 cfg["filter"]["mode_default"] = str(flt.get("mode_default") or "hard").strip()
             if "post_rules" in flt:
                 cfg["filter"]["post_rules"] = config_store.sanitize_rules(flt.get("post_rules"))
-            if "use_filter_plugin_rules" in flt:
-                cfg["filter"]["use_filter_plugin_rules"] = bool(flt.get("use_filter_plugin_rules"))
             if not cfg["filter"]["keep_columns"]:
                 return jsonify({"error": "保留字段名单不能为空——它是字段过滤的依据"}), 400
 
@@ -404,9 +392,8 @@ def register(app):
         # ---- 过滤预演固定用「硬过滤」：自检阶段应当是快速、确定、无副作用的 ----
         try:
             res = filter_bridge.apply_filter(
-                _app_ref, raw_rows, mode="hard", columns=keep_cols,
-                post_rules=cfg["filter"].get("post_rules"),   # 见上：规则唯一来源是本插件配置
-                cookie=_cookie(), host_url=_host_url())
+                raw_rows, mode="hard", columns=keep_cols,
+                post_rules=cfg["filter"].get("post_rules"))   # 见上：规则唯一来源是本插件配置
         except filter_bridge.FilterError as exc:
             report_store.drop_stage(stage["staged_id"])
             return jsonify({"error": exc.message}), exc.status
@@ -481,8 +468,7 @@ def register(app):
 
         report_store.cleanup()
         task_id = report_store.create_task(staged_id, _viewer(), mode)
-        _executor.submit(_run_analysis, _app_ref, task_id, stage, mode,
-                         _cookie(), _host_url(), session)
+        _executor.submit(_run_analysis, task_id, stage, mode, session)
         _set_operation("提交轨迹速写任务")
         return jsonify({"task_id": task_id, "mode": mode})
 
