@@ -306,7 +306,9 @@ Check "全程用户数据未变" ((Get-TreeHash (Join-Path $Data "plugins")) -eq
 Head "6. 全新安装与卸载（base64）"
 Remove-Item -LiteralPath (Join-Path $App "plugins\base64") -Recurse -Force
 $r = Run-Builder @("-Id", "base64", "-OutDir", $OutDir)
-$pkgB64 = Join-Path $OutDir "JZToolsHub-base64-后端-v1.0.0.zip"
+# 版本从 manifest 现取（写死会随后续升补丁号静默失配）；命名族方案 A：<id> 前置 + 后端/前端成对
+$b64Ver = (Get-Content -LiteralPath (Join-Path $Repo "plugins\base64\manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json).version
+$pkgB64 = Join-Path $OutDir "JZToolsHub-base64-后端-v$b64Ver.zip"
 Check "base64 包构建成功（纯前端）" ($r.Code -eq 0 -and (Test-Path -LiteralPath $pkgB64)) $r.Text
 # 从沙箱 tools.json 里删掉 base64 条目 → 测"新增注册条目"路径
 $tj = Join-Path $Data "config\tools.json"
@@ -344,7 +346,7 @@ $nm.id = "e2e-noreg"
 Write-JsonFile (Join-Path $fixNoreg "manifest.json") $nm
 $r = Run-Builder @("-Id", "e2e-noreg", "-From", $fixNoreg, "-OutDir", $OutVar)
 Check "构建无注册条目的包（仅警告不阻断）" ($r.Code -eq 0) $r.Text
-$pkgNoreg = Join-Path $OutVar "JZToolsHub-e2e-noreg-后端-v1.0.0.zip"
+$pkgNoreg = Join-Path $OutVar "JZToolsHub-e2e-noreg-后端-v$($nm.version).zip"
 $r = Run-Installer @("-Package", $pkgNoreg, "-InstallDir", $App, "-DataRoot", $Data)
 Check "全新安装缺 tools_entry → 拒绝" ($r.Code -ne 0 -and $r.Text -match "tools_entry") $r.Text
 Check "拒绝后未落盘" (-not (Test-Path -LiteralPath (Join-Path $App "plugins\e2e-noreg")))
