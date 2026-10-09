@@ -2,7 +2,7 @@
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 状态 | 现行（活清单；2026-10-09 Q6 批次后：P0 C1/C2/C3/C4 已销项（C1b 删除窗口仍待 flag 全覆盖），P1 D3/D4/D7 已修、D1/D2 部分完成（跨处理器读改写锁需人工），D5/D6/D8 需拍板；P2/P3 未开始） |
+| 状态 | 现行（活清单；2026-10-09 Q6 批次后：P0 C1/C2/C3/C4 已销项（C1b 删除窗口仍待 flag 全覆盖），P1 D3/D4/D7 已修、D1/D2 部分完成（跨处理器读改写锁需人工），D5 需拍板、D6/D8 已完成（8105ae9）、L-13 债·admin 已完成（fcae857）；P2/P3 未开始） |
 | 最后核对 | 2026-10-09（对照 `docs/eval/20260929代码质量分析报告.md` v2 全文与 `git log` 实况） |
 | 作用域 | 框架 + 跨插件 + 插件内部（宿主 / 构建 / 测试 / 各插件） |
 | 随包 | 否（`docs/plan/` 层，见 `docs/README.md` §8） |
@@ -31,7 +31,7 @@
 | C2 | §2.2 C2：`plugins/trajectory-sketch/backend/filter_bridge.py:44-52` 恒真函数与废弃形参；死键 `use_filter_plugin_rules`（`config_store.py:38/:130`、`routes.py:274-275`）；孤儿 `_probe_fix.cpython-314.pyc` | 删恒真函数与废弃形参（同步修调用方）、删死键三处读写、清孤儿 pyc——这是完成解耦，不是卫生清理 | ✅ 已完成（commit `7a14e96`）：恒真函数与废弃形参删除、调用方同修、死键三处读写与模板/注释清理、孤儿 pyc 删除；`file-filter-c-tests` 11/11、`test_filter_llm` 31/31 全绿 |
 | C3 | §2.2 C3：帧头常量三份人肉同步（`trajectory-convert:48-51` ↔ `info-transfer:175-178` ↔ `qr-video-decode:38-40`）；编码实现四份 | 协议契约文档（`docs/design/`）+ `testdata/protocol/` 跨实现测试向量；**代码不合并**（四插件各自保留实现） | ✅ 已完成（commit 本次）：契约 `docs/design/二维码传输协议-契约文档.md` + 向量 `testdata/protocol/`（含 `generate.py` 与来源说明）+ 台架 `tools/e2e/qr-protocol-consistency.py`（32/32 通过、1 项如实 skip）；**台架建档过程中查出两处新互操作缺陷已登记契约 §6.1/§6.2，修法需拍板**（m=256 申报溢出；map-marker 生成脚本多组分组与解码端不同构→静默错位） |
 | C4 | §2.2 C4：同源副本无台账——`bg_image.py`×2 未声明（file-filter ≡ trajectory-sketch）、`jsqr.min.js`×2 未登记、QR 编解码×4 含未声明分叉（`PAYLOAD_SAFETY`） | 增设**同源副本台账**一节（副本对 / 同源日期 / 演进策略 / 漂移时以谁为准）+ 构建期 md5 漂移提示（warning 不阻断，宿主同 C-11 脚本） | ✅ 已完成（commit 本次）：`docs/design/同源副本台账.md` 覆盖报告 C4 全部副本对（并纠正份数：`bg_image` 实为 ×4、`_viewer` 实为 ×11），逐条给路径对/md5 基准/校验口径/漂移处置；**构建期 md5 漂移提示（报告建议 2）未实施**，已列入台账 §4 后续 |
-| L-13 债·admin | 门禁侧新登记（非报告编号）：admin legacy 端点命名债——`/api/account/password` 等（后端 `plugins/admin/backend/routes.py:988` 注册；前端 `frontend/js/admin-common.js:178` 调用；测试 `test_data_migrate.py:574` 覆盖），不符 §16.10「`/api/<自身id>`」惯例 | 现经框架面白名单放行（`tools/build-plugin-package.ps1` `$l13CoreLegacy`，依据 admin 随主体分发、不可卸载；Python 侧 `CORE_LEGACY_FACES` 同口径）；可选清理=改名 `/api/admin/...`（后端+前端+测试三处 + 功能验证） | 未开始 |
+| L-13 债·admin | 门禁侧新登记（非报告编号）：admin legacy 端点命名债——`/api/account/password` 等（后端 `plugins/admin/backend/routes.py:988` 注册；前端 `frontend/js/admin-common.js:178` 调用；测试 `test_data_migrate.py:574` 覆盖），不符 §16.10「`/api/<自身id>`」惯例 | 现经框架面白名单放行（`tools/build-plugin-package.ps1` `$l13CoreLegacy`，依据 admin 随主体分发、不可卸载；Python 侧 `CORE_LEGACY_FACES` 同口径）；可选清理=改名 `/api/admin/...`（后端+前端+测试三处 + 功能验证） | ✅ 已完成（2026-10-09，commit fcae857：改名 `/api/admin/account/password` + 撤双侧白名单；无白名单 L-13 实测通过、跨插件负向仍拦） |
 
 ## 2. P1：数据安全与正确性（报告 §三）
 
@@ -42,9 +42,9 @@
 | D3 | `plugins/admin/backend/plugin_admin.py:1365` 传 `None`，函数（`:883-892`）对非 dict 恒返回 `{}` | 修 `plugin_names(None)`——**一行可修** | ✅ 已完成（commit 本次）：`scan_packages` 改为按 `data_root/config/tools.json` 取展示名（`plugin_names(None)` 恒空的缺陷修掉），`data_root=None` 时安全回落 |
 | D4 | `app.py:515`（读 tools.json）用普通 utf-8；`jz_deps.py:125…334`、`app.py:122`、`jz_llm.py:811` 用 utf-8-sig | 外部可手工编辑的 JSON 统一 `utf-8-sig`（BOM → 整站空注册表） | ✅ 已完成（commit 本次）：`app.py` 的 tools.json / manifest.json 读取统一 `utf-8-sig`（与 `jz_deps`/`jz_llm` 同口径，容忍记事本 BOM） |
 | D5 | 放行版：`character-graph:157-169`、`qr-video-decode:106-118`、`info-transfer:367-376`；收紧版：`trajectory-convert:192-205`、`file-filter:225-236` | 拍板从严（旧任务仅超管可见），三个放行版插件**各自本地**统一；不沉淀公共模块 | 未开始（**需拍板**：放行版与收紧版口径相反，属产品判定，不在自动整改范围） |
-| D6 | v2 出「无。』」（`v2/report.py:222-231`）vs v3 只遍历有窗口数据的用户（`v3/__init__.py:145`） | 核对产品预期后在插件内统一 v2/v3 报告口径 | 未开始（**需拍板**：v2/v3 报告口径漂移需核对产品预期后统一） |
+| D6 | v2 出「无。』」（`v2/report.py:222-231`）vs v3 只遍历有窗口数据的用户（`v3/__init__.py:145`） | 核对产品预期后在插件内统一 v2/v3 报告口径 | ✅ 已完成（2026-10-09，commit 8105ae9：v3 按 `dataset.all_usernums` 全集枚举（含被清洗空的号码），无数据号码出「无。」；针对性验证 PASS + test_filter_llm 31/31） |
 | D7 | 聚合接口用 manifest.id（`app.py:687`）vs visibility 用 registry.id（`:1142`），无加载期校验 | `register_plugin_backends` 加载时校验一致，不一致记入 `_manifest_errors` | ✅ 已完成（commit 本次）：`load_manifests` 加载期校验 `manifest.id` 与目录名一致（不一致记入 `_manifest_errors` 并跳过该插件，与既有「单插件坏不连坐」口径同）；17 插件实测全过 |
-| D8 | 未处理 401：`notice-board`（app.js:35-40）、`file-filter`（:1683-1697）、`trajectory-sketch`；已处理：case-report、shared-docs | 各插件本地补 401 跳转（不引公共 JS 模块） | 未开始（**需拍板**；备注：knowledge-base 已补 401——`plugins/knowledge-base/frontend/app.js:39-48/:64-82`，需复核后部分销项） |
+| D8 | 未处理 401：`notice-board`（app.js:35-40）、`file-filter`（:1683-1697）、`trajectory-sketch`；已处理：case-report、shared-docs | 各插件本地补 401 跳转（不引公共 JS 模块） | ✅ 已完成（2026-10-09，commit 8105ae9：notice-board / file-filter / trajectory-sketch 按 knowledge-base 模式补 401（ff 含传文件链路），缓存戳 ts ?v=5 / ff ?v=8 / nb ?v=7） |
 
 ## 3. P2 / P3：宿主、构建与插件内部（报告 §四 / §五）
 
