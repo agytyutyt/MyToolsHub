@@ -1,16 +1,40 @@
 # QR 视频流解码（qr-video-decode）
 
-全栈插件，解码 QR-transfer 生成的动态二维码视频，经 zfec 前向纠错重组恢复原始数据。
-
-> ⚠️ **协议兼容性**：本插件仅支持 **v1 文本帧**；v2（JZ2 二进制帧）流需另行适配（读取 `binaryData`），当前 Web Worker（`frontend/worker.js`）按 v1 文本帧头解析，不解 v2 二进制流。
+全栈插件，解码 QR-transfer / 「信息传输」生成的动态二维码视频（v1 文本帧 + v2 JZ2 二进制帧），
+经 zfec 前向纠错重组恢复原始数据。
 
 ## 功能
 
 - **视频上传**：拖拽或选择 .mp4 / .webm 二维码视频流；
-- **逐帧扫码**：Web Worker 中 jsQR 逐帧解码，不阻塞主线程；
+- **逐帧扫码**：Web Worker 中 jsQR 逐帧解码，不阻塞主线程；v2 二进制帧读 `binaryData`
+  （逐字节还原；`data` 为 UTF-8 文本，对二进制有损，仅作 v1 回落）；
+- **协议双代自适应**：v1 文本帧按 12 字符 base64 帧头解析；v2 JZ2 帧按 21 字节帧头解析
+  （magic/ver/flags/seg_i/seg_n/meta_len/body_len/crc32），CRC32 校验失败的帧拒收
+  （按缺帧交给 zfec 容错），share 载荷统一转 base64 交后端重组；
 - **zfec 纠错重组**：后端异步执行前向纠错解码，按纠错块粒度更新进度；
 - **进度轮询**：前端实时轮询重组进度与预计剩余时间；
-- **结果展示**：恢复数据预览（支持 JSON 美化）、下载与复制。
+- **结果展示**：v2 产物在浏览器内解析 JZ2 信封帧（压缩标志 → 解压 → 原始载荷）：
+  - `fmt=file`（原件传输）→ **按原始文件名下载原始文件字节**；
+  - text / markdown / word / excel（精简传输）→ 文本预览（JSON 美化）与按声明命名的下载
+    （word → `.txt`、excel → `.json`，不伪造 `.docx`/`.xlsx`）；
+  - v1 产物保持原有信封 JSON 预览/下载路径。
+
+## 协议支持与已知限制（v1.2.0）
+
+| 能力 | 状态 |
+| --- | --- |
+| v1 文本帧（QR-transfer / 轨迹转换等旧流） | ✅ 零回归（原有路径未动） |
+| v2 JZ2 share 帧解析（magic/长度/版本/CRC32） | ✅ |
+| v2 后端 zfec 重组（复用既有 `/reassemble` 任务接口） | ✅ |
+| v2 信封帧解析（fmt/name/ext/orig_len/mode） | ✅ |
+| v2 载荷 `comp=none` / `comp=zlib` 解压 | ✅（浏览器原生 `DecompressionStream("deflate")`，WebView2 / Chromium 103+） |
+| v2 载荷 `comp=xz`（LZMA2，编码端 `_compress_best` 对文本类数据常选） | ❌ 浏览器端无解压能力——改用「信息传输 → 信息解析」（后端 Python 支持）或手机 APP 扫码还原 |
+| v2 `mode=rebuild`（拆包重组，重建 ZIP） | ❌ 同上，改用「信息传输 → 信息解析」或 APP |
+| 真实摄像头拍摄链路 / 视频编解码压缩退化 | 不在本次验证范围（沿用既有 jsQR 扫描流程） |
+
+- 解码端按 `b"JZ2"` 魔数双协议自适应（与「信息传输」`_envelope_from_raw` / APP 同口径）；
+- JZ2 帧头常量目前是多份人肉拷贝（`info-transfer/backend/routes.py`、`worker.js`、
+  APP 端），协议契约文档化属另一任务，本次未动。
 
 ## 依赖与升级
 
@@ -21,7 +45,7 @@
 | 插件自带依赖（`backend/vendor/`） | 无 |
 | 外部程序组件 | 无 |
 | 能否单独升级 | ✅ 可以——业务依赖走「依赖组件包」，插件不 import 其他插件（构建期 C-4/C-10/C-11 校验） |
-| 升级是否需重启 | 含 `backend/**` 改动**需要**重启（后台/安装器会自动重启，约 5~10 秒）；纯前端改动免重启，Ctrl+F5 即可 |
+| 升级是否需重启 | 本次改动为**纯前端**（`frontend/worker.js`、`frontend/app.js`），**免重启**；Ctrl+F5 强制刷新即可（`/plugin/**` 静态资源 24h 长缓存，见 F-2） |
 
 > 声明真源是 `manifest.json` 的 `requires`（三类依赖：框架包 / 自带 vendor / 外部程序组件）；
 > 出包工具构建期校验「声明 ↔ 实测 import」一致（C-10）。后台「插件管理」按它显示
@@ -30,6 +54,14 @@
 
 ## 注意事项
 
-- 视频需为 QR-transfer 协议生成的二维码流，帧内容包含序号/总帧数/FEC 参数；
+- 视频需为 QR-transfer 协议生成的二维码流（v1 文本帧或 v2 JZ2 二进制帧），帧内容包含
+  序号/总帧数/FEC 参数；
 - 后端重组为异步任务，前端通过 `GET /reassemble/<task_id>` 轮询，结果保留 30 分钟；
 - 解码时确保视频清晰、二维码完整，帧率不足或模糊可能导致数据不可恢复。
+
+## 版本记录
+
+- **1.2.0**（本次，D-7）：新增 v2 JZ2 二进制帧消费——worker 读 `binaryData`、帧头/CRC32 解析、
+  share 载荷接入既有后端 zfec 管线；重组产物为 JZ2 信封帧时在浏览器内解包（zlib）；
+  v1 路径零改动。版本递增理由：新增对外协议能力（新增功能，非修补），主版本次位 +1。
+- 1.1.7 及以前：仅支持 v1 文本帧。

@@ -1,6 +1,10 @@
 /* QR 视频流解码插件 —— 前端逻辑
  * 流程：选择视频 → 逐帧抽到 canvas → Web Worker 中 jsQR 解码 → 按协议解析
  *       帧头（序号/总帧数/纠错参数）→ 收集分块 → 后端异步 zfec 重组（轮询进度）。
+ * 协议双代自适应（v1 文本帧 / v2 JZ2 二进制帧，帧层解析在 worker.js）：
+ * - v2 重组产物是 JZ2 信封帧（二进制），由 Worker 的 kind="unpack" 消息解析
+ *   （帧头/元数据/压缩标志 → 解压 → 原始载荷），本文件按 fmt 渲染与下载；
+ * - v1 重组产物是信封 JSON 文本，走原有文本预览/下载路径（零改动）。
  *
  * 性能设计（针对大视频）：
  * - 解码放在 Web Worker，主线程只负责取帧与进度渲染，不卡 UI；
@@ -10,8 +14,10 @@
 
 const $ = (id) => document.getElementById(id);
 
-/* 部署时请与 index.html 中 app.js 的 ?v= 保持一致，用于绕过 24h 长缓存（F-2） */
-const APP_VER = "v=7";
+/* Worker 缓存参数，用于绕过 /plugin 静态资源 24h 长缓存（F-2）。
+ * 注：index.html 中 app.js 的 ?v= 与它相互独立（本次改动未含 index.html），
+ * 部署后需 Ctrl+F5 强制刷新页面以取到新版 app.js/worker.js。 */
+const APP_VER = "v=8";
 
 window.addEventListener("error", (e) => {
   try { setStatus("页面错误：" + (e.message || "未知"), true); } catch (_) {}
@@ -29,7 +35,10 @@ const urlState = {
   m: 0,
   framesScanned: 0,
   declaredN: 0,
+  proto: 0,           // 实际收到的帧协议：1=v1 文本帧 / 2=JZ2 二进制帧
   recoveredText: null,
+  recoveredBytes: null,   // v2：最终载荷字节（file 为原始文件，其余为载荷）
+  recoveredName: "",      // v2：下载文件名（按 fmt 语义给出）
 };
 
 let worker = null;
@@ -72,11 +81,11 @@ function ensureWorker() {
     return;
   }
   worker.onmessage = (e) => {
-    const { id, parsed } = e.data;
+    const { id, kind } = e.data;
     const item = pending.get(id);
     if (item) {
       pending.delete(id);
-      item.resolve(parsed);
+      item.resolve(kind === "unpack" ? e.data.result : e.data.parsed);
     }
   };
   worker.onerror = (e) => {
@@ -102,6 +111,16 @@ function dispatchDecode(dataArr, width, height) {
   });
 }
 
+/* 把重组产物字节交回 Worker 解析 v2 信封帧（JZ2），返回解析结果对象。 */
+function dispatchUnpack(buf) {
+  ensureWorker();
+  return new Promise((resolve) => {
+    const id = (Math.random() * 1e9) | 0;
+    pending.set(id, { resolve });
+    worker.postMessage({ id, kind: "unpack", data: buf }, [buf]);
+  });
+}
+
 /* 将一帧解码结果写入 chunks 集合 */
 function collectFrameResult(parsed) {
   if (!parsed) return;
@@ -109,6 +128,7 @@ function collectFrameResult(parsed) {
     urlState.declaredN = parsed.n;
     urlState.k = parsed.fec[0];
     urlState.m = parsed.fec[1];
+    urlState.proto = parsed.proto || 1;
   } else if (parsed.n !== urlState.declaredN ||
              parsed.fec[0] !== urlState.k ||
              parsed.fec[1] !== urlState.m) {
@@ -210,6 +230,9 @@ async function runScan(file) {
   urlState.nframes = 0;
   urlState.m = 0;
   urlState.k = 0;
+  urlState.proto = 0;
+  urlState.recoveredBytes = null;
+  urlState.recoveredName = "";
 
   await waitForFrame(video, 4000);
   if (!video.videoWidth) { setStatus("视频画面无法读取", true); return; }
@@ -303,6 +326,12 @@ function showReassembleProgress(pct, stage, etaSec, detail) {
 
 /* ---------- 后端异步纠错 ---------- */
 
+function renderSafely(result) {
+  Promise.resolve(renderRecovered(result)).catch((e) => {
+    setStatus("结果渲染失败：" + (e && e.message ? e.message : e), true);
+  });
+}
+
 async function submitToBackend() {
   const chunks = {};
   for (const [k, v] of urlState.chunks) chunks[k] = v;
@@ -323,7 +352,7 @@ async function submitToBackend() {
     const taskId = data.task_id;
     if (!taskId) {
       // 旧版同步响应兼容
-      return renderRecovered(data);
+      return renderSafely(data);
     }
 
     const startWall = performance.now();
@@ -349,7 +378,7 @@ async function submitToBackend() {
           `已完成 ${s.done || 0}/${s.total || "-"} 个纠错块`);
         prevPct = pct;
       } else if (s.status === "done") {
-        return renderRecovered(s);
+        return renderSafely(s);
       } else if (s.status === "error") {
         setStatus(s.detail || "纠错重组失败", true);
         return;
@@ -364,10 +393,22 @@ async function submitToBackend() {
   }
 }
 
-function renderRecovered(result) {
-  const bin = atob(result.data_b64);
+function b64ToBytes(b64) {
+  const bin = atob(b64);
   const raw = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+  return raw;
+}
+
+function isJz2(raw) {
+  return raw.length >= 3 && raw[0] === 0x4a && raw[1] === 0x5a && raw[2] === 0x32; // "JZ2"
+}
+
+function renderRecovered(result) {
+  const raw = b64ToBytes(result.data_b64);
+  if (isJz2(raw)) {
+    return renderRecoveredV2(raw, result);
+  }
   const text = new TextDecoder().decode(raw);
   const isJson = /^[\s]*[[{]$/.test(text.trim());
   let summary = `重组成功 ✔  恢复 ${result.size} 字节（原始文件）`;
@@ -380,6 +421,8 @@ function renderRecovered(result) {
   }
 
   setStatus(summary);
+  urlState.recoveredBytes = null;
+  urlState.recoveredName = "";
   $("resultSize").textContent = result.size + " 字节";
   $("result").hidden = false;
   $("previewTitle").textContent = isJson ? "恢复内容预览（JSON）" : "恢复内容预览（文本）";
@@ -391,14 +434,75 @@ function renderRecovered(result) {
   showDataModal(text, result.size, `${result.size} 字节 · 重组成功`);
 }
 
+/* v2（JZ2 二进制帧）重组产物：交回 Worker 解析信封帧（帧头/meta/解压），
+ * 再按 fmt 渲染——file 提供原始文件下载，其余提供载荷文本预览与按声明命名的下载。 */
+async function renderRecoveredV2(raw, result) {
+  setStatus("重组成功，正在解析 v2（JZ2）信封…");
+  const info = await dispatchUnpack(raw.buffer);
+  if (!info) {
+    setStatus("v2 信封解析失败（Worker 无响应）", true);
+    return;
+  }
+  if (!info.ok) {
+    setStatus(info.message || "v2 信封解析失败", true);
+    return;
+  }
+
+  const compLabel = info.comp === 0 ? "无压缩" : (info.comp === 1 ? "zlib" : "xz");
+  urlState.recoveredBytes = info.bytes;
+  urlState.recoveredName = info.downloadName;
+  urlState.recoveredText = info.text;
+
+  $("resultSize").textContent = info.size + " 字节";
+  $("result").hidden = false;
+  $("downloadBtn").disabled = false;
+
+  if (info.fmt === "file") {
+    setStatus(`重组成功 ✔  恢复文件 ${info.downloadName}（${info.size} 字节，原始字节一致）`);
+    $("previewTitle").textContent = "恢复内容预览（原始文件）";
+    $("preview").textContent =
+      `原始文件：${info.downloadName}\n大小：${info.size} 字节\n压缩：${compLabel}\n` +
+      "（二进制文件不在预览中展开，点击「下载恢复数据」保存原文件）";
+    showDataModal(
+      `原始文件：${info.downloadName}\n大小：${info.size} 字节\n压缩：${compLabel}\n\n` +
+      "（已按原始字节恢复，可直接下载）",
+      info.size, `${info.size} 字节 · v2 原始文件 · 重组成功`);
+    return;
+  }
+
+  const text = info.text || "";
+  const isJson = /^[\s]*[[{]$/.test(text.trim());
+  let summary = `重组成功 ✔  v2 数据（${info.fmt}）${info.size} 字节`;
+  if (isJson) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) summary += `，JSON 数组含 ${parsed.length} 个元素`;
+      else summary += "，JSON 对象";
+    } catch (e) { /* 忽略 */ }
+  }
+  setStatus(summary);
+  $("previewTitle").textContent = isJson ? "恢复内容预览（JSON）" : "恢复内容预览（文本）";
+  $("preview").textContent = text.slice(0, 2000);
+  showDataModal(text, info.size, `${info.size} 字节 · ${info.fmt} · 重组成功`);
+}
+
 function downloadRecovered() {
-  const text = urlState.recoveredText || "";
-  const blob = new Blob([text], { type: "application/octet-stream" });
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "recovered-data.json";
+  let url;
+  if (urlState.recoveredBytes) {
+    const blob = new Blob([urlState.recoveredBytes], { type: "application/octet-stream" });
+    url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = urlState.recoveredName || "recovered-data.bin";
+  } else {
+    const text = urlState.recoveredText || "";
+    const blob = new Blob([text], { type: "application/octet-stream" });
+    url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = "recovered-data.json";
+  }
   a.click();
-  URL.revokeObjectURL(a.href);
+  URL.revokeObjectURL(url);
 }
 
 /* ---------- 解码结果浮窗 ---------- */
@@ -481,6 +585,8 @@ function init() {
     $("videoSrc").removeAttribute("src");
     urlState.video = null;
     urlState.recoveredText = null;
+    urlState.recoveredBytes = null;
+    urlState.recoveredName = "";
     $("fileName").textContent = "";
     $("scanBtn").disabled = true;
     $("progressWrap").hidden = true;
@@ -511,6 +617,7 @@ window.__qrDebug = () => ({
   nframes: urlState.nframes,
   k: urlState.k,
   m: urlState.m,
+  proto: urlState.proto,
   nChunks: urlState.chunks.size,
   sampleIndices: Array.from(urlState.chunks.keys()).slice(0, 40),
 });
