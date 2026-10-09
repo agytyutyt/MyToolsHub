@@ -393,7 +393,11 @@ class RealBuilderCrossCheck(unittest.TestCase):
         os.makedirs(os.path.join(self.root, "config"))
         shutil.copytree(os.path.join(self.repo, "plugins", "base64"),
                         os.path.join(self.base, "plugins", "base64"))
-        # 当作目标机上的旧版本 1.0.0（与仓库一致），并造一个"新版"夹具
+        # 当作目标机上的旧版本 1.0.0（仓库现版本会随批次递增，故显式改写夹具而非依赖仓库值）
+        base_man = json.load(open(os.path.join(self.base, "plugins", "base64", "manifest.json"),
+                                  encoding="utf-8"))
+        base_man["version"] = "1.0.0"
+        self.write_json(os.path.join(self.base, "plugins", "base64", "manifest.json"), base_man)
         self.write_json(os.path.join(self.base, "version.json"), {"app": "1.9.0", "schema": 1})
         self.write_json(os.path.join(self.root, "config", "tools.json"), {"tools": []})
         self.fixture = os.path.join(self.tmp, "fixtures", "base64")
@@ -427,7 +431,7 @@ class RealBuilderCrossCheck(unittest.TestCase):
              "-Id", "base64", "-From", self.fixture, "-OutDir", out_dir, "-RegistryFile", reg],
             capture_output=True, text=True, encoding="gbk", errors="replace", timeout=300)
         self.assertEqual(r.returncode, 0, "构建失败：%s\n%s" % (r.stdout[-1500:], r.stderr[-500:]))
-        pkg = os.path.join(out_dir, "JZToolsHub-插件-base64-v1.0.1.zip")
+        pkg = os.path.join(out_dir, "JZToolsHub-base64-后端-v1.0.1.zip")
         self.assertTrue(os.path.isfile(pkg), r.stdout[-800:])
 
         ins = pa.inspect_package(pkg, self.base, self.root)
