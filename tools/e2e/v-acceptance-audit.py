@@ -98,8 +98,17 @@ h2 = sha(z2) if z2 else ""
 ck("V2", "同源派生可重复构建（两次 sha256 一致）", bool(h1) and h1 == h2, (h1[:16], h2[:16]))
 store_pkg = glob.glob(os.path.join(os.path.expanduser("~"), ".jztoolshub", "store", "packages",
                                    "JZClient-本地插件-local-base64-v*.zip"))
-ck("V2", "派生包与商店上架包 sha256 一致",
-   bool(store_pkg) and h1 == sha(store_pkg[0]), ("store", sha(store_pkg[0])[:16]) if store_pkg else "商店无该包")
+# 商店里同 id 会有多版本并存（历史包不删）——必须取**最高版本**比对，
+# 用 glob 原序会在每次升版本号后随机拿到旧包，产生与实现无关的假红灯。
+def _ver_of(_p):
+    _m = re.search(r"-v(\d+(?:\.\d+)*)\.zip$", _p)
+    return tuple(int(x) for x in _m.group(1).split(".")) if _m else ()
+store_pkg = sorted(store_pkg, key=_ver_of)
+latest_store = store_pkg[-1] if store_pkg else ""
+ck("V2", "派生包与商店上架包 sha256 一致（取商店内最高版本）",
+   bool(latest_store) and h1 == sha(latest_store),
+   (os.path.basename(latest_store), sha(latest_store)[:16]) if latest_store else "商店无该包")
+
 # 第二源码副本：client-plugins 之外的本地插件源码目录
 dup = []
 for base in ("plugins",):
