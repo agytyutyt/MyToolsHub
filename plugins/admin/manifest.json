@@ -17,7 +17,7 @@
     "大模型设置",
     "数据迁移"
   ],
-  "version": "1.4.0",
+  "version": "1.4.1",
   "author": "JZToolsHub 团队",
   "form": "source",
   "core": true,
@@ -40,6 +40,12 @@
         "version": ">=3.1",
         "required": false,
         "hint": "缺少 openpyxl：批量导入导出（xlsx，缺失时仅剩 CSV）不可用。请安装依赖组件包 JZToolsHub-依赖-openpyxl-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
+      },
+      {
+        "name": "requests",
+        "version": ">=2.31",
+        "required": false,
+        "hint": "缺少 requests：插件商店服务器侧的 worker 单元控制（停用/卸载）不可用。请安装依赖组件包 JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。"
       },
       {
         "name": "werkzeug",
