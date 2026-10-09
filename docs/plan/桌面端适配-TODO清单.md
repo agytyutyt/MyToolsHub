@@ -283,7 +283,7 @@
 | X-2 | D-2 B-heavy 本地包丢 timeout_ms | 重出包时漏传 `-TimeoutMs` → 能力层超时上限回落 60s | ✅ 已完成（commit `53bab50`）；三插件升补丁号重出：info-transfer 1.2.10 / qr-video-decode 1.1.7 / trajectory-convert 1.2.1<br>2026-10-09 后续：info-transfer→1.2.11、qr→1.2.0 已重出（含服务器包），待上架（Q3） |
 | X-3 | D-8 store 无 README | store 插件缺 README（接口唯一真源）；出包链对 README 缺失只 Warn | ✅ 已完成（commit `95c219d`）：README 门禁升格为「必须/Die」+ 上架机器校验兜底；store 登记 `8e14e5c` |
 | X-4 | C1 迁移上移 | 插件历史 LLM 迁移上移主体 `app.py`（代码质量报告 C1 整改） | ✅ 已完成（commit `747412d`：app.py 落点 + `llm_migrated.flag` 退场标记；删除窗口=flag 全覆盖后，已写入代码注释） |
-| X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | 未开始（本轮已排期） |
+| X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | 未开始（本轮已排期）；2026-10-09：本地包 10 个已重出（含 README）待上架；catalog 修复待 Q4 |
 | X-6 | D-5 WebView2 fixed 内核链 | 备选阶梯 100.x→109.x→92.x（2026-10-09 拍板） | 未开始（本轮已排期） |
 | X-7-1 | 残留小项① | admin manifest 版本递增（admin 代码 `747412d` 有改动） | 未开始 |
 | X-7-2 | 残留小项② | `tools/e2e/plugin-upgrade-sandbox-tests.ps1` 依赖旧路径 `deploy\JZToolsHub\version.json`（现为 `deploy\服务端\JZToolsHub`）需修 | 未开始 |
