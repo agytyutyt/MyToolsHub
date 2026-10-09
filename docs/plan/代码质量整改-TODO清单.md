@@ -31,6 +31,7 @@
 | C2 | §2.2 C2：`plugins/trajectory-sketch/backend/filter_bridge.py:44-52` 恒真函数与废弃形参；死键 `use_filter_plugin_rules`（`config_store.py:38/:130`、`routes.py:274-275`）；孤儿 `_probe_fix.cpython-314.pyc` | 删恒真函数与废弃形参（同步修调用方）、删死键三处读写、清孤儿 pyc——这是完成解耦，不是卫生清理 | 未开始 |
 | C3 | §2.2 C3：帧头常量三份人肉同步（`trajectory-convert:48-51` ↔ `info-transfer:175-178` ↔ `qr-video-decode:38-40`）；编码实现四份 | 协议契约文档（`docs/design/`）+ `testdata/protocol/` 跨实现测试向量；**代码不合并**（四插件各自保留实现） | 未开始（与「二维码协议契约专项」绑定执行） |
 | C4 | §2.2 C4：同源副本无台账——`bg_image.py`×2 未声明（file-filter ≡ trajectory-sketch）、`jsqr.min.js`×2 未登记、QR 编解码×4 含未声明分叉（`PAYLOAD_SAFETY`） | 增设**同源副本台账**一节（副本对 / 同源日期 / 演进策略 / 漂移时以谁为准）+ 构建期 md5 漂移提示（warning 不阻断，宿主同 C-11 脚本） | 未开始（注：2026-10-09 落的「服务器↔客户端工件文件头登记」不是本项，C4 要求的跨插件台账仍未做） |
+| L-13 债·admin | 门禁侧新登记（非报告编号）：admin legacy 端点命名债——`/api/account/password` 等（后端 `plugins/admin/backend/routes.py:988` 注册；前端 `frontend/js/admin-common.js:178` 调用；测试 `test_data_migrate.py:574` 覆盖），不符 §16.10「`/api/<自身id>`」惯例 | 现经框架面白名单放行（`tools/build-plugin-package.ps1` `$l13CoreLegacy`，依据 admin 随主体分发、不可卸载；Python 侧 `CORE_LEGACY_FACES` 同口径）；可选清理=改名 `/api/admin/...`（后端+前端+测试三处 + 功能验证） | 未开始 |
 
 ## 2. P1：数据安全与正确性（报告 §三）
 

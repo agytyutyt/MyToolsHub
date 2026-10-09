@@ -62,6 +62,24 @@ DEFAULT_TIMEOUT_MS = 600000
 # L-13 白名单框架面（规范 §16.10 第 3 款：/api/<token> 中 token 允许集）
 FRAMEWORK_FACES = {"tools", "org", "login", "logout", "session"}
 
+# 核心插件 legacy 自有端点（命名债）放行（2026-10-09；与 build-plugin-package.ps1 $l13CoreLegacy 同口径）：
+# 核心插件随主体分发、不可卸载（plugins/admin/manifest.json "core": true），其前端即框架面——legacy
+# 端点未按 /api/<自身id>/ 惯例命名（/api/account/password 注册于 plugins/admin/backend/routes.py:988），
+# 按框架面口径放行。仅对**正在构建的核心插件自身**生效：其他插件引用这些 token 仍判跨插件。
+CORE_LEGACY_FACES = {"admin": ("account",)}
+
+# 外部 URL 语境豁免（与 build-plugin-package.ps1 $l13ExtRe 同口径）：同字面量内含 host/port 形态外部
+# 地址（如 http://127.0.0.1:11434/api/chat）时，其中的 /api/<token> 是外部服务地址描述（实例：admin
+# 前端 <option> 文案「Ollama 本地（/api/chat）」，其所在模板字面量另含 api.deepseek.com 提示行），
+# 不按跨插件调用记罪。依据：规范 §16.10 第 3 款判的是插件间调用（插件端点一律同源 /api/<id>/…）；
+# 代码级硬编码来源仍由禁用模式 5（https?://…/api/）独立判红——本豁免只免「跨插件」重复记罪。
+# 字面量口径：反引号模板字面量整段（跨行，按相邻反引号配对；文件反引号数为奇数时尾部失配，已知边界）；
+# 不在模板字面量内时按本行。行号口径与错误报告一致（均在块注释剥离后的文本上计行）。
+EXT_ADDR_RE = re.compile(
+    r"[A-Za-z][A-Za-z0-9+.\-]*://(?:localhost|(?:\d{1,3}\.){3}\d{1,3}"
+    r"|(?:[A-Za-z0-9_-]+\.)+[A-Za-z]{2,})(?::\d{1,5})?")
+TEMPLATE_LIT_RE = re.compile(r"`[^`]*`", re.S)
+
 
 def load_rules():
     try:
@@ -141,6 +159,12 @@ def l13_check(frontend_dir, base_id):
             continue
         # 注释剥离：L-13 管的是代码字面量——文档注释里提历史路径（如解耦迁移说明）不算违规
         text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+        # 外部 URL 语境行集：模板字面量整段含外部地址 → 该段全部行号豁免跨插件判定（见 EXT_ADDR_RE 注释）
+        ext_lines = set()
+        for lit in TEMPLATE_LIT_RE.finditer(text):
+            if EXT_ADDR_RE.search(lit.group(0)):
+                start = text.count("\n", 0, lit.start()) + 1
+                ext_lines.update(range(start, start + lit.group(0).count("\n") + 1))
         lines = text.splitlines()
         for li, ln in enumerate(lines, 1):
             if ln.lstrip().startswith(("//", "*", "<!--")):
@@ -159,7 +183,11 @@ def l13_check(frontend_dir, base_id):
                     continue
                 token = m.group(1)
                 if token != base_id and token not in FRAMEWORK_FACES \
+                        and token not in CORE_LEGACY_FACES.get(base_id, ()) \
                         and token != "local/%s" % base_id:
+                    # 外部 URL 语境：字面量（模板整段/本行）含 host/port 外部地址 → 地址描述，非跨插件调用
+                    if li in ext_lines or EXT_ADDR_RE.search(ln):
+                        continue
                     errors.append("%s:%d L-13 跨插件端点：/api/%s（仅允许自身 api/%s 与白名单框架面）"
                                   % (rel, li, token, base_id))
     return errors, refs

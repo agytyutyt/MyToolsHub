@@ -541,6 +541,22 @@ $l13Faces = @("tools", "org", "login", "logout", "session")   # 白名单框架�
 # 自身全局面：核心插件的 API 直接挂在 /plugin/<自身id>/api/<端点>（store，桌面端插件商店设计文档 §4.2）。
 # 该形态的 token 是 /api/ 后的端点名、自身 id 在其前——按自身命名空间放行，其他插件 id 仍判跨插件。
 $l13OwnGlobal = "/plugin/$Id"
+# 核心插件 legacy 自有端点（命名债）放行（2026-10-09）：核心插件随主体分发、不可卸载
+# （plugins/admin/manifest.json "core": true），其前端即框架面——legacy 端点未按 /api/<自身id>/
+# 惯例命名（/api/account/password 注册于 plugins/admin/backend/routes.py:988），按框架面口径放行。
+# 仅对**正在构建的核心插件自身**放行：其他插件引用这些 token 仍判跨插件（插件间独立铁律不松）。
+$l13CoreLegacy = @{ admin = @("account") }
+$l13LegacyOk = @()
+if ($l13CoreLegacy.ContainsKey($Id)) { $l13LegacyOk = @($l13CoreLegacy[$Id]) }
+# 外部 URL 语境豁免（精度修复，2026-10-09）：同字面量内含 host/port 形态外部地址
+# （如 http://127.0.0.1:11434/api/chat）时，其中的 /api/<token> 是外部服务地址描述（实例：
+# frontend/js/admin-user.js 的 <option> 文案「Ollama 本地（/api/chat）」，其所在模板字面量
+# 另含 https://api.deepseek.com/chat/completions 提示行），不按跨插件调用记罪。依据：规范
+# §16.10 第 3 款判的是插件间调用（插件端点一律同源 /api/<id>/…）；代码级硬编码来源仍由第 2 款
+# 的禁用模式 5（https?://…/api/）独立判红——本豁免只免「跨插件」重复记罪，不禁硬编码来源。
+# 字面量口径：反引号模板字面量整段（跨行，按相邻反引号配对；文件反引号数为奇数时尾部失配，
+# 已知边界）；不在模板字面量内时按本行。与 build-local-plugin-package.py 同口径。
+$l13ExtRe = '[A-Za-z][A-Za-z0-9+.\-]*://(?:localhost|(?:\d{1,3}\.){3}\d{1,3}|(?:[A-Za-z0-9_-]+\.)+[A-Za-z]{2,})(?::\d{1,5})?'
 $l13Banned = @(
     @{ re = '[''"]/api/[''"]\s*\+';               label = '动态拼接基址（"/api/" + …）' },
     @{ re = '\+\s*[''"]/api/[''"]';               label = '动态拼接基址（… + "/api/"）' },
@@ -554,6 +570,15 @@ if (Test-Path $l13Frontend) {
     $l13Files = Get-ChildItem -LiteralPath $l13Frontend -Recurse -File -Include *.js, *.html, *.css
     foreach ($f in $l13Files) {
         $rel = Get-RelPath $payloadPlugin $f.FullName
+        # 外部 URL 语境行集：模板字面量整段含外部地址 → 该段全部行号豁免跨插件判定（见上注释）
+        $l13ExtLines = @{}
+        $l13Raw = [string](Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8)
+        foreach ($lit in [regex]::Matches($l13Raw, '(?s)`[^`]*`')) {
+            if (-not ($lit.Value -match $l13ExtRe)) { continue }
+            $l13Start = ([regex]::Matches($l13Raw.Substring(0, $lit.Index), "`n")).Count + 1
+            $l13End = $l13Start + ([regex]::Matches($lit.Value, "`n")).Count
+            for ($n = $l13Start; $n -le $l13End; $n++) { $l13ExtLines[$n] = $true }
+        }
         $lines = Get-Content -LiteralPath $f.FullName -Encoding UTF8
         $l13InBlock = $false
         for ($i = 0; $i -lt $lines.Count; $i++) {
@@ -575,7 +600,10 @@ if (Test-Path $l13Frontend) {
                 # 自身全局面 /plugin/<自身id>/api/<端点>：id 在 /api/ 之前，按自身命名空间放行
                 if ($m.Index -ge $l13OwnGlobal.Length -and
                     ([string]$ln).Substring($m.Index - $l13OwnGlobal.Length, $l13OwnGlobal.Length) -ceq $l13OwnGlobal) { continue }
-                if ($tok -ne $Id -and $l13Faces -notcontains $tok -and $tok -ne "local/$Id") {
+                if ($tok -ne $Id -and $l13Faces -notcontains $tok -and
+                    $l13LegacyOk -notcontains $tok -and $tok -ne "local/$Id") {
+                    # 外部 URL 语境：字面量（模板整段/本行）含 host/port 外部地址 → 地址描述，非跨插件调用
+                    if ($l13ExtLines.ContainsKey($i + 1) -or ([string]$ln) -match $l13ExtRe) { continue }
                     $l13Bad += ("{0}:{1} 跨插件端点 /api/{2}（仅允许自身与白名单框架面）" -f $rel, ($i + 1), $tok)
                 }
             }
