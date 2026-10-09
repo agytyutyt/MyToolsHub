@@ -353,7 +353,7 @@ function buildCard(item) {
   meta.className = "ann-meta";
   meta.append(
     Object.assign(document.createElement("span"),
-      { innerHTML: JZIcon.html("👤") + " " + (item.created_by_name || item.created_by || "未知") }),
+      { innerHTML: JZIcon.html("👤") + " " + esc(item.created_by_name || item.created_by || "未知") }),
     Object.assign(document.createElement("span"), { textContent: "·" }),
     Object.assign(document.createElement("time"), { textContent: item.created_at || "" }),
     Object.assign(document.createElement("span"), { className: "spacer" }),
@@ -389,7 +389,7 @@ function buildCard(item) {
 function openDetail(item) {
   $("detailTitle").textContent = item.title || "";
   $("detailAuthor").innerHTML =
-    JZIcon.html("👤") + " " + (item.created_by_name || item.created_by || "未知");
+    JZIcon.html("👤") + " " + esc(item.created_by_name || item.created_by || "未知");
   $("detailTime").textContent = item.created_at || "";
   const box = $("detailContent");
   box.innerHTML = nl2br(item.content);   // esc 后按换行转 <br>

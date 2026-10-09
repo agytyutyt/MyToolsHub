@@ -50,10 +50,29 @@
     var list = ICON_NAMES.map(function (n) {
       return fetch('./icons/' + n + '.svg')
         .then(function (r) { return r.ok ? r.text() : ''; })
-        .then(function (t) { ICONS[n] = t; })
+        .then(function (t) { ICONS[n] = sanitizeIconSvg(t); })
         .catch(function () { ICONS[n] = ''; });
     });
     return Promise.all(list);
+  }
+
+  /** 图标 SVG 保守清洗（F-3）：只认根节点为 <svg> 的文档，剥掉 on* 事件属性与外链引用；
+   *  含 <script>/<foreignObject> 或解析失败则整枚弃用（返回 ''，渲染时回落 <img>）。
+   *  图标文本来自本插件自带静态资产、名称受 ICON_NAMES 白名单约束，这里防的是资产被
+   *  篡改/替换后变成同源脚本执行面。 */
+  function sanitizeIconSvg(text) {
+    var doc = new DOMParser().parseFromString(String(text || ''), 'image/svg+xml');
+    var root = doc.documentElement;
+    if (!root || root.nodeName !== 'svg') { return ''; }
+    if (doc.querySelector('script, foreignObject')) { return ''; }
+    Array.prototype.forEach.call(root.querySelectorAll('*'), function (node) {
+      Array.prototype.slice.call(node.attributes).forEach(function (attr) {
+        if (/^on/i.test(attr.name) || attr.name === 'href' || attr.name === 'xlink:href') {
+          node.removeAttribute(attr.name);
+        }
+      });
+    });
+    return new XMLSerializer().serializeToString(root);
   }
 
   /** 布尔安全文本（防止 undefined 被渲染成 "undefined"） */

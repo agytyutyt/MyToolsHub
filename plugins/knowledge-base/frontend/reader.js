@@ -473,7 +473,11 @@
 
   // ==================== 渲染器：Excel（.xlsx/.xls/.csv） ====================
   function renderSheet(file) {
-    return Promise.all([fetchRaw(file), loadScript(V + "xlsx/xlsx.full.min.js?v=1")])
+    // purify 必载：SheetJS 的 sheet_to_html 只转义单元格正文，属性侧（data-v / data-z /
+    // 超链接 href）是裸拼字符串，上传文件可借此逃逸出属性上下文注入事件 —— 与 Markdown /
+    // Word 两个渲染器同口径先 sanitize 再入 DOM（F-3）。
+    return Promise.all([fetchRaw(file), loadScript(V + "xlsx/xlsx.full.min.js?v=1"),
+                        loadScript(V + "purify/purify.min.js?v=1")])
       .then(function (results) {
         var buf = results[0];
         var wb = window.XLSX.read(buf, { type: "array" });
@@ -493,8 +497,10 @@
         var tableHtmls = {};
         names.forEach(function (name) {
           var ws = wb.Sheets[name];
-          tableHtmls[name] = window.XLSX.utils.sheet_to_html(ws, { header: "", footer: "" })
-            .replace(/<table/, '<table class="sheet-table"');
+          tableHtmls[name] = window.DOMPurify.sanitize(
+            window.XLSX.utils.sheet_to_html(ws, { header: "", footer: "" }),
+            { USE_PROFILES: { html: true } }
+          ).replace(/<table/, '<table class="sheet-table"');
         });
         function show(name) {
           wrap.innerHTML = tableHtmls[name] || "";
