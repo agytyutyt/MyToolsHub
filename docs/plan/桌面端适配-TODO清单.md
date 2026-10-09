@@ -11,7 +11,7 @@
 | --- | --- |
 | 接口契约 | 批次 3 的路由分区表与会话中继口径、批次 4 的本地插件 manifest 契约（均引自方案 §6，本文不复制） |
 | 实现路径 | 改动面：新建客户端工程（内核同源复用 + UI 层壳 + 能力层路由）+ `static/` 与 16 插件前端的流式改造 |
-| 当前实现状态 | **批次 0 完成（T01–T05 ✅ 2026-10-03，spike 存档 `demo/desktop-spike/README.md`）**；T06–T33 待做 |
+| 当前实现状态 | **批次 0 完成（T01–T05 ✅ 2026-10-03，spike 存档 `demo/desktop-spike/README.md`）**；批次 1–8b 主体完成（遗留见各批次）；**批次 9/10 已大量完成（剩真机/上架项）、批次 11 未开工** |
 | 后续优化方向 | 本文即桌面端落地唯一活清单；完成并出包后整文移入 `docs/archive/` |
 
 > **覆盖范围**：桌面客户端全部实施步骤（spike → 内核/UI/中继/插件四层建设 → 流式布局改造 → 验收出包）、门控关系与红线（唯一活清单）
@@ -34,6 +34,7 @@
 | 9 | 存量插件适配——框架增补 + 三类试点 | F1 身份注入 / F2 依赖组件包补齐 / F3 resident 台架 / F4 出包工具增强（L-13 静态检查）/ F5 清单降级合并；试点 base64（B1）+ qr-video-decode（B2）+ file-filter（C） | **设计已定稿（2026-10-06，`docs/design/存量插件三类适配-设计文档.md` Q1–Q7 全拍板）；待排期** |
 | 10 | 存量插件适配——B 类放量 + A 类上架 | B-light 4 个 + B-heavy 2 个（含懒加载改造）；A 类 4 个出包上架（knowledge-base/shared-docs/notice-board/case-report） | 批次 9 试点通过 |
 | 11 | 存量插件适配——C 类收尾 + 全量验收 | trajectory-sketch/character-graph（Q5 过渡口径）+ A 类可选 worker 迁移（Q7 顺序）+ 全量验收（V1–V10） | 批次 10 |
+| 12 | 2026-10-09 审计承接（D 类缺陷销项 + 上架/内核链收口 + 残留小项） | 主包与客户端出包链 / 商店上架链 / WebView2 内核链 / 文档与工具残留 | 无 |
 
 ---
 
@@ -55,8 +56,6 @@
 | T07 | 客户端出包链路 | 新建客户端 spec（onedir、`console=False`，复用主包 spec 模式 + T01 验证的 `--collect-all webview` 口径；**含子进程运行时目录 embeddable Python，GD4**）+ 出包脚本（`build-deploy-local.py` 模式另立，**不改主包命令真源**）+ 校验脚本（verify 模式另立：结构断言/禁带清单/`--smoke` 起服务探针）。**命名/版本/兜底策略走构建配置单源**（`tools/client/client-build-config.json`：产品名、exe 名、显示名、程序目录、数据目录、版本号、`webview2_fallback=fixed`（已定案）、`webview2_version`（100.0.1185.x 线最后补丁版）——spec、出包脚本、install.ps1、壳窗口标题统一从它读取）；fixed 目录获取=官方下载页 Fixed Version 下拉（100.x 可选性待核验，备选 Microsoft Update Catalog）解包入 `runtime\webview2\`，**删多余语言包（留 zh-CN/en-US）+ NTFS compact LZX 压缩**随出包脚本执行；**部署分件解耦**：程序包（exe+_internal+static+插件）/ 内核包（webview2 fixed 独立分件，先例=Chrome MSI/LibreOffice 离线组件）/ 组件包，install.ps1 按 `webview2_version` 探测已装则跳过——程序更新不重下内核；初值：exe `JZClient.exe`、版本 **0.0.1-preview**、数据目录 `%LOCALAPPDATA%\JZClient\` | 双击产物起能力层服务并监听 127.0.0.1 随机端口；产物含 `runtime\python.exe` 且可派生插件子进程；**改配置文件即可改名/改版本/换内核，出包链无硬编码**；100 代 fixed 目录实占 ≈180–250MB（裁语言包+LZX 后）；**程序包更新用例：覆盖程序目录后内核目录原样未动**；校验脚本红灯项与主包同风格 | ✅ 程序包分件落地（构建配置单源 + spec + build-client.py + verify-client.py），实际出包 **36.6MB**（批次 1 无 UI 层），结构断言与 smoke 全过；**遗留**：fixed 内核 100.x 可得性核验与内核分件、install.ps1（T31 前）；子进程运行时目录**已销项（2026-10-08）**：`tools/client/build-client-runtime.py` → `runtime/python`（embeddable cp314 + Flask 栈），verify-client 增「打包态 worker 往返」断言 |
 | T08 | 能力层路由分区 | 按方案 §6.1 表实现四路裁决（本地直出/清单合并/中继远程/兜底）；`/api/local/<id>/` 挂载机制；127.0.0.1 随机空闲端口；**单实例互斥**（命名 mutex + 第二实例激活已有窗口） | 四路路由用例各 1 条过；二次启动激活已有窗口不开新进程 | ✅ 源码态+打包态全过（本地直出/中继透传 401→登录→200/兜底 503/`/api/local` 占位/单实例防重入退出）；**「第二实例激活已有窗口」随批次 2 T10 窗口接入**。补丁（2026-10-04，应无窗阶段运维反馈）：**`port.txt`/`client.pid` 落盘 + exe `--stop` 参数**（带镜像名校验防误杀）——当前端口不再靠翻追加式日志 |
 | T09 | 配置/探测/兜底 | 客户端配置存 `%LOCALAPPDATA%\<客户端>\`（本地插件清单、客户端配置文件；不存凭据）。**远程地址以配置文件为准（2026-10-03 拍板）**：两层——构建配置给默认地址（出包定型）→ 安装时落地到客户端配置文件（可按机器改）→ 运行时读客户端配置文件，**无首启输入向导**；兜底页「改地址」= 编辑该文件后重连；健康探测用匿名探针（**`GET /login`；`/api/session` 当前版本 404 已废弃，2026-10-03 修正**）；本地兜底页（原因+改地址+重试+用浏览器打开） | 断网/错地址/慢响应三场景兜底页可达；改配置文件地址即重连；**装完即起，无首启向导** | ✅ 源码态+打包态全过（smoke：兜底页 503/health/写地址落盘 config.json）；探针口径 T03 已实测 |
-
-| T09 | 配置/探测/兜底 | 客户端配置存 `%LOCALAPPDATA%\<客户端>\`（本地插件清单、客户端配置文件；不存凭据）。**远程地址以配置文件为准（2026-10-03 拍板）**：两层——构建配置给默认地址（出包定型）→ 安装时落地到客户端配置文件（可按机器改）→ 运行时读客户端配置文件，**无首启输入向导**；兜底页「改地址」= 编辑该文件后重连；健康探测用匿名探针（**`GET /login`；`/api/session` 当前版本 404 已废弃，2026-10-03 修正**）；本地兜底页（原因+改地址+重试+用浏览器打开） | 断网/错地址/慢响应三场景兜底页可达；改配置文件地址即重连；**装完即起，无首启向导** | ✅ 源码态+打包态全过（smoke：兜底页 503/health/写地址落盘 config.json） |
 
 #### T06 实施记录：宿主内核边界清单（2026-10-03 产出，**已冻结**）
 
@@ -81,7 +80,7 @@
 | --- | --- | --- |
 | V1 | 纸面评审本清单（正面/禁带/档2 抽取推迟至 T19/T20） | 确认或改判；确认后清单状态改「已冻结」 |
 | V2 | `git diff app.py jz_deps.py jz_api.py jztools_data.py` | 空输出（主包零改动红线） |
-| V3 | `python tools/client/build-client.py` | `deploy/JZClient/` 生成，~36MB，build-info.json 版本=0.0.1-preview |
+| V3 | `python tools/client/build-client.py` | `deploy/桌面端/JZClient/` 生成，~36MB，build-info.json 版本=0.0.1-preview |
 | V4 | `python tools/client/verify-client.py` | 结构断言过（含禁带：无 plugins/ 目录） |
 | V5 | `python tools/client/verify-client.py --smoke` | 临时目录启动→兜底页 503→health→写地址落盘→退出码 0 |
 | V6 | 改 client-build-config.json 的 exe 名与版本 → 重出包 | 产物名/版本随之（单源验证），验完改回 |
@@ -179,10 +178,10 @@
 
 | # | 任务 | 具体实现方案 | 预期效果与验收 | 状态 |
 | --- | --- | --- | --- | --- |
-| T30 | 布局验收 | 按方案 §5.4：resize sweep（四边四角+最大化往返 3 次）、极值采样（720×560/640×1024/2560×640/1920×1080）、DPI 矩阵（100/125/150/200%）、边界用例（弹窗/拖卡/地图/上传中缩放）。**注：批次 0 基线图截于 Evergreen 154 内核；fixed 定版（100.0.1185.x）后须以目标内核重截基线作为对拍真源** | 全过且与目标内核基线图对比无回归 | ✅ resize sweep/极值采样/窄高 640×1024 均过（Evergreen 154；**fixed-100 定版后重截基线**） | ☑ |
-| T31 | 干净机器部署验收 | 按 `docs/guide/干净机器部署验收手册.md` 模式另立客户端清单：运行时自足、pylibs 组件包、**WebView2 fixed（100.0.1185.x）装载与内核/程序解耦验证（程序更新不触碰内核目录，T07）**、单实例、断网降级 | 干净机一次装成；程序包更新后内核目录未动、客户端正常启动 | ✅ 解耦语义实证（KERNEL_MARKER 保留）+ smoke；**真干净机验收留需求方** | ☑ |
-| T32 | 样例插件端到端 | 三类各一：类 A（现网插件经中继）、类 B-heavy（worker）、类 C（进程内+jz_relay 取数+LLM 中继）；验证跨类禁调用（白名单外 403）与断网行为 | 三样例全过；红线 1/2/6 逐条核验 | ✅ 类 A 真实端到端（登录/清单/公告板经中继，截图存档）；类 B/C 台架全过；LLM 中继预留（主包无 HTTP 推理面）；**类 C 离线语义已明确=降级可用**（本地简单运算照常、服务器复杂/敏感步骤降级，方案 §1.2） | ☑ |
-| T33 | 文档与手册回写 | `docs/guide/打包部署手册.md` 增客户端出包命令；`离线部署包说明.md` 增 WebView2 运行时组件（如适用）；`docs/README.md` 索引状态更新；方案文档 §9 风险表销项 | 文档与产物一致；索引三处（路由表/plan 表/eval 表）同步 | ✅ 手册/离线说明/README/方案 §9 已回写 | ☑ |
+| T30 | 布局验收 | 按方案 §5.4：resize sweep（四边四角+最大化往返 3 次）、极值采样（720×560/640×1024/2560×640/1920×1080）、DPI 矩阵（100/125/150/200%）、边界用例（弹窗/拖卡/地图/上传中缩放）。**注：批次 0 基线图截于 Evergreen 154 内核；fixed 定版（100.0.1185.x）后须以目标内核重截基线作为对拍真源** | 全过且与目标内核基线图对比无回归 | ✅ resize sweep/极值采样/窄高 640×1024 均过（Evergreen 154；**fixed-100 定版后重截基线**） ☑ |
+| T31 | 干净机器部署验收 | 按 `docs/guide/干净机器部署验收手册.md` 模式另立客户端清单：运行时自足、pylibs 组件包、**WebView2 fixed（100.0.1185.x）装载与内核/程序解耦验证（程序更新不触碰内核目录，T07）**、单实例、断网降级 | 干净机一次装成；程序包更新后内核目录未动、客户端正常启动 | ✅ 解耦语义实证（KERNEL_MARKER 保留）+ smoke；**真干净机验收留需求方** ☑ |
+| T32 | 样例插件端到端 | 三类各一：类 A（现网插件经中继）、类 B-heavy（worker）、类 C（进程内+jz_relay 取数+LLM 中继）；验证跨类禁调用（白名单外 403）与断网行为 | 三样例全过；红线 1/2/6 逐条核验 | ✅ 类 A 真实端到端（登录/清单/公告板经中继，截图存档）；类 B/C 台架全过；LLM 中继预留（主包无 HTTP 推理面）；**类 C 离线语义已明确=降级可用**（本地简单运算照常、服务器复杂/敏感步骤降级，方案 §1.2） ☑ |
+| T33 | 文档与手册回写 | `docs/guide/打包部署手册.md` 增客户端出包命令；`离线部署包说明.md` 增 WebView2 运行时组件（如适用）；`docs/README.md` 索引状态更新；方案文档 §9 风险表销项 | 文档与产物一致；索引三处（路由表/plan 表/eval 表）同步 | ✅ 手册/离线说明/README/方案 §9 已回写 ☑ |
 
 ---
 
@@ -221,23 +220,9 @@
 - **遗留**：venv 建环境（wheel 清单闭包安装，T-O2-12c 后半）；试点插件真机迁移（迁移流程：注册表加单元 → 重启主应用 → 验证反代 → 逐个切）；supervisor 独立安装包真机服务化验收（NSSM 脚本已备）；懒启动（拍板首期不做）。
 - **同日收口（批次 8b 续）**：①venv 建环境全链落地——`venv_mgr.py`（`--system-site-packages` 基线随主包、wheel 绝对路径离线安装、marker 幂等重建）+ apply 自动 venv 化（`deps_mode=venv` 包→建环境→单元切 venv 解释器）+ `validate_venv_node` 上架校验同源复用 + 出包链 `-VenvWheels`；台架 D5 组（6 项：venv apply/单元登记/健康/业务 API/私有依赖 dbgmod 生效/wheel sha 不符拒装旧版照常），**实施修正：wheel tag 校验须按「末三段」解析且分两类放行（cp314*-cp314*-win_amd64 C 扩展 / py3-none-any 纯 Python）——整名匹配与 "none" 一刀切都会误杀（已回写 §4）**。②试点迁移演练 `tools/e2e/worker-migration-demo.py` 8 项全过——真实主应用 + 真实 notice-board（注册表加单元→重启跳过进程内→supervisor 拉起→真实登录→反代访问公告板 API（worker 回环取**真实** admin 身份 dict）→停 worker 该插件 503 而主应用/登录态/工具清单照常）。③`tools/build-supervisor-package.ps1` 分件组装实测通过（supervisor/ + jz_worker.py + 安装脚本 + 注册表模板）。
 
-## 批次 9–11：存量插件适配（设计已定稿；**批次 9 进行中**，2026-10-06 开工）
+## 批次 9–11：存量插件适配（设计已定稿；**批次 9/10 已大量完成（剩真机/上架项）、批次 11 未开工**，2026-10-06 开工）
 
 ### 批次 10 实施记录（2026-10-06，提交 89367f2）
-
-### 客户端重新出包（2026-10-07，提交 7043c2d）
-
-- **触发**：批次 9/10 改动（F1 身份注入/F5 降级合并/查询串透传/executor 崩溃修复/同源内核 jz_api 兜底）尚未进冻结包。
-- **过程抓到环境漂移**：首次构建 smoke 失败——`ModuleNotFoundError: webview`（pywebview/pythonnet 从构建环境消失，PyInstaller 静默少收集；批次 2 补丁③ UI 存活断言按设计拦截）。修复=按批次 0 定案版本装回（pywebview==6.2.1 + pythonnet==3.2.0；**本机代理 7890 宕，pip 走直连**）。
-- **加固**：build-client.py 增出包前置断言（webview/pythonnet/pystray 缺失即拒打，失败从 smoke 前移到打包前，7043c2d）。
-- **产物**：`deploy/YFJZ_Client` 85.3 MB；结构断言 9 项过；smoke 通过（兜底页/本地接口/配置落盘）；F2 依赖清单随包（9 包，含 pywebview）；runtime\ 子树保留（内核/程序解耦）。
-- **待真机**：Windows 实机开窗/托盘/拖拽人工复核 + 批次 9/10 的商店上架与装包走查。
-
-### 主包 v2.3.23 出包（2026-10-07）——上架前置
-
-- **触发**：真机验证发现桌面端「插件商店」点击报「工具不存在或未启用」→ 服务器跑的是 9 月 v2.3.22 部署包（store 是批次 8 才进主包的）。
-- **产物**：deploy/JZToolsHub **v2.3.23**（增量组装：覆盖 544/新增 20；plugins/ 含 admin+store；tools.json store 条目 grant_all；含批次 9/10 的 jz_api 内核改动与 file-filter v1.6.0 源）；**verify-package --smoke 全绿**（启动/登录页/匿名 401/数据根隔离）。
-- **待目标机**：按打包部署手册覆盖部署 → 重启 → 验证侧栏「插件商店」可开 → 商店管理面上架三试点与依赖组件包 → 装包走查。
 
 | 项 | 状态 |
 | --- | --- |
@@ -246,6 +231,20 @@
 | B-heavy 2 个本地包 | ✅ 派生出包（info-transfer 改写 17 处 / trajectory-convert 7 处，resident+timeout） |
 | A 类 4 个双包重打 | ✅ -Force 补前端工件（knowledge-base/shared-docs/notice-board/case-report，C-13 全过——**顺带落地注释剥离**：notice-board 解耦迁移说明里的历史路径不算违规） |
 | 待办 | 真机项：admin 商店管理面上架（local 包×7 + 服务器双包）→ 装包走查 → 批次 11（C 类收尾 + worker 迁移 Q7 顺序） |
+
+### 客户端重新出包（2026-10-07，提交 7043c2d）
+
+- **触发**：批次 9/10 改动（F1 身份注入/F5 降级合并/查询串透传/executor 崩溃修复/同源内核 jz_api 兜底）尚未进冻结包。
+- **过程抓到环境漂移**：首次构建 smoke 失败——`ModuleNotFoundError: webview`（pywebview/pythonnet 从构建环境消失，PyInstaller 静默少收集；批次 2 补丁③ UI 存活断言按设计拦截）。修复=按批次 0 定案版本装回（pywebview==6.2.1 + pythonnet==3.2.0；**本机代理 7890 宕，pip 走直连**）。
+- **加固**：build-client.py 增出包前置断言（webview/pythonnet/pystray 缺失即拒打，失败从 smoke 前移到打包前，7043c2d）。
+- **产物**：`deploy/桌面端/YFJZ_Client` 85.3 MB；结构断言 9 项过；smoke 通过（兜底页/本地接口/配置落盘）；F2 依赖清单随包（9 包，含 pywebview）；runtime\ 子树保留（内核/程序解耦）。
+- **待真机**：Windows 实机开窗/托盘/拖拽人工复核 + 批次 9/10 的商店上架与装包走查。
+
+### 主包 v2.3.23 出包（2026-10-07）——上架前置
+
+- **触发**：真机验证发现桌面端「插件商店」点击报「工具不存在或未启用」→ 服务器跑的是 9 月 v2.3.22 部署包（store 是批次 8 才进主包的）。
+- **产物**：deploy/服务端/JZToolsHub **v2.3.23**（增量组装：覆盖 544/新增 20；plugins/ 含 admin+store；tools.json store 条目 grant_all；含批次 9/10 的 jz_api 内核改动与 file-filter v1.6.0 源）；**verify-package --smoke 全绿**（启动/登录页/匿名 401/数据根隔离）。
+- **待目标机**：按打包部署手册覆盖部署 → 重启 → 验证侧栏「插件商店」可开 → 商店管理面上架三试点与依赖组件包 → 装包走查。
 
 > 权威设计：`docs/design/存量插件三类适配-设计文档.md`（2026-10-06 定稿，Q1–Q7 全部拍板）。分类 A×6/B-light×5/B-heavy×3/C×3、四条改造模式（M-A/M-B1/M-B2/M-C）、逐插件方案（§3）、框架增补 F1–F6（§2.5）、验收 V1–V10（§5）均以该文为准——本节只登记批次骨架，任务分解随排期展开。后续优化已列 O3–O6。
 
@@ -261,16 +260,36 @@
 | # | 任务 | 内容 | 状态 |
 | --- | --- | --- | --- |
 | T-O9-1 | F4 出包工具增强 | `build-local-plugin-package.py`：`--derive-local`（manifest 变体派生，entry 字符串/对象双形态兼容）、`--api-rewrite`（幂等改写+边界断言）、L-13 静态检查（5 类禁用模式逐行定位+跨插件端点+改写计数核对）、`-FrontendFrom`；sha256 旁挂/登记片段沿用既有。**✅（2026-10-06）**：base64/qr-video-decode 两试点包实测通过（B1 manifest 变体正确、B2 resident/timeout/backend 入口正确、改写 3 处零残留）；负路径 4 类违规全红。**遗留：服务器出包链 C 系同款扫描（`build-plugin-package.ps1`）未做，随 T-O9-8 前补** | ✅（遗留 1 子项） |
-| T-O9-2 | 试点 M-B1：base64 | **出包 ✅**（`deploy/本地插件包/JZClient-本地插件-local-base64-v1.0.1.zip`，3.1KB，零 api 引用） | 出包完成；**装包走查待客户端台架** |
+| T-O9-2 | 试点 M-B1：base64 | **出包 ✅**（`deploy/插件包/本地插件/JZClient-本地插件-local-base64-v1.0.1.zip`，3.1KB，零 api 引用） | 出包完成；**装包走查待客户端台架** |
 | T-O9-3 | 试点 M-B2：qr-video-decode | **出包 ✅**（`…local-qr-video-decode-v1.1.5.zip`，resident=true/timeout=600000/entry.backend 正确，改写 3 处零残留，requires=flask+zfec 原样） | 出包完成；**zfec dep-slot 组件包联动待 T-O9-6；装包/任务轮询走查待台架** |
 | T-O9-4 | F1 身份注入 | capability_app：镜像钩子（更新/清除→身份失效）+ /api/session 惰性缓存（TTL 300s）+ 派发链 X-JZ-User 头 + jz_api.register_providers（hybrid）；根 jz_api（同源内核，GD8）get_session_user 增无 provider 时请求上下文读头兜底（懒 import flask，服务器 provider 路径不变）。**✅（2026-10-06）台架 `tools/e2e/identity-inject-tests.py` 10/10**：匿名/登录双链（provider+头）/登出清空/provider 优先 | ✅ |
 | T-O9-5 | F5 清单降级合并 | api_tools_merged 两处 502 兜底 → `_local_only_tools_response`（200 仅本地条目 + degraded 标记 + 仅本地分类，停用过滤照旧）。**✅（2026-10-06）台架 5a–5e**：死端口 200/仅本地出格/本地元数据可取/停用隐藏。main.js **无需改动**（200 走正常渲染路径，site 字段显式判空） | ✅ |
-| T-O9-6 | F2 依赖组件包盘点 | **✅（2026-10-06）盘点结论：零缺项**——B/C 插件 requires 全集（cv2/numpy/zfec/zxingcpp/qrcode/olefile/openpyxl/xlrd/docx/pypdf/requests）在 `deploy/依赖组件/` 全部有组件包且版本满足各插件下限；flask 走客户端运行时判定。**盘点抓出真缺口并修复**：客户端包内无 installed-deps.json → B-heavy 的 flask（required:true）三态判定误报缺失——build-client.py 接入同源 `gen-installed-deps.py --internal <客户端 _internal>`（产物落 kernel/config/，服务器 spec 白名单警告按「产物可解析」判据兼容），**现有 dist 已补生成 + evaluate 探针验证 flask→ok(3.1.3)、zfec 未装组件时正确 degraded**。偏差记录：客户端 _internal 无 requests/waitress dist-info（客户端工件 requires 不含 requests，无影响） | ✅ |
+| T-O9-6 | F2 依赖组件包盘点 | **✅（2026-10-06）盘点结论：零缺项**——B/C 插件 requires 全集（cv2/numpy/zfec/zxingcpp/qrcode/olefile/openpyxl/xlrd/docx/pypdf/requests）在 `deploy/依赖包/` 全部有组件包且版本满足各插件下限；flask 走客户端运行时判定。**盘点抓出真缺口并修复**：客户端包内无 installed-deps.json → B-heavy 的 flask（required:true）三态判定误报缺失——build-client.py 接入同源 `gen-installed-deps.py --internal <客户端 _internal>`（产物落 kernel/config/，服务器 spec 白名单警告按「产物可解析」判据兼容），**现有 dist 已补生成 + evaluate 探针验证 flask→ok(3.1.3)、zfec 未装组件时正确 degraded**。偏差记录：客户端 _internal 无 requests/waitress dist-info（客户端工件 requires 不含 requests，无影响） | ✅ |
 | T-O9-7 | F3 resident 台架用例 | **✅（2026-10-06）台架 `tools/e2e/resident-tests.py` 9/9**：resident 状态跨请求存活+同进程复用 / 非 resident 每请求新进程 / 超时 504+击杀后恢复 / 崩溃 502+自动拉起（状态重置）/ 查询串透传。**顺带修两处真缺陷**：①本地派发丢查询串（worker_path 只取 request.path，file-filter 前端 `mappings?limit=` 在用）→ 补 query_string 透传；②executor 崩溃后常驻表不弹出——Windows 下子进程句柄状态滞后（管道 EOF 先到、poll() 迟报退出码），死进程被复用连环 502 → 崩溃路径对齐超时路径同步弹出。**台架隔离坑**：local_state 经 client_config 落真实用户目录（load_client_config 不吃 data_dir 参数）跨运行残留——两台架已用官方 `JZCLIENT_DATA_DIR` 覆盖口隔离，误写目录已清 | ✅ |
-| T-O9-8 | 试点 M-C：file-filter 全套 | **阶段 1+2 ✅（2026-10-06）**：①前置 PS1 侧 L-13 扫描落地（build-plugin-package.ps1 新增 C-13 段，单引号 PS 串规避转义坍缩，桩验证 4/4 违规全红+base64/file-filter 真插件过；**教训：ps1 中文必须 UTF-8 BOM（批次 8b 已知）+ 双引号串内正则字符类转义不可靠**）；②服务器工件两端点已入 routes.py 并冒烟过——`POST /mappings/lookup`（批量查表 confirmed/suggested/remap，键归一化全在服务器）、`POST /llm/match-columns`（无状态 LLM 匹配+record_suggestions 落库+valid_targets/is_rejected 预过滤，Key 不出服务器）。**阶段 3 ✅（出包完成）**：客户端工件落地——`client-plugins/local-file-filter/`（manifest hybrid/mount/server_data=true/requires 仅 openpyxl+xlrd；backend=core+bg_image 同源副本 + **三个 relay 垫片**（llm_gateway=jz_llm 网关/mapping_store=查表垫片/llm_client=匹配垫片）+ routes.py 适配拷贝（adapt-ff-client.py 补丁：load_config/save_config→own 代理、10 个 mappings 管理端点→_passthrough 透明转发、过滤流本地化））；出包 `-FrontendFrom`+`--api-rewrite`（4 处改写零残留）。**顺带修真约定偏差**：entry.backend 按 pkg_install 六连口径应为**末段文件名**（routes.py）而非 GLM 草图的 backend/routes.py——工具推导/校验、file-filter manifest、两台架假插件已同步修正，qr-video-decode 包已重出。**待办**：混合装包冒烟台架（本地 status/config + 透传 + 过滤流离线降级）、双工件上架 | **阶段 4 ✅（2026-10-06）冒烟台架 `tools/e2e/file-filter-c-tests.py` 11/11**：本地 status/config（own 代理）+ mappings 透传 + 过滤全链（confirmed 档 relay 查表命中/exact 本地/LLM 建议删除）+ **敏感数据零出机**（stub 全量请求体无单元内容，V5 取证）+ **离线降级**（mode=llm 任务内 LLM 段失败 → 自动回退 hard 重跑并明示 degraded 原因）。**顺带修两处框架真缺陷**：①jz_relay.request 硬编码 timeout 不许覆盖 → kw.pop 缺省；②**jz_plugin_host 热升级缓存缺陷**——load_backend_module 的子模块 import_module 命中 sys.modules 旧缓存，升级后跑旧代码 → 装载前清同名父/子模块。**批次 9 台架全绿（15/15+9/9+11/11）**；包已按降级修复重出。剩：三试点双工件上架（admin 商店管理面操作）+ 真机装包走查 → T-O9-9 验收销项 | **✅（2026-10-06，提交 20d31bd+ab2bc4a）**：代码/文档/台架已提交；双工件包全部就绪——file-filter v1.6.0（后端+前端成对，C-13 真链首过）+ base64 v1.0.1（-Force 重打补前端工件）+ 三个本地包（deploy/本地插件包/）。qr-video-decode 服务器版无改动（1.1.5 既有包沿用）。**剩真机项**：目标机/部署服务器上经 admin 商店管理面上架三试点（local 包×3 + file-filter 双包）→ 发布即部署 → 真机装包走查（含离线降级/数据不出机抽验）→ 销项 | ✅（剩真机项） |
+| T-O9-8 | 试点 M-C：file-filter 全套 | **阶段 1+2 ✅（2026-10-06）**：①前置 PS1 侧 L-13 扫描落地（build-plugin-package.ps1 新增 C-13 段，单引号 PS 串规避转义坍缩，桩验证 4/4 违规全红+base64/file-filter 真插件过；**教训：ps1 中文必须 UTF-8 BOM（批次 8b 已知）+ 双引号串内正则字符类转义不可靠**）；②服务器工件两端点已入 routes.py 并冒烟过——`POST /mappings/lookup`（批量查表 confirmed/suggested/remap，键归一化全在服务器）、`POST /llm/match-columns`（无状态 LLM 匹配+record_suggestions 落库+valid_targets/is_rejected 预过滤，Key 不出服务器）。**阶段 3 ✅（出包完成）**：客户端工件落地——`client-plugins/local-file-filter/`（manifest hybrid/mount/server_data=true/requires 仅 openpyxl+xlrd；backend=core+bg_image 同源副本 + **三个 relay 垫片**（llm_gateway=jz_llm 网关/mapping_store=查表垫片/llm_client=匹配垫片）+ routes.py 适配拷贝（adapt-ff-client.py 补丁：load_config/save_config→own 代理、10 个 mappings 管理端点→_passthrough 透明转发、过滤流本地化））；出包 `-FrontendFrom`+`--api-rewrite`（4 处改写零残留）。**顺带修真约定偏差**：entry.backend 按 pkg_install 六连口径应为**末段文件名**（routes.py）而非 GLM 草图的 backend/routes.py——工具推导/校验、file-filter manifest、两台架假插件已同步修正，qr-video-decode 包已重出。**待办**：混合装包冒烟台架（本地 status/config + 透传 + 过滤流离线降级）、双工件上架 | **阶段 4 ✅（2026-10-06）冒烟台架 `tools/e2e/file-filter-c-tests.py` 11/11**：本地 status/config（own 代理）+ mappings 透传 + 过滤全链（confirmed 档 relay 查表命中/exact 本地/LLM 建议删除）+ **敏感数据零出机**（stub 全量请求体无单元内容，V5 取证）+ **离线降级**（mode=llm 任务内 LLM 段失败 → 自动回退 hard 重跑并明示 degraded 原因）。**顺带修两处框架真缺陷**：①jz_relay.request 硬编码 timeout 不许覆盖 → kw.pop 缺省；②**jz_plugin_host 热升级缓存缺陷**——load_backend_module 的子模块 import_module 命中 sys.modules 旧缓存，升级后跑旧代码 → 装载前清同名父/子模块。**批次 9 台架全绿（15/15+9/9+11/11）**；包已按降级修复重出。剩：三试点双工件上架（admin 商店管理面操作）+ 真机装包走查 → T-O9-9 验收销项 | **✅（2026-10-06，提交 20d31bd+ab2bc4a）**：代码/文档/台架已提交；双工件包全部就绪——file-filter v1.6.0（后端+前端成对，C-13 真链首过）+ base64 v1.0.1（-Force 重打补前端工件）+ 三个本地包（deploy/插件包/本地插件/）。qr-video-decode 服务器版无改动（1.1.5 既有包沿用）。**剩真机项**：目标机/部署服务器上经 admin 商店管理面上架三试点（local 包×3 + file-filter 双包）→ 发布即部署 → 真机装包走查（含离线降级/数据不出机抽验）→ 销项 | ✅（剩真机项） |
 | T-O9-9 | 批次 9 验收 | 试点三件按 V2/V4/V6/V8/V9 抽验 + 台架回归 + 回写实施记录 | 待办 |
 
 **跨批次纪律**：既有红线 1–6 全部适用（红线 2 为过渡期口径，退役规划见 O6）；适配设计文档 §5 V1–V10 为批次验收真源；F1–F5 先于一切插件适配（F4 是 B 类唯一卡点，F1 是 B-heavy 任务归属与 C 类会话取数前置）。
+
+---
+
+## 批次 12：2026-10-09 审计承接
+
+> 依据：`docs/archive/20261009规划完成度核对与未完成项汇总.md`（§3.1/§3.2/§3.4/§6）；X-1~X-7 逐条登记，状态如实。
+
+| # | 任务 | 内容 | 状态 |
+| --- | --- | --- | --- |
+| X-1 | D-1 出包白名单缺 store | `build-deploy.ps1` 核心插件白名单缺 store（静默产出无商店残包），与 `build-deploy-local.py`/`verify-package.py` 口径不一 | ✅ 已完成（commit `7e4083e`）；端到端验证待下次整包 |
+| X-2 | D-2 B-heavy 本地包丢 timeout_ms | 重出包时漏传 `-TimeoutMs` → 能力层超时上限回落 60s | ✅ 已完成（commit `53bab50`）；三插件升补丁号重出：info-transfer 1.2.10 / qr-video-decode 1.1.7 / trajectory-convert 1.2.1 |
+| X-3 | D-8 store 无 README | store 插件缺 README（接口唯一真源）；出包链对 README 缺失只 Warn | ✅ 已完成（commit `95c219d`）：README 门禁升格为「必须/Die」+ 上架机器校验兜底；store 登记 `8e14e5c` |
+| X-4 | C1 迁移上移 | 插件历史 LLM 迁移上移主体 `app.py`（代码质量报告 C1 整改） | ✅ 已完成（commit `747412d`：app.py 落点 + `llm_migrated.flag` 退场标记；删除窗口=flag 全覆盖后，已写入代码注释） |
+| X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | 未开始（本轮已排期） |
+| X-6 | D-5 WebView2 fixed 内核链 | 备选阶梯 100.x→109.x→92.x（2026-10-09 拍板） | 未开始（本轮已排期） |
+| X-7-1 | 残留小项① | admin manifest 版本递增（admin 代码 `747412d` 有改动） | 未开始 |
+| X-7-2 | 残留小项② | `tools/e2e/plugin-upgrade-sandbox-tests.ps1` 依赖旧路径 `deploy\JZToolsHub\version.json`（现为 `deploy\服务端\JZToolsHub`）需修 | 未开始 |
+| X-7-3 | 残留小项③ | 本地派生包未拷 README（上架告警将长期误报） | 未开始 |
+| X-7-4 | 残留小项④ | `tools/client/build-local-plugin-package.py` 的 DEFAULT_OUT 旧路径 `deploy\本地插件包` 未对齐新布局 | 未开始 |
+| X-7-5 | 残留小项⑤ | 该脚本的 L-13 扫描器与服务器链 `95c219d` 新增的同命名空间放行不同步 | 未开始 |
 
 ---
 
