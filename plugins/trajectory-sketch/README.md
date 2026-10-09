@@ -127,7 +127,7 @@ plugins/trajectory-sketch/
 **唯一切换入口**，办案员 / 管理员均可点击，下一次生成报告即生效（`POST /algorithm`
 仅写 `analysis.algo`；配置面板不再提供算法选择）。
 口径与实测预测：`docs/design/轨迹速写v3算法-设计文档.md`；实施清单：
-`docs/plan/轨迹速写v3算法-TODO清单.md`。
+`docs/archive/轨迹速写v3算法-TODO清单.md`（2026-10-09 归档）。
 
 ### 分析参数逐项说明（分析阈值 · v2 / v3 分立）
 

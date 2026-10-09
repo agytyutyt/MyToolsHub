@@ -801,7 +801,7 @@ def _pdf_task(fid):
 ### 16.1 问题与根因
 
 用户反馈 Word 预览三处显示缺陷。模块级复现（`dhr.convert` 直调）+ Canvas 像素签名 +
-agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库Word预览三问题排查报告.md`）：
+agent-browser 实测行高，定位如下（完整报告：`docs/archive/知识库Word预览三问题排查报告.md`）：
 
 | 现象 | 根因 |
 | --- | --- |
@@ -842,7 +842,7 @@ agent-browser 实测行高，定位如下（完整报告：`docs/eval/知识库W
 - 回归断言：`backend/test_routes_preview.py` 第 0b 节 5 组（①~⑤：补链正确性/顺序、tr 清理、
   CSS 重置、幂等、内容完整性）；边界用例（6 种写法 + 裸仿宋 + 已修链 + 无 `style` 块 + 空串/None）全过。
 - 同步：`plugins/knowledge-base/README.md`（新增「Word 产物后处理补丁」小节 + 排查路径提醒）、
-  `docs/eval/知识库Word预览三问题排查报告.md`（状态改已修复）。
+  `docs/archive/知识库Word预览三问题排查报告.md`（状态改已修复）。
 
 ---
 

@@ -123,7 +123,7 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 ### Word 产物后处理补丁（三处显示缺陷修正，vendor 零改动）
 
 `office_render.render_word()` 的返回值经 `_polish_word_html()` 处理，修正引擎产物的
-三处已知显示问题（排查报告见 `docs/eval/知识库Word预览三问题排查报告.md`）：
+三处已知显示问题（排查报告见 `docs/archive/知识库Word预览三问题排查报告.md`）：
 
 | 现象 | 根因 | 修法 |
 | --- | --- | --- |
