@@ -35,7 +35,7 @@
 | S10 | 门禁清单与工具树脱节（10 月新增台架零引用；手册仍是 3 条） | **本任务（E2-4）**：`docs/项目管理手册.md` §7 加「改哪类→跑哪些」台架映射；`HANDOFF.md` §10.2 补同清单指针。剩：`docs/guide/验收手册.md` 自动化差集扩桌面端/商店未开始 | ✅ 已完成（本任务，2026-10-09；验收手册扩编为剩项） |
 | S11 | 出包门禁只覆盖一半（guide/design 无非空断言） | `tools/verify-package.py` 加 REQUIRED 与 docs/guide·design 非空份数断言（`verify-package.py:30-32` 起）；包内文档与源的逐字节一致性校验仍未立（出包前刷新 docs 即可） | ✅ 已完成（commit 7e4083e） |
 | S12 | 规范「必须」条款无门禁 | 未开始；扫描器 7 项：L-8 禁 `shell=True` / L-9 跨插件调用（本地包链 backend import）/ L-12 本地包版本递增 / L-14 懒加载 / F-1 绝对路径 / F-3 XSS 转义 / F-4 硬编码 Key。现存相关物：L-13 已落（批次 9 的 C-13）、L-14 无校验（`tools/e2e/lazy-deps-patch.py` 是一次性补丁器） | ❌ 未开始 |
-| S13 | 数据侧填写质量问题（catalog） | 未开始：`zfec` 条目 `name` 错填 `"xlrd"`；9 条 local + 3 条 server 条目 `name=null` → 补显示名；设计 Q3「B-light 双条目并存用显示名后缀区分」口径无处承载 → 一并实施。去向：与商店上架人工项（真机清单 R7）同批 | ❌ 未开始 |
+| S13 | 数据侧填写质量问题（catalog） | 未开始：`zfec` 条目 `name` 错填 `"xlrd"`；9 条 local + 3 条 server 条目 `name=null` → 补显示名；设计 Q3「B-light 双条目并存用显示名后缀区分」口径无处承载 → 一并实施。去向：与商店上架人工项（真机清单 R7）同批 | ✅ 已完成（2026-10-09 Q3+Q4：9 条 local 随上架带名并统一「（本地）」后缀（含新增 `local-trajectory-sketch`）；`zfec`→`zfec`、`docx`→`docx`、`knowledge-base`→知识库、`notice-board`→公告板、`shared-docs`→共享文档；catalog 27 条无空名、无错名） |
 
 ## 2. 执行序与纪律
 
