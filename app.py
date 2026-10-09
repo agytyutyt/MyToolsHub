@@ -80,6 +80,120 @@ def init_data_root():
     # 保证大模型提示词等「随版本迭代」的配置在更新后立即生效（幂等：仅版本变化时执行一次）。
     jztools_data.sync_templates()
 
+
+def _write_llm_migration_flag(flag_path):
+    """写「插件历史大模型配置已清理」退场标记（C1 步骤②）。
+
+    标记存在即代表该数据根已完整通过一次清理（扫描完成且无失败），后续启动跳过扫描。
+    写失败不致命：这里吞掉异常、不改变调用方行为，下次启动重扫（清理本身幂等）即可。
+    内容只有时间戳，供 flag 覆盖率统计/排障（删除窗口判定见 migrate_plugin_legacy_llm）。
+    """
+    try:
+        os.makedirs(os.path.dirname(flag_path), exist_ok=True)
+        with open(flag_path, "w", encoding="utf-8") as f:
+            f.write("plugin legacy llm migration completed at %s\n"
+                    % datetime.now().isoformat(timespec="seconds"))
+    except OSError:
+        pass
+
+
+def migrate_plugin_legacy_llm():
+    """把插件历史 config.json 里的大模型配置**收编进统一配置，并清除插件侧副本**。
+
+    归属：本函数原在 admin 插件 register() 中常驻执行（每次启动改写**其他插件**的数据
+    文件，属未声明、未退场的插件间数据耦合——2026-09-29 代码质量分析报告 C1）。
+    2026-10-09 决策 7（方案 A）上移为主体启动流程的一次性清理（主体管理插件数据根是
+    sanctioned 方向），并加退场标记：完整通过一次后写 ``<数据根>/config/llm_migrated.flag``，
+    之后启动先查标记、存在即跳过扫描（C1 步骤①/②）。与插件注册无关——
+    调用点在 __main__ 的 init_data_root() 之后、register_plugin_backends() 之前。
+
+    背景：统一大模型落地前，case-report / character-graph / file-filter 各自在
+    ``<数据根>/plugins/<id>/config.json`` 存了一份 ``llm{base_url,api_key,model}``，
+    Key 是**明文**。统一后这份副本已无读取方（兼容桥本轮一并移除），留着既是明文泄漏面，
+    也会让"Key 到底存在哪"说不清。
+
+    做法（**先收编、再清除**，避免"清掉副本 = 大模型功能直接失效"）：
+      ① 统一配置还没有可用接入信息时，把插件那份搬进 ``<数据根>/config/llm.json``
+         （经 jz_llm.save_global 加密落盘；历史语义就是 OpenAI 兼容）；
+      ② 无论是否收编，都把插件 config.json 里的 ``llm`` 段删除（原子写）；
+      ③ 完整通过（扫描完成且 failed 为空，含没有历史 llm 段的空跑）后写退场标记。
+    幂等：有退场标记即跳过；没有 llm 段的文件不动，重复执行无副作用。
+    返回可读的处理摘要（供调用方写日志）；无处理动作或已有标记时返回 None。
+
+    ★ 删除窗口（C1 步骤③，后续任务）：这是**一次性迁移**，不该永驻。判定依据：
+    凡可能产出历史 llm 段的存量数据根，都已启动过带本函数的版本——
+    即所有目标数据根都存在 ``<数据根>/config/llm_migrated.flag``（flag 覆盖率 100%）；
+    且新安装、新插件版本均不再向插件 config.json 写 llm 段。满足后本函数、
+    _write_llm_migration_flag 与 __main__ 中的调用点可整段删除（标记文件可留可删，无害）。
+    """
+    root = jztools_data.get_data_root()
+    flag_path = os.path.join(root, "config", "llm_migrated.flag")
+    if os.path.isfile(flag_path):
+        return None                      # 退场标记：清理已完成，跳过扫描
+    plugins_dir = os.path.join(root, "plugins")
+    if not os.path.isdir(plugins_dir):
+        return None
+
+    candidates = []          # [(pid, llm_dict)]
+    targets = []             # [(path, data)]  含 llm 段、待清除
+    for pid in sorted(os.listdir(plugins_dir)):
+        if not re.match(r"^[A-Za-z0-9_-]+$", pid):
+            continue
+        path = os.path.join(plugins_dir, pid, "config.json")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        llm = (data or {}).get("llm") if isinstance(data, dict) else None
+        if not isinstance(llm, dict):
+            continue
+        targets.append((path, data))
+        if (llm.get("api_key") or "").strip():
+            candidates.append((pid, llm))
+
+    if not targets:
+        _write_llm_migration_flag(flag_path)   # 存量数据根无历史 llm 段：同样视为已完整过一遍
+        return None
+
+    adopted = ""
+    cfg = jz_llm.load_global()
+    if candidates and not jz_llm.provider_usable(cfg["provider"]):
+        pid, llm = candidates[0]
+        url = str(llm.get("url") or llm.get("base_url") or "").strip()
+        if url and not url.endswith("/chat/completions"):
+            url = url.rstrip("/") + "/chat/completions"     # 历史允许省写，补全为完整接口地址
+        provider = jz_llm.normalize_provider({
+            "format": "openai", "url": url,
+            "api_key": llm.get("api_key"), "model": llm.get("model"),
+        })
+        if jz_llm.provider_usable(provider):
+            jz_llm.save_global({"mode": cfg["mode"], "fallback": cfg["fallback"],
+                                "provider": provider})
+            adopted = pid
+
+    cleared = []
+    failed = []
+    for path, data in targets:
+        data.pop("llm", None)
+        tmp = path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+            cleared.append(os.path.basename(os.path.dirname(path)))
+        except OSError as e:
+            failed.append("%s（%s）" % (path, e.strerror or e))
+
+    if not failed:
+        _write_llm_migration_flag(flag_path)   # 完整通过 → 退场标记（写失败下次重扫，幂等）
+
+    return {"adopted_from": adopted, "cleared": cleared, "failed": failed,
+            "dropped_duplicates": [p for p, _ in candidates if p != adopted]}
+
+
 # 插件 ID 只允许出现在目录名中，防止目录穿越
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -1252,6 +1366,22 @@ if __name__ == "__main__":
         sys.exit(run_worker(_worker_id) or 0)
     init_data_root()  # 迁移旧版程序目录数据 + 解析数据根目录（决定日志/配置位置）
     setup_access_logging(app)
+    # 插件历史大模型配置清理（C1 归属上移，2026-10-09 决策 7）：主体在插件加载前对插件
+    # 数据根做一次性清理——先收编历史明文 Key（加密落盘）、再清除插件侧副本、最后写退场
+    # 标记（llm_migrated.flag，存在即跳过扫描）。不依赖任何插件注册；删除窗口见函数注释。
+    _legacy_llm = migrate_plugin_legacy_llm()
+    if _legacy_llm:
+        if _legacy_llm["adopted_from"]:
+            app.logger.info("插件 %s 的历史大模型配置已收编进统一配置（加密存储）",
+                            _legacy_llm["adopted_from"])
+        if _legacy_llm["cleared"]:
+            app.logger.info("已清除 %d 个插件 config.json 中的历史 llm 段：%s",
+                            len(_legacy_llm["cleared"]), "、".join(_legacy_llm["cleared"]))
+        if _legacy_llm["dropped_duplicates"]:
+            app.logger.info("其余插件的历史 llm 段（重复副本）已丢弃：%s",
+                            "、".join(_legacy_llm["dropped_duplicates"]))
+        for bad in _legacy_llm["failed"]:
+            app.logger.warning("清除插件历史大模型配置失败：%s", bad)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
     # E 架构反代桥（T-O2-12b）：worker 化插件的 /api/<id>/* 转发 + 统一 errorhandler

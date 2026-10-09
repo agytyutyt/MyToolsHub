@@ -433,8 +433,10 @@ def resolve(plugin_id=None):
           → 未配置（source 为空，reason 说明差什么）。
 
     plugin_id 仅用于日志与排障定位，不参与解析（历史兼容桥已于 2026-09-23 移除：
-    插件侧不再保存任何接入信息，见 docs/design/数据迁移-设计文档.md 与
-    admin 插件的 migrate_plugin_legacy_llm —— 它会把历史 Key 收编进统一配置再清除副本）。
+    插件侧不再保存任何接入信息，见 docs/design/数据迁移-设计文档.md 与主体启动流程的
+    app.migrate_plugin_legacy_llm——2026-10-09 决策 7 起已由 admin 插件上移至主体
+    （app.py，init_data_root 一侧），它会把历史 Key 收编进统一配置再清除副本，
+    并以 <数据根>/config/llm_migrated.flag 退场）。
     """
     cfg = load_global()
     user = jz_api.get_session_user()

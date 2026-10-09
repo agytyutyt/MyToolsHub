@@ -305,81 +305,6 @@ def migrate_admin_llm_format(cfg):
     return changed
 
 
-def migrate_plugin_legacy_llm():
-    """把插件历史 config.json 里的大模型配置**收编进统一配置，并清除插件侧副本**。
-
-    背景：统一大模型落地前，case-report / character-graph / file-filter 各自在
-    ``<数据根>/plugins/<id>/config.json`` 存了一份 ``llm{base_url,api_key,model}``，
-    Key 是**明文**。统一后这份副本已无读取方（兼容桥本轮一并移除），留着既是明文泄漏面，
-    也会让"Key 到底存在哪"说不清。
-
-    做法（**先收编、再清除**，避免"清掉副本 = 大模型功能直接失效"）：
-      ① 统一配置还没有可用接入信息时，把插件那份搬进 ``<数据根>/config/llm.json``
-         （经 jz_llm.save_global 加密落盘；历史语义就是 OpenAI 兼容）；
-      ② 无论是否收编，都把插件 config.json 里的 ``llm`` 段删除（原子写）。
-    幂等：没有 llm 段的文件不动，重复执行无副作用。返回可读的处理摘要（供日志）。
-    """
-    root = jztools_data.get_data_root()
-    plugins_dir = os.path.join(root, "plugins")
-    if not os.path.isdir(plugins_dir):
-        return None
-
-    candidates = []          # [(pid, llm_dict)]
-    targets = []             # [(path, data)]  含 llm 段、待清除
-    for pid in sorted(os.listdir(plugins_dir)):
-        if not re.match(r"^[A-Za-z0-9_-]+$", pid):
-            continue
-        path = os.path.join(plugins_dir, pid, "config.json")
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except Exception:
-            continue
-        llm = (data or {}).get("llm") if isinstance(data, dict) else None
-        if not isinstance(llm, dict):
-            continue
-        targets.append((path, data))
-        if (llm.get("api_key") or "").strip():
-            candidates.append((pid, llm))
-
-    if not targets:
-        return None
-
-    adopted = ""
-    cfg = jz_llm.load_global()
-    if candidates and not jz_llm.provider_usable(cfg["provider"]):
-        pid, llm = candidates[0]
-        url = str(llm.get("url") or llm.get("base_url") or "").strip()
-        if url and not url.endswith("/chat/completions"):
-            url = url.rstrip("/") + "/chat/completions"     # 历史允许省写，补全为完整接口地址
-        provider = jz_llm.normalize_provider({
-            "format": "openai", "url": url,
-            "api_key": llm.get("api_key"), "model": llm.get("model"),
-        })
-        if jz_llm.provider_usable(provider):
-            jz_llm.save_global({"mode": cfg["mode"], "fallback": cfg["fallback"],
-                                "provider": provider})
-            adopted = pid
-
-    cleared = []
-    failed = []
-    for path, data in targets:
-        data.pop("llm", None)
-        tmp = path + ".tmp"
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, path)
-            cleared.append(os.path.basename(os.path.dirname(path)))
-        except OSError as e:
-            failed.append("%s（%s）" % (path, e.strerror or e))
-
-    return {"adopted_from": adopted, "cleared": cleared, "failed": failed,
-            "dropped_duplicates": [p for p, _ in candidates if p != adopted]}
-
-
 def sync_admin_permissions(cfg):
     """把 tools.json 中的全部工具 ID 并集写入 admin 账号的权限点，返回是否变更。
 
@@ -985,20 +910,6 @@ def register(app):
         save_admin_config(cfg)
     if migrate_admin_llm_format(cfg):
         save_admin_config(cfg)
-    # 插件历史大模型配置：先收编进统一配置（加密），再清除插件侧明文副本（一次性、幂等）
-    _legacy_llm = migrate_plugin_legacy_llm()
-    if _legacy_llm:
-        if _legacy_llm["adopted_from"]:
-            app.logger.info("插件 %s 的历史大模型配置已收编进统一配置（加密存储）",
-                            _legacy_llm["adopted_from"])
-        if _legacy_llm["cleared"]:
-            app.logger.info("已清除 %d 个插件 config.json 中的历史 llm 段：%s",
-                            len(_legacy_llm["cleared"]), "、".join(_legacy_llm["cleared"]))
-        if _legacy_llm["dropped_duplicates"]:
-            app.logger.info("其余插件的历史 llm 段（重复副本）已丢弃：%s",
-                            "、".join(_legacy_llm["dropped_duplicates"]))
-        for bad in _legacy_llm["failed"]:
-            app.logger.warning("清除插件历史大模型配置失败：%s", bad)
     if sync_admin_permissions(cfg):
         save_admin_config(cfg)
     app.config["SECRET_KEY"] = cfg["secret_key"]
