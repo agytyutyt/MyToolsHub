@@ -570,6 +570,7 @@
       </div>
       <div class="row">
         <button id="decodeBtn" class="primary" disabled>开始解析</button>
+        <button id="decodeCancelBtn" class="danger" hidden>停止解析</button>
       </div>
       <div id="decProgressWrap" hidden>
         <div class="progress"><div id="decProgressFill" class="progress-fill"></div></div>
@@ -673,6 +674,32 @@
     $("decProgressWrap").hidden = false;
     $("decProgressFill").style.width = pct + "%";
     $("decProgressText").textContent = text;
+  }
+
+  /* T33：解析任务的「停止解析」按钮显隐（与封装端「全部停止」同构） */
+  function setDecodeCancel(visible) {
+    const b = $("decodeCancelBtn");
+    if (!b) return;
+    b.hidden = !visible;
+    if (!visible) { b.disabled = false; b.textContent = "停止解析"; }
+  }
+
+  /* T32：按后端错误码给差异化引导（不再靠文案字符串匹配；后端 detail 已脱敏） */
+  const DEC_GUIDE = {
+    DEPENDENCY_MISSING: "请管理员在「管理后台 → 插件管理」安装依赖组件包",
+    UNSUPPORTED_FORMAT: "请换一种输入（图片 / ZIP / 视频）或调大二维码版本",
+    TOO_LARGE: "请把数据拆分后再传输",
+    DECODE_FAILED: "请确认二维码清晰完整后重试",
+    INCOMPLETE_PAGES: "请补扫缺失的页，或改用视频/APP 通道",
+    FEC_INSUFFICIENT: "缺码过多：请放慢播放速度、重拍或用手机 APP 扫码",
+    INTEGRITY_UNVERIFIED: "码流校验失败：请重新生成二维码后重传",
+    QUEUE_FULL: "任务队列已满，请稍候重试",
+    INTERNAL: "服务器内部错误，请查看服务日志",
+  };
+  function decodeErrorText(resp, fallback) {
+    const detail = (resp && resp.detail) || fallback || "解析失败";
+    const guide = resp && resp.code ? DEC_GUIDE[resp.code] : "";
+    return guide ? detail + "｜" + guide : detail;
   }
 
   /* ---------- 内凹胶囊切换 ---------- */
@@ -1715,14 +1742,14 @@
         }
         const d = await fetchJson("/api/info-transfer/decode", { method: "POST", body: fd });
         showDecProgress(100, "解析完成");
-        if (!d.ok) { setDecStatus(d.detail || "解析失败", true); $("decodeBtn").disabled = false; return; }
+        if (!d.ok) { setDecStatus(decodeErrorText(d, "解析失败"), true); $("decodeBtn").disabled = false; return; }
         renderDecodeResult(d, "静态二维码");
       } else {
         if (!state.decVideo) { setDecStatus("请先选择二维码视频", true); $("decodeBtn").disabled = false; return; }
         fd.append("type", "video");
         fd.append("file", state.decVideo);
         const d = await fetchJson("/api/info-transfer/decode", { method: "POST", body: fd });
-        if (!d.ok) { showDecProgress(0, "解析失败"); setDecStatus(d.detail || "解析失败", true); $("decodeBtn").disabled = false; return; }
+        if (!d.ok) { showDecProgress(0, "解析失败"); setDecStatus(decodeErrorText(d, "解析失败"), true); $("decodeBtn").disabled = false; return; }
         pollDecode(d.task_id);
       }
     } catch (e) {
@@ -1792,15 +1819,23 @@
   }
 
   async function pollDecode(taskId) {
+    state.decodeTaskId = taskId;
     const startWall = performance.now();
     for (;;) {
       await new Promise((res) => setTimeout(res, 500));
       try {
         const s = await fetchJson(`/api/info-transfer/decode/${taskId}`);
-        if (!s.ok) { setDecStatus(s.detail || "任务失败", true); $("decodeBtn").disabled = false; return; }
+        if (!s.ok) {
+          setDecodeCancel(false);
+          setDecStatus(s.detail || "任务失败", true);
+          $("decodeBtn").disabled = false;
+          return;
+        }
         if (s.status === "pending" || s.status === "running") {
+          setDecodeCancel(true);
           showDecProgress(Math.round((s.progress || 0) * 100), s.stage || "解析中…");
         } else if (s.status === "done") {
+          setDecodeCancel(false);
           showDecProgress(100, "解析完成");
           let payload;
           try { payload = JSON.parse(s.payload_json); } catch (e) { payload = null; }
@@ -1809,18 +1844,28 @@
             fmt: s.fmt, name: s.name, ext: s.ext, payload,
           }, "二维码视频", s.data_size);
           return;
+        } else if (s.status === "canceled") {
+          // T33：用户停止后后端已删除临时视频原件，这里只需收尾状态
+          setDecodeCancel(false);
+          showDecProgress(0, "已停止解析");
+          setDecStatus(s.detail || "已停止解析", true);
+          $("decodeBtn").disabled = false;
+          return;
         } else if (s.status === "error") {
+          setDecodeCancel(false);
           showDecProgress(0, "解析失败");
-          setDecStatus(s.detail || "解析失败", true);
+          setDecStatus(decodeErrorText(s, "解析失败"), true);
           $("decodeBtn").disabled = false;
           return;
         }
       } catch (e) {
+        setDecodeCancel(false);
         setDecStatus("网络错误：" + e.message, true);
         $("decodeBtn").disabled = false;
         return;
       }
       if (performance.now() - startWall > 900000) {
+        setDecodeCancel(false);
         setDecStatus("解析超时，请重试", true);
         $("decodeBtn").disabled = false;
         return;
@@ -2026,6 +2071,16 @@
     });
     decVInput.addEventListener("change", () => { if (decVInput.files.length) handleDecVideo(decVInput.files[0]); });
     $("decodeBtn").addEventListener("click", startDecode);
+    $("decodeCancelBtn").addEventListener("click", async () => {
+      // T33：向解析任务发取消请求（协同取消；已结束态 409/404 由轮询给出终态）
+      const b = $("decodeCancelBtn");
+      if (!state.decodeTaskId || b.disabled) return;
+      b.disabled = true;
+      b.textContent = "正在停止…";
+      try {
+        await fetchJson(`/api/info-transfer/decode/${state.decodeTaskId}/cancel`, { method: "POST" });
+      } catch (e) { /* 忽略：轮询负责收尾显示 */ }
+    });
     $("exportBtn").addEventListener("click", exportFile);
     $("copyBtn").addEventListener("click", copyPayload);
     $("decReChoose").addEventListener("click", resetDecodeInput);

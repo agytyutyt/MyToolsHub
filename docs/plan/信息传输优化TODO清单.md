@@ -17,7 +17,7 @@
 
 > **覆盖范围**：信息传输优化的**全部待办条目、批次划分、预期效果与验收红线**（唯一活清单）
 > ｜**不覆盖**：收益口径 → `docs/eval/信息传输格式开销评估与优化方案.md`；缺陷诊断 → `docs/plan/信息传输优化方案0917.md`
-> ｜**随包**：否 ｜**最后核对**：2026-09-24
+> ｜**随包**：否 ｜**最后核对**：2026-10-10（L4-1：T32/T33 落地并回写，T15 观察项收口）
 
 ## 总览
 
@@ -135,11 +135,17 @@
 **实现方案**：静态多页拆分改用 QR-transfer 分帧协议（复用 zfec，按 idx 重组、缺页容忍），或最小改动版：每 k 页附加 1 张冗余页（k-1-of-k）。
 **预期效果**：缺 1 页不再全部作废（注入"随机丢 10% 页"用例还原成功率 ≥95%）；200 页原件静态传输成功率从趋近 0 提升到可用。
 
-### T15 · 观察项：packJPG / 喷泉码 / 帧头二进制化 【状态：未开始】
+### T15 · 观察项：packJPG / 喷泉码 / 帧头二进制化 【状态：已收口（2026-10-10，观察项保留）】
 
 **实现方案**：不排期，满足触发条件再启动——jpg 无损诉求明确 → packJPG/brunsli（NDK，−16~−22%）；实时流长尾明显 → wirehair/RaptorQ（NDK `.so`，冗余 40%→0~2%）；小码场景占比高 → 帧头 12 字符二进制化（v15 下 1.6%）。
 **预期效果**：各自立项时再定量化口径。
 **补注**：「帧头二进制化」已随 T08 完成（2026-10-09 核对）。
+**收口记录（2026-10-10，L4-1）**：三条观察项按**触发条件是否成立**逐条核对后收口为「保留观察、不排期」——
+① packJPG/brunsli：本仓无 jpg 无损出码诉求（出码走 PNG 位图与 v2 二进制载荷），**未触发**；
+② 喷泉码：实时流长尾未做量化观测（缺 ≥1000 帧真机丢码样本），**未触发**，且 T16/T17（批次 6）的
+可配置 FEC 与帧级校验一旦落地，长尾收益需重估——**顺序上排在 T16/T17 之后**；
+③ 帧头二进制化：**已完成**（随 T08，v15 单码 12 字符头不再优化）。
+本条不再作为待办计入口径，触发条件命中时按①②各自立项。
 
 ---
 
@@ -247,15 +253,39 @@
 - 对照旧实现：40 码 ≈116MB 常驻（v15 850px），文档 E1 口径 v25/1000 帧 5.10GB → 现 5 张 ≈26MB。
 - **遗留**：真机长流扫码验收（APP 连续采集 ≥10 轮无漏码）待用户执行。
 
-### T32 · 错误脱敏与错误码（解决 E2、E4、E5） 【状态：未开始】
+### T32 · 错误脱敏与错误码（解决 E2、E4、E5） 【状态：已完成（2026-10-10，test_security 48/48）】
 
 **实现方案**：定义错误码枚举（`DEPENDENCY_MISSING / UNSUPPORTED_FORMAT / TOO_LARGE / DECODE_FAILED / INCOMPLETE_PAGES / FEC_INSUFFICIENT / INTEGRITY_UNVERIFIED / QUEUE_FULL / INTERNAL`）；`_run_encode`/`_run_decode` 只透出白名单文案，内部细节写日志。
 **预期效果**：前端可按 code 差异化引导；消除路径等内部信息外泄。
+**落地记录（2026-10-10，L4-1）**：
+- `routes.py` 新增 `ERR_CODES` / `_ERR_CODE_RULES` / `_INTERNAL_TEXT_RE` / `_error_of(exc, fallback_code, fallback_detail)`：
+  **判「可否透出」看内容指纹**（绝对路径 `X:\`、`.py`、`line \d+`、`Errno`、`codec`、`Traceback`、超 200 字符等命中即脱敏），
+  命中脱敏时原文写 logger `jztools.plugin.info_transfer`（WARNING），前端只拿通用文案。
+  为什么不用「白名单前缀表」原方案：本插件自己的 raise 文案有几十处且会随改动漂移，前缀表必然漏；
+  内容指纹 + 通用兜底是**保守侧安全**的判据（宁可少透出，不泄露路径）。规则表命中即给具体码。
+- 覆盖面：`_run_encode` / `_run_decode` 的 `ValueError`/`RuntimeError`/`Exception` 三档，`it_decode` 同步解析三档 + 两个前置 400，
+  全部改为 `(code, detail)`；`/task/<id>`、`/decode/<id>` 的 error 态响应新增 `code` 字段（`canceled` 态一并回显 detail）。
+- 前端（`frontend/index.html`）：`DEC_GUIDE` 按 code 给差异化引导后缀（依赖缺失/缺码/校验失败/超限/队列满…），
+  `decodeErrorText(resp, fallback)` 统一拼接；不再有任何文案字符串匹配。
+- 验收：`test_security.TestErrorCodesAndCancel` 5 例（含「带路径的第三方 ValueError 必须被脱敏」与
+  五条自有文案→码映射；规则表产出的码全部 ∈ `ERR_CODES`）。四套回归 49/59/22/48 全绿。
+- **遗留**：`_run_build_video`（按需视频）失败仍写 `video_detail` 原文，未接 `_error_of`——它只出现在插件自己的
+  任务卡上、不含第三方文案，按低风险保留；后续接 T34 回归时一并收敛。
 
-### T33 · 解析任务取消与临时文件清理（解决 E3） 【状态：未开始】
+### T33 · 解析任务取消与临时文件清理（解决 E3） 【状态：已完成（2026-10-10，test_security 48/48）】
 
 **实现方案**：`/decode` 增加取消接口与 `cancel_check`；失败/取消清理临时视频文件。
 **预期效果**：与封装端行为对齐，不再残留临时文件。
+**落地记录（2026-10-10，L4-1）**：
+- 新增 `POST /decode/<task_id>/cancel`，与 `/encode/<id>/cancel` **同构**（归属校验 → 进行中才置 `cancel=True`；
+  未知任务 404、已结束 409、进行中 `ok=true`）。
+- `decode_video_frames(..., cancel_check=None)`：逐帧循环入口检查点，命中抛 `TaskCanceled`；
+  `_run_decode` 传入 `lambda: _canceled(task_id)`，并新增 `except TaskCanceled` → 状态 `canceled` + `detail="已停止解析"`。
+- `_run_decode` 外层 `try/finally` **无条件删除**落盘的临时视频原件（成功/失败/取消都清），不再等 30 分钟 TTL。
+- 前端解析卡片新增「停止解析」按钮（`#decodeCancelBtn`，仅在 pending/running 显影），并补上此前**缺失的
+  `canceled` 态分支**——旧实现遇到 canceled 会一路空转到 900 秒超时才报错。
+- 顺带修掉一个连带缺陷：`it_decode_status` 此前不回显 canceled 的 detail，前端拿不到「已停止解析」。
+- 验收：`TestErrorCodesAndCancel.test_03/test_04/test_05`（失败态文件已删 + 取消入口即止 + 接口三态契约）。
 
 ---
 

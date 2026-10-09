@@ -342,35 +342,6 @@
                                    "frontend_sha256":  "4c767f77f1f94c0c03c48d4797c246b8b7ebf7870da5eef5751a2e27ba2051df",
                                    "frontend_size":  80133
                                },
-                     "info-transfer":  {
-                                           "version":  "1.2.12",
-                                           "api_version":  1,
-                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.12.zip",
-                                           "sha256":  "a95dcef77781bfd6c5bbdfa9e5c650804281b912dc78fba22b0f98bcd2274f18",
-                                           "size":  105653,
-                                           "built_at":  "2026-10-10T02:14:14+08:00",
-                                           "code_sha256":  "b8117743d8b0063b44358185619a2bffb05c8c0bd129aa4e5c13ed3b5fcd822e",
-                                           "file_count":  10,
-                                           "requires_restart":  true,
-                                           "file_hashes":  {
-                                                               "plugins/info-transfer/backend/.pytest_cache/.gitignore":  "ae07caff09568018",
-                                                               "plugins/info-transfer/backend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
-                                                               "plugins/info-transfer/backend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
-                                                               "plugins/info-transfer/backend/.pytest_cache/v/cache/nodeids":  "63409764951a9d6a",
-                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
-                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
-                                                               "plugins/info-transfer/backend/routes.py":  "a6c53207735275b9",
-                                                               "plugins/info-transfer/frontend/index.html":  "05de42f40d264a58",
-                                                               "plugins/info-transfer/manifest.json":  "350f332e9edb06c1",
-                                                               "plugins/info-transfer/README.md":  "b99fbcf82ab729cb"
-                                                           },
-                                           "assets":  {
-
-                                                      },
-                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.12.zip",
-                                           "frontend_sha256":  "1d6e00db819ce020d38c31845c133970695b331826ca27dcd4a9d95fdfecf9f0",
-                                           "frontend_size":  24964
-                                       },
                      "trajectory-convert":  {
                                                 "version":  "1.2.2",
                                                 "api_version":  1,
@@ -819,6 +790,35 @@
                                           "frontend_file":  "JZToolsHub-notice-board-前端-v1.0.7.zip",
                                           "frontend_sha256":  "870ece66c0701f754d220fd508c8c8450b8afb653adc3a6f6a70162568c5e4c1",
                                           "frontend_size":  11677
-                                      }
+                                      },
+                     "info-transfer":  {
+                                           "version":  "1.2.13",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.13.zip",
+                                           "sha256":  "dfcda9acc18d71b56b87b2103612c03d2b5cf6cf466dd501fe79d7b58641b82f",
+                                           "size":  108601,
+                                           "built_at":  "2026-10-10T03:10:00+08:00",
+                                           "code_sha256":  "8e3465db63897530bfc43827a2d14f792e78972f30473db15163a9041f5af154",
+                                           "file_count":  10,
+                                           "requires_restart":  true,
+                                           "file_hashes":  {
+                                                               "plugins/info-transfer/backend/.pytest_cache/.gitignore":  "ae07caff09568018",
+                                                               "plugins/info-transfer/backend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
+                                                               "plugins/info-transfer/backend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
+                                                               "plugins/info-transfer/backend/.pytest_cache/v/cache/nodeids":  "63409764951a9d6a",
+                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
+                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
+                                                               "plugins/info-transfer/backend/routes.py":  "532940b65f3af34d",
+                                                               "plugins/info-transfer/frontend/index.html":  "4f8057a266fabd74",
+                                                               "plugins/info-transfer/manifest.json":  "29575be4e5c9df48",
+                                                               "plugins/info-transfer/README.md":  "b99fbcf82ab729cb"
+                                                           },
+                                           "assets":  {
+
+                                                      },
+                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.13.zip",
+                                           "frontend_sha256":  "8a89e38f346be76d96a8a314ae17bd97959691eea64fbeb50e4a8426e8be15c5",
+                                           "frontend_size":  25928
+                                       }
                  }
 }

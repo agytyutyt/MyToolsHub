@@ -47,6 +47,7 @@ import base64
 import csv as csv_mod
 import io
 import json
+import logging
 import lzma
 import math
 import mimetypes
@@ -391,6 +392,49 @@ def _canceled(task_id):
     with TASKS_LOCK:
         t = TASKS.get(task_id)
         return bool(t and t.get("cancel"))
+
+
+# ---- T32（0917 §2.4 E2/E4/E5）：错误码体系与异常文案脱敏 ----
+# 口径：只有**本插件自己写出的中文提示**才透出给前端；第三方库（olefile / openpyxl /
+# pypdf / lxml / zfec …）的 ValueError 常带服务器绝对路径、行号、errno，一律换成通用
+# 文案并把原文写日志（排查靠日志，不靠用户转述）。所有失败响应都带机器可读 `code`，
+# 前端按 code 差异化引导，不再做文案字符串匹配。
+log = logging.getLogger("jztools.plugin.info_transfer")
+
+ERR_CODES = ("DEPENDENCY_MISSING", "UNSUPPORTED_FORMAT", "TOO_LARGE", "DECODE_FAILED",
+             "INCOMPLETE_PAGES", "FEC_INSUFFICIENT", "INTEGRITY_UNVERIFIED",
+             "QUEUE_FULL", "INTERNAL")
+
+# (命中文案片段, 错误码)；按序取第一条命中，片段取自本插件自己的 raise 文案
+_ERR_CODE_RULES = (
+    (("后端缺少", "缺少依赖", "依赖组件包", "未安装"), "DEPENDENCY_MISSING"),
+    (("有效分块不足", "无法纠错"), "FEC_INSUFFICIENT"),
+    (("CRC32 校验失败", "数据损坏", "被截断", "长度不符", "长度不足", "越界"), "INTEGRITY_UNVERIFIED"),
+    (("未找到可识别的二维码", "识别失败", "缺页", "页序", "未收齐", "不完整"), "INCOMPLETE_PAGES"),
+    (("过大", "超过上限", "超限", "容量", "配额"), "TOO_LARGE"),
+    (("不支持", "无法承载", "白名单", "受支持"), "UNSUPPORTED_FORMAT"),
+    (("队列", "排队"), "QUEUE_FULL"),
+    (("无法读取", "解码失败", "解析失败", "信封", "为空", "请选择"), "DECODE_FAILED"),
+)
+
+# 内部信息指纹：命中即视为不可透出（路径 / 源码行号 / errno / 编解码器报错 / 英文栈信息）
+_INTERNAL_TEXT_RE = re.compile(
+    r"[A-Za-z]:[\\/]|\\\\|\.py\b|line\s+\d+|Errno\s+\d+|codec|Traceback"
+    r"|Permission denied|No such file|SystemError|MemoryError|OSError|UnicodeDecode",
+    re.I)
+
+
+def _error_of(exc, fallback_code="INTERNAL", fallback_detail="出现内部错误，请重试或联系管理员"):
+    """把任意异常收敛成 (code, 用户可见文案)；不可透出的原文写日志。"""
+    text = (str(exc) or "").strip()
+    internal = bool(_INTERNAL_TEXT_RE.search(text)) or len(text) > 200
+    if internal:
+        log.warning("信息传输：异常原文已脱敏（%s: %s）", type(exc).__name__, text[:500])
+        return fallback_code, fallback_detail
+    for fragments, code in _ERR_CODE_RULES:
+        if any(f in text for f in fragments):
+            return code, text
+    return fallback_code, (text or fallback_detail)
 
 
 def _remove_task_files(task_id):
@@ -2380,12 +2424,13 @@ def decode_image_file(file_bytes):
             for t in found]
 
 
-def decode_video_frames(video_path, progress_cb=None):
+def decode_video_frames(video_path, progress_cb=None, cancel_check=None):
     _load_cv2()
     _load_numpy()
     """从二维码视频文件逐帧解码，返回内容字节列表（去重保序）。
 
     优先 zxing-cpp（v2 二进制载荷无损）；不可用时回退 cv2（仅 v1 文本可靠）。
+    cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（T33：用户停止解析）。
     """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         raise RuntimeError("后端缺少 cv2 / numpy，无法解析视频。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-cv2-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
@@ -2399,6 +2444,8 @@ def decode_video_frames(video_path, progress_cb=None):
     fi = 0
     try:
         while True:
+            if cancel_check and cancel_check():
+                raise TaskCanceled()
             ok, frame = cap.read()
             if not ok:
                 break
@@ -2766,12 +2813,16 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
         set_task(task_id, status="canceled", progress=0.0, stage="",
                  detail="已停止封装")
     except ValueError as e:
-        set_task(task_id, status="error", detail=str(e))
+        code, detail = _error_of(e, "INTERNAL", "封装失败，请重试或联系管理员")
+        set_task(task_id, status="error", detail=detail, code=code)
     except RuntimeError as e:
-        set_task(task_id, status="error", detail=str(e))
+        code, detail = _error_of(e, "DEPENDENCY_MISSING",
+                                 "后端缺少必要依赖，请管理员安装依赖组件包")
+        set_task(task_id, status="error", detail=detail, code=code)
     except Exception as e:
-        # SEC-5：非预期异常不向前端透出内部细节
-        set_task(task_id, status="error", detail=f"封装失败（{type(e).__name__}）")
+        # SEC-5：非预期异常不向前端透出内部细节（原文进日志，前端只给类型名）
+        log.warning("信息传输：封装任务未预期异常（%s: %s）", type(e).__name__, str(e)[:500])
+        set_task(task_id, status="error", detail=f"封装失败（{type(e).__name__}）", code="INTERNAL")
 
 
 def _remove_video_file(task_id):
@@ -2827,16 +2878,24 @@ def _run_build_video(task_id):
 # ===================== 后台解析任务 =====================
 
 def _run_decode(task_id, video_path):
-    """后台解析视频流：逐帧解码 → zfec 重组 → 信封解析。"""
+    """后台解析视频流：逐帧解码 → zfec 重组 → 信封解析。
+
+    T33：① 全程可取消（逐帧循环有检查点，用户停止即抛 TaskCanceled）；
+         ② 无论成功、失败还是取消，finally 都删掉落盘的临时视频原件
+            （此前失败/取消要等 30 分钟 TTL 才回收，且取消接口根本没有）。
+    """
     try:
         set_task(task_id, status="running", created_at=time.time())
+        if _canceled(task_id):
+            raise TaskCanceled()
         set_task(task_id, progress=0.1, stage="逐帧扫描二维码")
 
         def progress(done, total):
             set_task(task_id, progress=round(0.1 + 0.6 * done / max(total, 1), 4),
                      stage=f"解码 {done}/{total} 帧")
 
-        codes = decode_video_frames(video_path, progress_cb=progress)
+        codes = decode_video_frames(video_path, progress_cb=progress,
+                                    cancel_check=lambda: _canceled(task_id))
         set_task(task_id, progress=0.75, stage=f"收到 {len(codes)} 帧，纠错重组中")
         raw = reassemble_any(codes)
         set_task(task_id, progress=0.9, stage="解析信封")
@@ -2850,12 +2909,24 @@ def _run_decode(task_id, video_path):
         set_task(task_id, status="done", progress=1.0,
                  fmt=fmt, name=name, ext=ext, data_size=data_size,
                  payload_json=json.dumps(payload, ensure_ascii=False))
+    except TaskCanceled:
+        set_task(task_id, status="canceled", progress=0.0, stage="", detail="已停止解析")
     except ValueError as e:
-        set_task(task_id, status="error", detail=str(e))
+        code, detail = _error_of(e, "DECODE_FAILED", "解析失败，请确认二维码清晰完整")
+        set_task(task_id, status="error", detail=detail, code=code)
     except RuntimeError as e:
-        set_task(task_id, status="error", detail=str(e))
+        code, detail = _error_of(e, "DEPENDENCY_MISSING",
+                                 "后端缺少必要依赖，请管理员安装依赖组件包")
+        set_task(task_id, status="error", detail=detail, code=code)
     except Exception as e:
-        set_task(task_id, status="error", detail=f"解析失败（{type(e).__name__}）")
+        log.warning("信息传输：解析任务未预期异常（%s: %s）", type(e).__name__, str(e)[:500])
+        set_task(task_id, status="error", detail=f"解析失败（{type(e).__name__}）", code="INTERNAL")
+    finally:
+        try:
+            if video_path and os.path.isfile(video_path):
+                os.remove(video_path)
+        except OSError:
+            pass
 
 
 # ===================== 路由注册 =====================
@@ -3047,6 +3118,8 @@ def register(app) -> None:
                 })
         if task.get("status") == "error":
             payload["detail"] = task.get("detail", "任务失败")
+            if task.get("code"):
+                payload["code"] = task["code"]      # T32：机器可读错误码（ERR_CODES）
         if task.get("status") == "canceled":
             payload["detail"] = task.get("detail", "已停止封装")
         return jsonify(payload)
@@ -3151,16 +3224,17 @@ def register(app) -> None:
         """
         f = request.files.get("file")
         if not f or not f.filename:
-            return jsonify({"ok": False, "detail": "请选择图片、ZIP 或视频文件"}), 400
+            return jsonify({"ok": False, "detail": "请选择图片、ZIP 或视频文件",
+                            "code": "UNSUPPORTED_FORMAT"}), 400
         dtype = request.form.get("type", "image")
         if dtype not in ("image", "zip", "video"):
             dtype = "image"
         try:
             file_bytes = _read_upload_limited(f)   # T27：Content-Length 预判 + 限量读取
         except UploadTooLarge as e:
-            return jsonify({"ok": False, "detail": str(e)}), 400
+            return jsonify({"ok": False, "detail": str(e), "code": "TOO_LARGE"}), 400
         if not file_bytes:
-            return jsonify({"ok": False, "detail": "文件为空"}), 400
+            return jsonify({"ok": False, "detail": "文件为空", "code": "DECODE_FAILED"}), 400
 
         if dtype == "video":
             # 视频逐帧解码较慢 → 后台任务
@@ -3196,11 +3270,17 @@ def register(app) -> None:
             env, page_info = _parse_scanned_codes(codes)
             fmt, name, data, ext = parse_envelope(env)
         except ValueError as e:
-            return jsonify({"ok": False, "detail": str(e)}), 400
+            code, detail = _error_of(e, "DECODE_FAILED", "解析失败，请确认二维码清晰完整")
+            return jsonify({"ok": False, "detail": detail, "code": code}), 400
         except RuntimeError as e:
-            return jsonify({"ok": False, "detail": str(e)}), 503
-        except Exception:
-            return jsonify({"ok": False, "detail": "解析失败，请确认二维码清晰完整"}), 500
+            code, detail = _error_of(e, "DEPENDENCY_MISSING",
+                                     "后端缺少必要依赖，请管理员安装依赖组件包")
+            return jsonify({"ok": False, "detail": detail, "code": code}), 503
+        except Exception as e:
+            # E4：不再把所有异常吞成同一句文案——按类型收敛出 code，原文进日志
+            log.warning("信息传输：同步解析未预期异常（%s: %s）", type(e).__name__, str(e)[:500])
+            return jsonify({"ok": False, "detail": f"解析失败（{type(e).__name__}）",
+                            "code": "INTERNAL"}), 500
 
         payload = {"jzt": 1, "fmt": fmt, "name": name, "data": data}
         if ext:
@@ -3239,7 +3319,28 @@ def register(app) -> None:
             })
         if task.get("status") == "error":
             payload["detail"] = task.get("detail", "解析失败")
+            if task.get("code"):
+                payload["code"] = task["code"]      # T32：机器可读错误码（ERR_CODES）
+        if task.get("status") == "canceled":
+            payload["detail"] = task.get("detail", "已停止解析")
         return jsonify(payload)
+
+    @app.post(f"{API_PREFIX}/decode/<task_id>/cancel")
+    def it_decode_cancel(task_id):
+        """T33：请求停止解析任务（与 /encode/<id>/cancel 同构，协同取消）。
+
+        任务已结束（done/error/canceled）或不存在时返回 ok=false（幂等友好）。
+        临时视频原件由 `_run_decode` 的 finally 删除，取消后不残留。
+        """
+        task = get_task(task_id)
+        if not task:
+            return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
+        if not _task_owned_by(task, _viewer()):
+            return jsonify({"ok": False, "detail": "任务不存在或已过期"}), 404
+        if task.get("status") not in ("pending", "running"):
+            return jsonify({"ok": False, "detail": "任务已结束，无需停止"}), 409
+        set_task(task_id, cancel=True)
+        return jsonify({"ok": True})
 
     @app.post(f"{API_PREFIX}/export")
     def it_export():

@@ -730,6 +730,90 @@ class TestTaskOwnership(unittest.TestCase):
         self.assertFalse(it._task_owned_by(task, None))
 
 
+class TestErrorCodesAndCancel(unittest.TestCase):
+    """T32（E2/E4/E5）错误码与文案脱敏 + T33（E3）解析取消与临时文件清理。"""
+
+    def _task_dir(self):
+        return it._TASK_DIR
+
+    def test_01_internal_text_is_scrubbed(self):
+        """第三方异常文案（含绝对路径/errno）不得透出，只给通用文案 + INTERNAL。"""
+        leak = ValueError('attempt to open "D:\\JZToolsHub\\config\\admin.json" failed [WinError 5]')
+        code, detail = it._error_of(leak, "INTERNAL", "封装失败，请重试或联系管理员")
+        self.assertEqual(code, "INTERNAL")
+        self.assertEqual(detail, "封装失败，请重试或联系管理员")
+        self.assertNotIn("JZToolsHub", detail)
+        self.assertNotIn("\\", detail)
+
+    def test_02_own_message_passes_through_with_code(self):
+        """本插件自己的中文提示原样透出，并映射到具体错误码。"""
+        cases = [
+            ("后端缺少 cv2 / numpy，无法解析视频。请管理员在「管理后台 → 插件管理」按依赖徽标安装"
+             "「依赖组件包 JZToolsHub-依赖-cv2-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）",
+             "DEPENDENCY_MISSING"),
+            ("第 1/2 组有效分块不足（1 < 2），无法纠错", "FEC_INSUFFICIENT"),
+            ("JZ2 帧 CRC32 校验失败（数据损坏）", "INTEGRITY_UNVERIFIED"),
+            ("数据量过大，无法拆分为静态二维码", "TOO_LARGE"),
+            ("视频中未识别到二维码帧", "DECODE_FAILED"),
+        ]
+        for text, code in cases:
+            got_code, got_detail = it._error_of(ValueError(text), "DECODE_FAILED", "解析失败")
+            self.assertEqual(got_code, code, text)
+            self.assertEqual(got_detail, text)
+        self.assertIn("INTERNAL", it.ERR_CODES)
+        self.assertEqual(set(it.ERR_CODES), set(it.ERR_CODES))     # 枚举去重自检
+        for _frag, c in it._ERR_CODE_RULES:
+            self.assertIn(c, it.ERR_CODES, c)                       # 规则表不产出未定义码
+
+    def test_03_decode_failure_carries_code_and_no_path(self):
+        """视频解析失败：/decode/<id> 回 code，detail 不含服务器路径；临时原件已清理（T33）。"""
+        tmpv = os.path.join(self._task_dir(), "t33-bad.mp4")
+        os.makedirs(self._task_dir(), exist_ok=True)
+        with open(tmpv, "wb") as f:
+            f.write(b"not a video at all")
+        tid = "t33task001"
+        it.set_task(tid, status="pending", progress=0.0, created_at=time.time(),
+                    created_by=TEST_USER["username"])
+        it._run_decode(tid, tmpv)
+        task = it.get_task(tid)
+        self.assertEqual(task.get("status"), "error", task)
+        self.assertIn(task.get("code"), it.ERR_CODES)
+        self.assertNotIn(tmpv, task.get("detail", ""))
+        self.assertNotIn("JZToolsHub", task.get("detail", ""))
+        self.assertFalse(os.path.exists(tmpv), "T33：解析失败后临时视频原件必须被 finally 删除")
+        r = CLIENT.get(f"{API}/decode/{tid}")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json().get("code"), task.get("code"))
+
+    def test_04_decode_cancel_stops_task_and_cleans_up(self):
+        """T33：取消标志让 _run_decode 在入口即终止，状态为 canceled 且不留临时文件。"""
+        tmpv = os.path.join(self._task_dir(), "t33-cancel.mp4")
+        with open(tmpv, "wb") as f:
+            f.write(b"whatever")
+        tid = "t33task002"
+        it.set_task(tid, status="pending", progress=0.0, created_at=time.time(),
+                    created_by=TEST_USER["username"], cancel=True)
+        it._run_decode(tid, tmpv)
+        task = it.get_task(tid)
+        self.assertEqual(task.get("status"), "canceled", task)
+        self.assertEqual(task.get("detail"), "已停止解析")
+        self.assertFalse(os.path.exists(tmpv))
+
+    def test_05_decode_cancel_endpoint_contract(self):
+        """取消接口与封装端同构：未知 404 / 已结束 409 / 进行中 ok=true。"""
+        self.assertEqual(CLIENT.post(f"{API}/decode/nosuchtask/cancel").status_code, 404)
+        tid = "t33task003"
+        it.set_task(tid, status="done", progress=1.0, created_at=time.time(),
+                    created_by=TEST_USER["username"])
+        r = CLIENT.post(f"{API}/decode/{tid}/cancel")
+        self.assertEqual(r.status_code, 409)
+        it.set_task(tid, status="running", created_at=time.time())
+        r = CLIENT.post(f"{API}/decode/{tid}/cancel")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.get_json().get("ok"))
+        self.assertTrue(it.get_task(tid).get("cancel"))
+
+
 if __name__ == "__main__":
     try:
         # warnings="ignore"：屏蔽第三方库（werkzeug 上传落盘 / pypdf）在 GC 时
