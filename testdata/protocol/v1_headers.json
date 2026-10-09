@@ -48,7 +48,64 @@
         "trajectory_convert": "AQAA"
       }
     ],
-    "note": "m=256 的 FEC 参数申报：三端输出互不相同，且按 (k<<8)|m 反解得到的 k/m 已被破坏。契约文档 §6.1 / 整改清单 C3 已登记，修法待拍板（限制 m ≤ 255 或改两段字节）。"
+    "derivation_guard": {
+      "map_marker_k_cap": {
+        "MAX_FEC_K": 170,
+        "max_m_at_cap": 255
+      },
+      "plan_sweep": {
+        "info-transfer": {
+          "max_m": 255,
+          "sizes": [
+            1,
+            4000
+          ],
+          "sizes_at_or_over_256": 0
+        },
+        "trajectory-convert": {
+          "max_m": 255,
+          "sizes": [
+            1,
+            4000
+          ],
+          "sizes_at_or_over_256": 0
+        }
+      },
+      "repro": {
+        "after": {
+          "fecinfo": "AHOA",
+          "k": 115,
+          "m": 128,
+          "nblocks": 2,
+          "nframes": 256,
+          "readback_k": 115,
+          "readback_m": 128
+        },
+        "before": {
+          "decodes": false,
+          "fecinfo": "AOcA",
+          "k": 230,
+          "m": 256,
+          "nblocks": 1,
+          "readback_k": 231,
+          "readback_m": 0
+        },
+        "chunk_bytes": 381,
+        "data_blocks": 230,
+        "data_bytes": 87626,
+        "ec": "L",
+        "fec_ratio": 0.1,
+        "implementation": "trajectory-convert",
+        "m_within_8_bits": true,
+        "qr_version": 15,
+        "reassembled_sha256": "e9cd7c257fd739148d64b7d2af0b8775f3fcda458350c7f7c751cc40793ebf34",
+        "roundtrip_equals_input": true
+      }
+    },
+    "fix": "修法①（编码端把 m 上限收到 255）：info-transfer._fec_plan 与 trajectory-convert._fec_plan 在推导值恰落到 256 时把 nblocks 加一再重算（while blocksize >= MAX_FEC_M）；map-marker 生成脚本把候选 k 上限取在 MAX_FEC_K=170（其 m = k + k//2，170→255）。帧头字节布局、(k<<8)|m 表示、encode_fecinfo 基元与解码端（qr-video-decode / 移动端 APP）均未改动。",
+    "fixed_at": "2026-10-09",
+    "note": "以下 cases 为**修复前史实**：encode_fecinfo 属低层基元，今天直接传 m=256 仍会产出同样的溢出字符串——修复发生在参数推导层，不在基元层。回归面见 derivation_guard（台架 C6 钉复现输入、C7 钉三端推导扫描），契约文档 §6.1。",
+    "status": "fixed"
   },
   "fecinfo": [
     {
@@ -129,5 +186,5 @@
       "n": 16777215
     }
   ],
-  "note": "v1 帧头三段基元的期望值。三处实现（trajectory-convert / info-transfer / map-marker 生成脚本）必须逐字符相同——这是帧头布局的机器可核对面。fecinfo 用例只覆盖 m ≤ 255：m=256 属已知缺陷面，另列 defect_m256。"
+  "note": "v1 帧头三段基元的期望值。三处实现（trajectory-convert / info-transfer / map-marker 生成脚本）必须逐字符相同——这是帧头布局的机器可核对面。fecinfo 用例只覆盖 m ≤ 255（帧头低 8 位可表示的范围）：m=256 属缺陷①，修复前史实与修复后回归面另列 defect_m256。"
 }

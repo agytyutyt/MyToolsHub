@@ -585,17 +585,27 @@ def _chunk_data(data, version, err):
     return chunks
 
 
+def _fec_plan(size, fec_ratio=FEC_RATIO):
+    """按数据块数计算 FEC 分块计划，返回 (blocksize, nblocks, k, m)（不编码）。"""
+    target = math.ceil(size / (1 - fec_ratio))
+    nblocks = math.ceil(target / MAX_FEC_M)
+    blocksize = math.ceil(target / nblocks)
+    # m 写进帧头 (k<<8)|m 的低 8 位，m=256 会进位吃掉 k（解码端读出 m=0 → 整次传输失败）。
+    # 契约文档 §6.1 修法①：恰落到 256 时把 nblocks 加一再重算，使 m 恒 ≤ 255。
+    while blocksize >= MAX_FEC_M:
+        nblocks += 1
+        blocksize = math.ceil(target / nblocks)
+    padded = size + (nblocks - size % nblocks if size % nblocks else 0)
+    return blocksize, nblocks, padded // nblocks, blocksize
+
+
 def _fec_encode(data_list, fec_ratio=FEC_RATIO):
     """zfec 前向纠错，返回 (share_list, k, m)。"""
     size = len(data_list)
     chunksize = len(data_list[0])
-    blocksize = math.ceil(size / (1 - fec_ratio))
-    nblocks = math.ceil(blocksize / MAX_FEC_M)
-    blocksize = math.ceil(blocksize / nblocks)
+    blocksize, nblocks, k, m = _fec_plan(size, fec_ratio)
     if size % nblocks:
         data_list = data_list + [b"\0" * chunksize] * (nblocks - size % nblocks)
-    m = blocksize
-    k = len(data_list) // nblocks
     encoder = zfec.Encoder(k, m)
     mapped = []
     for i in range(nblocks):

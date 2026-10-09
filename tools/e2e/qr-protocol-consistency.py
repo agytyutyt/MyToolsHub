@@ -7,8 +7,10 @@
 
     python tools/e2e/qr-protocol-consistency.py
 
-红=协议漂了（某端与向量/他端不一致）。**缺陷①（m=256 申报溢出）**仍以刻画断言
-（characterization）钉住：一旦某端把它修好，本台架会转为失败并指名要求更新契约文档。
+红=协议漂了（某端与向量/他端不一致）。**缺陷①（m=256 申报溢出）**已于 2026-10-09 按修法①
+修复（三端参数推导把 m 收到 ≤255，帧头布局与解码端未动），C6–C7 自此为**回归断言**：
+复现输入必须 m ≤ 255 且往返逐字节一致，参数推导扫描必须恒不产出 m=256
+（`defect_m256.cases` 仍保留修复前史实，那是低层基元 `encode_fecinfo` 的直接产出，不参与断言）。
 **缺陷②（map-marker 多组分组不同构）**已于 2026-10-09 修复，C3–C5 转为回归断言：
 map-marker 多组输出必须可被 qr-video-decode 重组、往返逐字节一致（旧产物需重生成）。
 
@@ -211,7 +213,7 @@ def main():
 
         def find_k(total):
             best_k = 1
-            for cand in range(1, total + 1):
+            for cand in range(1, min(total, mm.MAX_FEC_K) + 1):
                 if total % cand == 0:
                     nb = total // cand
                     if 50 <= nb <= 500:
@@ -255,15 +257,35 @@ def main():
           "nblocks=%d 往返不一致；契约文档 §6.2 的修复被破坏" % md_nb)
 
 
-    d = headers["defect_m256"]["cases"][0]
-    mmv = mm.encode_fecinfo(d["k"], d["m"])
-    mmv = mmv.decode("ascii") if isinstance(mmv, bytes) else mmv
-    check("C6 m=256 的 FEC 申报溢出仍在（三端互不相同，契约文档 §6.1）",
-          it.encode_fecinfo(d["k"], d["m"]).decode("ascii") == d["info_transfer"]
-          and traj.encode_fecinfo(d["k"], d["m"]).decode("ascii") == d["trajectory_convert"]
-          and mmv == d["map_marker"]
-          and len({d["info_transfer"], d["trajectory_convert"], mmv}) > 1,
-          "现状已变化，请更新契约文档 §6.1")
+    d = headers["defect_m256"]
+    g = d["derivation_guard"]["repro"]
+    payload = b"\xA5" * g["data_bytes"]
+    repro_frames = re_encode(traj, payload)
+    nf, rk, rm, ch = frames_to_chunks(repro_frames)
+    got3 = qrvd.reassemble(nf, rk, rm, ch)
+    check("C6 m=256 申报溢出已修复：复现输入（traj v%s/%s、恰 %d 块=%d B）帧头回读 m ≤ 255 且往返逐字节一致（契约文档 §6.1 修法①）"
+          % (g["qr_version"], g["ec"], g["data_blocks"], g["data_bytes"]),
+          d.get("status") == "fixed" and d.get("fixed_at") == "2026-10-09"
+          and g["before"]["m"] == 256 and g["before"]["decodes"] is False
+          and rm == g["after"]["m"] and rk == g["after"]["k"] and rm <= 255
+          and len(repro_frames) == g["after"]["nframes"]
+          and got3 == payload and sha(got3) == g["reassembled_sha256"]
+          and g["roundtrip_equals_input"] is True,
+          "修复前 m=256；本次 k=%d m=%d（向量 k=%d m=%d），往返%s；请复核契约文档 §6.1 并重生成向量"
+          % (rk, rm, g["after"]["k"], g["after"]["m"], "一致" if got3 == payload else "不一致"))
+
+    sweep = d["derivation_guard"]["plan_sweep"]
+    viol = []
+    for name, mod in (("trajectory-convert", traj), ("info-transfer", it)):
+        ms = [mod._fec_plan(s)[3] for s in range(1, sweep[name]["sizes"][1] + 1)]
+        if max(ms) != sweep[name]["max_m"] or sum(1 for x in ms if x >= 256) != 0:
+            viol.append((name, max(ms), sweep[name]["max_m"]))
+    cap = d["derivation_guard"]["map_marker_k_cap"]
+    check("C7 三端参数推导恒不产出 m=256（traj/it 1..%d 扫描 + map-marker k≤%d、实产 m=%d/%d）"
+          % (sweep["info-transfer"]["sizes"][1], cap["MAX_FEC_K"], sm_m, md_m),
+          not viol and mm.MAX_FEC_K == cap["MAX_FEC_K"]
+          and cap["max_m_at_cap"] <= 255 and sm_m <= 255 and md_m <= 255,
+          "越界处=%s（契约文档 §6.1 的 m ≤ 255 约束被破坏）" % viol[:2])
 
     print("== D 段：v2（JZ2）帧头与 CRC 覆盖 ==")
     env_file = open(os.path.join(VEC, "v2_envelope.bin"), "rb").read()

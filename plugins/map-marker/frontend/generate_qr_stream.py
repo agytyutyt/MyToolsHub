@@ -34,6 +34,12 @@ import qrcode
 import zfec
 
 
+# 帧头第 3 段用 (k<<8)|m 申报 FEC 参数，m 实际只有 8 位可用：m=256 会进位吃掉 k，解码端
+# 读出 m=0 后整次传输失败（契约文档 §6.1 修法①）。本脚本 m = k + k//2，故把 k 的上限
+# 取在 170（170 + 85 = 255），使写出的 m 恒 ≤ 255。
+MAX_FEC_K = 170
+
+
 # ---------- 基础编码工具 ----------
 
 def encode_index(n: int) -> str:
@@ -170,7 +176,7 @@ def encode_to_video(input_path: str, output_path: str, version: int = 20,
     def find_k(total):
         """找到合适的 k，使得 total % k == 0 且 nblocks 不太大。"""
         best_k = 1
-        for candidate in range(1, total + 1):
+        for candidate in range(1, min(total, MAX_FEC_K) + 1):
             if total % candidate == 0:
                 nblocks = total // candidate
                 # 目标: nblocks 在 100-500 之间

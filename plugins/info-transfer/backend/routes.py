@@ -1775,9 +1775,14 @@ def _chunk_data(data, version, err, maxchunk=None):
 
 def _fec_plan(size):
     """按数据块数计算 FEC 分块计划，返回 (blocksize, nblocks, k, m)（不编码）。"""
-    blocksize = math.ceil(size / (1 - FEC_RATIO))
-    nblocks = math.ceil(blocksize / MAX_FEC_M)
-    blocksize = math.ceil(blocksize / nblocks)
+    target = math.ceil(size / (1 - FEC_RATIO))
+    nblocks = math.ceil(target / MAX_FEC_M)
+    blocksize = math.ceil(target / nblocks)
+    # m 写进帧头 (k<<8)|m 的低 8 位，m=256 会进位吃掉 k（解码端读出 m=0 → 整次传输失败）。
+    # 契约文档 §6.1 修法①：恰落到 256 时把 nblocks 加一再重算，使 m 恒 ≤ 255。
+    while blocksize >= MAX_FEC_M:
+        nblocks += 1
+        blocksize = math.ceil(target / nblocks)
     padded = size + (nblocks - size % nblocks if size % nblocks else 0)
     return blocksize, nblocks, padded // nblocks, blocksize
 

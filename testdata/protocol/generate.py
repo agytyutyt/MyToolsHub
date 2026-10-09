@@ -18,6 +18,7 @@ import base64
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import sys
 
@@ -31,6 +32,7 @@ os.environ["JZTOOLS_DATA_ROOT"] = TMP_ROOT          # 隔离真实数据根（ro
 
 QR_VERSION = 15                                       # 向量固定二维码版本（写入 manifest）
 EC_NAME = "L"
+SWEEP_MAX_SIZE = 4000                                  # defect_m256 参数推导扫描上界（纯函数，无 zfec）
 
 # 固定输入：ASCII + CJK + 标点 + 换行，覆盖 UTF-8 多字节与 base64 载荷形态
 INPUT_TEXT = (
@@ -70,7 +72,8 @@ def main():
     headers = {
         "note": "v1 帧头三段基元的期望值。三处实现（trajectory-convert / info-transfer / "
                 "map-marker 生成脚本）必须逐字符相同——这是帧头布局的机器可核对面。"
-                "fecinfo 用例只覆盖 m ≤ 255：m=256 属已知缺陷面，另列 defect_m256。",
+                "fecinfo 用例只覆盖 m ≤ 255（帧头低 8 位可表示的范围）：m=256 属缺陷①，"
+                "修复前史实与修复后回归面另列 defect_m256。",
         "index": [{"n": n, "expected": it.encode_index(n).decode("ascii")} for n in index_cases],
         "fecinfo": [{"k": k, "m": m, "expected": it.encode_fecinfo(k, m).decode("ascii")}
                     for k, m in fec_cases],
@@ -80,40 +83,8 @@ def main():
     for k, m in fec_cases:                       # map-marker 只有 encode_fecinfo，逐一同形验证
         assert mm.encode_fecinfo(k, m) == it.encode_fecinfo(k, m).decode("ascii"), (k, m)
 
-    # ---------- 1b) 已知缺陷刻画（m=256 时 FEC 参数申报溢出） ----------
-    # 帧头第 3 段用 (k << 8) | m 表示 k/m，m 只有 8 位可用；但 MAX_FEC_M=256 允许 m=256，
-    # 此时进位吃掉 k（读出 k+1、m=0），解码端要么判「k/m 非法」要么除零。
-    # 三处实现还各不相同（map-marker 把 m 当单字节截断）。本向量把现状**钉住**：
-    # 任一端修好（或三端统一）都会让台架变红，从而强制更新契约文档 §6.1。
-    def mm_fec(k, m):
-        v = mm.encode_fecinfo(k, m)
-        return v.decode("ascii") if isinstance(v, bytes) else v
-
-    defect_cases = [(1, 256), (230, 256), (255, 256)]
-    headers["defect_m256"] = {
-        "note": "m=256 的 FEC 参数申报：三端输出互不相同，且按 (k<<8)|m 反解得到的 k/m 已被破坏。"
-                "契约文档 §6.1 / 整改清单 C3 已登记，修法待拍板（限制 m ≤ 255 或改两段字节）。",
-        "cases": [{"k": k, "m": m,
-                   "info_transfer": it.encode_fecinfo(k, m).decode("ascii"),
-                   "trajectory_convert": traj.encode_fecinfo(k, m).decode("ascii"),
-                   "map_marker": mm_fec(k, m),
-                   "roundtrip_decodes": int.from_bytes(
-                       base64.b64decode(it.encode_fecinfo(k, m)), "big") & 0xFF == m}
-                  for k, m in defect_cases],
-    }
-
-
-    # ---------- 2) v1 往返向量（三端各自编码 → qrvd 解回同一输入） ----------
+    # ---------- 1a) v1 解码辅助（1b 的回归面与第 2 段往返共用） ----------
     prefixed = len(data).to_bytes(it.SIZE_DATASIZE, it.BYTE_ORDER) + data
-
-    def frames_from(mod, chunks=None):
-        chunks = chunks if chunks is not None else mod._chunk_data(prefixed, QR_VERSION, err)
-        shares, k, m = mod._fec_encode(chunks)
-        codes = mod._qrformat_encode(shares, k, m)
-        return codes, k, m
-
-    traj_frames, traj_k, traj_m = frames_from(traj)
-    it_frames, it_k, it_m = frames_from(it)
 
     def decode_with_qrvd(frames):
         chunks, nframes = {}, None
@@ -126,6 +97,102 @@ def main():
             chunks[str(idx)] = content[12:]
             k, m = km >> 8, km & 0xFF
         return qrvd.reassemble(nframes, k, m, chunks)
+
+    def readback_km(fecinfo):
+        """按 (k<<8)|m 反解帧头第 3 段——溢出时读出的就是被破坏的 k/m。"""
+        v = int.from_bytes(base64.b64decode(fecinfo.encode("ascii")
+                                            if isinstance(fecinfo, str) else fecinfo), "big")
+        return v >> 8, v & 0xFF
+
+    # ---------- 1b) 缺陷①（m=256 时 FEC 参数申报溢出）：修复前史实 + 修复后回归形态 ----------
+    # 帧头第 3 段用 (k<<8)|m 表示 k/m，m 只有 8 位可用；修复前 MAX_FEC_M=256 允许 m 落到 256，
+    # 此时进位吃掉 k（读出 k+1、m=0），解码端要么判「k/m 非法」要么除零 → 整次传输失败。
+    # 2026-10-09 拍板修法①（契约文档 §6.1）：三个编码端的**参数推导**把 m 收到 ≤255，
+    # 帧头字节布局、encode_fecinfo 基元、解码端与移动端 APP 一律未动。
+    # 故 cases 保留为**修复前史实**（基元直接传 m=256 至今仍产出那个被破坏的字符串，故意不改）；
+    # 真正的回归面是 derivation_guard：契约文档的复现输入修复后 m ≤ 255 且往返逐字节一致，
+    # 且三端参数推导扫描恒不产出 m=256。台架 C6/C7 断言其不再漂移。
+    def mm_fec(k, m):
+        v = mm.encode_fecinfo(k, m)
+        return v.decode("ascii") if isinstance(v, bytes) else v
+
+    defect_cases = [(1, 256), (230, 256), (255, 256)]
+
+    # 复现输入：让 trajectory-convert 在 v15/L 下恰产出 230 块（FEC_RATIO=0.1 → 修复前 m=256）
+    traj_chunk = len(traj._chunk_data(b"\x00" * 4096, QR_VERSION, err)[0])
+    repro_len = 230 * traj_chunk - it.SIZE_DATASIZE          # 加 4B 长度前缀后恰为 230 块
+    repro_payload = b"\xA5" * repro_len
+    repro_chunks = traj._chunk_data(repro_len.to_bytes(it.SIZE_DATASIZE, it.BYTE_ORDER)
+                                    + repro_payload, QR_VERSION, err)
+    assert len(repro_chunks) == 230, "复现输入应为 230 块，实际 %d" % len(repro_chunks)
+    repro_shares, repro_k, repro_m = traj._fec_encode(repro_chunks)
+    repro_frames = traj._qrformat_encode(repro_shares, repro_k, repro_m)
+    repro_rb_k, repro_rb_m = readback_km(repro_frames[0][8:12])
+    repro_got = decode_with_qrvd(repro_frames)
+
+    # 修复前史实：按旧推导公式复算（无 m≤255 约束），m 恰落到 256
+    old_target = math.ceil(230 / (1 - traj.FEC_RATIO))
+    old_nblocks = math.ceil(old_target / 256)
+    before_m = math.ceil(old_target / old_nblocks)
+    before_fecinfo = it.encode_fecinfo(230, before_m).decode("ascii")
+    before_rb_k, before_rb_m = readback_km(before_fecinfo)
+
+    # 参数推导扫描：纯函数，不跑 zfec，台架可全量复算
+    sweep = {}
+    for name, fn in (("trajectory-convert", lambda s: traj._fec_plan(s, traj.FEC_RATIO)[3]),
+                     ("info-transfer", lambda s: it._fec_plan(s)[3])):
+        ms = [fn(s) for s in range(1, SWEEP_MAX_SIZE + 1)]
+        sweep[name] = {"sizes": [1, SWEEP_MAX_SIZE], "max_m": max(ms),
+                       "sizes_at_or_over_256": sum(1 for x in ms if x >= 256)}
+    headers["defect_m256"] = {
+        "status": "fixed",
+        "fixed_at": "2026-10-09",
+        "fix": "修法①（编码端把 m 上限收到 255）：info-transfer._fec_plan 与 trajectory-convert._fec_plan "
+               "在推导值恰落到 256 时把 nblocks 加一再重算（while blocksize >= MAX_FEC_M）；"
+               "map-marker 生成脚本把候选 k 上限取在 MAX_FEC_K=170（其 m = k + k//2，170→255）。"
+               "帧头字节布局、(k<<8)|m 表示、encode_fecinfo 基元与解码端（qr-video-decode / 移动端 APP）均未改动。",
+        "note": "以下 cases 为**修复前史实**：encode_fecinfo 属低层基元，今天直接传 m=256 仍会产出同样的"
+                "溢出字符串——修复发生在参数推导层，不在基元层。回归面见 derivation_guard（台架 C6 钉复现输入、"
+                "C7 钉三端推导扫描），契约文档 §6.1。",
+        "cases": [{"k": k, "m": m,
+                   "info_transfer": it.encode_fecinfo(k, m).decode("ascii"),
+                   "trajectory_convert": traj.encode_fecinfo(k, m).decode("ascii"),
+                   "map_marker": mm_fec(k, m),
+                   "roundtrip_decodes": int.from_bytes(
+                       base64.b64decode(it.encode_fecinfo(k, m)), "big") & 0xFF == m}
+                  for k, m in defect_cases],
+        "derivation_guard": {
+            "repro": {
+                "implementation": "trajectory-convert", "qr_version": QR_VERSION, "ec": EC_NAME,
+                "fec_ratio": traj.FEC_RATIO, "chunk_bytes": traj_chunk,
+                "data_bytes": repro_len, "data_blocks": 230,
+                "before": {"k": 230, "m": before_m, "nblocks": old_nblocks,
+                           "fecinfo": before_fecinfo, "readback_k": before_rb_k,
+                           "readback_m": before_rb_m, "decodes": before_rb_m == before_m},
+                "after": {"k": repro_k, "m": repro_m, "nframes": len(repro_frames),
+                          "nblocks": len(repro_frames) // repro_m,
+                          "fecinfo": repro_frames[0][8:12], "readback_k": repro_rb_k,
+                          "readback_m": repro_rb_m},
+                "m_within_8_bits": repro_rb_m == repro_m and repro_m <= 255,
+                "roundtrip_equals_input": repro_got == repro_payload,
+                "reassembled_sha256": hashlib.sha256(repro_got).hexdigest(),
+            },
+            "plan_sweep": sweep,
+            "map_marker_k_cap": {"MAX_FEC_K": mm.MAX_FEC_K,
+                                 "max_m_at_cap": mm.MAX_FEC_K + max(1, mm.MAX_FEC_K // 2)},
+        },
+    }
+
+    # ---------- 2) v1 往返向量（三端各自编码 → qrvd 解回同一输入） ----------
+
+    def frames_from(mod, chunks=None):
+        chunks = chunks if chunks is not None else mod._chunk_data(prefixed, QR_VERSION, err)
+        shares, k, m = mod._fec_encode(chunks)
+        codes = mod._qrformat_encode(shares, k, m)
+        return codes, k, m
+
+    traj_frames, traj_k, traj_m = frames_from(traj)
+    it_frames, it_k, it_m = frames_from(it)
 
     roundtrip = {"note": "同一输入由三个编码端各自产帧（分块与 FEC 比例属各端本地调参，"
                          "帧数/字节可不同，见契约文档 §4.1），但都必须能被 qr-video-decode 解回同一输入。"
@@ -153,7 +220,7 @@ def main():
 
         def find_k(total):                      # 与 generate_qr_stream.encode_to_video 同逻辑
             best_k = 1
-            for candidate in range(1, total + 1):
+            for candidate in range(1, min(total, mm.MAX_FEC_K) + 1):
                 if total % candidate == 0:
                     nblocks = total // candidate
                     if 50 <= nblocks <= 500:
