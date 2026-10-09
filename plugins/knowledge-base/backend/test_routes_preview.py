@@ -32,6 +32,14 @@ sys.modules["kb_backend_test"] = pkg
 routes = importlib.import_module("kb_backend_test.routes")
 office_render = importlib.import_module("kb_backend_test.office_render")
 
+import jz_api  # noqa: E402
+
+# routes 现从框架门面取身份（`_get_session_user = jz_api.get_session_user`，解耦批次改造），
+# 上面伪造的 jztools_admin 假模块已不参与取号 —— 按框架真实注册路径补 provider，
+# 否则所有需登录的接口一律 401（该套件的既有缺陷，非被测行为回归）。
+jz_api.register_providers(get_session_user=admin_routes.get_session_user,
+                          set_operation=admin_routes.set_operation)
+
 from flask import Flask  # noqa: E402
 
 OUT = os.path.join(BACKEND, "out")
