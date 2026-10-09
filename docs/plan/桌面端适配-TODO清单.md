@@ -280,7 +280,7 @@
 | # | 任务 | 内容 | 状态 |
 | --- | --- | --- | --- |
 | X-1 | D-1 出包白名单缺 store | `build-deploy.ps1` 核心插件白名单缺 store（静默产出无商店残包），与 `build-deploy-local.py`/`verify-package.py` 口径不一 | ✅ 已完成（commit `7e4083e`）；端到端验证待下次整包 |
-| X-2 | D-2 B-heavy 本地包丢 timeout_ms | 重出包时漏传 `-TimeoutMs` → 能力层超时上限回落 60s | ✅ 已完成（commit `53bab50`）；三插件升补丁号重出：info-transfer 1.2.10 / qr-video-decode 1.1.7 / trajectory-convert 1.2.1 |
+| X-2 | D-2 B-heavy 本地包丢 timeout_ms | 重出包时漏传 `-TimeoutMs` → 能力层超时上限回落 60s | ✅ 已完成（commit `53bab50`）；三插件升补丁号重出：info-transfer 1.2.10 / qr-video-decode 1.1.7 / trajectory-convert 1.2.1<br>2026-10-09 后续：info-transfer→1.2.11、qr→1.2.0 已重出（含服务器包），待上架（Q3） |
 | X-3 | D-8 store 无 README | store 插件缺 README（接口唯一真源）；出包链对 README 缺失只 Warn | ✅ 已完成（commit `95c219d`）：README 门禁升格为「必须/Die」+ 上架机器校验兜底；store 登记 `8e14e5c` |
 | X-4 | C1 迁移上移 | 插件历史 LLM 迁移上移主体 `app.py`（代码质量报告 C1 整改） | ✅ 已完成（commit `747412d`：app.py 落点 + `llm_migrated.flag` 退场标记；删除窗口=flag 全覆盖后，已写入代码注释） |
 | X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | 未开始（本轮已排期） |
