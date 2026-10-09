@@ -149,10 +149,10 @@ def load_admin_config():
 def save_admin_config(cfg):
     """原子写入 config/admin.json（唯一临时名 + rename，见 `app.save_registry` 同口径）。
 
-    残留面（需人工判断，见代码质量整改清单 D1）：各请求处理器仍是
-    `load → 改 → save` 三步，锁只覆盖单步 I/O，跨步的丢失更新（lost update）
-    要靠把整段读改写包进 `with ADMIN_CFG_LOCK:` 才能消除——涉及 20+ 处鉴权写路径
-    的结构改动，不在自动整改范围内。
+    D1：全部 `load → 改 → save` 写路径已把整段包进 `with ADMIN_CFG_LOCK:`（跨步丢失
+    更新窗口就此消除）。唯一例外 = `/api/admin/plugins/index`：其读改写段中间夹着共享盘
+    索引读取（`plugin_admin.check_updates`），整段包锁会把所有配置写排在网络 I/O 之后，
+    故保留原样并登记在整改清单（详见落地方案 L1-3 失败/停卡报告）。
     """
     with ADMIN_CFG_LOCK:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ADMIN_CONFIG_PATH),
@@ -537,24 +537,25 @@ def get_user_llm(username):
 
 def save_user_llm(username, config):
     """保存某账号自己的大模型接入配置（明文 Key 落盘前加密）；账号不存在返回 False。"""
-    cfg = load_admin_config()
-    found = find_user(cfg, username)
-    if found is None:
-        return False
-    user = found[2]
-    llm = user.setdefault("llm", {})
-    config = config or {}
-    llm["format"] = (str(config.get("format") or "").strip() or "openai")
-    llm["base_url"] = str(config.get("url") or "").strip()
-    llm["api_key"] = encrypt_field(str(config.get("api_key") or ""))
-    llm["model"] = str(config.get("model") or "").strip()
-    headers = config.get("headers")
-    llm["headers"] = headers if isinstance(headers, dict) else {}
-    llm["body"] = str(config.get("body") or "")
-    llm["text_path"] = str(config.get("text_path") or "").strip()
-    llm["error_path"] = str(config.get("error_path") or "").strip()
-    save_admin_config(cfg)
-    return True
+    with ADMIN_CFG_LOCK:                      # D1：读改写全程持锁
+        cfg = load_admin_config()
+        found = find_user(cfg, username)
+        if found is None:
+            return False
+        user = found[2]
+        llm = user.setdefault("llm", {})
+        config = config or {}
+        llm["format"] = (str(config.get("format") or "").strip() or "openai")
+        llm["base_url"] = str(config.get("url") or "").strip()
+        llm["api_key"] = encrypt_field(str(config.get("api_key") or ""))
+        llm["model"] = str(config.get("model") or "").strip()
+        headers = config.get("headers")
+        llm["headers"] = headers if isinstance(headers, dict) else {}
+        llm["body"] = str(config.get("body") or "")
+        llm["text_path"] = str(config.get("text_path") or "").strip()
+        llm["error_path"] = str(config.get("error_path") or "").strip()
+        save_admin_config(cfg)
+        return True
 
 
 def _registered_tool_ids():
@@ -915,26 +916,27 @@ def register(app):
 
     # 会话密钥：首次启动生成并持久化于 config/admin.json，重启后会话保持有效
     ensure_admin_config()
-    cfg = load_admin_config()
-    if not cfg.get("secret_key") or cfg.get("secret_key") == "replace-on-first-startup":
-        cfg["secret_key"] = secrets.token_hex(32)
-        save_admin_config(cfg)
-    # 会话配置：旧文件缺失 session 节时自动补齐（读取处也有默认值兜底）
-    if not isinstance(cfg.get("session"), dict):
-        cfg["session"] = {"idle_minutes": SESSION_IDLE_MINUTES, "absolute_hours": SESSION_ABSOLUTE_HOURS}
-        save_admin_config(cfg)
-    if migrate_admin_hierarchy(cfg):
-        save_admin_config(cfg)
-    if migrate_admin_roles(cfg):
-        save_admin_config(cfg)
-    if migrate_admin_case_handler_role(cfg):
-        save_admin_config(cfg)
-    if migrate_admin_encryption(cfg):
-        save_admin_config(cfg)
-    if migrate_admin_llm_format(cfg):
-        save_admin_config(cfg)
-    if sync_admin_permissions(cfg):
-        save_admin_config(cfg)
+    with ADMIN_CFG_LOCK:                      # D1 全程锁：注册期单线程，与请求写路径同口径上锁
+        cfg = load_admin_config()
+        if not cfg.get("secret_key") or cfg.get("secret_key") == "replace-on-first-startup":
+            cfg["secret_key"] = secrets.token_hex(32)
+            save_admin_config(cfg)
+        # 会话配置：旧文件缺失 session 节时自动补齐（读取处也有默认值兜底）
+        if not isinstance(cfg.get("session"), dict):
+            cfg["session"] = {"idle_minutes": SESSION_IDLE_MINUTES, "absolute_hours": SESSION_ABSOLUTE_HOURS}
+            save_admin_config(cfg)
+        if migrate_admin_hierarchy(cfg):
+            save_admin_config(cfg)
+        if migrate_admin_roles(cfg):
+            save_admin_config(cfg)
+        if migrate_admin_case_handler_role(cfg):
+            save_admin_config(cfg)
+        if migrate_admin_encryption(cfg):
+            save_admin_config(cfg)
+        if migrate_admin_llm_format(cfg):
+            save_admin_config(cfg)
+        if sync_admin_permissions(cfg):
+            save_admin_config(cfg)
     app.config["SECRET_KEY"] = cfg["secret_key"]
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
@@ -1021,18 +1023,19 @@ def register(app):
         new_pwd = data.get("new_password") or ""
         if len(new_pwd) < 6:
             return jsonify({"error": "新密码长度不能少于 6 位"}), 400
-        cfg = load_admin_config()
-        info = get_session_user()
-        found = find_user(cfg, info["username"])
-        if found is None:
-            return jsonify({"error": "账号不存在"}), 404
-        _unit, _dept, user = found
-        if not check_password_hash(decrypt_field(user.get("password")), old_pwd):
-            return jsonify({"error": "原密码错误"}), 400
-        if old_pwd == new_pwd:
-            return jsonify({"error": "新密码不能与原密码相同"}), 400
-        user["password"] = encrypt_field(generate_password_hash(new_pwd))
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            info = get_session_user()
+            found = find_user(cfg, info["username"])
+            if found is None:
+                return jsonify({"error": "账号不存在"}), 404
+            _unit, _dept, user = found
+            if not check_password_hash(decrypt_field(user.get("password")), old_pwd):
+                return jsonify({"error": "原密码错误"}), 400
+            if old_pwd == new_pwd:
+                return jsonify({"error": "新密码不能与原密码相同"}), 400
+            user["password"] = encrypt_field(generate_password_hash(new_pwd))
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     # ---------------- 管理后台页面 ----------------
@@ -1150,18 +1153,19 @@ def register(app):
         name = (data.get("name") or "").strip()
         if not name:
             return jsonify({"error": "单位名称不能为空"}), 400
-        cfg = load_admin_config()
-        units = cfg.setdefault("units", [])
-        if any(u["name"] == name for u in units):
-            return jsonify({"error": "单位名称已存在"}), 400
-        unit = {
-            "id": "unit-" + uuid.uuid4().hex[:8],
-            "name": name,
-            "description": (data.get("description") or "").strip(),
-            "departments": [],
-        }
-        units.append(unit)
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            units = cfg.setdefault("units", [])
+            if any(u["name"] == name for u in units):
+                return jsonify({"error": "单位名称已存在"}), 400
+            unit = {
+                "id": "unit-" + uuid.uuid4().hex[:8],
+                "name": name,
+                "description": (data.get("description") or "").strip(),
+                "departments": [],
+            }
+            units.append(unit)
+            save_admin_config(cfg)
         return jsonify({"ok": True, "unit": unit})
 
     @app.put("/api/admin/units/<unit_id>")
@@ -1172,29 +1176,31 @@ def register(app):
         name = (data.get("name") or "").strip()
         if not name:
             return jsonify({"error": "单位名称不能为空"}), 400
-        cfg = load_admin_config()
-        unit = find_unit(cfg, unit_id)
-        if unit is None:
-            return jsonify({"error": "单位不存在"}), 404
-        if any(u["id"] != unit_id and u["name"] == name for u in cfg.get("units", [])):
-            return jsonify({"error": "单位名称已存在"}), 400
-        unit["name"] = name
-        unit["description"] = (data.get("description") or "").strip()
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            unit = find_unit(cfg, unit_id)
+            if unit is None:
+                return jsonify({"error": "单位不存在"}), 404
+            if any(u["id"] != unit_id and u["name"] == name for u in cfg.get("units", [])):
+                return jsonify({"error": "单位名称已存在"}), 400
+            unit["name"] = name
+            unit["description"] = (data.get("description") or "").strip()
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     @app.delete("/api/admin/units/<unit_id>")
     @permission_required("unit")
     def admin_api_units_delete(unit_id):
         set_operation("删除单位")
-        cfg = load_admin_config()
-        unit = find_unit(cfg, unit_id)
-        if unit is None:
-            return jsonify({"error": "单位不存在"}), 404
-        if unit.get("departments"):
-            return jsonify({"error": "该单位下仍有部门，请先调整或删除部门"}), 400
-        cfg["units"] = [u for u in cfg.get("units", []) if u["id"] != unit_id]
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            unit = find_unit(cfg, unit_id)
+            if unit is None:
+                return jsonify({"error": "单位不存在"}), 404
+            if unit.get("departments"):
+                return jsonify({"error": "该单位下仍有部门，请先调整或删除部门"}), 400
+            cfg["units"] = [u for u in cfg.get("units", []) if u["id"] != unit_id]
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     # ---------------- 部门管理 ----------------
@@ -1231,20 +1237,21 @@ def register(app):
             return jsonify({"error": "部门名称不能为空"}), 400
         if not unit_id:
             return jsonify({"error": "请选择所属单位"}), 400
-        cfg = load_admin_config()
-        unit = find_unit(cfg, unit_id)
-        if unit is None:
-            return jsonify({"error": "所属单位不存在"}), 404
-        if any(d["name"] == name for d in unit.get("departments", [])):
-            return jsonify({"error": "该单位下已存在同名部门"}), 400
-        dept = {
-            "id": "dept-" + uuid.uuid4().hex[:8],
-            "name": name,
-            "description": (data.get("description") or "").strip(),
-            "users": [],
-        }
-        unit.setdefault("departments", []).append(dept)
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            unit = find_unit(cfg, unit_id)
+            if unit is None:
+                return jsonify({"error": "所属单位不存在"}), 404
+            if any(d["name"] == name for d in unit.get("departments", [])):
+                return jsonify({"error": "该单位下已存在同名部门"}), 400
+            dept = {
+                "id": "dept-" + uuid.uuid4().hex[:8],
+                "name": name,
+                "description": (data.get("description") or "").strip(),
+                "users": [],
+            }
+            unit.setdefault("departments", []).append(dept)
+            save_admin_config(cfg)
         return jsonify({"ok": True, "department": dept})
 
     @app.put("/api/admin/departments/<dept_id>")
@@ -1255,41 +1262,43 @@ def register(app):
         name = (data.get("name") or "").strip()
         if not name:
             return jsonify({"error": "部门名称不能为空"}), 400
-        cfg = load_admin_config()
-        found = find_dept(cfg, dept_id)
-        if found is None:
-            return jsonify({"error": "部门不存在"}), 404
-        old_unit, dept = found
-        if any(d["id"] != dept_id and d["name"] == name for d in old_unit.get("departments", [])):
-            return jsonify({"error": "该单位下已存在同名部门"}), 400
-        dept["name"] = name
-        dept["description"] = (data.get("description") or "").strip()
-        # 移动部门到其他单位
-        new_unit_id = (data.get("unit_id") or "").strip()
-        if new_unit_id and new_unit_id != old_unit["id"]:
-            target = find_unit(cfg, new_unit_id)
-            if target is None:
-                return jsonify({"error": "目标单位不存在"}), 404
-            if any(d["id"] != dept_id and d["name"] == name for d in target.get("departments", [])):
-                return jsonify({"error": "目标单位下已存在同名部门"}), 400
-            old_unit["departments"] = [d for d in old_unit.get("departments", []) if d["id"] != dept_id]
-            target.setdefault("departments", []).append(dept)
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            found = find_dept(cfg, dept_id)
+            if found is None:
+                return jsonify({"error": "部门不存在"}), 404
+            old_unit, dept = found
+            if any(d["id"] != dept_id and d["name"] == name for d in old_unit.get("departments", [])):
+                return jsonify({"error": "该单位下已存在同名部门"}), 400
+            dept["name"] = name
+            dept["description"] = (data.get("description") or "").strip()
+            # 移动部门到其他单位
+            new_unit_id = (data.get("unit_id") or "").strip()
+            if new_unit_id and new_unit_id != old_unit["id"]:
+                target = find_unit(cfg, new_unit_id)
+                if target is None:
+                    return jsonify({"error": "目标单位不存在"}), 404
+                if any(d["id"] != dept_id and d["name"] == name for d in target.get("departments", [])):
+                    return jsonify({"error": "目标单位下已存在同名部门"}), 400
+                old_unit["departments"] = [d for d in old_unit.get("departments", []) if d["id"] != dept_id]
+                target.setdefault("departments", []).append(dept)
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     @app.delete("/api/admin/departments/<dept_id>")
     @permission_required("department")
     def admin_api_departments_delete(dept_id):
         set_operation("删除部门")
-        cfg = load_admin_config()
-        found = find_dept(cfg, dept_id)
-        if found is None:
-            return jsonify({"error": "部门不存在"}), 404
-        unit, dept = found
-        if dept.get("users"):
-            return jsonify({"error": "该部门下仍有人员，请先调整其所属部门"}), 400
-        unit["departments"] = [d for d in unit.get("departments", []) if d["id"] != dept_id]
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            found = find_dept(cfg, dept_id)
+            if found is None:
+                return jsonify({"error": "部门不存在"}), 404
+            unit, dept = found
+            if dept.get("users"):
+                return jsonify({"error": "该部门下仍有人员，请先调整其所属部门"}), 400
+            unit["departments"] = [d for d in unit.get("departments", []) if d["id"] != dept_id]
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     # ---------------- 人员管理 ----------------
@@ -1355,43 +1364,44 @@ def register(app):
             return jsonify({"error": "密码长度不能少于 6 位"}), 400
         if not unit_id or not dept_id:
             return jsonify({"error": "请选择所属单位与部门"}), 400
-        cfg = load_admin_config()
-        if find_user(cfg, username) is not None:
-            return jsonify({"error": "该登录名已存在"}), 400
-        llm = data.get("llm") or {}
-        if not isinstance(llm, dict):
-            llm = {}
-        role_id = (data.get("role") or "").strip()
-        if "permissions" in data:
-            permissions, perr = _normalize_permission_points(data.get("permissions"))
-            if perr:
-                return jsonify({"error": perr}), 400
-        else:
-            # 未显式指定权限点时：管理员（超管）不依赖权限点；普通角色（办案员等）
-            # 默认授予全部工具（不含管理后台），管理员可在「权限」弹窗中再调整。
-            if _role_super_admin(cfg, role_id):
-                permissions = []
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            if find_user(cfg, username) is not None:
+                return jsonify({"error": "该登录名已存在"}), 400
+            llm = data.get("llm") or {}
+            if not isinstance(llm, dict):
+                llm = {}
+            role_id = (data.get("role") or "").strip()
+            if "permissions" in data:
+                permissions, perr = _normalize_permission_points(data.get("permissions"))
+                if perr:
+                    return jsonify({"error": perr}), 400
             else:
-                permissions = sorted(_registered_tool_ids() - {"admin"})
-        user = {
-            "username": username,
-            "password": encrypt_field(generate_password_hash(password)),
-            "name": name,
-            "idcard": encrypt_field(data.get("idcard") or ""),
-            "role": role_id,
-            "permissions": permissions,
-            "llm": {
-                "format": (str(llm.get("format") or "").strip().lower()
-                           if str(llm.get("format") or "").strip().lower() in jz_llm.FORMAT_META
-                           else "openai"),
-                "base_url": (llm.get("base_url") or "").strip(),
-                "api_key": encrypt_field(llm.get("api_key") or ""),
-                "model": (llm.get("model") or "").strip(),
-            },
-        }
-        if not append_user(cfg, unit_id, dept_id, user):
-            return jsonify({"error": "所属单位或部门不存在"}), 404
-        save_admin_config(cfg)
+                # 未显式指定权限点时：管理员（超管）不依赖权限点；普通角色（办案员等）
+                # 默认授予全部工具（不含管理后台），管理员可在「权限」弹窗中再调整。
+                if _role_super_admin(cfg, role_id):
+                    permissions = []
+                else:
+                    permissions = sorted(_registered_tool_ids() - {"admin"})
+            user = {
+                "username": username,
+                "password": encrypt_field(generate_password_hash(password)),
+                "name": name,
+                "idcard": encrypt_field(data.get("idcard") or ""),
+                "role": role_id,
+                "permissions": permissions,
+                "llm": {
+                    "format": (str(llm.get("format") or "").strip().lower()
+                               if str(llm.get("format") or "").strip().lower() in jz_llm.FORMAT_META
+                               else "openai"),
+                    "base_url": (llm.get("base_url") or "").strip(),
+                    "api_key": encrypt_field(llm.get("api_key") or ""),
+                    "model": (llm.get("model") or "").strip(),
+                },
+            }
+            if not append_user(cfg, unit_id, dept_id, user):
+                return jsonify({"error": "所属单位或部门不存在"}), 404
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     @app.put("/api/admin/users/<username>")
@@ -1402,68 +1412,70 @@ def register(app):
         name = (data.get("name") or "").strip()
         if not name:
             return jsonify({"error": "姓名不能为空"}), 400
-        cfg = load_admin_config()
-        found = find_user(cfg, username)
-        if found is None:
-            return jsonify({"error": "人员不存在"}), 404
-        unit, dept, user = found
-        user["name"] = name
-        user["role"] = (data.get("role") or "").strip()
-        password = data.get("password") or ""
-        if password:
-            if len(password) < 6:
-                return jsonify({"error": "密码长度不能少于 6 位"}), 400
-            user["password"] = encrypt_field(generate_password_hash(password))
-        # 身份证：传空字符串则清空，不传则保留原值
-        if "idcard" in data:
-            user["idcard"] = encrypt_field(data.get("idcard") or "")
-        # 权限点（tools.json 中的插件 ID）
-        if "permissions" in data:
-            permissions, perr = _normalize_permission_points(data.get("permissions"))
-            if perr:
-                return jsonify({"error": perr}), 400
-            user["permissions"] = permissions
-        # 大模型配置（用户"各自设置"模式下由本人自助维护，此处供管理员代填）
-        llm = data.get("llm")
-        if isinstance(llm, dict):
-            u_llm = user.setdefault("llm", {})
-            if "format" in llm:
-                fmt = (llm.get("format") or "").strip().lower()
-                u_llm["format"] = fmt if fmt in jz_llm.FORMAT_META else "openai"
-            if "base_url" in llm:
-                u_llm["base_url"] = (llm.get("base_url") or "").strip()
-            if "api_key" in llm:
-                # 掩码/留空 = 不修改（与 /api/llm/settings、插件 /config、批量导入同一口径）。
-                # 不这样处理会把字面量 "••••••••" 存成 Key，用户此后调用一律 401 且原因难查。
-                if not jz_llm.is_mask(llm.get("api_key")):
-                    u_llm["api_key"] = encrypt_field(str(llm.get("api_key")).strip())
-            if "model" in llm:
-                u_llm["model"] = (llm.get("model") or "").strip()
-        # 调整所属单位 / 部门（移动用户）
-        new_unit_id = (data.get("unit_id") or "").strip()
-        new_dept_id = (data.get("department_id") or "").strip()
-        if new_unit_id and new_dept_id and (new_unit_id != unit["id"] or new_dept_id != dept["id"]):
-            target = find_dept(cfg, new_dept_id)
-            if target is None or target[0]["id"] != new_unit_id:
-                return jsonify({"error": "目标单位或部门不存在"}), 404
-            dept["users"] = [u for u in dept.get("users", []) if u.get("username") != username]
-            target[1].setdefault("users", []).append(user)
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            found = find_user(cfg, username)
+            if found is None:
+                return jsonify({"error": "人员不存在"}), 404
+            unit, dept, user = found
+            user["name"] = name
+            user["role"] = (data.get("role") or "").strip()
+            password = data.get("password") or ""
+            if password:
+                if len(password) < 6:
+                    return jsonify({"error": "密码长度不能少于 6 位"}), 400
+                user["password"] = encrypt_field(generate_password_hash(password))
+            # 身份证：传空字符串则清空，不传则保留原值
+            if "idcard" in data:
+                user["idcard"] = encrypt_field(data.get("idcard") or "")
+            # 权限点（tools.json 中的插件 ID）
+            if "permissions" in data:
+                permissions, perr = _normalize_permission_points(data.get("permissions"))
+                if perr:
+                    return jsonify({"error": perr}), 400
+                user["permissions"] = permissions
+            # 大模型配置（用户"各自设置"模式下由本人自助维护，此处供管理员代填）
+            llm = data.get("llm")
+            if isinstance(llm, dict):
+                u_llm = user.setdefault("llm", {})
+                if "format" in llm:
+                    fmt = (llm.get("format") or "").strip().lower()
+                    u_llm["format"] = fmt if fmt in jz_llm.FORMAT_META else "openai"
+                if "base_url" in llm:
+                    u_llm["base_url"] = (llm.get("base_url") or "").strip()
+                if "api_key" in llm:
+                    # 掩码/留空 = 不修改（与 /api/llm/settings、插件 /config、批量导入同一口径）。
+                    # 不这样处理会把字面量 "••••••••" 存成 Key，用户此后调用一律 401 且原因难查。
+                    if not jz_llm.is_mask(llm.get("api_key")):
+                        u_llm["api_key"] = encrypt_field(str(llm.get("api_key")).strip())
+                if "model" in llm:
+                    u_llm["model"] = (llm.get("model") or "").strip()
+            # 调整所属单位 / 部门（移动用户）
+            new_unit_id = (data.get("unit_id") or "").strip()
+            new_dept_id = (data.get("department_id") or "").strip()
+            if new_unit_id and new_dept_id and (new_unit_id != unit["id"] or new_dept_id != dept["id"]):
+                target = find_dept(cfg, new_dept_id)
+                if target is None or target[0]["id"] != new_unit_id:
+                    return jsonify({"error": "目标单位或部门不存在"}), 404
+                dept["users"] = [u for u in dept.get("users", []) if u.get("username") != username]
+                target[1].setdefault("users", []).append(user)
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     @app.delete("/api/admin/users/<username>")
     @permission_required("user")
     def admin_api_users_delete(username):
         set_operation("删除人员")
-        cfg = load_admin_config()
-        if username == get_session_user()["username"]:
-            return jsonify({"error": "不能删除当前登录账号"}), 400
-        found = find_user(cfg, username)
-        if found is None:
-            return jsonify({"error": "人员不存在"}), 404
-        _unit, dept, _user = found
-        dept["users"] = [u for u in dept.get("users", []) if u.get("username") != username]
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            if username == get_session_user()["username"]:
+                return jsonify({"error": "不能删除当前登录账号"}), 400
+            found = find_user(cfg, username)
+            if found is None:
+                return jsonify({"error": "人员不存在"}), 404
+            _unit, dept, _user = found
+            dept["users"] = [u for u in dept.get("users", []) if u.get("username") != username]
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     # ---------------- 权限（角色）管理（已并入人员管理，gate 用 user 模块） ----------------
@@ -1513,18 +1525,19 @@ def register(app):
         modules = data.get("modules") or []
         if not isinstance(modules, list) or any(m not in ADMIN_MODULES for m in modules):
             return jsonify({"error": "权限模块不合法"}), 400
-        cfg = load_admin_config()
-        roles = cfg.setdefault("permissions", [])
-        if any(r["name"] == name for r in roles):
-            return jsonify({"error": "角色名称已存在"}), 400
-        role = {
-            "id": "role-" + uuid.uuid4().hex[:8],
-            "name": name,
-            "description": (data.get("description") or "").strip(),
-            "modules": modules,
-        }
-        roles.append(role)
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            roles = cfg.setdefault("permissions", [])
+            if any(r["name"] == name for r in roles):
+                return jsonify({"error": "角色名称已存在"}), 400
+            role = {
+                "id": "role-" + uuid.uuid4().hex[:8],
+                "name": name,
+                "description": (data.get("description") or "").strip(),
+                "modules": modules,
+            }
+            roles.append(role)
+            save_admin_config(cfg)
         return jsonify({"ok": True, "permission": role})
 
     @app.put("/api/admin/permissions/<role_id>")
@@ -1538,30 +1551,32 @@ def register(app):
         modules = data.get("modules") or []
         if not isinstance(modules, list) or any(m not in ADMIN_MODULES for m in modules):
             return jsonify({"error": "权限模块不合法"}), 400
-        cfg = load_admin_config()
-        role = next((r for r in cfg.get("permissions", []) if r["id"] == role_id), None)
-        if role is None:
-            return jsonify({"error": "角色不存在"}), 404
-        if any(r["id"] != role_id and r["name"] == name for r in cfg.get("permissions", [])):
-            return jsonify({"error": "角色名称已存在"}), 400
-        role["name"] = name
-        role["description"] = (data.get("description") or "").strip()
-        role["modules"] = modules
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            role = next((r for r in cfg.get("permissions", []) if r["id"] == role_id), None)
+            if role is None:
+                return jsonify({"error": "角色不存在"}), 404
+            if any(r["id"] != role_id and r["name"] == name for r in cfg.get("permissions", [])):
+                return jsonify({"error": "角色名称已存在"}), 400
+            role["name"] = name
+            role["description"] = (data.get("description") or "").strip()
+            role["modules"] = modules
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     @app.delete("/api/admin/permissions/<role_id>")
     @permission_required("user")
     def admin_api_permissions_delete(role_id):
         set_operation("删除角色")
-        cfg = load_admin_config()
-        if any(u.get("role") == role_id for _u, _d, u in iter_users(cfg)):
-            return jsonify({"error": "该角色已分配给人员，请先调整其角色"}), 400
-        roles = cfg.get("permissions", [])
-        if not any(r["id"] == role_id for r in roles):
-            return jsonify({"error": "角色不存在"}), 404
-        cfg["permissions"] = [r for r in roles if r["id"] != role_id]
-        save_admin_config(cfg)
+        with ADMIN_CFG_LOCK:                  # D1 全程锁
+            cfg = load_admin_config()
+            if any(u.get("role") == role_id for _u, _d, u in iter_users(cfg)):
+                return jsonify({"error": "该角色已分配给人员，请先调整其角色"}), 400
+            roles = cfg.get("permissions", [])
+            if not any(r["id"] == role_id for r in roles):
+                return jsonify({"error": "角色不存在"}), 404
+            cfg["permissions"] = [r for r in roles if r["id"] != role_id]
+            save_admin_config(cfg)
         return jsonify({"ok": True})
 
     # ---------------- 系统数据目录管理（仅超级管理员） ----------------

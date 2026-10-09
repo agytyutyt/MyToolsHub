@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime, timedelta
 
@@ -558,11 +559,18 @@ def _log_response(response):
     return response
 
 
+REGISTRY_LOCK = threading.RLock()   # D2：config/tools.json 读改写全程锁（RLock 便于同线程复入）
+
+
 def load_registry():
     """加载后台配置(config/tools.json)，这是工具的注册清单。
 
     健壮性（解耦后插件目录由外部介质写入，坏文件概率上升）：读取/解析失败时
     返回空注册表并告警，绝不让单个坏文件把整站打挂（见设计文档 §2 健壮性缺口）。
+
+    D2：本函数与 `save_registry` 单步都是安全的（读一次全量、写用唯一临时名 +
+    replace 原子落盘）；跨步的 `load → 改 → save` 丢失更新由调用方用模块级
+    `REGISTRY_LOCK` 整段包住（见 `/api/tools/reorder`、`/api/tools/visibility`）。
     """
     try:
         # utf-8-sig（D4 口径统一）：与 jz_deps / jz_llm 一致，容忍人工编辑留下的 BOM。
@@ -1156,35 +1164,36 @@ def api_tools_reorder():
     if not isinstance(categories_order, list) or not isinstance(tools_order, dict):
         return jsonify({"error": "invalid payload"}), 400
 
-    registry = load_registry()
-    cat_ids = {c["id"] for c in registry.get("categories", [])}
-    tool_map = {t["id"]: t for t in registry.get("tools", [])}
+    with REGISTRY_LOCK:                       # D2 全程锁
+        registry = load_registry()
+        cat_ids = {c["id"] for c in registry.get("categories", [])}
+        tool_map = {t["id"]: t for t in registry.get("tools", [])}
 
-    for cid in categories_order:
-        if cid not in cat_ids:
-            return jsonify({"error": f"unknown category: {cid}"}), 400
-    for cid, tool_ids in tools_order.items():
-        if cid not in cat_ids:
-            return jsonify({"error": f"unknown category: {cid}"}), 400
-        if not isinstance(tool_ids, list):
-            return jsonify({"error": "tools must be a list"}), 400
-        for tid in tool_ids:
-            if tid not in tool_map:
-                return jsonify({"error": f"unknown tool: {tid}"}), 400
+        for cid in categories_order:
+            if cid not in cat_ids:
+                return jsonify({"error": f"unknown category: {cid}"}), 400
+        for cid, tool_ids in tools_order.items():
+            if cid not in cat_ids:
+                return jsonify({"error": f"unknown category: {cid}"}), 400
+            if not isinstance(tool_ids, list):
+                return jsonify({"error": "tools must be a list"}), 400
+            for tid in tool_ids:
+                if tid not in tool_map:
+                    return jsonify({"error": f"unknown tool: {tid}"}), 400
 
-    cat_map = {c["id"]: c for c in registry["categories"]}
-    new_cats = [cat_map[cid] for cid in categories_order]
-    for c in registry["categories"]:
-        if c["id"] not in {x["id"] for x in new_cats}:
-            new_cats.append(c)
-    registry["categories"] = new_cats
+        cat_map = {c["id"]: c for c in registry["categories"]}
+        new_cats = [cat_map[cid] for cid in categories_order]
+        for c in registry["categories"]:
+            if c["id"] not in {x["id"] for x in new_cats}:
+                new_cats.append(c)
+        registry["categories"] = new_cats
 
-    for cid, tool_ids in tools_order.items():
-        for pos, tid in enumerate(tool_ids):
-            tool_map[tid]["category"] = cid
-            tool_map[tid]["order"] = pos + 1
+        for cid, tool_ids in tools_order.items():
+            for pos, tid in enumerate(tool_ids):
+                tool_map[tid]["category"] = cid
+                tool_map[tid]["order"] = pos + 1
 
-    save_registry(registry)
+        save_registry(registry)
     return jsonify({"ok": True})
 
 
@@ -1230,30 +1239,31 @@ def api_tools_visibility_save():
     if typ not in ("tool", "category") or not isinstance(tid, str) or not tid:
         return jsonify({"error": "invalid payload"}), 400
     enabled = bool(data.get("enabled"))
-
-    registry = load_registry()
+    # 权限点先取（要读 admin 数据）——避免在 REGISTRY_LOCK 里嵌套另一把锁
     allowed = _current_user_allowlist()
-    if typ == "tool":
-        for t in registry.get("tools", []):
-            if t["id"] == tid:
-                if allowed is not None and tid not in allowed:
-                    return jsonify({"error": "无该工具的操作权限"}), 403
-                t["enabled"] = enabled
-                save_registry(registry)
-                return jsonify({"ok": True})
-        return jsonify({"error": "tool not found"}), 404
-    else:
-        for c in registry.get("categories", []):
-            if c["id"] == tid:
-                if allowed is not None and not any(
-                    t.get("category") == tid and t["id"] in allowed
-                    for t in registry.get("tools", [])
-                ):
-                    return jsonify({"error": "无该分类的操作权限"}), 403
-                c["enabled"] = enabled
-                save_registry(registry)
-                return jsonify({"ok": True})
-        return jsonify({"error": "category not found"}), 404
+    with REGISTRY_LOCK:                   # D2 全程锁
+        registry = load_registry()
+        if typ == "tool":
+            for t in registry.get("tools", []):
+                if t["id"] == tid:
+                    if allowed is not None and tid not in allowed:
+                        return jsonify({"error": "无该工具的操作权限"}), 403
+                    t["enabled"] = enabled
+                    save_registry(registry)
+                    return jsonify({"ok": True})
+            return jsonify({"error": "tool not found"}), 404
+        else:
+            for c in registry.get("categories", []):
+                if c["id"] == tid:
+                    if allowed is not None and not any(
+                        t.get("category") == tid and t["id"] in allowed
+                        for t in registry.get("tools", [])
+                    ):
+                        return jsonify({"error": "无该分类的操作权限"}), 403
+                    c["enabled"] = enabled
+                    save_registry(registry)
+                    return jsonify({"ok": True})
+            return jsonify({"error": "category not found"}), 404
 
 
 # ===================== 系统托盘（仅打包运行） =====================
