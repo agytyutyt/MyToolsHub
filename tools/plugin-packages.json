@@ -766,6 +766,41 @@
                                                 "frontend_file":  "JZToolsHub-trajectory-convert-前端-v1.2.1.zip",
                                                 "frontend_sha256":  "c2a5a1650b5bf83c812e6801592fa0684cc155f907ec22fbc25074ab5340b861",
                                                 "frontend_size":  9280
-                                            }
+                                            },
+                     "store":  {
+                                   "version":  "1.0.0",
+                                   "api_version":  1,
+                                   "file":  "JZToolsHub-store-后端-v1.0.0.zip",
+                                   "sha256":  "82cc0b8057463f4a3ac810ca0d9c63c5b749b596c53b075e986d8636ba3e99cd",
+                                   "size":  46795,
+                                   "built_at":  "2026-10-09T08:50:09+08:00",
+                                   "code_sha256":  "c02c944aa60b758aafb4eb970be9bd125bd8045299ac8602e1b899b406c45544",
+                                   "file_count":  7,
+                                   "requires_restart":  true,
+                                   "file_hashes":  {
+                                                       "plugins/store/backend/__init__.py":  "fe23335de6016851",
+                                                       "plugins/store/backend/routes.py":  "84bfeb1e502893c0",
+                                                       "plugins/store/frontend/index.html":  "3aeee576eb48fb1c",
+                                                       "plugins/store/frontend/store.js":  "e1d0590d2f4def31",
+                                                       "plugins/store/frontend/style.css":  "9fd021fa1cbcf870",
+                                                       "plugins/store/manifest.json":  "f66222f196178b77",
+                                                       "plugins/store/README.md":  "c05ac7aa256d5529"
+                                                   },
+                                   "assets":  {
+                                                  "frontend/store.js":  {
+                                                                            "h":  "e1d0590d2f4def31",
+                                                                            "v":  17,
+                                                                            "referenced":  true
+                                                                        },
+                                                  "frontend/style.css":  {
+                                                                             "h":  "9fd021fa1cbcf870",
+                                                                             "v":  8,
+                                                                             "referenced":  true
+                                                                         }
+                                              },
+                                   "frontend_file":  "JZToolsHub-store-前端-v1.0.0.zip",
+                                   "frontend_sha256":  "4d5f9da9033203fc5807571b2f7a67b7c1b3a2c855842aca2bffd6d904990427",
+                                   "frontend_size":  14893
+                               }
                  }
 }
