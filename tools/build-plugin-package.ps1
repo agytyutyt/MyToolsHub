@@ -615,7 +615,11 @@ Say ("  C-13     ：L-13 前端 API 路径纪律（{0} 个前端文件已扫）"
 # （L-8/L-9/L-12/L-14/F-1/F-3/F-4）。红灯两种修法：① 真风险改代码（F-3 走 esc()/textContent）；
 # ② 确认误报后在 tools/e2e/lint-static-rules.py 的 EXEMPTIONS 登记「文件:行 + 理由」——
 # 不接受静默删除或整片目录豁免。
+$s12PrevEnc = $env:PYTHONIOENCODING
+$env:PYTHONIOENCODING = "utf-8"          # 理由文案含非 GBK 字符，子进程按 UTF-8 输出才不被 Stop 偏好误判为错
 $s12Out = & $PythonCmd (Join-Path $Root "tools\e2e\lint-static-rules.py") --plugin $Id --gate 2>&1
+if ([string]::IsNullOrWhiteSpace($s12PrevEnc)) { Remove-Item Env:\PYTHONIOENCODING -ErrorAction SilentlyContinue }
+else { $env:PYTHONIOENCODING = $s12PrevEnc }
 if ($LASTEXITCODE -ne 0) {
     $msg = "静态纪律门禁未通过（lint-static-rules.py --gate --plugin $Id）：`n      " +
            (($s12Out | Select-Object -Last 12) -join "`n      ") + "`n" +

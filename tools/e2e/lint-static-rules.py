@@ -26,6 +26,15 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 
+# 输出流按 UTF-8 走：豁免理由里有「•」「✅」这类非 GBK 字符，Windows 控制台默认代码页
+# 直接 print 会抛 UnicodeEncodeError —— 被出包脚本（$ErrorActionPreference=Stop）接走时
+# 会把一次本该通过的门禁误判成红灯。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:      # 非标准流（被重定向/捕获）时静默跳过
+        pass
+
 SERVER_DIRS = ("plugins",)
 LOCAL_DIRS = ("client-plugins",)
 LOCAL_DERIVED_PREFIX = "local-"          # 派生本地包 = 服务器插件 --derive-local 产出，源在 plugins/
