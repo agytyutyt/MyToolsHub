@@ -17,6 +17,10 @@ r"""本地插件包出包工具（批次 8 T-O2-6 + 批次 9 T-O9-1/F4 增强）
                              跨插件端点）命中即红；源码引用 api/<base> 但改写计数为 0 即红
                              （规范 §16.10 执行点）
     -FrontendFrom <dir>      frontend 改从指定目录取（C 类客户端工件复用 plugins/<id>/frontend）
+    超时缺省（D-2 护栏）      派生模式有 backend 且未显式传 -TimeoutMs 时，按设计缺省写入
+                             timeout_ms=600000 并打醒目警告（显式传参仍可覆盖）；
+                             漏写会让能力层回落 60000，长任务 60s 即超时
+    派生门禁（S-5）           派生模式源插件目录缺 README.md → 硬失败（插件规范必备件）
 
 产出（两种模式一致）：
     deploy\本地插件包\JZClient-本地插件-<id>-v<版本>.zip     （zip 根即插件目录，T18 口径）
@@ -44,6 +48,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 RULES_FILE = os.path.join(ROOT, "tools", "plugin-payload-rules.json")
 DEFAULT_OUT = os.path.join(ROOT, "deploy", "本地插件包")
 TEXT_EXT = {".js", ".html", ".css", ".json", ".svg"}
+
+# 派生模式（有 backend 的 worker 本地包）timeout_ms 缺省值：600000 ms。
+# 设计真源：docs/design/存量插件三类适配-设计文档.md:118「timeout_ms: 600000 // 视频/编解码长任务放宽」。
+# 能力层缺省回落 60000 ms（client/capability_app.py:362 `m.get("timeout_ms") or 60000`）——
+# 重出/派生时未显式传 -TimeoutMs 且不写本缺省，长视频/大文件任务的超时上限会静默从 10 分钟跌回
+# 60 秒（2026-10-09 D-2 回归即此根因）。显式 -TimeoutMs 仍可覆盖。
+DEFAULT_TIMEOUT_MS = 600000
 
 # L-13 白名单框架面（规范 §16.10 第 3 款：/api/<token> 中 token 允许集）
 FRAMEWORK_FACES = {"tools", "org", "login", "logout", "session"}
@@ -204,6 +215,19 @@ def build_staging(args, base_id, rules):
             manifest["resident"] = True     # 内存任务表+轮询型插件必须常驻（§2.4）
             if args.timeout_ms:
                 manifest["timeout_ms"] = args.timeout_ms
+            else:
+                # D-2 护栏：未显式传参也必须写入设计缺省值——否则 manifest 无 timeout_ms，
+                # 能力层回落 60000，长任务 60 s 即超时（回归无提示、只在运行时暴露）。
+                manifest["timeout_ms"] = DEFAULT_TIMEOUT_MS
+                print("  " + "!" * 72)
+                print("  !!! [警告] 未显式传 -TimeoutMs：按设计缺省写入 timeout_ms=%d（毫秒）"
+                      % DEFAULT_TIMEOUT_MS)
+                print("  !!! [警告] 真源 docs/design/存量插件三类适配-设计文档.md:118；"
+                      "缺省时能力层只给 60000（client/capability_app.py:362）")
+                print("  !!! [警告] 需要其他上限请显式覆盖，例如 -TimeoutMs 600000")
+                print("  " + "!" * 72)
+                notes.append("!! timeout_ms 未显式指定 → 按设计缺省 %d 写入（-TimeoutMs 可覆盖）"
+                             % DEFAULT_TIMEOUT_MS)
         with open(os.path.join(staging, "manifest.json"), "w", encoding="utf-8", newline="") as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
             f.write("\n")
@@ -237,7 +261,8 @@ def main():
     ap.add_argument("-FrontendFrom", dest="frontend_from", default="",
                     help="frontend 改从该目录取（C 类客户端工件复用服务器插件 frontend）")
     ap.add_argument("-TimeoutMs", dest="timeout_ms", type=int, default=0,
-                    help="派生模式 worker 的 timeout_ms（有 backend 时写入 manifest）")
+                    help="派生模式 worker 的 timeout_ms（有 backend 时写入 manifest；"
+                         "未显式传参按设计缺省 %d 写入并警告）" % DEFAULT_TIMEOUT_MS)
     ap.add_argument("-OutDir", dest="out_dir", default=DEFAULT_OUT)
     ap.add_argument("-Version", dest="version", default="", help="缺省取 manifest.version")
     args = ap.parse_args()
@@ -249,6 +274,8 @@ def main():
             die("目录名不是合法插件 id：%r" % base_id)
         if not os.path.isfile(os.path.join(src, "manifest.json")):
             die("派生模式：源目录缺少 manifest.json（须为服务器插件目录）")
+        if not os.path.isfile(os.path.join(src, "README.md")):
+            die("缺少插件 README.md（规范 S-5 必须）")
         pid = "local-" + base_id
     else:
         if not re.match(r"^local-[A-Za-z0-9_-]+$", base_id):

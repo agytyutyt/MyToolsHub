@@ -29,7 +29,8 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REQUIRED = ["JZToolsHub.exe", "start.bat", "一键安装.bat", "一键卸载.bat", "install.ps1",
             "config/tools.json", "config/installed-deps.json", "version.json", "README.md", "HANDOFF.md",
-            "插件设计规范.md", "移动端APP.md", "docs/README.md", "_internal/python3*"]
+            "插件设计规范.md", "移动端APP.md", "docs/README.md", "docs/项目管理手册.md",
+            "_internal/python3*"]
 TEMPLATE_MIN = 0   # 解耦后主包只带核心插件（admin 无 *.template.json）；模板随业务插件包分发
 # 核心插件白名单：主包 plugins/ 内只允许出现它（口径与 build-deploy-local.py 的 CORE_PLUGINS 一致）
 CORE_PLUGINS = ["admin", "store"]
@@ -169,6 +170,17 @@ def main():
     leaked = [n for n in names if FORBIDDEN_IN_PACKAGE.search(n)]
     check(not leaked, "无内部文档层 / 插件测试脚本随包（docs eval·plan·archive、test_*.py）",
           ("夹带 %d 项：%s" % (len(leaked), leaked[:3])) if leaked else "")
+
+    # 随包交付层非空断言（S11）：REQUIRED 只查索引与根契约文档，整目录漏拷 docs/guide、docs/design
+    # 此前不会被拦下（S11 实证漏洞）。N 口径 = 2026-10-09 核对时刻仓库顶层 .md 实际份数
+    # （docs/guide 5 份、docs/design 16 份；design 内 过滤器记忆机制图.svg 非 .md，不计）。
+    # 只判「>= N」防漏拷；份数增加不误报（本值按 docs/README.md §3.1 以定义处为准的纪律，口径即此注释）。
+    guide_md = [n for n in files if n.startswith("docs/guide/") and n.endswith(".md")]
+    check(len(guide_md) >= 5, "docs/guide/ 随包 .md >= 5 份（交付层未整目录漏拷）",
+          "实际 %d 份：%s" % (len(guide_md), ", ".join(sorted(guide_md))))
+    design_md = [n for n in files if n.startswith("docs/design/") and n.endswith(".md")]
+    check(len(design_md) >= 16, "docs/design/ 随包 .md >= 16 份（设计层未整目录漏拷）",
+          "实际 %d 份" % len(design_md))
 
     try:
         bat = z.read("start.bat").decode("gbk")

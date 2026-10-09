@@ -11,7 +11,7 @@ r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<Deploy
 与 build-deploy.ps1 的对应关系（行为逐一复刻，勿擅自改口径）：
   §3.1   dist\JZToolsHub\*（exe + _internal）
   §3.2   static/ + docs/guide/ + docs/design/（COPY_DIRS）
-         + docs/README.md + README.md + HANDOFF.md + 插件设计规范.md + 移动端APP.md
+         + docs/README.md + docs/项目管理手册.md + README.md + HANDOFF.md + 插件设计规范.md + 移动端APP.md
          + install.ps1 + 一键安装.bat + 一键卸载.bat（COPY_FILES）
          + plugins/<核心插件白名单>（CORE_PLUGINS，admin+store）+ tools/plugin-upgrade
          + config\tools.json（收窄为「site + 分类骨架 + 核心插件条目」）
@@ -61,6 +61,7 @@ CORE_PLUGINS = ["admin", "store"]
 #   tools 只拷 plugin-upgrade（目标机离线装插件）、wheels 不随包（无运行时消费方）。
 COPY_DIRS = ["static", "docs/guide", "docs/design"]
 COPY_FILES = ["install.ps1", "一键安装.bat", "一键卸载.bat", "docs/README.md",
+              "docs/项目管理手册.md",
               "README.md", "HANDOFF.md", "插件设计规范.md", "移动端APP.md"]
 
 START_BAT = """@echo off

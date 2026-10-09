@@ -134,10 +134,11 @@ Copy-Item -Recurse -Force (Join-Path $Dist "JZToolsHub\*") $AppDir
 
 # 3.2 前端与插件源码（可修改）、配置模板、文档
 # ★ 主体与插件解耦（S1，见 docs\design\主体与插件解耦-设计文档.md §3.3 / §7 #1）：
-#   主包**只带核心插件白名单**（一期 = admin），业务插件走「插件包 / 插件集」独立分发。
+#   主包**只带核心插件白名单**（当前 = admin + store，store 为第二核心插件/插件商店），
+#   业务插件走「插件包 / 插件集」独立分发。
 #   这样主体升级（整包覆盖）从机制上不可能碰到业务插件代码——「升级只针对主体」成立。
 #   目标机已装的业务插件原地保留；全新装机由插件集安装（install.ps1 完成时提示）。
-$CorePlugins = @("admin")
+$CorePlugins = @("admin", "store")
 Copy-Item -Recurse -Force (Join-Path $Root "static")  $AppDir
 $dstPlugins = Join-Path $AppDir "plugins"
 New-Item -ItemType Directory -Force -Path $dstPlugins | Out-Null
@@ -172,6 +173,10 @@ foreach ($sub in @("guide", "design")) {
 }
 $docIndex = Join-Path $Root "docs\README.md"
 if (Test-Path $docIndex) { Copy-Item -Force $docIndex (Join-Path $AppDir "docs") }
+# docs/项目管理手册.md 随包（S4：包内 docs/README.md 多处引用它，漏拷即死链）
+# ★ 口径与 tools\build-deploy-local.py 的 COPY_DIRS/COPY_FILES 一致 —— 改一处要两处一起改。
+$docManual = Join-Path $Root "docs\项目管理手册.md"
+if (Test-Path $docManual) { Copy-Item -Force $docManual (Join-Path $AppDir "docs") }
 Copy-Item -Force (Join-Path $Root "README.md") $AppDir
 Copy-Item -Force (Join-Path $Root "HANDOFF.md") $AppDir
 # 顶层契约文档（README/HANDOFF 会引用它们，此前漏拷导致部署包内引用悬空）
@@ -250,7 +255,7 @@ if (Test-Path $pluginDir) {
 }
 
 # 3.2.1 模板自检：清理后必须仍保留同步模板（防止未来有人把模板又命名回 config.json）
-# ★ 期望值随**核心插件白名单**动态计算（解耦后主包只带 admin，业务插件的模板不随主包）：
+# ★ 期望值随**核心插件白名单**动态计算（解耦后主包只带核心插件 admin+store，业务插件的模板不随主包）：
 #   硬编码 4 会在主包收窄后直接误报中止（设计文档 §7 #2）。
 $tplExpect = 0
 foreach ($cp in $CorePlugins) {
