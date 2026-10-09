@@ -7,8 +7,10 @@
 
     python tools/e2e/qr-protocol-consistency.py
 
-红=协议漂了（某端与向量/他端不一致）。**已知缺陷**以刻画断言（characterization）钉住：
-一旦某端把它修好，本台架会转为失败并指名要求更新契约文档，而不是悄悄放过。
+红=协议漂了（某端与向量/他端不一致）。**缺陷①（m=256 申报溢出）**仍以刻画断言
+（characterization）钉住：一旦某端把它修好，本台架会转为失败并指名要求更新契约文档。
+**缺陷②（map-marker 多组分组不同构）**已于 2026-10-09 修复，C3–C5 转为回归断言：
+map-marker 多组输出必须可被 qr-video-decode 重组、往返逐字节一致（旧产物需重生成）。
 
 契约真源：docs/design/二维码传输协议-契约文档.md
 向量再生成：python testdata/protocol/generate.py
@@ -239,18 +241,18 @@ def main():
           sha(got) == case["reassembled_sha256"])
 
     kd = rt["known_defect_multigroup"]
-    check("C3 已知缺陷仍在（map-marker 多组=连续分组 vs 解码端=跨步分组）：解出长度对、内容不对",
-          kd["output_length_matches"] and not kd["output_equals_input"],
-          "现状已变化，请更新契约文档 §6.2 与本向量")
     md_frames, md_k, md_m, md_nb, md_tot = mm_encode(input_bytes)
-    check("C4 缺陷现场复现（多组用例本次运行仍能重现错位，且帧集哈希与向量一致）",
-          md_nb > 1 and sha("\n".join(md_frames).encode("utf-8")) == kd["frames_sha256"]
-          and qrvd.reassemble(md_tot, md_k, md_m,
-                              frames_to_chunks(md_frames)[3]) != input_bytes)
+    check("C3 多组用例登记为已修复（向量 status=fixed，契约文档 §6.2）",
+          kd.get("status") == "fixed" and kd.get("fixed_at") == "2026-10-09",
+          "向量 status=%s；修法已实施应标 fixed，请复核契约文档 §6.2" % kd.get("status"))
+    check("C4 多组输出本次重跑与向量逐帧相同（跨步分组形态未漂移）",
+          md_nb > 1 and sha("\n".join(md_frames).encode("utf-8")) == kd["frames_sha256"],
+          "nblocks=%d；实现或向量有改动，请重生成向量并复核契约文档" % md_nb)
     got2 = qrvd.reassemble(md_tot, md_k, md_m, frames_to_chunks(md_frames)[3])
-    check("C5 缺陷形态未漂移（错位结果的哈希与向量一致）",
-          sha(got2) == kd["wrong_output_sha256"],
-          "实现有改动，请重生成向量并复核契约文档")
+    check("C5 map-marker 多组输出可被 qr-video-decode 重组、往返逐字节一致（缺陷②修复形态）",
+          md_nb > 1 and got2 == input_bytes and sha(got2) == kd["reassembled_sha256"]
+          and kd["output_equals_input"] and kd["output_length_matches"],
+          "nblocks=%d 往返不一致；契约文档 §6.2 的修复被破坏" % md_nb)
 
 
     d = headers["defect_m256"]["cases"][0]

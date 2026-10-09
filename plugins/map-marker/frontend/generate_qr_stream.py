@@ -14,7 +14,8 @@
 
 视频帧排列（QR-transfer 协议）：
   总帧数 = nblocks * m
-  frame[i + j*nblocks] = 第 j 组 FEC 的第 i 个数据块
+  第 i 组的原始数据块 = data_list[i::nblocks]（跨步切片，与解码端重组同构）
+  frame[i + j*nblocks] = 第 i 组 FEC 的第 j 个 share
   其中 nblocks = 数据块总数 / k
 """
 
@@ -81,29 +82,31 @@ def prepare_data(data_bytes: bytes, chunk_size: int) -> bytes:
 def fec_encode(padded_data: bytes, chunk_size: int, k: int, m: int) -> list:
     """使用 zfec 编码，返回按 QR-transfer 协议排列的帧列表。
 
-    协议排列：frame[i + j*nblocks] = 第 j 组 FEC 的第 i 个块
+    分组与 trajectory-convert / info-transfer / qr-video-decode 同构：
+      第 i 组的原始块 = data_list[i::nblocks]（**跨步切片**），
+      frame[i + j*nblocks] = 第 i 组的第 j 个 share。
+
+    2026-10-09 修复：此前按**连续**切块分组（组 g = 块 g*k … g*k+k-1），
+    与解码端的跨步重组不同构，nblocks>1 时内容静默错位（契约文档 §6.2）。
     """
     total_blocks = len(padded_data) // chunk_size
-    # 补齐到 k 的倍数
+    # 补齐到 k 的倍数（保证每个跨步组恰好 k 块）
     if total_blocks % k != 0:
         pad_count = k - (total_blocks % k)
         padded_data = padded_data + b"\x00" * (pad_count * chunk_size)
         total_blocks = len(padded_data) // chunk_size
 
     nblocks = total_blocks // k
+    data_list = [padded_data[i * chunk_size:(i + 1) * chunk_size]
+                 for i in range(total_blocks)]
     encoder = zfec.Encoder(k, m)
 
-    # 每组独立编码
+    # 每组独立编码：组 i = data_list[i::nblocks]（跨步，与解码端重组同构）
     groups_encoded = []
-    for g in range(nblocks):
-        group = []
-        for i in range(k):
-            offset = (g * k + i) * chunk_size
-            group.append(padded_data[offset:offset + chunk_size])
-        encoded = encoder.encode(group)
-        groups_encoded.append(encoded)
+    for i in range(nblocks):
+        groups_encoded.append(encoder.encode(data_list[i::nblocks]))
 
-    # 按协议排列：frame[idx] = groups_encoded[g][j] where idx = i + j*nblocks
+    # 按协议排列：frame[idx] = groups_encoded[i][j] where idx = i + j*nblocks
     fec_frames = []
     for j in range(m):
         for i in range(nblocks):

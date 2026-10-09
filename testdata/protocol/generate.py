@@ -129,8 +129,8 @@ def main():
 
     roundtrip = {"note": "同一输入由三个编码端各自产帧（分块与 FEC 比例属各端本地调参，"
                          "帧数/字节可不同，见契约文档 §4.1），但都必须能被 qr-video-decode 解回同一输入。"
-                         "map-marker 生成脚本只在「单组（nblocks=1）」时与解码端同构，"
-                         "多组时其块→组映射为连续切分（解码端为跨步切分），故单列 known_defect。",
+                         "map-marker 生成脚本自 2026-10-09 起改为跨步切片分组（与解码端同构），"
+                         "多组用例登记在 known_defect_multigroup（历史缺陷②，已修复的回归向量）。",
                  "input_sha256": input_sha, "input_bytes": len(data),
                  "qr_version": QR_VERSION, "ec": EC_NAME, "cases": {}}
     for name, frames, k, m in (("trajectory-convert", traj_frames, traj_k, traj_m),
@@ -183,23 +183,31 @@ def main():
         "input_b64": base64.b64encode(mm_small_data).decode("ascii"),
         "input_sha256": hashlib.sha256(mm_small_data).hexdigest(),
         "frames": sm_frames, "reassembled_sha256": hashlib.sha256(sm_got).hexdigest(),
-        "scope": "nblocks=1（单组）——map-marker 与解码端唯一同构的形态",
+        "scope": "nblocks=1（单组用例；多组回归见 known_defect_multigroup）",
     }
 
-    # map-marker：多组用例 = 已知缺陷刻画（长度正确、内容错位）
+    # map-marker：多组用例 = 缺陷②修复后的回归向量
+    # 历史（修复前）：数据块按**连续**切块分组（组 g = 块 g*k..g*k+k-1），与解码端的
+    # 跨步重组不同构，nblocks>1 时长度校验通过但内容错位（静默坏）。
+    # 2026-10-09 修复：fec_encode 改为跨步切片 data_list[i::nblocks]（契约文档 §6.2），
+    # 本条目自此保存「修复后形态」（往返逐字节一致），台架 C3–C5 断言其不再漂移。
     md_frames, md_k, md_m, md_nb, md_tot = mm_frames_for(data)
-    assert md_nb > 1, "多组缺陷用例应落在 nblocks>1，实际 %d" % md_nb
+    assert md_nb > 1, "多组用例应落在 nblocks>1，实际 %d" % md_nb
     md_got = decode_with_qrvd(md_frames)
+    assert md_got == data, "map-marker 多组往返不一致（跨步分组应与解码端同构）"
     roundtrip["known_defect_multigroup"] = {
-        "note": "map-marker 的 generate_qr_stream.py 把数据块**连续**分进各组"
+        "note": "历史缺陷②（契约文档 §6.2）：generate_qr_stream.py 曾把数据块**连续**分进各组"
                 "（group g = 块 g*k..g*k+k-1），而 trajectory-convert / info-transfer / "
-                "qr-video-decode 一律按**跨步**分组（data_list[i::nblocks]）。"
-                "nblocks>1 时解码端长度校验通过但内容错位——静默坏。契约文档 §6.2 已登记，修法待拍板。",
+                "qr-video-decode 一律按**跨步**分组（data_list[i::nblocks]），nblocks>1 时静默错位。"
+                "2026-10-09 修复并重生成：本条目改为修复后形态——多组输出可被 qr-video-decode "
+                "重组、往返逐字节一致。旧产物（修复前生成的视频）需用新脚本重新生成。",
+        "status": "fixed",
+        "fixed_at": "2026-10-09",
         "input_bytes": len(data), "input_sha256": input_sha,
         "input_ref": "input.txt（主输入）",
         "nframes": md_tot, "k": md_k, "m": md_m, "nblocks": md_nb,
         "frames_sha256": hashlib.sha256("\n".join(md_frames).encode("utf-8")).hexdigest(),
-        "wrong_output_sha256": hashlib.sha256(md_got).hexdigest(),
+        "reassembled_sha256": hashlib.sha256(md_got).hexdigest(),
         "output_length_matches": len(md_got) == len(data),
         "output_equals_input": md_got == data,
     }
@@ -279,7 +287,7 @@ def main():
     for n in manifest["files"]:
         p = os.path.join(HERE, n)
         print("  %-22s %8d B" % (n, os.path.getsize(p)))
-    print("输入 %d 字节 sha256=%s…；v1 帧数 traj=%d it=%d；map-marker 单组=%d 多组=%d(缺陷刻画)"
+    print("输入 %d 字节 sha256=%s…；v1 帧数 traj=%d it=%d；map-marker 单组=%d 多组=%d(回归)"
           % (len(data), input_sha[:12], len(traj_frames), len(it_frames),
              sm_tot, md_tot))
 

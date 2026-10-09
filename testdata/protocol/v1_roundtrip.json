@@ -35,7 +35,7 @@
       "m": 2,
       "nframes": 2,
       "reassembled_sha256": "94c1be5626db859e31463602b15048d788dca8960080e4aec552e5178f26e930",
-      "scope": "nblocks=1（单组）——map-marker 与解码端唯一同构的形态"
+      "scope": "nblocks=1（单组用例；多组回归见 known_defect_multigroup）"
     },
     "trajectory-convert": {
       "frames": [
@@ -59,7 +59,8 @@
   "input_bytes": 2952,
   "input_sha256": "ce6fe523e032ac0709ea0c8d36c6e33a0e3d8ec604697eb86e8699ae5dc4b33f",
   "known_defect_multigroup": {
-    "frames_sha256": "f82c1677f33b7a4f5b8d2d1ed6d4fa364d12224bb7a3834ce41d06ae5a56d9ef",
+    "fixed_at": "2026-10-09",
+    "frames_sha256": "5dd09490bc54a11dacfb00b74ff5f7f12669a7b47b5708e8b70d9bd1143f4caf",
     "input_bytes": 2952,
     "input_ref": "input.txt（主输入）",
     "input_sha256": "ce6fe523e032ac0709ea0c8d36c6e33a0e3d8ec604697eb86e8699ae5dc4b33f",
@@ -67,11 +68,12 @@
     "m": 3,
     "nblocks": 4,
     "nframes": 12,
-    "note": "map-marker 的 generate_qr_stream.py 把数据块**连续**分进各组（group g = 块 g*k..g*k+k-1），而 trajectory-convert / info-transfer / qr-video-decode 一律按**跨步**分组（data_list[i::nblocks]）。nblocks>1 时解码端长度校验通过但内容错位——静默坏。契约文档 §6.2 已登记，修法待拍板。",
-    "output_equals_input": false,
+    "note": "历史缺陷②（契约文档 §6.2）：generate_qr_stream.py 曾把数据块**连续**分进各组（group g = 块 g*k..g*k+k-1），而 trajectory-convert / info-transfer / qr-video-decode 一律按**跨步**分组（data_list[i::nblocks]），nblocks>1 时静默错位。2026-10-09 修复并重生成：本条目改为修复后形态——多组输出可被 qr-video-decode 重组、往返逐字节一致。旧产物（修复前生成的视频）需用新脚本重新生成。",
+    "output_equals_input": true,
     "output_length_matches": true,
-    "wrong_output_sha256": "01788fe7700251f2a4b973488700a1871733604798e0847e971cf1e1a72c2584"
+    "reassembled_sha256": "ce6fe523e032ac0709ea0c8d36c6e33a0e3d8ec604697eb86e8699ae5dc4b33f",
+    "status": "fixed"
   },
-  "note": "同一输入由三个编码端各自产帧（分块与 FEC 比例属各端本地调参，帧数/字节可不同，见契约文档 §4.1），但都必须能被 qr-video-decode 解回同一输入。map-marker 生成脚本只在「单组（nblocks=1）」时与解码端同构，多组时其块→组映射为连续切分（解码端为跨步切分），故单列 known_defect。",
+  "note": "同一输入由三个编码端各自产帧（分块与 FEC 比例属各端本地调参，帧数/字节可不同，见契约文档 §4.1），但都必须能被 qr-video-decode 解回同一输入。map-marker 生成脚本自 2026-10-09 起改为跨步切片分组（与解码端同构），多组用例登记在 known_defect_multigroup（历史缺陷②，已修复的回归向量）。",
   "qr_version": 15
 }
