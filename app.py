@@ -254,6 +254,13 @@ else:
 # 会话密钥兜底：admin 插件 register() 时会被 config/admin.json 中的持久化密钥覆盖
 app.config["SECRET_KEY"] = __import__("secrets").token_hex(32)
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# T27 框架级兜底：单请求体硬上限 640MB（Werkzeug 在解析请求体前拦截，超限 413，
+# 不进入视图函数、不占用插件内存）。取值依据：各插件自身上传限额中最宽松的是
+# admin 插件包 300MB（plugin_admin.MAX_ZIP_BYTES）与商店上架「插件包 + 前端包」
+# 两文件相加（store_admin.check_frontend_zip 同为 300MB）≈600MB，叠加 multipart
+# 开销后取 640MB——高于任一插件的合法请求上限（不误伤既有插件），同时给
+# 未设自身限额的上传路径（如 trajectory-convert 的 f.read()）一个无界读硬边界。
+app.config["MAX_CONTENT_LENGTH"] = 640 * 1024 * 1024
 
 
 class WindowsSafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
@@ -471,6 +478,31 @@ def _compress_response(response):
     response.set_data(buf.getvalue())
     response.headers["Content-Encoding"] = "gzip"
     response.headers["Vary"] = "Accept-Encoding"
+    return response
+
+
+# T30 框架级安全响应头（批次 8）。取值说明：
+# - X-Frame-Options 必须 SAMEORIGIN：插件页由主页面以**同源 iframe** 嵌入
+#   （见 /plugin/<id>/ 路由），DENY 会把所有插件页一并挡掉；
+# - CSP 保守处理：只禁 object/embed（object-src 'none'）与 <base> 劫持
+#   （base-uri 'self'）。**不设** script-src/style-src——既有页面大量使用
+#   内联 <script>/onclick 与动态 style，收紧会直接白屏（上 nonce/hash 需先
+#   改造全部前端，另立批次）；
+# - 用 setdefault 而非覆盖：允许具体响应（如 send_file 的缓存/下载语义）自行
+#   设置同名头，但插件与页面不做特殊处理时一律有这三项基础防护。
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": "object-src 'none'; base-uri 'self'",
+}
+
+
+@app.after_request
+def _security_headers(response):
+    """给所有响应补齐基础安全头（含错误响应：Flask 对 413/404 同样过 after_request）。"""
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
     return response
 
 

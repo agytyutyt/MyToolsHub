@@ -287,6 +287,44 @@ SUPPORTED_FORMATS = {
 
 # 上传大小上限（与框架层面独立的前置校验，SEC-3）
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
+# T27：multipart 请求体的宽容差——Content-Length 含 multipart 边界、字段与文件名开销，
+# 单文件场景实测 ≤1KB；给 1MB 余量，避免把合法请求（恰为 20MB 的文件）误判为超限。
+UPLOAD_REQUEST_SLACK_BYTES = 1024 * 1024
+
+# ===================== 安全闸门常量（T26–T30，批次 8） =====================
+# T26 ZIP 解析资源上限（解压炸弹防护，S1）：**读取任何条目之前**先按中央目录的
+# 声明值校验——条目数 / 单条解压尺寸 / 解压总量 / 单条压缩比。声明值不可信的
+# 极端情形由读取时的限量兜底（见 it_decode 的 ZIP 分支）。
+# 取值依据（合法输入的真实规模）：
+#   - 静态码 ZIP 由本插件产出，每页一张 PNG（v25/1250px 实测 ≈6.7KB/页）；
+#     20MB 原文的静态分页远小于 500 页（分页超 200 页时前置引导改视频）；
+#   - 单条 16MB ≈ 合法页 PNG 的 2000 倍；压缩比 PNG 类 ≈1（PNG 已压缩），
+#     200 倍上限只可能来自「小额压缩输入声明超大解压尺寸」的炸弹形态。
+MAX_ZIP_ENTRIES = 500                        # 条目数上限（含非图片条目）
+MAX_ZIP_ENTRY_BYTES = 16 * 1024 * 1024       # 单条声明解压尺寸上限
+MAX_ZIP_TOTAL_BYTES = 128 * 1024 * 1024      # 声明解压总量上限（单请求内存封顶 <200MB）
+MAX_ZIP_RATIO = 200                          # 单条声明压缩比上限（file_size/compress_size）
+
+# T28 OOXML（docx/xlsx/xlsm）DTD/实体声明扫描：OOXML 规范禁止 DTD，合法文件零命中；
+# 只扫每个部件头部 XXE_SCAN_BYTES 字节——DTD 只能出现在 XML 序言（根元素之前），
+# 头部足矣，且避免为扫描把压缩包整包解压。
+XXE_SCAN_BYTES = 4096                        # 每部件扫描头部字节数
+MAX_XXE_PARTS = 4096                         # 参与扫描的部件数上限（病态包快速回退）
+XXE_MARKERS = (b"<!DOCTYPE", b"<!ENTITY", b"<!ELEMENT")
+
+# T29 PDF 解密/提取护栏（S4）：pypdf 的 AES 解密与逐页提取均为纯 Python，
+# 加密 PDF 是最廉价的 CPU DoS 载体——加密文档先过「体积 + 页数」门槛才允许
+# 尝试空密码解密；非加密文档的提取再加页数上限与耗时预算。
+MAX_PDF_ENCRYPTED_BYTES = 5 * 1024 * 1024    # 加密 PDF 参与精简解析的体积门槛
+MAX_PDF_ENCRYPTED_PAGES = 50                 # 加密 PDF 参与精简解析的页数门槛
+MAX_PDF_PAGES = 300                          # 单文档提取页数上限（兜底，正常文档远低于此）
+PDF_EXTRACT_SECONDS = 20.0                   # 单文档提取耗时预算（超时回退原件并提示）
+
+# T30 任务临时目录（视频原件 / 逐帧 PNG / ZIP / MP4 共用）容量配额：
+# 超过上限时按 mtime 从旧到新清理，不再只依赖 30 分钟 TTL（S6：连续上传可在
+# 清理生效前写满磁盘）。豁免 60 秒内新建/修改的条目（活跃任务的产物）。
+TASK_DIR_MAX_BYTES = 2 * 1024 * 1024 * 1024  # 目录容量上限 2GB
+TASK_DIR_QUOTA_MIN_AGE = 60                  # 配额清理豁免窗口（秒）
 
 # ===================== 后台任务 =====================
 WORKERS = 2
@@ -412,6 +450,64 @@ def _frames_dir(task_id):
     return os.path.join(_TASK_DIR, f"{task_id}_frames")
 
 
+def _path_usage_bytes(path):
+    """单条目磁盘占用（目录递归求和，异常条目按 0 计）。"""
+    if not os.path.isdir(path):
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+def _enforce_task_dir_quota():
+    """T30：任务临时目录容量配额——超限时按 mtime 从旧到新回收，不再只等 TTL。
+
+    豁免 `TASK_DIR_QUOTA_MIN_AGE` 秒内新建/修改的条目（活跃任务正在写的
+    帧序列/视频不能被回收）；因此极端情况下目录可短暂超过上限（活跃任务
+    自身产物体积，单任务通常 ≪100MB），待其静默后由下一次调用回收。
+    """
+    try:
+        names = os.listdir(_TASK_DIR)
+    except OSError:
+        return
+    now = time.time()
+    entries = []
+    total = 0
+    for name in names:
+        path = os.path.join(_TASK_DIR, name)
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        size = _path_usage_bytes(path)
+        entries.append((mtime, path, size))
+        total += size
+    if total <= TASK_DIR_MAX_BYTES:
+        return
+    entries.sort(key=lambda e: e[0])          # 最旧优先回收
+    for mtime, path, size in entries:
+        if total <= TASK_DIR_MAX_BYTES:
+            break
+        if now - mtime < TASK_DIR_QUOTA_MIN_AGE:
+            continue                          # 活跃任务产物豁免
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                os.remove(path)
+        except OSError:
+            continue
+        total -= size
+
+
 def _clean_task_files():
     os.makedirs(_TASK_DIR, exist_ok=True)
     now = time.time()
@@ -425,6 +521,7 @@ def _clean_task_files():
                     os.remove(path)
         except Exception:
             pass
+    _enforce_task_dir_quota()                 # T30：TTL 之外再按容量配额回收
 
 
 def _viewer():
@@ -447,6 +544,30 @@ def _task_owned_by(task, user):
     if user.get("super_admin"):
         return True
     return owner == user.get("username")
+
+
+# ===================== 上传前置校验（T27） =====================
+
+class UploadTooLarge(Exception):
+    """上传超限（T27）：Content-Length 预判或流式计数触发，由调用方转 400。"""
+
+
+def _read_upload_limited(file_storage, limit=MAX_UPLOAD_BYTES):
+    """T27：按 Content-Length 预判 + 流式计数限量读取，替代「先 f.read() 再判上限」。
+
+    1) Content-Length 已声明且超过 limit + 1MB（multipart 开销）→ 立即拒绝，
+       不消耗内存读请求体；
+    2) FileStorage.read(limit + 1) 最多读 limit+1 字节（Werkzeug 语义），
+       分块读取计数，读到超限即拒——即便客户端**未声明或谎报** Content-Length，
+       内存占用也封顶 limit。
+    """
+    declared = request.content_length
+    if declared is not None and declared > limit + UPLOAD_REQUEST_SLACK_BYTES:
+        raise UploadTooLarge("文件过大（上限 %dMB）" % (limit // 1048576))
+    blob = file_storage.read(limit + 1)
+    if len(blob) > limit:
+        raise UploadTooLarge("文件过大（上限 %dMB）" % (limit // 1048576))
+    return blob
 
 
 # ===================== 文档提取 =====================
@@ -483,6 +604,52 @@ class LeanUnsupported(Exception):
     """精简模式无法提取该文件（封装端应回退原件传输）。"""
 
 
+class XxeSuspected(LeanUnsupported):
+    """T28：文档含 DTD/实体声明（疑似 XXE 载荷），拒绝精简解析并回退原件传输。"""
+
+
+def _scan_ooxml_xxe(file_bytes):
+    """T28：OOXML（docx/xlsx/xlsm）解析前的 DTD/实体声明扫描。
+
+    为什么按 ZIP 逐部件扫而不是整体字节扫描：OOXML 部件以 deflate 压缩存储，
+    直接扫容器字节看不到压缩后的 `<!DOCTYPE`；这里按 zip 解出每个部件的头部
+    （DTD 只能出现在 XML 序言、根元素之前，头部 XXE_SCAN_BYTES 字节足够），
+    每部件只解压 4KB，扫描成本有界。
+
+    为什么零误杀：ISO/IEC 29500 明确禁止 OOXML 使用 DTD，合法文档的任意部件
+    都不含 `<!DOCTYPE / <!ENTITY / <!ELEMENT`；文本中的同名字面量会以 `&lt;`
+    转义，不会误命中。非 ZIP 容器/解析失败时直接放行，由原解析器按既有逻辑
+    （坏文件 → LeanUnsupported 回退原件）处理。
+    """
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(file_bytes))
+    except (zipfile.BadZipFile, OSError):
+        return
+    try:
+        infos = zf.infolist()
+        if len(infos) > MAX_XXE_PARTS:
+            raise XxeSuspected(
+                "文档结构异常（部件数 %d 超上限 %d），已拒绝精简解析"
+                % (len(infos), MAX_XXE_PARTS))
+        for info in infos:
+            if info.is_dir():
+                continue
+            try:
+                with zf.open(info) as fp:
+                    head = fp.read(XXE_SCAN_BYTES)
+            except Exception:
+                continue  # 坏部件交给原解析器报错，不在扫描层拦截
+            upper = head.upper()
+            if any(marker in upper for marker in XXE_MARKERS):
+                raise XxeSuspected("文档含 DTD/实体声明（疑似 XXE 载荷），已拒绝精简解析")
+    except XxeSuspected:
+        raise
+    except Exception:
+        return  # 容器/中央目录异常：交由原解析器按既有逻辑处理
+    finally:
+        zf.close()
+
+
 def extract_doc_raw(filename, file_bytes):
     """原件传输：不做任何解析，返回 (fmt="file", 完整文件名, base64 字节, ext=None)。"""
     name = os.path.basename(filename or "未命名")
@@ -511,6 +678,7 @@ def _extract_docx_text(file_bytes):
     """
     if not DOCX_AVAILABLE:
         raise LeanUnsupported("服务器未安装 python-docx")
+    _scan_ooxml_xxe(file_bytes)   # T28：DTD/实体声明扫描（不依赖 lxml 解析器行为）
     try:
         document = docx.Document(io.BytesIO(file_bytes))
         lines = []
@@ -557,6 +725,7 @@ def _extract_xlsx_rows(file_bytes):
     """
     if not OPENPYXL_AVAILABLE:
         raise LeanUnsupported("服务器未安装 openpyxl")
+    _scan_ooxml_xxe(file_bytes)   # T28：DTD/实体声明扫描（不依赖 openpyxl 的解析器选型）
     wb = None
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
@@ -734,17 +903,47 @@ def _extract_doc_text(file_bytes):
     return _clean_doc_text(text)
 
 
-def _extract_pdf_text(file_bytes):
+def _pdf_page_hint(file_bytes):
+    """加密 PDF 的页数启发式（不解密）：统计 `/Type /Page` 名字出现次数。
+
+    PDF 加密只作用于字符串与流，名字（/Type /Page）仍以明文可见，故对常规
+    对象结构可靠；对象流（xref stream）内压缩的页对象统计不到 → 该情形由
+    体积门槛兜底（读起来慢的文件本来就不该走精简提取）。
+    """
+    try:
+        return len(re.findall(rb"/Type\s*/Page[^s]", file_bytes))
+    except Exception:
+        return 0
+
+
+def _extract_pdf_text(file_bytes, progress_cb=None):
     """T12：pdf 逐页提取文本（pypdf，纯 Python）。
 
     加密 pdf（空密码可解则继续，否则回退）；扫描版/纯图版提取为空 →
     LeanUnsupported 自动回退原件并提示。
+
+    T29 CPU 护栏（S4）：pypdf 的 AES 解密为纯 Python，加密 PDF 是廉价的
+    CPU DoS 载体（单请求可长时间占满 CPU）——
+      - 加密路径先过「体积 ≤ MAX_PDF_ENCRYPTED_BYTES 且页数 ≤ MAX_PDF_ENCRYPTED_PAGES」
+        门槛，超限**不做解密尝试**直接回退原件（明确文案）；
+      - 非加密路径提取页数 ≤ MAX_PDF_PAGES，且耗时预算 PDF_EXTRACT_SECONDS：
+        超预算即回退原件（避免超长提取占死 WORKERS=2 的工作线程）；
+      - progress_cb(done, total, elapsed) 上报提取进度（耗时对用户可见）。
     """
     if not PYPDF_AVAILABLE:
         raise LeanUnsupported("服务器未安装 pypdf，无法精简提取 pdf")
+    t0 = time.time()
     try:
         reader = pypdf.PdfReader(io.BytesIO(file_bytes))
         if reader.is_encrypted:
+            # T29：加密文档的解密是纯 Python，先按体积/页数门槛决定是否尝试解密
+            hint = _pdf_page_hint(file_bytes)
+            if (len(file_bytes) > MAX_PDF_ENCRYPTED_BYTES
+                    or hint > MAX_PDF_ENCRYPTED_PAGES):
+                raise LeanUnsupported(
+                    "pdf 已加密且超出精简提取门槛（体积 ≤%dMB、页数 ≤%d 页）"
+                    "（建议：解密/另存为文本类格式后再精简传输）"
+                    % (MAX_PDF_ENCRYPTED_BYTES // 1048576, MAX_PDF_ENCRYPTED_PAGES))
             try:
                 if not reader.decrypt(""):
                     raise LeanUnsupported("pdf 已加密，无法精简提取（已按原件传输）")
@@ -752,8 +951,17 @@ def _extract_pdf_text(file_bytes):
                 raise
             except Exception:
                 raise LeanUnsupported("pdf 已加密，无法精简提取（已按原件传输）")
+        pages = reader.pages
+        try:
+            total = len(pages)
+        except Exception:
+            total = 0
+        if total > MAX_PDF_PAGES:
+            raise LeanUnsupported(
+                "pdf 页数过多（%d 页，上限 %d 页），精简提取耗时不划算"
+                % (total, MAX_PDF_PAGES))
         parts = []
-        for page in reader.pages:
+        for i, page in enumerate(pages):
             try:
                 t = page.extract_text() or ""
             except Exception:
@@ -761,6 +969,16 @@ def _extract_pdf_text(file_bytes):
             t = t.strip()
             if t:
                 parts.append(t)
+            if progress_cb is not None:
+                try:
+                    progress_cb(i + 1, total, time.time() - t0)
+                except Exception:
+                    pass
+            if time.time() - t0 > PDF_EXTRACT_SECONDS:
+                # 超预算：不产出半截文本（静默截断比回退原件更危险），整体回退
+                raise LeanUnsupported(
+                    "pdf 精简提取超时（>%ds，页数 %d/%s）"
+                    % (int(PDF_EXTRACT_SECONDS), i + 1, total or "?"))
         text = "\n\n".join(parts).strip()
     except LeanUnsupported:
         raise
@@ -879,7 +1097,7 @@ def _parse_doc_pieces(clx, wd):
         return None
 
 
-def extract_doc_lean(filename, file_bytes):
+def extract_doc_lean(filename, file_bytes, progress_cb=None):
     """精简传输提取：返回 (fmt, name, data, ext)。
 
     提取方式按内置清单 SUPPORTED_FORMATS[ext]["extract"] 映射选择，与运行配置无关：
@@ -891,6 +1109,8 @@ def extract_doc_lean(filename, file_bytes):
     - ppt：.ppt 提取纯文本；pypdf：.pdf 提取纯文本（两者 fmt 均为 text）；
     - none（**仅 .pptx**）：不可精简 → 抛 LeanUnsupported，
       由调用方自动回退原件传输并提示。
+    progress_cb(done, total, elapsed)：提取进度回调（当前仅 pdf 逐页提取上报，
+    T29 让长耗时提取对用户可见）；缺省 None 保持旧调用口径。
     """
     name = os.path.basename(filename or "未命名")
     ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
@@ -911,7 +1131,7 @@ def extract_doc_lean(filename, file_bytes):
     if extract == "doc":
         return fmt, base, _extract_doc_text(file_bytes), ext_decl
     if extract == "pypdf":
-        return fmt, base, _extract_pdf_text(file_bytes), ext_decl
+        return fmt, base, _extract_pdf_text(file_bytes, progress_cb=progress_cb), ext_decl
     if extract == "ppt":
         return fmt, base, _extract_ppt_text(file_bytes), ext_decl
     if extract == "csv":
@@ -2058,6 +2278,69 @@ def _decode_multi(detector, img):
     return [t for t in (res[0] or []) if t]  # (texts, points, straight)
 
 
+class ZipLimitExceeded(ValueError):
+    """ZIP 解压资源超限（T26）：越过闸门即整体拒绝，不按"坏页"静默跳过。"""
+
+
+def _decode_zip_pages(zf):
+    """T26：解出 ZIP 内的二维码图片页，返回 (codes, bad_pages)。
+
+    解压炸弹防护——**读取任何条目之前**先按中央目录声明值过四道闸门：
+      1) 条目数 ≤ MAX_ZIP_ENTRIES（含非图片条目，防止海量小条目拖垮遍历）；
+      2) 单条声明解压尺寸 ≤ MAX_ZIP_ENTRY_BYTES；
+      3) 声明解压总量 ≤ MAX_ZIP_TOTAL_BYTES；
+      4) 单条声明压缩比 ≤ MAX_ZIP_RATIO（file_size / compress_size）。
+    读取时再对**实际**解压量做上限兜底（`read(limit+1)`）：声明值被伪造时
+    也不会一次性读入巨量数据（zipfile 的 read(n) 亦按声明剩余量截断）。
+    超限抛 ZipLimitExceeded（ValueError 子类）→ 调用方转 400。
+    """
+    infos = zf.infolist()
+    if len(infos) > MAX_ZIP_ENTRIES:
+        raise ZipLimitExceeded(
+            f"ZIP 内条目过多（{len(infos)} 个，上限 {MAX_ZIP_ENTRIES} 个），已拒绝解析")
+    declared_total = 0
+    for info in infos:
+        if info.is_dir():
+            continue
+        if info.file_size > MAX_ZIP_ENTRY_BYTES:
+            raise ZipLimitExceeded(
+                "ZIP 内含超大条目（单条解压上限 %dMB），已拒绝解析"
+                % (MAX_ZIP_ENTRY_BYTES // 1048576))
+        if info.compress_size and info.file_size // info.compress_size > MAX_ZIP_RATIO:
+            raise ZipLimitExceeded(
+                "ZIP 压缩比异常（疑似解压炸弹，上限 %d×），已拒绝解析" % MAX_ZIP_RATIO)
+        declared_total += info.file_size
+    if declared_total > MAX_ZIP_TOTAL_BYTES:
+        raise ZipLimitExceeded(
+            "ZIP 解压后总量过大（声明 %dMB，上限 %dMB），已拒绝解析"
+            % (declared_total // 1048576, MAX_ZIP_TOTAL_BYTES // 1048576))
+
+    codes = []
+    bad_pages = 0
+    read_total = 0
+    for info in infos:
+        if info.is_dir() or not info.filename.lower().endswith((".png", ".jpg", ".jpeg")):
+            continue
+        try:
+            with zf.open(info) as fp:
+                blob = fp.read(MAX_ZIP_ENTRY_BYTES + 1)   # 限量读取（声明失真兜底）
+            if len(blob) > MAX_ZIP_ENTRY_BYTES:
+                raise ZipLimitExceeded(
+                    "ZIP 条目实际解压尺寸超限（上限 %dMB），已拒绝解析"
+                    % (MAX_ZIP_ENTRY_BYTES // 1048576))
+            read_total += len(blob)
+            if read_total > MAX_ZIP_TOTAL_BYTES:
+                raise ZipLimitExceeded(
+                    "ZIP 实际解压总量超限（上限 %dMB），已拒绝解析"
+                    % (MAX_ZIP_TOTAL_BYTES // 1048576))
+            codes.extend(decode_image_file(blob))
+        except ZipLimitExceeded:
+            raise
+        except (ValueError, RuntimeError, zipfile.BadZipFile):
+            bad_pages += 1  # 个别页模糊/破损（含篡改声明值导致的 CRC 校验失败）时跳过
+    return codes, bad_pages
+
+
 def decode_image_file(file_bytes):
     _load_cv2()
     _load_numpy()
@@ -2364,8 +2647,19 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                 fmt, name, data, ext = extract_doc_raw(filename, file_bytes)
             else:
                 set_task(task_id, progress=0.05, stage="提取文档信息")
+
+                # T29：提取层进度上报（pdf 逐页提取的页数/耗时对用户可见；
+                # 其余格式不回调，stage 维持"提取文档信息"）
+                def extract_progress(done, total, elapsed):
+                    stage = "提取文档信息"
+                    if total:
+                        stage = "提取文档信息 %d/%d 页（%.1fs）" % (done, total, elapsed)
+                    set_task(task_id, progress=round(0.05 + 0.15 * done / max(total or 1, 1), 4),
+                             stage=stage)
+
                 try:
-                    fmt, name, data, ext = extract_doc_lean(filename, file_bytes)
+                    fmt, name, data, ext = extract_doc_lean(filename, file_bytes,
+                                                            progress_cb=extract_progress)
                 except LeanUnsupported as reason:
                     # 白名单内但不可精简（旧版格式/解析失败）→ 自动回退原件传输并提示
                     fmt, name, data, ext = extract_doc_raw(filename, file_bytes)
@@ -2642,9 +2936,10 @@ def register(app) -> None:
                 allowed = " / ".join(sorted(SUPPORTED_FORMATS.keys()))
                 return jsonify({"ok": False,
                                 "detail": f"仅支持 {allowed} 格式文件"}), 400
-            file_bytes = f.read()
-            if len(file_bytes) > MAX_UPLOAD_BYTES:
-                return jsonify({"ok": False, "detail": "文件过大（上限 20MB）"}), 400
+            try:
+                file_bytes = _read_upload_limited(f)   # T27：Content-Length 预判 + 限量读取
+            except UploadTooLarge as e:
+                return jsonify({"ok": False, "detail": str(e)}), 400
             if not file_bytes:
                 return jsonify({"ok": False, "detail": "文件为空"}), 400
         elif text_input is not None and text_input.strip():
@@ -2852,14 +3147,18 @@ def register(app) -> None:
         dtype = request.form.get("type", "image")
         if dtype not in ("image", "zip", "video"):
             dtype = "image"
-        file_bytes = f.read()
-        if len(file_bytes) > MAX_UPLOAD_BYTES:
-            return jsonify({"ok": False, "detail": "文件过大（上限 20MB）"}), 400
+        try:
+            file_bytes = _read_upload_limited(f)   # T27：Content-Length 预判 + 限量读取
+        except UploadTooLarge as e:
+            return jsonify({"ok": False, "detail": str(e)}), 400
+        if not file_bytes:
+            return jsonify({"ok": False, "detail": "文件为空"}), 400
 
         if dtype == "video":
             # 视频逐帧解码较慢 → 后台任务
             task_id = uuid.uuid4().hex[:12]
             cleanup_tasks()
+            _clean_task_files()                    # T30：TTL + 容量配额（含视频原件落盘前）
             os.makedirs(_TASK_DIR, exist_ok=True)
             tmp_video = _task_file(task_id, os.path.splitext(f.filename)[1] or ".mp4")
             with open(tmp_video, "wb") as vf:
@@ -2877,13 +3176,7 @@ def register(app) -> None:
                 bad_pages = 0
                 try:
                     with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
-                        for info in zf.infolist():
-                            if info.is_dir() or not info.filename.lower().endswith((".png", ".jpg", ".jpeg")):
-                                continue
-                            try:
-                                codes.extend(decode_image_file(zf.read(info)))
-                            except (ValueError, RuntimeError):
-                                bad_pages += 1  # 个别页模糊/破损时跳过，后续按缺页提示
+                        codes, bad_pages = _decode_zip_pages(zf)
                 except zipfile.BadZipFile:
                     raise ValueError("无法读取 ZIP 文件")
                 # ZIP 内按文件名排序保证页序（解码顺序已是文件序）
