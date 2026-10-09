@@ -341,7 +341,10 @@ def top_imports(path):
 stdlib = set(getattr(sys, 'stdlib_module_names', ()))
 # 主体（框架）模块：插件 import 它们是**框架 API 面**（FC-2/FC-3），不是第三方依赖，
 # 故既不并入框架白名单、也不参与 C-4/C-10 判定。
-FRAMEWORK_MODULES = {'jz_api', 'jz_deps', 'jztools_data', 'jz_llm'}
+# supervisor：管理进程分件的主体模块（随主包树分发，见打包部署手册「管理进程 supervisor」），
+# 插件侧经 mainapp_bridge 桥接且带 import 兜底（分件未随包 → 纯进程内形态）——非 PyPI 包，
+# 无法用 requires.python_packages 声明（声明会被判定为缺件），故按框架面放行。
+FRAMEWORK_MODULES = {'jz_api', 'jz_deps', 'jztools_data', 'jz_llm', 'supervisor'}
 # 主程序自身的第三方依赖（app.py / jztools_data.py 直接 import 的库随 exe 一起打包）
 for name in ('app.py', 'jztools_data.py'):
     fp = root / name
