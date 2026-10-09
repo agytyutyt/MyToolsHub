@@ -285,7 +285,7 @@
 | X-4 | C1 迁移上移 | 插件历史 LLM 迁移上移主体 `app.py`（代码质量报告 C1 整改） | ✅ 已完成（commit `747412d`：app.py 落点 + `llm_migrated.flag` 退场标记；删除窗口=flag 全覆盖后，已写入代码注释） |
 | X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | ✅ 已完成（2026-10-09，Q1–Q4 链：服务器包重出登记 `d7d13f9`、本地包 10 个含 README 重出 + 补件 `abf3e2b`、商店 12 项 published（10 本地 + file-filter v1.6.1 / trajectory-sketch v1.3.1，服务器条目走隔离 base_dir 部署验证）、catalog 名称修复见 S13） |
 | X-6 | D-5 WebView2 fixed 内核链 | 备选阶梯 100.x→109.x→92.x（2026-10-09 拍板） | 进行中：可执行项已就绪（`tools/client/build-webview2-kernel.py` + `install.ps1`）；定版待拍板（100.0.1185.50 存档 vs 官方在售） |
-| X-7-1 | 残留小项① | admin manifest 版本递增（admin 代码 `747412d` 有改动） | 未开始 |
+| X-7-1 | 残留小项① | admin manifest 版本递增（admin 代码 `747412d` 有改动） | ✅ 已完成（2026-10-09：admin 1.4.1→1.4.2，随源码对齐重出批次，登记 commit `e50f00f`） |
 | X-7-2 | 残留小项② | `tools/e2e/plugin-upgrade-sandbox-tests.ps1` 依赖旧路径 `deploy\JZToolsHub\version.json`（现为 `deploy\服务端\JZToolsHub`）需修 | 未开始 |
 | X-7-3 | 残留小项③ | 本地派生包未拷 README（上架告警将长期误报） | ✅ 已完成（2026-10-09 Q2：派生链随包 README + 两个 C 类工件补 `README.md`（`abf3e2b`），重出后 10/10 包根含 README，上架机器校验告警 0） |
 | X-7-4 | 残留小项④ | `tools/client/build-local-plugin-package.py` 的 DEFAULT_OUT 旧路径 `deploy\本地插件包` 未对齐新布局 | 未开始 |
