@@ -172,9 +172,10 @@ def main():
           ("夹带 %d 项：%s" % (len(leaked), leaked[:3])) if leaked else "")
 
     # 随包交付层非空断言（S11）：REQUIRED 只查索引与根契约文档，整目录漏拷 docs/guide、docs/design
-    # 此前不会被拦下（S11 实证漏洞）。N 口径 = 2026-10-09 核对时刻仓库顶层 .md 实际份数
-    # （docs/guide 5 份、docs/design 16 份；design 内 过滤器记忆机制图.svg 非 .md，不计）。
-    # 只判「>= N」防漏拷；份数增加不误报（本值按 docs/README.md §3.1 以定义处为准的纪律，口径即此注释）。
+    # 此前不会被拦下（S11 实证漏洞）。口径 = 仓库顶层 .md 实况（2026-10-09 复核：docs/guide 6 份，
+    # 含新增《桌面端与商店真机验收清单》；docs/design 16 份；design 内 过滤器记忆机制图.svg 非 .md，不计）。
+    # 阈值取比实况低一档的 >= 5 防「整目录漏拷」（该场景必红），份数增加不误报；
+    # 本值按 docs/README.md §3.1「以定义处为准、不复述份数」的纪律 —— 口径即此注释，实况变化时更新注释。
     guide_md = [n for n in files if n.startswith("docs/guide/") and n.endswith(".md")]
     check(len(guide_md) >= 5, "docs/guide/ 随包 .md >= 5 份（交付层未整目录漏拷）",
           "实际 %d 份：%s" % (len(guide_md), ", ".join(sorted(guide_md))))

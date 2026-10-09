@@ -281,6 +281,105 @@ Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留�
 #   （安装日志-LibreOffice核心.txt 由安装器在目标机运行时生成，不随包）
 #   $offlineSummary 记录随包的离线组件（写进 version.json.offline）；默认瘦包时为空串。
 $offlineSummary = @()
+
+# 离线组件清单自检（体积 + R5 sha256 冻结值比对）。
+# 独立成函数便于沙箱单测（AST 抽取后可用假 runtime 树直接触发，见报告验证）；
+# 函数不依赖脚本其余状态：默认瘦包不调用它，因而无 runtime\ 时不会误报。
+# 参数：
+#   RuntimeDir      包内 runtime\ 目录
+#   ManifestPath    包内 runtime\manifest.json
+#   ComponentsFile  仓库 tools\offline-components.json（期望 sha256 真源；空串=跳过哈希比对）
+#   CoreMeta        裁剪核心包元数据（$null=未裁剪）
+# 返回：随包组件摘要字符串数组（写 version.json.offline）。
+function Test-OfflineRuntimeManifest {
+    param(
+        [Parameter(Mandatory = $true)][string]$RuntimeDir,
+        [Parameter(Mandatory = $true)][string]$ManifestPath,
+        [string]$ComponentsFile = "",
+        [object]$CoreMeta = $null
+    )
+    if (-not (Test-Path -LiteralPath $ManifestPath)) {
+        Write-Warning "  包内没有 runtime\manifest.json —— 无法校验组件完整性"
+        return @()
+    }
+    $mf = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($CoreMeta) {
+        # 包内清单必须如实反映「MSI 已被核心包替代」，否则校验必然误报
+        foreach ($c in $mf.components) {
+            if ($c.id -eq "libreoffice") {
+                # 名称也要跟着改：清单里仍写「完整版 MSI」会与包内实际形态（裁剪核心包）自相矛盾
+                $c.name    = "LibreOffice $($c.version) 裁剪核心包（.doc→.docx / .xls→.xlsx 所需子集，源 MSI 派生）"
+                $c | Add-Member -NotePropertyName "core_pruned"    -NotePropertyValue $true -Force
+                $c | Add-Member -NotePropertyName "source_msi"     -NotePropertyValue ([string]$CoreMeta.source.file) -Force
+                $c | Add-Member -NotePropertyName "unpacked_bytes" -NotePropertyValue ([int64]$CoreMeta.artifact.unpacked_bytes) -Force
+                $c.file    = "libreoffice-core.zip"
+                $c.size    = [int64]$CoreMeta.artifact.size
+                $c.sha256  = [string]$CoreMeta.artifact.sha256
+                $c.install = "zip-unpack"
+            }
+        }
+        $mf | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ManifestPath -Encoding UTF8
+    }
+
+    # 期望 sha256 表（R5）：真源 = 仓库 tools\offline-components.json 的冻结值。
+    # 体积一致挡不住「同体积换字节」——故按 id 再比一次哈希，不一致即中止。
+    # derived[]（裁剪核心包）没有自身 sha256 字段，期望值取其 meta 文件（libreoffice-core.json）的 artifact.sha256。
+    $expSha = @{}
+    if ($ComponentsFile -and (Test-Path -LiteralPath $ComponentsFile)) {
+        try {
+            $exp = Get-Content -LiteralPath $ComponentsFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($ec in @($exp.components)) {
+                if ($ec.id -and $ec.sha256) { $expSha[[string]$ec.id] = ([string]$ec.sha256).ToLower() }
+            }
+            foreach ($ed in @($exp.derived)) {
+                if ($ed.id -and $ed.meta) {
+                    $mp = Join-Path (Join-Path $RuntimeDir $ed.subdir) $ed.meta
+                    if (Test-Path -LiteralPath $mp) {
+                        $md = Get-Content -LiteralPath $mp -Raw -Encoding UTF8 | ConvertFrom-Json
+                        if ($md.artifact.sha256) { $expSha[[string]$ed.id] = ([string]$md.artifact.sha256).ToLower() }
+                    }
+                }
+            }
+        } catch {
+            Write-Warning "  读取离线组件期望 sha256（$ComponentsFile）失败，跳过哈希比对：$($_.Exception.Message)"
+        }
+    } elseif ($ComponentsFile) {
+        Write-Warning "  缺少 $ComponentsFile —— 跳过离线组件 sha256 冻结值比对"
+    }
+
+    $miss   = @()
+    $bad    = @()
+    $badSha = @()
+    foreach ($c in $mf.components) {
+        $fp = Join-Path (Join-Path $RuntimeDir $c.subdir) $c.file
+        if (-not (Test-Path -LiteralPath $fp)) {
+            $miss += "$($c.subdir)\$($c.file)"
+        } elseif ((Get-Item -LiteralPath $fp).Length -ne [int64]$c.size) {
+            $bad += "$($c.subdir)\$($c.file)"
+        } elseif ($expSha.ContainsKey([string]$c.id)) {
+            $act = (Get-FileHash -LiteralPath $fp -Algorithm SHA256).Hash.ToLower()
+            if ($act -ne $expSha[[string]$c.id]) { $badSha += "$($c.subdir)\$($c.file)" }
+        }
+    }
+    if ($miss.Count -or $bad.Count -or $badSha.Count) {
+        throw ("离线组件不完整：缺失 [" + ($miss -join ", ") + "]，体积不符 [" + ($bad -join ", ") +
+               "]，sha256 与 tools\offline-components.json 冻结值不符 [" + ($badSha -join ", ") +
+               "]。请重跑 tools\fetch-offline-bundle.py --verify-only 后重新打包。")
+    }
+    $rtTotal = [math]::Round((Get-ChildItem -LiteralPath $RuntimeDir -Recurse -File |
+                              Measure-Object Length -Sum).Sum / 1MB, 1)
+    Write-Host "  离线组件自检通过：$($mf.components.Count) 个组件（含 sha256 冻结值比对），runtime\ 合计 $rtTotal MB"
+    $offlineSummary = @()
+    foreach ($c in $mf.components) {
+        if ($CoreMeta -and $c.id -eq "libreoffice") {
+            $offlineSummary += "libreoffice $($c.version)-core"
+        } else {
+            $offlineSummary += "$($c.id) $($c.version)"
+        }
+    }
+    return $offlineSummary
+}
+
 #   默认**不**组装（主包瘦身）：Chrome 与 LibreOffice 由独立的「离线组件包」分发，
 #   目标机按需一键安装，从而既缩小分发体积，又让组件可独立升级/卸载。
 #   要出旧式「组件随包」的胖包：加 -WithOfflineRuntime。
@@ -336,55 +435,11 @@ if (-not $WithOfflineRuntime) {
         Write-Host "    原始 MSI 已移出包外（要随包带完整版：-KeepFullLibreOffice）"
     }
 
-    # 清单自检：manifest.json 声明了什么，包里就必须有什么、且体积一致。
-    # （缺文件不打自招是好事；怕的是「清单说有两个组件、实际只有一个」而无人察觉）
-    if (Test-Path $rtMf) {
-        $mf = Get-Content $rtMf -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($coreZm) {
-            # 包内清单必须如实反映「MSI 已被核心包替代」，否则校验必然误报
-            foreach ($c in $mf.components) {
-                if ($c.id -eq "libreoffice") {
-                    # 名称也要跟着改：清单里仍写「完整版 MSI」会与包内实际形态（裁剪核心包）自相矛盾
-                    $c.name    = "LibreOffice $($c.version) 裁剪核心包（.doc→.docx / .xls→.xlsx 所需子集，源 MSI 派生）"
-                    $c | Add-Member -NotePropertyName "core_pruned"    -NotePropertyValue $true -Force
-                    $c | Add-Member -NotePropertyName "source_msi"     -NotePropertyValue ([string]$coreZm.source.file) -Force
-                    $c | Add-Member -NotePropertyName "unpacked_bytes" -NotePropertyValue ([int64]$coreZm.artifact.unpacked_bytes) -Force
-                    $c.file    = "libreoffice-core.zip"
-                    $c.size    = [int64]$coreZm.artifact.size
-                    $c.sha256  = [string]$coreZm.artifact.sha256
-                    $c.install = "zip-unpack"
-                }
-            }
-            $mf | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $rtMf -Encoding UTF8
-        }
-        $miss = @()
-        $bad  = @()
-        foreach ($c in $mf.components) {
-            $fp = Join-Path (Join-Path $rtDst $c.subdir) $c.file
-            if (-not (Test-Path $fp)) {
-                $miss += "$($c.subdir)\$($c.file)"
-            } elseif ((Get-Item $fp).Length -ne [int64]$c.size) {
-                $bad += "$($c.subdir)\$($c.file)"
-            }
-        }
-        if ($miss.Count -or $bad.Count) {
-            throw ("离线组件不完整：缺失 [" + ($miss -join ", ") + "]，体积不符 [" + ($bad -join ", ") +
-                   "]。请重跑 tools\fetch-offline-bundle.py --verify-only 后重新打包。")
-        }
-        $rtTotal = [math]::Round((Get-ChildItem $rtDst -Recurse -File |
-                                  Measure-Object Length -Sum).Sum / 1MB, 1)
-        Write-Host "  离线组件自检通过：$($mf.components.Count) 个组件，runtime\ 合计 $rtTotal MB"
-        $offlineSummary = @()
-        foreach ($c in $mf.components) {
-            if ($coreZm -and $c.id -eq "libreoffice") {
-                $offlineSummary += "libreoffice $($c.version)-core"
-            } else {
-                $offlineSummary += "$($c.id) $($c.version)"
-            }
-        }
-    } else {
-        Write-Warning "  包内没有 runtime\manifest.json —— 无法校验组件完整性"
-    }
+    # 清单自检：manifest.json 声明了什么，包里就必须有什么、且体积与 sha256 一致。
+    # （缺文件不打自招是好事；怕的是「清单说有两个组件、实际只有一个」而无人察觉；
+    #   体积一致但字节被换过同样要拦 —— R5：按 tools\offline-components.json 的冻结 sha256 比对）
+    $offlineSummary = @(Test-OfflineRuntimeManifest -RuntimeDir $rtDst -ManifestPath $rtMf `
+        -ComponentsFile (Join-Path $Root "tools\offline-components.json") -CoreMeta $coreZm)
 }
 
 # 3.3 运行期目录

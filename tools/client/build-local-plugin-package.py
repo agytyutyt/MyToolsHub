@@ -15,7 +15,8 @@ r"""本地插件包出包工具（批次 8 T-O2-6 + 批次 9 T-O9-1/F4 增强）
                              api/local/local-<base>/api/<base>（幂等，边界断言防误伤同前缀 id）
     L-13 静态检查            禁用模式（动态拼接 / 模板插值基址 / 数组 join / 硬编码来源 /
                              跨插件端点）命中即红；源码引用 api/<base> 但改写计数为 0 即红
-                             （规范 §16.10 执行点）
+                             （规范 §16.10 执行点）；自身全局面 /plugin/<自身id>/api/<端点>
+                             按自身命名空间放行（与服务器链 build-plugin-package.ps1 C-13 同口径）
     -FrontendFrom <dir>      frontend 改从指定目录取（C 类客户端工件复用 plugins/<id>/frontend）
     超时缺省（D-2 护栏）      派生模式有 backend 且未显式传 -TimeoutMs 时，按设计缺省写入
                              timeout_ms=600000 并打醒目警告（显式传参仍可覆盖）；
@@ -23,7 +24,7 @@ r"""本地插件包出包工具（批次 8 T-O2-6 + 批次 9 T-O9-1/F4 增强）
     派生门禁（S-5）           派生模式源插件目录缺 README.md → 硬失败（插件规范必备件）
 
 产出（两种模式一致）：
-    deploy\本地插件包\JZClient-本地插件-<id>-v<版本>.zip     （zip 根即插件目录，T18 口径）
+    deploy\插件包\本地插件\JZClient-本地插件-<id>-v<版本>.zip     （zip 根即插件目录，T18 口径）
     同名 .sha256 旁挂 + 登记片段（id/version/file/sha256/size/requires）
 
 用法：
@@ -46,7 +47,9 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RULES_FILE = os.path.join(ROOT, "tools", "plugin-payload-rules.json")
-DEFAULT_OUT = os.path.join(ROOT, "deploy", "本地插件包")
+# 缺省输出目录与「deploy 四类布局」（2026-10-07 起）一致：deploy\插件包\本地插件\
+# （口径：docs/guide/打包部署手册.md「deploy 四类布局」；此前为 deploy\本地插件包 旧布局）。
+DEFAULT_OUT = os.path.join(ROOT, "deploy", "插件包", "本地插件")
 TEXT_EXT = {".js", ".html", ".css", ".json", ".svg"}
 
 # 派生模式（有 backend 的 worker 本地包）timeout_ms 缺省值：600000 ms。
@@ -107,7 +110,11 @@ def iter_frontend_files(frontend_dir):
 
 
 def l13_check(frontend_dir, base_id):
-    """规范 §16.10 L-13 静态检查。返回 (errors, api_ref_count)。"""
+    """规范 §16.10 L-13 静态检查。返回 (errors, api_ref_count)。
+
+    与服务器链 tools/build-plugin-package.ps1 C-13 同口径（含 2026-10-09 95c219d 增补的
+    「自身全局面 /plugin/<自身id>/api/<端点> 放行」）；禁用模式与跨插件判定不变。
+    """
     errors, refs = [], 0
     # 禁用模式：动态拼接 / 模板插值基址 / 数组 join / 硬编码来源
     banned = [
@@ -120,6 +127,10 @@ def l13_check(frontend_dir, base_id):
     ]
     own = re.compile(r"/api/%s(?![A-Za-z0-9_-])" % re.escape(base_id))
     other = re.compile(r"/api/([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])")
+    # 自身全局面：核心插件的 API 直接挂在 /plugin/<自身id>/api/<端点>（store 形态，
+    # 桌面端插件商店设计文档 §4.2）。该形态的 token 是 /api/ 后的端点名、自身 id 在其前——
+    # 按自身命名空间放行；其他插件 id 仍判跨插件（与 build-plugin-package.ps1 的 $l13OwnGlobal 同款回看比对）。
+    own_global = "/plugin/%s" % base_id
     for full in iter_frontend_files(frontend_dir):
         rel = os.path.relpath(full, frontend_dir).replace(os.sep, "/")
         try:
@@ -142,6 +153,10 @@ def l13_check(frontend_dir, base_id):
             if ln.lstrip().startswith(("//", "*", "<!--")):
                 continue
             for m in other.finditer(ln):
+                # 自身全局面 /plugin/<自身id>/api/<端点>：id 在 /api/ 之前，按自身命名空间放行
+                if m.start() >= len(own_global) \
+                        and ln[m.start() - len(own_global):m.start()] == own_global:
+                    continue
                 token = m.group(1)
                 if token != base_id and token not in FRAMEWORK_FACES \
                         and token != "local/%s" % base_id:
@@ -234,7 +249,10 @@ def build_staging(args, base_id, rules):
         copy_tree(src_frontend, os.path.join(staging, "frontend"), rules)
         if has_backend:
             copy_tree(os.path.join(src, "backend"), os.path.join(staging, "backend"), rules)
-        notes.append("派生自服务器插件 %s（backend=%s，resident=%s）"
+        # 插件 README.md 随派生包（上架机器校验按规范 S-5 要求包根 README；此前派生只拷
+        # frontend/backend，导致全部派生本地包长期缺件告警）。main() 已保证派生模式源有 README。
+        shutil.copy2(os.path.join(src, "README.md"), os.path.join(staging, "README.md"))
+        notes.append("派生自服务器插件 %s（backend=%s，resident=%s；README.md 已随包）"
                      % (base_id, "有→worker" if has_backend else "无→纯前端",
                         "true" if has_backend else "n/a"))
     else:

@@ -119,8 +119,15 @@ if ($stray.Count -gt 0) {
 if (Test-Path -LiteralPath $T) { Remove-Item -LiteralPath $T -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $App, $Data, $OutDir, $OutVar | Out-Null
 
-Copy-Item -LiteralPath (Join-Path $Repo "deploy\JZToolsHub\version.json") -Destination $App -Force
-Copy-Item -LiteralPath (Join-Path $Repo "deploy\JZToolsHub\config") -Destination $App -Recurse -Force
+# 部署目录布局（2026-10-07「四类布局」起）：deploy\服务端\JZToolsHub\ 为现行路径，
+# 旧布局 deploy\JZToolsHub\ 保留回退（先新后旧）；两处都没有则给出明确提示而非静默早退。
+$AppSrc = Join-Path $Repo "deploy\服务端\JZToolsHub"
+if (-not (Test-Path -LiteralPath $AppSrc)) { $AppSrc = Join-Path $Repo "deploy\JZToolsHub" }
+if (-not (Test-Path -LiteralPath $AppSrc)) {
+    throw "找不到部署目录（deploy\服务端\JZToolsHub\ 与 deploy\JZToolsHub\ 均不存在）——先出一次主包（tools\build-deploy-local.py 或 build-deploy.ps1）再跑本台架"
+}
+Copy-Item -LiteralPath (Join-Path $AppSrc "version.json") -Destination $App -Force
+Copy-Item -LiteralPath (Join-Path $AppSrc "config") -Destination $App -Recurse -Force
 Copy-PluginsSeed (Join-Path $App "plugins")
 [System.IO.File]::WriteAllText((Join-Path $App "JZToolsHub.exe"), "", (New-Object System.Text.UTF8Encoding($false)))
 # 沙箱里的 knowledge-base 当作"目标机上的旧版本 0.9.0"
@@ -183,7 +190,7 @@ $html = $html -replace ('app\.js\?v=' + $curV), ('app.js?v=' + ($curV + 1))
 [System.IO.File]::WriteAllText((Join-Path $fixKb "frontend\index.html"), $html, (New-Object System.Text.UTF8Encoding($false)))
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir, "-MinApp", "1.9.0", "-FromMin", "0.9.0")
 Check "③ C-3：递增 ?v=$curV→$($curV + 1) 后构建成功（v1.0.1）" ($r.Code -eq 0) $r.Text
-$pkg = Join-Path $OutDir "JZToolsHub-插件-knowledge-base-v1.0.1.zip"
+$pkg = Join-Path $OutDir "JZToolsHub-knowledge-base-后端-v1.0.1.zip"   # 命名族方案 A（2026-10-08）：JZToolsHub-<id>-后端-v<版本>.zip
 Check "   包已产出" (Test-Path -LiteralPath $pkg)
 # ④ 同版本再次发布（不加 -Force）→ C-2 必须拒绝
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir)
@@ -253,7 +260,7 @@ $r = Run-Installer @("-Package", $pkgBad, "-InstallDir", $App, "-DataRoot", $Dat
 Check "篡改包被哈希校验拒绝（-Force 也拦）" ($r.Code -ne 0 -and $r.Text -match "哈希校验未通过") $r.Text
 Check "拒绝后程序目录仍未变" ((Get-TreeHash $kbApp) -eq $beforeHash)
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutVar, "-Force", "-MinApp", "99.0.0")
-$pkgMin = Join-Path $OutVar "JZToolsHub-插件-knowledge-base-v1.0.1.zip"
+$pkgMin = Join-Path $OutVar "JZToolsHub-knowledge-base-后端-v1.0.1.zip"
 Check "变体包已构建（min_app=99.0.0）" (Test-Path -LiteralPath $pkgMin) $r.Text
 $r = Run-Installer @("-Package", $pkgMin, "-InstallDir", $App, "-DataRoot", $Data, "-Force")
 Check "主程序版本过低被拒" ($r.Code -ne 0 -and $r.Text -match "主程序版本过低") $r.Text
@@ -262,7 +269,7 @@ $fixMan2 = Get-Content -LiteralPath (Join-Path $fixKb "manifest.json") -Raw -Enc
 $fixMan2.version = "1.0.2"
 Write-JsonFile (Join-Path $fixKb "manifest.json") $fixMan2
 $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutVar, "-FromMax", "0.5.0")
-$pkgMax = Join-Path $OutVar "JZToolsHub-插件-knowledge-base-v1.0.2.zip"
+$pkgMax = Join-Path $OutVar "JZToolsHub-knowledge-base-后端-v1.0.2.zip"
 Check "变体包已构建（v1.0.2，upgrade_from_max=0.5.0）" (Test-Path -LiteralPath $pkgMax) $r.Text
 $r = Run-Installer @("-Package", $pkgMax, "-InstallDir", $App, "-DataRoot", $Data)
 Check "超出 upgrade_from_max 被拒（未加 -Force）" ($r.Code -ne 0 -and $r.Text -match "最高起升版本") $r.Text
@@ -299,7 +306,7 @@ Check "全程用户数据未变" ((Get-TreeHash (Join-Path $Data "plugins")) -eq
 Head "6. 全新安装与卸载（base64）"
 Remove-Item -LiteralPath (Join-Path $App "plugins\base64") -Recurse -Force
 $r = Run-Builder @("-Id", "base64", "-OutDir", $OutDir)
-$pkgB64 = Join-Path $OutDir "JZToolsHub-插件-base64-v1.0.0.zip"
+$pkgB64 = Join-Path $OutDir "JZToolsHub-base64-后端-v1.0.0.zip"
 Check "base64 包构建成功（纯前端）" ($r.Code -eq 0 -and (Test-Path -LiteralPath $pkgB64)) $r.Text
 # 从沙箱 tools.json 里删掉 base64 条目 → 测"新增注册条目"路径
 $tj = Join-Path $Data "config\tools.json"
@@ -337,7 +344,7 @@ $nm.id = "e2e-noreg"
 Write-JsonFile (Join-Path $fixNoreg "manifest.json") $nm
 $r = Run-Builder @("-Id", "e2e-noreg", "-From", $fixNoreg, "-OutDir", $OutVar)
 Check "构建无注册条目的包（仅警告不阻断）" ($r.Code -eq 0) $r.Text
-$pkgNoreg = Join-Path $OutVar "JZToolsHub-插件-e2e-noreg-v1.0.0.zip"
+$pkgNoreg = Join-Path $OutVar "JZToolsHub-e2e-noreg-后端-v1.0.0.zip"
 $r = Run-Installer @("-Package", $pkgNoreg, "-InstallDir", $App, "-DataRoot", $Data)
 Check "全新安装缺 tools_entry → 拒绝" ($r.Code -ne 0 -and $r.Text -match "tools_entry") $r.Text
 Check "拒绝后未落盘" (-not (Test-Path -LiteralPath (Join-Path $App "plugins\e2e-noreg")))
