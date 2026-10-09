@@ -1,6 +1,8 @@
 # 知识库插件 Word 预览三问题排查报告
 
-> **状态：已修复（2026-09-18）**。修复实现见 `plugins/knowledge-base/backend/office_render.py`
+> **状态：已修复（2026-09-18）；已归档（2026-10-09 移入 `docs/archive/`，触发①「结论被其他文档吸收」，
+> 只作排查过程留证、不再更新）**。现行落点 → `plugins/knowledge-base/README.md`（插件现状与已知问题）、
+> `docs/design/知识库Office预览-设计文档.md`（预览链路权威）。修复实现见 `plugins/knowledge-base/backend/office_render.py`
 > 的 `_polish_word_html()` 及其子补丁函数；回归断言见
 > `plugins/knowledge-base/backend/test_routes_preview.py` 第 0b 节（5 组，①~⑤）。
 > vendor 目录除 vendor/README.md 登记的 5 条编号补丁外不改引擎源码（升级时整目录
