@@ -610,6 +610,20 @@ if ($l13Bad.Count -gt 0) {
 }
 Say ("  C-13     ：L-13 前端 API 路径纪律（{0} 个前端文件已扫）" -f $l13Files.Count)
 
+# ---------------- C-14：插件规范「必须」条款静态纪律门禁（S12；L2 存量清诊后接入） ----------------
+# 宿主与 C-11 同侧：出包前把 lint-static-rules.py 的 --gate 模式当硬门禁跑一遍
+# （L-8/L-9/L-12/L-14/F-1/F-3/F-4）。红灯两种修法：① 真风险改代码（F-3 走 esc()/textContent）；
+# ② 确认误报后在 tools/e2e/lint-static-rules.py 的 EXEMPTIONS 登记「文件:行 + 理由」——
+# 不接受静默删除或整片目录豁免。
+$s12Out = & $PythonCmd (Join-Path $Root "tools\e2e\lint-static-rules.py") --plugin $Id --gate 2>&1
+if ($LASTEXITCODE -ne 0) {
+    $msg = "静态纪律门禁未通过（lint-static-rules.py --gate --plugin $Id）：`n      " +
+           (($s12Out | Select-Object -Last 12) -join "`n      ") + "`n" +
+           "        修法：① 真风险改代码；② 误报在 EXEMPTIONS 登记「文件:行 + 理由」（逐处，勿整片豁免）。"
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
+}
+Say "  C-14     ：静态纪律门禁（lint-static-rules --gate）通过"
+
 # ---------------- 版本与配置模板扫描 ----------------
 # 模板命名/目标映射与 jztools_data._TEMPLATE_SYNC 保持一致：
 #   plugins/<id>/backend/config.template.json → 数据根 plugins/<id>/config.json
