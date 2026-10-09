@@ -289,7 +289,10 @@ if (Test-Path -LiteralPath (Join-Path $payloadPlugin "backend")) {
     if ($routesText -notmatch 'def\s+register\s*\(\s*app') { Die "backend\routes.py 未导出 register(app)（规范 §8.2）" }
 }
 foreach ($req in $Rules.required) {
-    if (-not (Test-Path -LiteralPath (Join-Path $payloadPlugin $req))) { Warn "缺少建议文件：$req（规范 S-5）" }
+    if (-not (Test-Path -LiteralPath (Join-Path $payloadPlugin $req))) {
+        $hint = if ($req -ieq "README.md") { "（规范 S-5）" } else { "" }
+        Die "缺少必须文件：$req$hint（plugin-payload-rules.json 的 required；缺失即拒绝出包）"
+    }
 }
 
 # ---------------- C-4：依赖白名单（第三方库必须 ∈ 框架 PACKAGES ∪ vendor ∪ 标准库） ----------------
@@ -532,6 +535,9 @@ if ($depObj -and $depObj.no_backend) {
 # 跨插件端点）命中即红。与 tools/client/build-local-plugin-package.py 的 Python 侧检查同口径。
 $l13Bad = @()
 $l13Faces = @("tools", "org", "login", "logout", "session")   # 白名单框架面（L-4 现值）
+# 自身全局面：核心插件的 API 直接挂在 /plugin/<自身id>/api/<端点>（store，桌面端插件商店设计文档 §4.2）。
+# 该形态的 token 是 /api/ 后的端点名、自身 id 在其前——按自身命名空间放行，其他插件 id 仍判跨插件。
+$l13OwnGlobal = "/plugin/$Id"
 $l13Banned = @(
     @{ re = '[''"]/api/[''"]\s*\+';               label = '动态拼接基址（"/api/" + …）' },
     @{ re = '\+\s*[''"]/api/[''"]';               label = '动态拼接基址（… + "/api/"）' },
@@ -563,6 +569,9 @@ if (Test-Path $l13Frontend) {
             }
             foreach ($m in [regex]::Matches($ln, "/api/([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])")) {
                 $tok = $m.Groups[1].Value
+                # 自身全局面 /plugin/<自身id>/api/<端点>：id 在 /api/ 之前，按自身命名空间放行
+                if ($m.Index -ge $l13OwnGlobal.Length -and
+                    ([string]$ln).Substring($m.Index - $l13OwnGlobal.Length, $l13OwnGlobal.Length) -ceq $l13OwnGlobal) { continue }
                 if ($tok -ne $Id -and $l13Faces -notcontains $tok -and $tok -ne "local/$Id") {
                     $l13Bad += ("{0}:{1} 跨插件端点 /api/{2}（仅允许自身与白名单框架面）" -f $rel, ($i + 1), $tok)
                 }

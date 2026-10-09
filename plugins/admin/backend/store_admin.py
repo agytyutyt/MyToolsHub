@@ -296,6 +296,9 @@ def check_local_plugin_zip(zip_path):
     frontend = (manifest.get("entry") or {}).get("frontend") or "index.html"
     if "frontend/" + frontend not in names:
         errors.append("包内缺少 frontend/%s" % frontend)
+    # 规范 S-5 必须项（告警兜底历史包）：本地包「zip 根即插件目录」，README 应在根
+    if "README.md" not in names:
+        warnings.append("包内缺少插件 README.md（规范 S-5：README 是插件接口的唯一真源）")
     if manifest.get("kind") == "hybrid":
         backend = (manifest.get("entry") or {}).get("backend")
         mount = ((manifest.get("entry") or {}).get("mount") or "").rstrip("/")
@@ -343,6 +346,10 @@ def check_server_backend_zip(zip_path):
     if not any(n.replace("\\", "/").startswith("payload/plugins/%s/frontend/" % pid)
                for n in _zip_names(zip_path)):
         warnings.append("后端包内没有 frontend/（服务器无法服务浏览器路径）")
+    # 规范 S-5 必须项（告警兜底历史包）：服务器包 README 在 payload/plugins/<id>/ 下
+    if not any(n.replace("\\", "/") == "payload/plugins/%s/README.md" % pid
+               for n in _zip_names(zip_path)):
+        warnings.append("包内缺少插件 README.md（规范 S-5：README 是插件接口的唯一真源）")
     # venv 节机器校验（§4，deps_mode=venv 的包必带 wheel 闭包）：与 supervisor apply 同源
     try:
         from supervisor.apply_chain import validate_venv_node
