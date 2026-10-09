@@ -175,7 +175,7 @@
         if (newPwd !== confirmEl.value) { errEl.textContent = '两次输入的新密码不一致'; return; }
         saveBtn.disabled = true;
         try {
-          await api('/api/account/password', {
+          await api('/api/admin/account/password', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }),

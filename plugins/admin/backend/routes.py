@@ -1008,7 +1008,7 @@ def register(app):
         set_operation("查询登录状态")
         return jsonify({"user": get_session_user()})
 
-    @app.post("/api/account/password")
+    @app.post("/api/admin/account/password")
     @login_required
     def admin_account_password():
         """自助修改密码：校验旧密码 → 新密码 ≥6 位且不得与旧密码相同。

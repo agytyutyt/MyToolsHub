@@ -62,11 +62,8 @@ DEFAULT_TIMEOUT_MS = 600000
 # L-13 白名单框架面（规范 §16.10 第 3 款：/api/<token> 中 token 允许集）
 FRAMEWORK_FACES = {"tools", "org", "login", "logout", "session"}
 
-# 核心插件 legacy 自有端点（命名债）放行（2026-10-09；与 build-plugin-package.ps1 $l13CoreLegacy 同口径）：
-# 核心插件随主体分发、不可卸载（plugins/admin/manifest.json "core": true），其前端即框架面——legacy
-# 端点未按 /api/<自身id>/ 惯例命名（/api/account/password 注册于 plugins/admin/backend/routes.py:988），
-# 按框架面口径放行。仅对**正在构建的核心插件自身**生效：其他插件引用这些 token 仍判跨插件。
-CORE_LEGACY_FACES = {"admin": ("account",)}
+# admin legacy 端点已改名（2026-10-09），白名单已撤：跨插件判定只认自身 api/<id>、
+# 自身全局面 /plugin/<自身id>/api/<端点> 与框架面 FRAMEWORK_FACES，不再有按插件 id 的 legacy 放行。
 
 # 外部 URL 语境豁免（与 build-plugin-package.ps1 $l13ExtRe 同口径）：同字面量内含 host/port 形态外部
 # 地址（如 http://127.0.0.1:11434/api/chat）时，其中的 /api/<token> 是外部服务地址描述（实例：admin
@@ -183,7 +180,6 @@ def l13_check(frontend_dir, base_id):
                     continue
                 token = m.group(1)
                 if token != base_id and token not in FRAMEWORK_FACES \
-                        and token not in CORE_LEGACY_FACES.get(base_id, ()) \
                         and token != "local/%s" % base_id:
                     # 外部 URL 语境：字面量（模板整段/本行）含 host/port 外部地址 → 地址描述，非跨插件调用
                     if li in ext_lines or EXT_ADDR_RE.search(ln):

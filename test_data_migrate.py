@@ -571,7 +571,7 @@ class TestHttpLayer(unittest.TestCase):
                        json={"passphrase": "longenough1", "sections": ["accounts"]})
         blob = r.data
         # 改掉当前管理员密码
-        r = admin.post("/api/account/password",
+        r = admin.post("/api/admin/account/password",
                        json={"old_password": "admin123", "new_password": "changed123"})
         self.assertEqual(r.status_code, 200, r.get_data(as_text=True)[:200])
         c2 = self.app.test_client()
