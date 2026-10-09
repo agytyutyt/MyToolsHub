@@ -786,7 +786,7 @@ c.post("/api/login", json={"username": "admin", "password": "admin123"})
 | 评估层 | `docs/eval/` | 信息传输总纲、Python 选型、热插拔路线、手搓引擎 |
 | 方案层 | `docs/plan/` | 信息传输 TODO 清单、主体与插件解耦 TODO 清单（活清单）与实施方案 |
 | 归档层 | `docs/archive/` | 已完成 / 已决 / 已取代，只作留证 |
-| 插件自带 | `plugins/<id>/README.md`（16 份） | **该插件接口的唯一真源** |
+| 插件自带 | `plugins/<id>/README.md`（份数以 plugins/*/README.md 实况为准，当前 17） | **该插件接口的唯一真源** |
 
 
 ---
