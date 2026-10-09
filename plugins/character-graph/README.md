@@ -22,6 +22,8 @@
 | `/analyze` | POST | multipart `file` → 异步返回 `{ok, task_id}`；缺文件 / 空文件 / 大模型未配置 → 400 | 登录 |
 | `/result/<task_id>` | GET | 轮询任务：`status`（pending / running / done / error）+ `filename`；`done` 另有 `graph`，`error` 另有 `detail`；任务不存在或已过期 → 404 | 创建者/超管 |
 
+> 任务可见性：本人或超管；升级前无主任务同口径（仅超管）。
+
 ## 依赖与升级
 
 | 项 | 内容 |

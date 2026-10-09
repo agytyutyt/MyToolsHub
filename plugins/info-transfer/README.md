@@ -144,6 +144,8 @@ flags bit0-1=压缩算法（0=none 1=zlib 2=xz；`_compress_best` 取 zlib/xz �
 | GET | /decode/<id> | 视频解析任务轮询 |
 | POST | /export | 解析数据 → 导出文件（file 直接还原原始文件；word/excel 重建 docx/xlsx） |
 
+> 任务可见性：本人或超管；升级前无主任务同口径（仅超管）。
+
 ## 依赖与升级
 
 | 项 | 内容 |

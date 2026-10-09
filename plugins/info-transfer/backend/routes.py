@@ -535,10 +535,13 @@ def _viewer():
 
 
 def _task_owned_by(task, user):
-    """任务归属校验：非创建者（且非超管）视为任务不存在（404，纵深防御）。"""
+    """任务归属校验：非创建者（且非超管）视为任务不存在（404，纵深防御）。
+
+    无归属记录的旧任务（升级前创建）仅超管可见 —— 收紧而非放行。
+    """
     owner = task.get("created_by")
     if not owner:
-        return True
+        return bool(user and user.get("super_admin"))
     if user is None:
         return False
     if user.get("super_admin"):

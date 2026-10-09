@@ -49,6 +49,13 @@ _spec = importlib.util.spec_from_file_location(
 it = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(it)
 
+import jz_api  # noqa: E402
+
+# D5（任务归属校验统一收紧）之后，无主任务仅超管可见 —— 全套件以一个固定登录身份跑，
+# 使任务 created_by 与轮询 `/task/<id>` 的身份同口径（等价于真实部署下的已登录会话）。
+TEST_USER = {"username": "it-sec-tester", "super_admin": False}
+jz_api.register_providers(get_session_user=lambda: dict(TEST_USER))
+
 from flask import Flask  # noqa: E402
 
 API = "/api/info-transfer"
@@ -694,6 +701,33 @@ class TestTaskDirQuota(unittest.TestCase):
                           "quota.txt", {"mode": "static"})
         self.assertEqual(r.status_code, 200)
         self.assertTrue(calls, "/encode 应调用 _clean_task_files")
+
+
+class TestTaskOwnership(unittest.TestCase):
+    """D5：任务归属校验统一收紧——无主任务（升级前创建）与已归属任务同口径（仅本人或超管）。"""
+
+    NORMAL = {"username": "alice", "super_admin": False}
+    OTHER = {"username": "bob", "super_admin": False}
+    ADMIN = {"username": "root", "super_admin": True}
+
+    def test_orphan_task_rejects_normal_user(self):
+        """无主任务 + 普通用户 → 拒绝（收紧前此分支无条件放行）。"""
+        for task in ({}, {"created_by": ""}, {"created_by": None}):
+            self.assertFalse(it._task_owned_by(task, self.NORMAL), task)
+        self.assertFalse(it._task_owned_by({}, None))
+
+    def test_orphan_task_allows_super_admin(self):
+        """无主任务 + 超管 → 放行。"""
+        self.assertTrue(it._task_owned_by({}, self.ADMIN))
+        self.assertTrue(it._task_owned_by({"created_by": ""}, self.ADMIN))
+
+    def test_owned_task_unchanged(self):
+        """已归属任务：本人放行、他人拒绝、超管放行、未登录拒绝（回归）。"""
+        task = {"created_by": "alice"}
+        self.assertTrue(it._task_owned_by(task, self.NORMAL))
+        self.assertFalse(it._task_owned_by(task, self.OTHER))
+        self.assertTrue(it._task_owned_by(task, self.ADMIN))
+        self.assertFalse(it._task_owned_by(task, None))
 
 
 if __name__ == "__main__":

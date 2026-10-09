@@ -32,6 +32,13 @@ _spec = importlib.util.spec_from_file_location(
 it = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(it)
 
+import jz_api  # noqa: E402
+
+# D5（任务归属校验统一收紧）之后，无主任务仅超管可见 —— 全套件以一个固定登录身份跑，
+# 使任务 created_by 与轮询 `/task/<id>` 的身份同口径（等价于真实部署下的已登录会话）。
+TEST_USER = {"username": "it-vod-tester", "super_admin": False}
+jz_api.register_providers(get_session_user=lambda: dict(TEST_USER))
+
 from flask import Flask  # noqa: E402
 
 FAILS = []
@@ -159,7 +166,7 @@ def main():
     print("\n[5] 失败路径：帧序列缺失不静默产坏视频")
     empty = "f" * 12
     it.set_task(empty, status="done", output_type="video", frame_count=3,
-                frame_repeat=5, created_at=time.time(), created_by="")
+                frame_repeat=5, created_at=time.time(), created_by=TEST_USER["username"])
     r = client.post(f"{API}/encode/{empty}/video")
     check("无帧目录时拒绝生成", r.status_code == 409, f"{r.status_code} {r.data}")
     r = client.post(f"{API}/encode/nonexistent000/video")
