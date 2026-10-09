@@ -48,7 +48,11 @@ RULES = {
     "F-4":  "硬编码密钥（`sk-…` 字面量 / `\"api_key\": \"…\"`），凭据必须交 jz_llm（SEC-2/L-10）",
 }
 
-# 已核实为误报或既有形态的豁免（rule, 路径前缀, 理由）
+# 已核实为误报或既有形态的豁免（rule, 路径, 理由）
+# 路径两种形态：
+#   - 目录/文件前缀（如 `plugins/admin/frontend/`）：整片命中都降级；
+#   - `文件:行`（如 `plugins/store/frontend/store.js:600`）：**只豁免那一行**——
+#     逐处分诊（F-3 存量清诊）用它，避免把整个文件的将来命中一起吞掉。
 EXEMPTIONS = [
     ("L-14", "plugins/", "test_*.py 与台架夹具不参与出包，模块级 import 重依赖属预期（构建期剔除）"),
     ("F-1", "plugins/admin/frontend/", "占位符文案里的示例路径（`D:\\…`）是给用户看的说明文字，非代码取径"),
@@ -66,10 +70,15 @@ def norm(p):
     return p.replace(os.sep, "/")
 
 
-def exempt(rule, rel):
+def exempt(rule, rel, line=None):
     rel = norm(rel)
-    for r, prefix, why in EXEMPTIONS:
-        if r == rule and rel.startswith(prefix):
+    for r, target, why in EXEMPTIONS:
+        if r != rule:
+            continue
+        if ":" in target:                       # 精确到行
+            if line is not None and "%s:%d" % (rel, line) == target:
+                return why
+        elif rel.startswith(target):
             return why
     base = rel.split("/")[-1]
     for r, token, why in STRUCTURAL_EXEMPT:
@@ -273,7 +282,7 @@ def build_findings(only_plugin=None):
                 continue
             for ln, msg in fn(rel, lines, ctx):
                 findings.append({"rule": rule, "path": rel, "line": ln, "message": msg,
-                                 "exempt": exempt(rule, rel)})
+                                 "exempt": exempt(rule, rel, ln)})
     # L-12：本地包版本递增（manifest.version 必须 > 已出包最新版）
     for base in ("client-plugins",):
         root = os.path.join(REPO, base)
@@ -371,13 +380,28 @@ def selftest():
         print("  L-12 造样例命中：%s（已出包最新=%s manifest=1.0.0）" % ("OK" if ok12 else "**未命中**", got))
         if not ok12:
             bad.append("L-12")
+        # 行级豁免（F-3 存量清诊用它逐处登记）：只降级登记的那一行
+        probe = "plugins/probe_f3/frontend/app.js"
+        EXEMPTIONS.append(("F-3", probe + ":1", "selftest 行级豁免"))
+        try:
+            hit_line = exempt("F-3", probe, 1) == "selftest 行级豁免"
+            hit_other_line = exempt("F-3", probe, 2) is None
+            hit_other_file = exempt("F-3", "plugins/probe_f3/frontend/other.js", 1) is None
+        finally:
+            EXEMPTIONS.pop()
+        ok_line = hit_line and hit_other_line and hit_other_file
+        print("  行级豁免（文件:行）：%s（登记行降级=%s 同文件他行不降级=%s 他文件不降级=%s）"
+              % ("OK" if ok_line else "**不符**", hit_line, hit_other_line, hit_other_file))
+        if not ok_line:
+            bad.append("EXEMPT")
     finally:
         REPO = real
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
-    print("\n== 扫描器自测：%d/%d 规则可命中 ==" % (7 - len(bad), 7))
+    total = 8
+    print("\n== 扫描器自测：%d/%d 项通过 ==" % (total - len(bad), total))
     if bad:
-        print("未命中规则：" + "、".join(bad))
+        print("未通过项：" + "、".join(bad))
     return 1 if bad else 0
 
 
