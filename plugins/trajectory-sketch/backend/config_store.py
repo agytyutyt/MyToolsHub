@@ -35,7 +35,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "keep_columns": ["BEGINTIME", "USERNUM", "LAI", "CI", "ADDRESS",
                          "LONGITUDE", "LATITUDE"],
         "post_rules": [],
-        "use_filter_plugin_rules": False,
     },
     "schema": copy.deepcopy(engine_params.DEFAULT_SCHEMA),
     "analysis": {
@@ -127,7 +126,6 @@ def _sanitize_filter(flt: Any) -> Dict[str, Any]:
         "mode_default": mode,
         "keep_columns": keep[:MAX_KEEP_COLUMNS],
         "post_rules": sanitize_rules(src.get("post_rules")),
-        "use_filter_plugin_rules": bool(src.get("use_filter_plugin_rules")),
     }
 
 

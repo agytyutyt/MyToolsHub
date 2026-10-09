@@ -41,16 +41,6 @@ FILTER_PLUGIN_ID = "trajectory-sketch"
 # 可用性自检
 # --------------------------------------------------------------------------
 
-def filter_enabled() -> bool:
-    """过滤能力是否可用——本地实现恒为 True（不再依赖其他插件）。"""
-    return True
-
-
-def filter_route_available(app=None) -> bool:
-    """兼容保留：不再有"对方路由"这一说，恒为 True。"""
-    return True
-
-
 def filter_status(app=None) -> Dict[str, Any]:
     """过滤能力状态摘要（给 ``/status`` 与前端用）。
 
@@ -82,14 +72,12 @@ def llm_session():
 # 主调用
 # --------------------------------------------------------------------------
 
-def apply_filter(app=None, rows: Sequence[Sequence[Any]] = (), mode: str = "hard",
+def apply_filter(rows: Sequence[Sequence[Any]], mode: str = "hard",
                  columns: Optional[List[str]] = None,
                  post_rules: Optional[List[Dict[str, Any]]] = None,
-                 cookie: str = "", host_url: str = "",
                  session: Any = None) -> Dict[str, Any]:
     """执行过滤（本插件自带实现；``mode="llm"`` 时经框架模块 ``jz_llm`` 做语义匹配）。
 
-    保留 ``app`` / ``cookie`` / ``host_url`` 形参只为兼容既有调用方（内部不再使用）。
     ``session`` 仅在 ``mode="llm"`` 时需要，且必须由请求线程取得后传入。
     失败抛 :class:`FilterError`（``status`` 为建议的 HTTP 状态码）。
     """

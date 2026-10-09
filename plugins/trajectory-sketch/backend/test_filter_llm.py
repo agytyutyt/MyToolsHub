@@ -367,7 +367,7 @@ class RoutesWiringTest(Base):
 
     def test_worker_receives_session(self):
         src = _read(os.path.join("backend", "routes.py"))
-        self.assertIn("_cookie(), _host_url(), session)", src)
+        self.assertIn("_executor.submit(_run_analysis, task_id, stage, mode, session)", src)
         self.assertIn("session: Any = None", src)
 
 
