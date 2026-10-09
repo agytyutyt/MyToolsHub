@@ -37,8 +37,8 @@
 
 | # | 现状证据（报告 §） | 修法摘要 | 状态 |
 | --- | --- | --- | --- |
-| D1 | `plugins/admin/backend/routes.py:134-146`（load/save 无锁）；`batch_io.py:273/284` 同 | admin.json 加模块级 `threading.RLock` 包住 load→mutate→save 全程 | ◐ 部分完成（commit 本次）：`ADMIN_CFG_LOCK`（RLock）+ `save_admin_config` 唯一临时名已落，`batch_io` 经注入的同一对函数自动受益；**跨处理器的 load→mutate→save 全程锁未做**（23 处写点、涉鉴权面，结构改动交人工），丢失更新窗口仍在 |
-| D2 | `app.py:525-530`（固定 `.tmp` 名）；`:1073-1116`/`:1148-1184` 无锁读改写 | tools.json 加模块级锁；tmp 改 `tempfile.mkstemp(dir=…)` | ◐ 部分完成（commit 本次）：`save_registry` 固定 `.tmp` 改 `tempfile.mkstemp` 唯一名 + 失败清理；tools.json 的跨处理器读改写锁同 D1 未做（需拍板） |
+| D1 | `plugins/admin/backend/routes.py:134-146`（load/save 无锁）；`batch_io.py:273/284` 同 | admin.json 加模块级 `threading.RLock` 包住 load→mutate→save 全程 | ◐ 部分完成（commit 本次）：`ADMIN_CFG_LOCK`（RLock）+ `save_admin_config` 唯一临时名已落，`batch_io` 经注入的同一对函数自动受益；**跨处理器的 load→mutate→save 全程锁未做**（23 处写点、涉鉴权面，结构改动交人工），丢失更新窗口仍在（**2026-10-09 拍板：①全量收口（update_admin_config 全程锁 + 24 处替换 + tools.json 同类收敛），待实施**） |
+| D2 | `app.py:525-530`（固定 `.tmp` 名）；`:1073-1116`/`:1148-1184` 无锁读改写 | tools.json 加模块级锁；tmp 改 `tempfile.mkstemp(dir=…)` | ◐ 部分完成（commit 本次）：`save_registry` 固定 `.tmp` 改 `tempfile.mkstemp` 唯一名 + 失败清理；tools.json 的跨处理器读改写锁随 D1 一并 ① 全量收口（2026-10-09 拍板，待实施） |
 | D3 | `plugins/admin/backend/plugin_admin.py:1365` 传 `None`，函数（`:883-892`）对非 dict 恒返回 `{}` | 修 `plugin_names(None)`——**一行可修** | ✅ 已完成（commit 本次）：`scan_packages` 改为按 `data_root/config/tools.json` 取展示名（`plugin_names(None)` 恒空的缺陷修掉），`data_root=None` 时安全回落 |
 | D4 | `app.py:515`（读 tools.json）用普通 utf-8；`jz_deps.py:125…334`、`app.py:122`、`jz_llm.py:811` 用 utf-8-sig | 外部可手工编辑的 JSON 统一 `utf-8-sig`（BOM → 整站空注册表） | ✅ 已完成（commit 本次）：`app.py` 的 tools.json / manifest.json 读取统一 `utf-8-sig`（与 `jz_deps`/`jz_llm` 同口径，容忍记事本 BOM） |
 | D5 | 放行版：`character-graph:157-169`、`qr-video-decode:106-118`、`info-transfer:367-376`；收紧版：`trajectory-convert:192-205`、`file-filter:225-236` | 拍板从严（旧任务仅超管可见），三个放行版插件**各自本地**统一；不沉淀公共模块 | 未开始（**需拍板**：放行版与收紧版口径相反，属产品判定，不在自动整改范围） |
@@ -54,10 +54,10 @@
 
 | # | 范围（报告 §） | 要点摘要 | 状态 |
 | --- | --- | --- | --- |
-| P2-1 | §4.1 宿主核心重复 | `jz_llm._post`/`test_connection` 约 30 行逐字重复 → `_send_and_parse`；「tmp 写入 + os.replace」4 模块 6 处 → `atomic_write_json`（顺带统一 D4 编码）；删 `_EMOJI_ICON_FILES`/`icon_file` 死代码；`@require_login` 收口三条 LLM 路由等 | 未开始 |
-| P2-2 | §4.2 构建脚本重复 | `build-deploy.ps1` ↔ `build-deploy-local.py` 整段双实现；包内容清单单一真源数据文件；`tools/_shared.psm1` 统一 `Compare-SemVer` 等；`install.ps1` cfgPairs 死清单改自动发现；spec 两份 19 项列表合一；修 `$vcBundled` 先用后定义与 depCheck 漂移；zip 机制对齐 | 未开始 |
-| P2-3 | §4.3 测试重复（无 conftest.py） | 根 `conftest.py` 收敛 `load_plugin`/数据根 fixture/USER/PLUGIN_DIRS 四类样板；`test_admin_plugin_manager` 导入期副作用入 fixture | 未开始 |
-| P2-4 | §4.4 宿主复杂结构 | `app.py` 拆模块（dep_bootstrap / access_log / plugin_loader / LLM Blueprint / tray）；长函数拆分；每请求开销两项（refresher 退避、轻量 `/api/site`） | 未开始 |
+| P2-1 | §4.1 宿主核心重复 | `jz_llm._post`/`test_connection` 约 30 行逐字重复 → `_send_and_parse`；「tmp 写入 + os.replace」4 模块 6 处 → `atomic_write_json`（顺带统一 D4 编码）；删 `_EMOJI_ICON_FILES`/`icon_file` 死代码；`@require_login` 收口三条 LLM 路由等 | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
+| P2-2 | §4.2 构建脚本重复 | `build-deploy.ps1` ↔ `build-deploy-local.py` 整段双实现；包内容清单单一真源数据文件；`tools/_shared.psm1` 统一 `Compare-SemVer` 等；`install.ps1` cfgPairs 死清单改自动发现；spec 两份 19 项列表合一；修 `$vcBundled` 先用后定义与 depCheck 漂移；zip 机制对齐 | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
+| P2-3 | §4.3 测试重复（无 conftest.py） | 根 `conftest.py` 收敛 `load_plugin`/数据根 fixture/USER/PLUGIN_DIRS 四类样板；`test_admin_plugin_manager` 导入期副作用入 fixture | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
+| P2-4 | §4.4 宿主复杂结构 | `app.py` 拆模块（dep_bootstrap / access_log / plugin_loader / LLM Blueprint / tray）；长函数拆分；每请求开销两项（refresher 退避、轻量 `/api/site`） | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
 
 ### 3.2 P3（报告 §5.1 / §5.3）
 
