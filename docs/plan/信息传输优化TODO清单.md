@@ -45,7 +45,7 @@
 
 **实现方案**：新增 `plugins/info-transfer/backend/test_roundtrip.py`——对 9 类格式样例（txt/md/csv/xlsx/xls/docx/doc/ppt/pdf，样例生成方式复用 `.workbuddy/tmp/it_bench/`）分别走 `POST /encode（static+video 两种 mode）→ /decode → /export` 全链路，断言导出文件 SHA-256 与源文件一致（精简模式断言提取文本一致）。静态多页 >200 页的用例断言报错信息含引导文案。
 **预期效果**：9 格式 × 2 模式回归全绿；此后每个 TODO 合并前跑通本回归，作为改动是否破坏还原正确性的唯一判据。
-**现状注记（2026-09-24）**：本回归套件（`backend/test_roundtrip.py`，同批还有 `test_protocol_v2.py` / `test_video_ondemand.py`）已于 **2026-09-18 由 commit `944128c` 移出仓库**（现 `backend/` 仅 `__init__.py` / `requirements.txt` / `routes.py`）；**回归需先恢复该文件**（`test_*.py` 排除规则已保证不随包），下文各条"套件全绿"记录均为移出前口径。
+**现状注记（2026-09-24）**：本回归套件（`backend/test_roundtrip.py`，同批还有 `test_protocol_v2.py` / `test_video_ondemand.py`）已于 **2026-09-18 由 commit `944128c` 移出仓库**（现 `backend/` 仅 `__init__.py` / `requirements.txt` / `routes.py`）；**回归需先恢复该文件**（`test_*.py` 排除规则已保证不随包）；**已恢复（2026-10-09）**：三套件自 `944128c^` 还原并完成漂移适配后全绿（roundtrip 49/49、protocol_v2 59/59、video_ondemand 22/22），本条回归红线恢复可执行。下文各条"套件全绿"记录均为移出前口径。
 
 ### T02 · `fmt=file` 试压 zlib（S2 阶段一） 【状态：已完成（2026-09-16）】
 
@@ -276,7 +276,7 @@
 - 前端：视频设置区新增「同时生成视频文件（MP4）」勾选（默认关，`video_file=1` 当场直出）；结果卡摘要区分"视频文件未生成/已生成（体积）"，下载按钮在未生成时显示「生成视频文件并下载（MP4）」→ 触发后按 `video_status` 轮询进度 → 完成后自动下载并刷新卡片。
 **预期效果**：常规路径单任务体积 4.38MB → 227KB（16KB 载荷，−95%）、生成耗时 24.6s → 21.4s；需要文件时才付 18× 体积与 6–13% CPU。
 **验收与落地记录（2026-09-17）**：
-- `backend/test_video_ondemand.py` **22/22**（**现状注记（2026-09-24）**：该套件与 `test_protocol_v2.py` / `test_roundtrip.py` 已于 2026-09-18 由 commit `944128c` 移出仓库，回归需先恢复该文件）：默认不产视频（`video_status=none`、`video_size=0`、帧接口可用）、下载未生成视频返回 409、按需生成幂等、**生成的 mp4 走 `/decode type=video` 还原文本与原文逐字节一致**、直出（`video_file=1`）与按需生成帧数口径一致、帧目录缺失时拒绝生成（不静默产坏视频）。
+- `backend/test_video_ondemand.py` **22/22**（**现状注记（2026-09-24）**：该套件与 `test_protocol_v2.py` / `test_roundtrip.py` 已于 2026-09-18 由 commit `944128c` 移出仓库，回归需先恢复该文件；**已恢复（2026-10-09）并复跑 22/22**）：默认不产视频（`video_status=none`、`video_size=0`、帧接口可用）、下载未生成视频返回 409、按需生成幂等、**生成的 mp4 走 `/decode type=video` 还原文本与原文逐字节一致**、直出（`video_file=1`）与按需生成帧数口径一致、帧目录缺失时拒绝生成（不静默产坏视频）。
 - 协议回归 `test_protocol_v2.py` **45/45**（`test_roundtrip.py` 显式传 `out_path`，不受默认值变更影响）。
 - 浏览器实测（独立 dev server）：按钮「生成视频文件并下载（MP4）」→ 状态行「正在生成视频文件… n%」→「视频文件已生成（1010.3 KB）」→ 标签变「下载二维码视频（MP4）」+ 摘要回填体积 + 真实 download 事件；**生成期间轮播不中断**；勾选直出路径当场产出（73.1 KB，无生成步骤）。
 - **遗留**：无（真机扫码不受影响：帧序列与 mp4 同源同渲染）。
@@ -319,7 +319,7 @@
 
 ## 验收红线（贯穿所有批次）
 
-1. **每次合并前跑 T01 回归**（9 格式 × 2 模式 SHA-256/文本一致）——**现状注记（2026-09-24）**：套件已于 2026-09-18 移出仓库（commit `944128c`），执行前需先恢复 `plugins/info-transfer/backend/test_roundtrip.py`（协议/按需视频回归同需恢复 `test_protocol_v2.py` / `test_video_ondemand.py`）；
+1. **每次合并前跑 T01 回归**（9 格式 × 2 模式 SHA-256/文本一致）——**现状注记（2026-09-24）**：套件已于 2026-09-18 移出仓库（commit `944128c`），执行前需先恢复 `plugins/info-transfer/backend/test_roundtrip.py`（协议/按需视频回归同需恢复 `test_protocol_v2.py` / `test_video_ondemand.py`）；**已恢复（2026-10-09，三套件全绿 49/59/22）**，本条红线恢复可执行；
 2. 高版本满屏大码、二进制直载上线前**真机验证**（连续 200 帧全解 ≥95%；≥2 台：旗舰 + 中低端）；
 3. 有损变换必须逐次显式授权，默认关闭；
 4. 新增第三方依赖必须登记进 `JZToolsHub.spec` 的 `PACKAGES`（框架必需）**或** `DEP_COMPONENT_PACKAGES`（随依赖组件包分发），并在 `manifest.requires` 声明，并核对许可（xz-java 0BSD、pypdf BSD、packJPG LGPL 注意动态链接合规）；
