@@ -456,6 +456,10 @@
     resetResult();
     fetch(API + "/filter", { method: "POST", body: fd, credentials: "same-origin" })
       .then(function (resp) {
+        if (resp.status === 401) {                       // D8 统一（2026-10-09）
+          location.href = "/login?next=" + encodeURIComponent("/tool/file-filter");
+          return new Promise(function () {});            // 跳转中挂起
+        }
         return resp.json().then(function (data) {
           if (!resp.ok) {
             var err = new Error(data.error || ("HTTP " + resp.status));
@@ -1687,6 +1691,10 @@
       opts.headers = { "Content-Type": "application/json" };
     }
     return fetch(url, opts).then(function (resp) {
+      if (resp.status === 401) {                         // D8 统一（2026-10-09）
+        location.href = "/login?next=" + encodeURIComponent("/tool/file-filter");
+        return new Promise(function () {});              // 跳转中挂起
+      }
       return resp.json().then(function (data) {
         if (!resp.ok) {
           var err = new Error((data && data.error) || ("HTTP " + resp.status));

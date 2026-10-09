@@ -34,6 +34,10 @@ function toast(text, isErr) {
 
 async function api(url, options) {
   const res = await fetch(url, options);
+  if (res.status === 401) {                              // D8 统一（2026-10-09）
+    location.href = "/login?next=" + encodeURIComponent("/tool/notice-board");
+    return new Promise(() => {});                        // 跳转中挂起，后续 then/catch 不再触发
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `请求失败（${res.status}）`);
   return data;

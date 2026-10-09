@@ -142,7 +142,15 @@ def _state_report(dataset: Dataset, params: Dict[str, Any],
     append_summary = bool(rcfg.get("append_summary", True))
     split_day = bool(rcfg.get("split_by_day"))
 
-    users = list(per_user_items.keys())
+    # D6 统一（2026-10-09）：与 v2 `_sorted_users` 同口径——以原始文件号码全集为准（含被清洗空的号码），
+    # 遗漏者也要出行（下方 lines 为空 → 「无。」），绝不整条跳过。
+    users: List[str] = []
+    for _u in dataset.all_usernums:
+        if _u not in users:
+            users.append(_u)
+    for _u in per_user_items:
+        if _u not in users:
+            users.append(_u)
     entries_out: List[Dict[str, Any]] = []
     text_by_user: Dict[str, str] = {}
     user_summaries: Dict[str, str] = {}
@@ -151,7 +159,7 @@ def _state_report(dataset: Dataset, params: Dict[str, Any],
     last_ts_all: List[int] = []
 
     for user in users:
-        items = per_user_items[user]
+        items = per_user_items.get(user, [])
         display = user or "（未标注号码）"
         user_summaries[user] = _user_summary(items)
         lines: List[str] = []

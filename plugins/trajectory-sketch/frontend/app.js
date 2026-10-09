@@ -66,6 +66,10 @@
 
   function api(path, opt) {
     return fetch(API + path, opt || {}).then(function (r) {
+      if (r.status === 401) {                            // D8 统一（2026-10-09）
+        location.href = '/login?next=' + encodeURIComponent('/tool/trajectory-sketch');
+        return new Promise(function () {});              // 跳转中挂起
+      }
       return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok) {
           var e = new Error(j && j.error ? j.error : ('请求失败（HTTP ' + r.status + '）'));
