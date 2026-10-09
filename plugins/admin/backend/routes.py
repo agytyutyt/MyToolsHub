@@ -25,6 +25,7 @@ import re
 import secrets
 import shutil
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -52,6 +53,8 @@ PROJECT_DIR = os.path.dirname(os.path.dirname(PLUGIN_DIR))
 CONFIG_PATH = jztools_data.get_data_root_file("config", "tools.json")
 ADMIN_CONFIG_PATH = jztools_data.get_data_root_file("config", "admin.json")
 ADMIN_KEY_PATH = jztools_data.get_data_root_file("config", ".admin_key")
+# admin.json 读写锁（D1）：单进程内跨线程串行化，见 load/save_admin_config
+ADMIN_CFG_LOCK = threading.RLock()
 
 # 允许的权限模块（管理后台的四个子模块）
 ADMIN_MODULES = ("unit", "department", "user", "permission")
@@ -132,18 +135,38 @@ def ensure_admin_config():
 
 
 def load_admin_config():
-    """读取 config/admin.json（鉴权数据 / 单位 / 部门 / 人员 / 权限）。"""
-    ensure_admin_config()
-    with open(ADMIN_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """读取 config/admin.json（鉴权数据 / 单位 / 部门 / 人员 / 权限）。
+
+    D1：读与写共用模块级 `ADMIN_CFG_LOCK`（RLock 便于同线程内 load→save 复入），
+    保证「写者不会撞同一个临时名、读者不会读到 replace 中途的文件」。
+    """
+    with ADMIN_CFG_LOCK:
+        ensure_admin_config()
+        with open(ADMIN_CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
 
 
 def save_admin_config(cfg):
-    """原子写入 config/admin.json。"""
-    tmp = ADMIN_CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, ADMIN_CONFIG_PATH)
+    """原子写入 config/admin.json（唯一临时名 + rename，见 `app.save_registry` 同口径）。
+
+    残留面（需人工判断，见代码质量整改清单 D1）：各请求处理器仍是
+    `load → 改 → save` 三步，锁只覆盖单步 I/O，跨步的丢失更新（lost update）
+    要靠把整段读改写包进 `with ADMIN_CFG_LOCK:` 才能消除——涉及 20+ 处鉴权写路径
+    的结构改动，不在自动整改范围内。
+    """
+    with ADMIN_CFG_LOCK:
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ADMIN_CONFIG_PATH),
+                                   prefix="admin.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, ADMIN_CONFIG_PATH)
+        except Exception:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            raise
 
 
 def _session_settings(cfg):

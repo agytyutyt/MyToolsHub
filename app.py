@@ -10,6 +10,7 @@ import queue
 import re
 import shutil
 import sys
+import tempfile
 import time
 from datetime import datetime, timedelta
 
@@ -564,7 +565,8 @@ def load_registry():
     返回空注册表并告警，绝不让单个坏文件把整站打挂（见设计文档 §2 健壮性缺口）。
     """
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        # utf-8-sig（D4 口径统一）：与 jz_deps / jz_llm 一致，容忍人工编辑留下的 BOM。
+        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
             obj = json.load(f)
         return obj if isinstance(obj, dict) else {"site": {}, "categories": [], "tools": []}
     except Exception as exc:
@@ -575,11 +577,23 @@ def load_registry():
 
 
 def save_registry(registry):
-    """原子写入 config/tools.json，先写临时文件再 rename。"""
-    tmp = CONFIG_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(registry, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CONFIG_PATH)
+    """原子写入 config/tools.json：唯一临时名 + rename。
+
+    固定名 `tools.json.tmp` 在同进程并发写（请求线程 + 后台线程）或上次写入被强杀留残file时，
+    会出现两个写者往同一个临时文件落笔、后者 `os.replace` 把前者的半成品提升为正式文件。
+    唯一临时名（`tempfile.mkstemp` 同目录）消除该冲突面；失败清理临时文件不留残骸。
+    """
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CONFIG_PATH), prefix="tools.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(registry, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CONFIG_PATH)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def load_manifests():
@@ -597,10 +611,17 @@ def load_manifests():
         if not os.path.isfile(manifest_path):
             continue
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
+            # utf-8-sig：manifest.json 是人工可编辑文件，记事本"UTF-8"另存会带 BOM，
+            # 普通 utf-8 读到 BOM 直接 JSONDecodeError（本函数按「跳过该插件」降级，难排查）。
+            with open(manifest_path, "r", encoding="utf-8-sig") as f:
                 obj = json.load(f)
             if not isinstance(obj, dict):
                 raise ValueError("manifest 不是 JSON 对象")
+            # 加载期一致性校验（D7）：manifest.id 必须等于目录名。聚合接口按 manifest.id
+            # 取展示元信息、可见性判定按 registry/目录名 id，两者不一致会静默错位。
+            mid = str(obj.get("id") or "").strip()
+            if mid != name:
+                raise ValueError("manifest.id=%r 与目录名 %r 不一致" % (obj.get("id"), name))
             manifests[name] = obj
         except Exception as exc:
             _manifest_errors[name] = f"{type(exc).__name__}: {exc}"

@@ -1309,6 +1309,10 @@ def scan_packages(base_dir, data_root=None, dirs=None, max_files=600, force=Fals
         dirs = default_scan_dirs(base_dir)
     app_py, app_ver = _app_abi(base_dir)
     comps = _installed_components(base_dir)
+    # 展示名真源 = config/tools.json（规范 M-2）。此前此处传 plugin_names(None)，
+    # 而 plugin_names 对非 dict 恒返回 {} ——扫描列表里的插件名永远退化成 id。
+    names = plugin_names(read_json(os.path.join(data_root, "config", "tools.json"), {})
+                         if data_root else {})
     items, seen_paths, scanned = [], set(), 0
     for root_dir in dirs:
         if not root_dir or not os.path.isdir(root_dir):
@@ -1362,7 +1366,7 @@ def scan_packages(base_dir, data_root=None, dirs=None, max_files=600, force=Fals
                     status, reason = _verdict(cur_ver, new_ver, abi_ok, abi_reason, force)
                     items.append({
                         "kind": "plugin", "file": name, "path": full, "id": pid,
-                        "name": display_name(plugin_names(None), pid, meta),
+                        "name": display_name(names, pid, meta),
                         "version": new_ver, "installed": cur_ver,
                         "status": status, "reason": reason, "size": size,
                         "requires_restart": bool(meta.get("requires_restart")),
