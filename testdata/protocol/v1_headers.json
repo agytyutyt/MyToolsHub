@@ -1,0 +1,133 @@
+{
+  "data": [
+    {
+      "b64src": "",
+      "expected": ""
+    },
+    {
+      "b64src": "AA==",
+      "expected": "AA=="
+    },
+    {
+      "b64src": "YWJj",
+      "expected": "YWJj"
+    },
+    {
+      "b64src": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==",
+      "expected": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w=="
+    },
+    {
+      "b64src": "UVItdHJhbnNmZXIg5Y2P6K6u5rWL6K+V5ZCR6YePIC8gcHJvdG9jb2wgY29uZm9ybWFuY2UgdmVjdG9yCjAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5egrovajov7nngrnvvJoyMDI2LTEwLTA5IDA4OjE1IOe7j+W6piAxMjE=",
+      "expected": "UVItdHJhbnNmZXIg5Y2P6K6u5rWL6K+V5ZCR6YePIC8gcHJvdG9jb2wgY29uZm9ybWFuY2UgdmVjdG9yCjAxMjM0NTY3ODlhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5egrovajov7nngrnvvJoyMDI2LTEwLTA5IDA4OjE1IOe7j+W6piAxMjE="
+    }
+  ],
+  "defect_m256": {
+    "cases": [
+      {
+        "info_transfer": "AAIA",
+        "k": 1,
+        "m": 256,
+        "map_marker": "AAEA",
+        "roundtrip_decodes": false,
+        "trajectory_convert": "AAIA"
+      },
+      {
+        "info_transfer": "AOcA",
+        "k": 230,
+        "m": 256,
+        "map_marker": "AOcA",
+        "roundtrip_decodes": false,
+        "trajectory_convert": "AOcA"
+      },
+      {
+        "info_transfer": "AQAA",
+        "k": 255,
+        "m": 256,
+        "map_marker": "AP8A",
+        "roundtrip_decodes": false,
+        "trajectory_convert": "AQAA"
+      }
+    ],
+    "note": "m=256 的 FEC 参数申报：三端输出互不相同，且按 (k<<8)|m 反解得到的 k/m 已被破坏。契约文档 §6.1 / 整改清单 C3 已登记，修法待拍板（限制 m ≤ 255 或改两段字节）。"
+  },
+  "fecinfo": [
+    {
+      "expected": "AAEC",
+      "k": 1,
+      "m": 2
+    },
+    {
+      "expected": "AAMF",
+      "k": 3,
+      "m": 5
+    },
+    {
+      "expected": "AAoQ",
+      "k": 10,
+      "m": 16
+    },
+    {
+      "expected": "AICC",
+      "k": 128,
+      "m": 130
+    },
+    {
+      "expected": "AMj/",
+      "k": 200,
+      "m": 255
+    },
+    {
+      "expected": "AP//",
+      "k": 255,
+      "m": 255
+    },
+    {
+      "expected": "AAH/",
+      "k": 1,
+      "m": 255
+    }
+  ],
+  "index": [
+    {
+      "expected": "AAAA",
+      "n": 0
+    },
+    {
+      "expected": "AAAB",
+      "n": 1
+    },
+    {
+      "expected": "AAAH",
+      "n": 7
+    },
+    {
+      "expected": "AAA/",
+      "n": 63
+    },
+    {
+      "expected": "AAD/",
+      "n": 255
+    },
+    {
+      "expected": "AAEA",
+      "n": 256
+    },
+    {
+      "expected": "AA//",
+      "n": 4095
+    },
+    {
+      "expected": "ABAA",
+      "n": 4096
+    },
+    {
+      "expected": "AP//",
+      "n": 65535
+    },
+    {
+      "expected": "////",
+      "n": 16777215
+    }
+  ],
+  "note": "v1 帧头三段基元的期望值。三处实现（trajectory-convert / info-transfer / map-marker 生成脚本）必须逐字符相同——这是帧头布局的机器可核对面。fecinfo 用例只覆盖 m ≤ 255：m=256 属已知缺陷面，另列 defect_m256。"
+}

@@ -1,0 +1,48 @@
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）
+QR-transfer 协议测试向量 / protocol conformance vector
+0123456789abcdefghijklmnopqrstuvwxyz
+轨迹点：2026-10-09 08:15 经度 121.47 纬度 31.23 小区 460001234567890
+特殊字符：{}[]"'\`~!@#$%^&*()_+-=<>?/.,;:|　（全角空格）

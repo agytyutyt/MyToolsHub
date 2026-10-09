@@ -1,0 +1,40 @@
+{
+  "crc_negative": {
+    "expect_reject": "ValueError",
+    "python": true
+  },
+  "envelope": {
+    "bytes": 326,
+    "decoded_fmt": "text",
+    "decoded_name": "protocol-vector.txt",
+    "decoded_text_sha256": "ce6fe523e032ac0709ea0c8d36c6e33a0e3d8ec604697eb86e8699ae5dc4b33f",
+    "fields": {
+      "body_len": 278,
+      "comp": 1,
+      "is_fec": 0,
+      "meta_len": 27,
+      "mode": 0,
+      "seg_i": 0,
+      "seg_n": 1
+    },
+    "header_hex": "4a5a320201000000000001001b000001160f6f7b45",
+    "sha256": "c8ea6c4d8ec50324068e0fe385696641025659ada56e2af2b3dd2e7c1f4fae02"
+  },
+  "note": "v2 由 info-transfer 产出（v2 的两处实现是 info-transfer 与 qr-video-decode 的 worker.js）。comp 由编码端试压择优，运行期可能随 zlib 实现变化，故不作为期望值；crc 覆盖范围与字段布局是断言对象。",
+  "roundtrip_v2": "ce6fe523e032ac0709ea0c8d36c6e33a0e3d8ec604697eb86e8699ae5dc4b33f",
+  "shares": {
+    "count": 12,
+    "first_fields": {
+      "body_len": 447,
+      "comp": 0,
+      "is_fec": 1,
+      "meta_len": 2,
+      "mode": 0,
+      "seg_i": 0,
+      "seg_n": 12
+    },
+    "first_sha256": "bb2a68b7616b3e6edc10c675065392e725b2df39bd1074ad5ea5fad37aab58f2",
+    "k": 7,
+    "m": 12
+  }
+}

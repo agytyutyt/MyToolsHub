@@ -1,0 +1,39 @@
+{
+  "constants_snapshot": {
+    "encoder_local": {
+      "info-transfer.FEC_RATIO": 0.4,
+      "info-transfer.PAYLOAD_SAFETY": 0.9,
+      "trajectory-convert.FEC_RATIO": 0.1
+    },
+    "shared_v1_header": {
+      "BYTE_ORDER": "big",
+      "MAX_FEC_M": 256,
+      "SIZE_DATASIZE": 4,
+      "SIZE_INDEX": 3,
+      "SIZE_PREFIX": 4
+    }
+  },
+  "ec": "L",
+  "files": [
+    "input.txt",
+    "v1_headers.json",
+    "v1_roundtrip.json",
+    "v2_envelope.bin",
+    "v2_shares.bin",
+    "v2_frames.json"
+  ],
+  "generated_by": "testdata/protocol/generate.py",
+  "harness": "tools/e2e/qr-protocol-consistency.py",
+  "implementations": [
+    "plugins/trajectory-convert/backend/routes.py",
+    "plugins/info-transfer/backend/routes.py",
+    "plugins/map-marker/frontend/generate_qr_stream.py",
+    "plugins/qr-video-decode/backend/routes.py",
+    "plugins/qr-video-decode/frontend/worker.js"
+  ],
+  "input_bytes": 2952,
+  "input_sha256": "ce6fe523e032ac0709ea0c8d36c6e33a0e3d8ec604697eb86e8699ae5dc4b33f",
+  "protocol_doc": "docs/design/二维码传输协议-契约文档.md",
+  "qr_version": 15,
+  "schema": 1
+}
