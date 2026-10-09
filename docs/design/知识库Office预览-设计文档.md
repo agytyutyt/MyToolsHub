@@ -330,12 +330,12 @@ def _pdf_task(fid):
 ### 7.4 Excel「有数据的部分」处理策略
 
 - 默认：直接整本喂给 soffice（`calc_pdf_Export` 按各 sheet 的**使用区域**分页导出，空白区域天然不产出页面）——满足「对有数据的部分转换」。
-- 已知边缘：单元格带残留格式（无边框但有样式）会扩大使用区域产生空白页。列为**遗留增强**（§12 阶段 6）：转换前用 openpyxl 预扫描生成「trimmed 临时副本」（删除完全空白的 sheet、裁剪有效行列之外的区域）再喂 soffice；注意 openpyxl 重写会丢图表/条件格式，故默认不启用。
+- 已知边缘：单元格带残留格式（无边框但有样式）会扩大使用区域产生空白页。曾拟用 openpyxl 预扫描生成「trimmed 临时副本」缓解（本期不做，随 PDF 管线退役）；注意 openpyxl 重写会丢图表/条件格式，故默认不启用。
 
 ### 7.5（二期可选）纯 Python reportlab 降级引擎
 
 仅在「目标机无法安装 LibreOffice」成为现实约束时启动，单独立项：
-`backend/pdf_render/`（docx 引擎：python-docx 段落/表格 → reportlab platypus；xlsx 引擎：openpyxl → reportlab Table；CJK 用 `UnicodeCIDFont('STSong-Light')` 或探测系统 simsun/msyh TTF 嵌入；spec PACKAGES + reportlab）。本期不实施，TODO 列在阶段 6。
+`backend/pdf_render/`（docx 引擎：python-docx 段落/表格 → reportlab platypus；xlsx 引擎：openpyxl → reportlab Table；CJK 用 `UnicodeCIDFont('STSong-Light')` 或探测系统 simsun/msyh TTF 嵌入；spec PACKAGES + reportlab）。本期不实施（随 PDF 管线退役）。
 
 ---
 
@@ -412,10 +412,10 @@ def _pdf_task(fid):
 ## 10. 性能策略
 
 1. **异步转换**：上传请求零转换耗时；转换串行（线程池 1 + 模块锁），服务器 CPU 峰值可控。
-2. **（已废止）** 原「PDF 一次生成永久复用，`/pdf` 端点 `send_file(conditional=True)` 自带 ETag/Range/304」随 `/pdf` 一并移除；现行预览为 `/preview` **按需同步渲染** + 磁盘缓存 `<id>.preview.json`（首次请求渲染、后续命中缓存）。
-3. **（已废止）** 原「列表轮询 3s × 最多 60s，无 pending 即停」的异步状态机已随 `/pdf` 移除（引擎亚秒级，无需轮询）；阅读端复用 pdf.js 渲染 PDF 原件不变。
+2. **预览缓存**：现行预览为 `/preview` **按需同步渲染** + 磁盘缓存 `<id>.preview.json`（首次请求渲染、后续命中缓存）；原 `/pdf` 的 ETag/Range 复用方案随端点移除。
+3. **（已废止）** 原「列表轮询 3s × 最多 60s」异步状态机已随 `/pdf` 移除（引擎亚秒级、无需轮询）；原生 PDF 阅读仍走 pdf.js。
 4. **降级链免费**：无引擎时与现状体验完全一致，无额外开销。
-5. 磁盘：word/excel 类约 2~3 倍占用；`MAX_FILES=2000` × 20MB 上限下可控（运维层面如有压力，遗留项提供「清理降级件」开关）。
+5. 磁盘：word/excel 类约 2~3 倍占用；`MAX_FILES=2000` × 20MB 上限下可控。
 
 ---
 
@@ -434,282 +434,30 @@ def _pdf_task(fid):
 
 ---
 
-## 12. TODO（断点续开发清单 · 按序执行）
+## 12. 交付摘要与遗留
 
-> 约定：完成一项把 `[ ]` 改 `[x]` 并附日期；发现新事项追加到对应阶段末尾，不打乱顺序。
-> 阶段 1→2→3 串行；阶段 4 穿插在各阶段内进行；低性能模型接手时从第一个 `[ ]` 继续即可。
-> 测试统一套路（务必遵守，保护真实数据 `~/.jztoolshub`）：
-> 先 `import jztools_data; jztools_data.get_data_root = lambda: <临时目录>`，再 `import app`，
-> 复制 `config/tools.json` 进临时目录，`register_plugin_backends(app)`，用 `app.test_client()` 打接口；
-> **不要调用 `init_data_root()`**。运行用隔离 venv
-> `C:\Users\yfjz\.workbuddy\binaries\python\envs\default\Scripts\python.exe`。
+> 各阶段（0~11）已全部交付；逐项断点勾选清单不再保留。实施记录与踩坑见 §15–§18，接口与行为真源见 `plugins/knowledge-base/README.md`。
+> 测试套路（保护真实数据 `~/.jztoolshub`）：先 `import jztools_data; jztools_data.get_data_root = lambda: <临时目录>`，再 `import app`，
+> 复制 `config/tools.json` 进临时目录，`register_plugin_backends(app)`，用 `app.test_client()` 打接口；**不要调用 `init_data_root()`**；运行用隔离 venv
+> （`C:/Users/yfjz/.workbuddy/binaries/python/envs/default/Scripts/python.exe`）。
 
-### 阶段 0：设计 ✅（本文档）
-
-- [x] 需求确认与边界划定（§1）
-- [x] 转换引擎选型定稿（§3：LibreOffice headless 主选，探测+降级链）
-- [x] 存储/数据模型/API/前后端改动面设计（§4~§8）
-- [x] 本机环境探测：WPS 有、MS Office 无、LibreOffice 无（§3.1 脚注）
-
-### 阶段 1：后端存储与下载 ✅ 2026-09-11（不依赖 LibreOffice，已独立交付）
-
-- [x] **1.1 `routes.py` 元数据层**：`_file_brief()` 增加输出 `pdf_ready`（`rec.get("pdf_status")=="ok"`）、`pdf_status`、`original_ext`（回落 `rec.get("ext")`）、`original_size`（回落 `size`）。
-  `converted` 语义同步修正为 `original_ext != ext`（原为「original_ext 有值」——原件字段普及后会误判所有记录都"已转换"）。
-  验证：py_compile 通过。
-- [x] **1.2 `routes.py` 迁移函数**：新增 `_migrate_files()`（§5 三条规则：回填 original_ext / pdf_status / original_size / pdf_size / pdf_error），在 `register()` 开头调用（try/except 兜底，失败不影响插件主体）；幂等。
-  **实测坑**：判定"是否需要迁移"必须用**键是否存在**（`"pdf_size" not in rec`），
-  不能判取值（`rec.get("pdf_size") is None`）——未生成 PDF 时 pdf_size 恒为 None，
-  会导致每次启动都误判需迁移并重写 files.json。
-- [x] **1.3 `routes.py` 上传改双份落盘**：按 §7.3 改 `kb_file_upload`——`upload_ext`（原件扩展名，恒记录）、
-  `converted_from`（旧版转换来源，仅 doc/xls 有值，前端"已转换"角标仍用 `converted_from`）；
-  doc/xls 先写原件 `<fid>.<original_ext>` 再写转换件；其余类型 `original_ext=ext` 单次落盘
-  （按绝对路径去重，避免重复写）；元数据补 `original_ext/original_size/pdf_status=none` 等。
-- [x] **1.4 `routes.py` 新增下载端点**：`GET /files/<id>/download`（视图名 `kb_file_download`）。
-  验证：docx/xls/pdf/csv 下载字节与上传源一致；中文文件名响应头含 `filename*=UTF-8''...`。
-- [x] **1.5 `routes.py` 删除改三件套**：按 `original_ext / ext / pdf` 三个扩展名生成路径并按
-  绝对路径去重后逐个删除（缺失跳过）。验证：xls 记录删除后 `.xls` 与 `.xlsx` 均无残留。
-- [x] **1.6 隔离测试**：54 项全过（`%TEMP%\kb_phase1_smoke.py`，临时数据根目录 + test_client）：
-  双份落盘 / 下载字节一致 / 中文文件名 / 删除清理 / 迁移幂等 / 401 / 403 / 404 / 穿越防护 /
-  坏文件 422 / 白名单外 415 / /raw 回归。
-  **补充实施决策**：`_pdf_engine_available()` 已在阶段 1 预置（pdf_convert 模块缺失时恒 False），
-  doc/xls 转换失败在**引擎可用时不阻断**、不可用时维持 422——阶段 2 接入引擎后自动生效。
-
-### 阶段 2：PDF 转换引擎与异步管线 ✅ 2026-09-11
-
-- [x] **2.1 新增 `backend/pdf_convert.py`**：按 §7.1 实现 `PdfConvertError / detect_soffice(refresh) / engine_status(refresh) / convert_to_pdf`。
-  验证：py_compile 通过；本机（无 LibreOffice）`detect_soffice()` 返回 `available=False` 且不抛异常，
-  `convert_to_pdf` 抛 `PdfConvertError("服务器未检测到 LibreOffice…")`。
-  **实施补充**：探测候选路径加了 `LibreOffice 7` 两个目录与 `WOW6432Node` 注册表键；
-  Windows 下用 `STARTUPINFO` 隐藏子进程黑框；配置文件同时支持
-  `<数据根>/plugins/knowledge-base/config.json`（运维可改、不随升级被覆盖）与模块目录同级。
-- [x] **2.2 `routes.py` 接线 `/status`**：返回增加 `pdf_engine` + `pdf_preview`；`?refresh=1` 调 `detect_soffice(refresh=True)`。
-  **实施补充**：refresh 会派生子进程读版本号，因此**仅管理员生效**，普通用户拿到缓存结果（防探测风暴）。
-  实测：`/status` 受全局鉴权，未登录 401（与 `/config` 不同，写用例时别按匿名接口断言）。
-- [x] **2.3 `routes.py` 转换队列**：`_PDF_POOL`（max_workers=1）/ `_enqueue_pdf` / `_pdf_task` / `_pdf_finish`；
-  上传把 word/excel 类的 `pdf_status` 置 `"pending"` 并入队，响应返回 `pdf_status`；
-  `pdf_error` 截断 200 字符、不含堆栈与路径（SEC-5）。
-  验证：无引擎环境上传 docx → `pending` → `failed`，`pdf_error` 含「未检测到 LibreOffice」。
-- [x] **2.4 `routes.py` 新增 `/files/<id>/pdf`**（`kb_file_pdf`）：仅 `pdf_status=="ok"` 且文件存在才返回，
-  `application/pdf` + `Content-Disposition: inline` + `conditional=True`；否则 404。
-- [x] **2.5 `routes.py` 新增 `/files/<id>/pdf-retry`**（`kb_file_pdf_retry`）：仅 `failed` → `pending` 入队；
-  非 failed 409、不存在 404、非管理员 403；`set_operation("重试知识库PDF转换")`。
-- [x] **2.6 启动补偿**：新增 `_recover_pending_pdfs()`，`register()` 在迁移后调用；
-  命中「word/excel 类 + `pdf_status ∈ {none, pending}` + PDF 文件不存在」，置 pending 入队。
-  验证：手工把记录改 `none` 并删 PDF → 调 `_recover_pending_pdfs()` → 命中并转 ok。
-- [x] **2.7 fake-soffice 测试夹具**：`soffice.bat` 转调 `fake_soffice.py`（解析 `--outdir` 与源文件，
-  输出**最小但结构合法**的 PDF，pdf.js 可直接打开）；测试里打桩 `pdf_convert.detect_soffice` 指向 bat。
-  验证：`%TEMP%\kb_phase2_smoke.py` **53/53 通过**——pending→ok、`/pdf` 200 + `%PDF-`、
-  失败 failed 与重试（409→200→ok）、启动补偿、无引擎优雅降级、下载/raw 回归、权限 401/403/404。
-- [x] **2.8 `backend/requirements.txt`**：加注释说明「PDF 预览依赖目标机安装 LibreOffice
-  （可选外部程序，非 pip 包）」+ `pdf.soffice_path` 配置示例。
-  **补充**：`_file_brief` 增加 `pdf_error` 输出（卡片"预览降级"角标悬停展示原因，服务端生成的用户可读文案）。
-
-### 阶段 3：前端 ✅ 2026-09-11
-
-- [x] **3.1 `reader.js`**：`fetchUrl(file, url)` 抽出（默认 `/raw`），`renderPdf(file, opts)` 支持 URL 覆盖，
-  `render()` 里 `file.pdf_ready` 短路到 `renderPdf(file, {url: pdfUrl(file)})`；
-  `NAV_FORMATS` 注释改为「按实际渲染器判定」（该常量当前无引用，仅作说明）。
-  验证：`node --check reader.js` 通过（受管 node 22.22.2）。
-- [x] **3.2 `app.js`**：`downloadFile(f)`（fetch + blob + `<a download>`，文件名按 RFC 5987 解析
-  `filename*=` 回退 `filename=`）+ `DL_SVG` 内联图标 + `fileById()` +
-  卡片下载按钮（全员可见，不影响管理按钮显隐）+ dock 下载按钮（按 `state.currentFileId` 取当前文件）+
-  "PDF 生成中"/"预览降级"角标 + `startPdfPoll/stopPdfPoll`（3s × 最多 20 次，就绪自动重渲染切 PDF 视图）+
-  提示条三类文案（PDF 生成中→info 蓝 / 生成失败→warn 琥珀 / 旧版格式转换→原样式）。
-  验证：`node --check app.js` 通过。
-  **实施补充**：`loadFiles(silent)` 加静默参数（轮询不弹错）；`readerCbs()` 抽出供打开与自动重渲染共用。
-- [x] **3.3 `index.html`**：dock 下载按钮（内联 SVG，无 emoji）+ 版本号 `style.css?v=20 / reader.js?v=4 / app.js?v=14`。
-- [x] **3.4 `style.css`**：`.card-dl`（卡片下载按钮）、`.pdf-badge.pending/.degraded`、
-  `@keyframes pdf-pulse`、`.reader-notice.info`（提示条信息态）。
-- [x] **3.5 无引擎环境走查**：见阶段 4.3（已用预置数据验证 pending/failed/ok 三种角标与提示条）。
-
-### 阶段 4：真机验证（含 LibreOffice 环境）
-
-- [x] **4.1 开发机安装 LibreOffice** ✅ 2026-09-11：采用 **非管理员「管理安装」** 解包到 `D:\LibreOffice\`
-  （`msiexec /a <msi> /qn TARGETDIR=D:\LibreOffice`，避免 UAC），版本 25.8.7（366MB MSI / 解包 1.5GB），
-  探测顺序：先尝试注册表（未命中）→ 走 **`<数据根>/plugins/knowledge-base/config.json` 的 `pdf.soffice_path`**。
-- [x] **4.2 真实样例转换** ✅ 2026-09-11：用 openpyxl/python-docx 生成含中文/表格/图片/页眉页脚的
-  docx（2 页 / 105KB PDF）与多 sheet xlsx（3 sheet → 3 页 / 230KB PDF）。PDF 由 LibreOffice headless
-  生成，`%PDF-` 头校验通过；xlsx `SUM(E3:E7)` 公式被 LibreOffice 求值（120200）。
-- [x] **4.4 重启补偿验证** ✅ 2026-09-11：上传后转换 ok → 把 `pdf_status` 重置回 pending 并删掉 PDF →
-  重新加载 routes 模块（与「服务重启 register()」走同一段 `_recover_pending_pdfs` 代码）→
-  自动入队并转回 ok（约 18s）。
-- [x] **4.3 浏览器走查**（agent-browser，先 `set viewport 1440 1000`，`no_proxy=127.0.0.1,localhost`）✅ 2026-09-11：
-  **用「临时数据根副本 + 预置记录」的方式验证**（复制 `~/.jztoolshub` 到临时目录并注入两条样例，
-  真实库零改动、零上传，测完即删）。结果：
-  - `style.css?v=20 / reader.js?v=4 / app.js?v=14` 均被加载（版本号生效）；
-  - `f-pdftest1`（docx + pdf_status=ok）→ 卡片无任何异常角标 → 点击后
-    `GET /files/f-pdftest1/pdf 200` + pdf.js/pdf.worker 加载 + `#reader-container canvas` = 1、
-    页码 `1 / 1`、提示条 hidden → **PDF 预览链路成立**；
-  - `f-pdftest2`（xls→xlsx + pdf_status=failed）→ 卡片显示「已转换 + 预览降级」，
-    打开后提示条「PDF 预览生成失败，已回退为简化渲染；可下载原件查看完整样式。」+
-    SheetJS 渲染出表格 → **降级链路成立**；
-  - 8 张卡片每张都有「下载原始文档」按钮；点击 `f-pdftest2` 的下载按钮 →
-    `GET /files/f-pdftest2/download 200`（headless 环境报 "Download was canceled" 属自动化环境限制，
-    字节与响应头已在阶段 1/2 的 test_client 用例中断言）。
-  **踩坑**：插件前端跑在 `/tool/<id>` 的 iframe 里，`click`/`eval` 默认作用于父文档 ——
-  登录后直接开 `/plugin/knowledge-base/index.html` 才行（见 HANDOFF §7-21）。
-  待补：未登录访问被拦、无权限账号只见下载不见管理按钮（本次未造普通账号，代码层已按 `can_manage` 控制）。
-- [x] **4.4 重启补偿验证**：隔离用例覆盖（把记录改 `none` + 删 PDF → `_recover_pending_pdfs()` → 转 ok）。
-
-### 阶段 5：文档同步与收尾（改功能后必做，顺序执行）
-
-- [x] **5.1 `plugins/knowledge-base/README.md`**：新增「PDF 预览（Word / Excel 原样式）」章节
-  （异步管线 / 降级行为 / LibreOffice 安装与 `pdf.soffice_path` 配置）、三件套存储表、
-  新增端点列举、已知限制补充（Excel 空白页、历史 doc/xls 原件不可恢复）。
-- [x] **5.2 根 `README.md`**：内置插件一览（knowledge-base 行）、目录树注释、
-  HTTP API 表新增 `/pdf`、`/download`、`/pdf-retry`，`/status` 补 `pdf_engine`，
-  上传行补双份保存与 `pdf_status=pending`，脚注改「无编辑接口，阅读与下载原件对全员开放」。
-- [x] **5.3 `docs/design/知识库插件-设计文档.md`**：增补「阶段 7：PDF 预览 + 原件下载」记录本轮改动
-  （事实源仍为本文件，此处只记落地结果）。
-- [x] **5.4 `HANDOFF.md`**：状态头「最后更新」+ §2 git 状态 + §3 插件一览 + §7 踩坑
-  （新增 20~23：.bat 转调 Python 做转换夹具 / 插件前端在 iframe 内 / agent-browser 会话与 batch 语法 /
-  `download_name` 与前端文件名解析）+ §7.5 速查表（knowledge-base 行长任务列改为线程池 1）。
-- [x] **5.5 当日工作日志** `.workbuddy/memory/2026-09-11.md`。
-- [x] **5.6 规范自检**（插件设计规范 §14 前四组逐项）：见 §14 自检记录。
-  - [ ] git 提交（**等用户确认**，与历史条目一致：本轮改动全部未提交）。
+| 阶段 | 主题 | 关键落点 |
+| --- | --- | --- |
+| 0 设计 | 需求边界 / 引擎选型 / 存储·模型·API·前后端改动面 | 本文 §1–§8 |
+| 1 后端存储与下载 | `_file_brief` / 幂等迁移 `_migrate_files` / 原件落盘 / `kb_file_download` / 删除清理 | `backend/routes.py` |
+| 2 PDF 引擎与异步管线（**已退役**） | `pdf_convert.py`、`_PDF_POOL`、`/pdf`、`/pdf-retry`、启动补偿 | 被阶段 8 替换；留痕 §15 |
+| 3 前端 | `reader.js` `renderPdf` URL 覆盖、`app.js` 下载/角标/轮询、`index.html`/`style.css` | `frontend/{reader,app}.js` |
+| 4 真机验证 | LibreOffice 25.8.7 端到端、重启补偿、浏览器走查 | §15 |
+| 5 文档同步 | 插件/根 README、知识库设计文档、HANDOFF | — |
+| 7 Excel HTML 预览（**已退役**） | `xlsx_render.py` openpyxl 手绘 HTML、`/preview` | 被阶段 8 替换 |
+| 8 xhr/dhr 双引擎 | `office_render.py`、`vendor/{xhr,dhr}`、`/preview` 按需同步渲染 + `<id>.preview.json` 缓存 | §13 决策末两条 |
+| 9 Word 产物后处理补丁 | `_polish_word_html` / `_patch_font_fallback` / `_patch_table_overflow` / `_patch_css` | §16 |
+| 10 异步下载源 | `_read_upload`、`<id>.dl.<ext>`、`kb_file_download` 下载源优先 | §17 |
+| 11 开关点击修复 | `.switch-row` 整行包 `<label>`（原生 label↔input 关联） | §18 |
 
 ### 阶段 6：遗留 / 增强（本期不做，可后补）
 
-- [ ] reportlab 纯 Python 降级引擎（§7.5，目标机无法装 LibreOffice 时立项；spec PACKAGES + reportlab）
-- [ ] Excel 预修剪（§7.4：openpyxl trimmed 副本，去空白 sheet/空白页）
 - [ ] 存量 doc/xls 历史记录原件不可恢复的补偿策略评估（§11 已知折衷）
-- [ ] 管理端「批量重转全部 PDF」按钮（retry 的批量版）
-- [ ] 磁盘压力时的「降级渲染件清理」开关（docx/xlsx 转换件删除，仅留原件+PDF）
-
-### 阶段 7：Excel 表格 HTML 预览（替代 Excel 的 PDF 预览）✅ 2026-09-13
-
-> 背景与需求变更：xlsx 走 LibreOffice→PDF 预览时**按打印分页**，宽表/长表被切成多页
-> 不利阅读（阶段 4 真机实测：3 sheet xlsx → 3 页 PDF 即分页证据）。本轮把 Excel 类预览
-> 从「转 PDF」改为「**Python 手绘 HTML 表格**」（参考共享文档插件的表格呈现思路 +
-> GitHub Apkawa/xlsx2html 的 openpyxl→HTML 样式映射，按本项目约束重写，**零新增 pip 依赖**）；
-> Word 类 PDF 预览不受影响。需求来源：用户反馈 2026-09-13。
-
-- [x] **7.1 新模块 `backend/xlsx_render.py`**：openpyxl 读簿（`data_only=True` 取公式缓存值）
-  → 逐 sheet 手绘 `<table>`（`table-layout:fixed` + `<colgroup>` 锁列宽）→ JSON
-  （`{sheets:[{name,rows_total,cols_total,truncated,html}]}`）原子落盘。
-  还原：合并单元格（colspan/rowspan + 外边框按边缘单元格取值——即「openpyxl 丢合并边框」的正确读法）、
-  列宽（`px≈width*7+5`，修正 xlsx2html 的 /10*96 偏窄）/行高（pt→px）/隐藏行列、
-  13 种边框样式、填充色（solid 取 fgColor，图案取底色近似；**theme+tint 主题色**解析
-  `wb.loaded_theme`——xlsx2html 直接丢弃 theme 色）、字体（名称/字号 pt→px——修正其
-  11pt 当 11px/加粗/斜体/下划线/删除线/颜色）、对齐（水平/垂直默认 bottom/换行/缩进）、
-  数字与日期显示格式（千分位/百分比/货币/[Red] 负数/中文日期/时分秒消歧/AM-PM/[h] 经时/
-  科学计数，ROUND_HALF_UP 对齐 Excel；不引入 babel）。
-  不还原：批注/浮动图片/图表/条件格式/冻结窗格/富文本局部样式。
-- [x] **7.2 上限熔断与降级链**：单 sheet 3000 行 / 120 列 / 12 万格 / 4MB 输出封顶，
-  超限截断并在表尾提示「下载原件查看全部」；源文件 >15MB 或解析失败 → `html_status=failed`
-  → 前端回退 SheetJS（上传/阅读/下载不受影响，B-4）。
-- [x] **7.3 `routes.py` 管线**（与 PDF 管线同构）：`PDF_SOURCE_EXTS` 收窄为 `{doc,docx}`，
-  新增 `XLSX_SOURCE_EXTS={xls,xlsx}`；`html_status/html_size/html_error` 三字段；
-  `_HTML_POOL`（独立 1 线程池，不与 LibreOffice 长任务互相阻塞）、`_html_task/_html_finish/
-  _enqueue_html/_recover_pending_htmls`（重启补渲，`failed` 不自动重试）；
-  新端点 `GET /files/<id>/preview`（JSON，未就绪/失败/不存在一律 404，SEC-5）、
-  `POST /files/<id>/preview-retry`（管理员）；上传元数据与响应补 `html_status`；
-  删除清理扩为四件套（+`<id>.json`）；`/status` 报 `xlsx_render/xlsx_preview`。
-- [x] **7.4 数据迁移**：`_migrate_files` 幂等补齐 html 三字段；历史 Excel 记录的
-  `pdf_status∈{pending,failed}` 复位 `none`（PDF 预览管线对 Excel 退役；已生成的 PDF 文件
-  留存不删，仅不再被阅读端消费）。
-- [x] **7.5 前端**：`reader.js` 新增 `renderSheetHtml`（/preview → DOMPurify → 页签 +
-  注入 + TSV 复制，拉取失败自动回退 SheetJS）；分派改为「Excel×html_ready → 表格预览、
-  Word×pdf_ready → PDF.js、其余按扩展名降级」；`app.js` 状态辅助函数
-  （`isSheetFile/previewStatus/previewPending/previewReady`）统一轮询/角标/提示条/
-  上传 toast；`style.css` 增 `.kb-xlsx-table`（默认网格线 + 兜底字体，样式主体由
-  单元格 inline style 承载）；版本号 `style.css?v=21 / reader.js?v=5 / app.js?v=15`（F-2）。
-- [x] **7.6 验证**：格式化矩阵 40+ 用例（数字/日期/经时/货币/[Red]/科学计数/舍入口径）全过；
-  Flask test_client 集成（假 admin 会话）：上传→异步渲染 ok→/preview 200 四 sheet→
-  404 语义→删除四件套无残留；浏览器目检（IAB 1280×900）：合并标题蓝底白字、表头
-  双线底边、红字负数、¥ 千分位、中文日期、百分比、隐藏行/列、theme+tint 填充、
-  `9:05 AM`/`[h]:mm`、关网格线 sheet、wrap_text 折行、超宽表截断提示条——全部符合预期。
-  自测脚本留存：`backend/test_xlsx_render.py`、`backend/test_routes_preview.py`（产物
-  `backend/out/` 已入 .gitignore）。
-- [x] **7.7 文档同步**：本文件（阶段 7 + §13 决策）、`docs/design/知识库插件-设计文档.md`（阶段 8）、
-  插件 README、根 README（插件一览/API 表/四件套注）、requirements.txt 注释、HANDOFF、当日日志。
-- [x] git 提交 ✅ 2026-09-13（`77e0f22`，阶段 1~7 一次补交）。
-
-### 阶段 8：Office 预览引擎替换为 xhr/dhr 双引擎（阶段 7 的手绘方案与阶段 2 的 PDF 方案一并退役）✅ 2026-09-13
-
-> 需求：用户指定采用 `D:\TestWorkSpace\xlsx-html-preview` 项目的转换引擎
-> （xhr = XLSX/XLS→HTML 重绘引擎、dhr = DOC/DOCX→HTML 渲染引擎，纯 Python 标准库、
-> 自带解析器与 IR 层、369 个测试、错误码/安全白名单完备），Word 与 Excel 两类
-> 预览**舍弃原方案**（Word→LibreOffice 转 PDF + pdf.js 分页渲染；Excel→xlsx_render
-> openpyxl 手绘 HTML）。仅知识库插件预览链路变更，下载/分类/权限不动。
-
-- [x] **8.1 引擎 vendor**：`backend/vendor/{xhr,dhr}` 原样拷贝（53 个 .py 约 581KB，
-  零改动；升级整目录替换），`vendor/README.md` 记录来源/版本/许可证/接入方式。
-  dhr 顶层 `from xhr.core import ...` → 两包必须同为顶层可导入，适配层用
-  `sys.path` 注入（上游 demo 同款做法）。
-- [x] **8.2 适配层 `backend/office_render.py`**：引擎导入与 `XHR_SOFFICE` 环境注入
-  （配置 `office.soffice_path` 新键、兼容旧 `pdf.soffice_path`）；模块级渲染锁；
-  `render_word`（dhr：flow 流式 + fragment + 图片 base64）/ `render_sheet`
-  （xhr：fragment + 页签 + max_cells=12 万截断）；`XhrError` →
-  `OfficeRenderError`（用户可读文案）；`availability()/soffice_available()`。
-- [x] **8.3 routes.py 重写**：删除 `pdf_convert.py`、`xlsx_render.py` 与
-  pdf_status/html_status 全套状态机（线程池/启动补偿/轮询字段/`/pdf`、`/pdf-retry`、
-  `/preview-retry` 端点、`_file_brief` 状态字段、上传 pending 入队）；
-  `GET /files/<id>/preview` 改为**按需同步渲染 + 原子缓存** `<id>.preview.json`
-  （文件按 id 不可变无失效问题；失败/引擎缺失/非 Office 类一律 404+用户可读
-  error，前端回退）；删除清理改为「原件+渲染件+预览缓存+历史 PDF 残留」；
-  上传旧格式转换失败的放行口径改为 `_office_fallback_possible`（.xls 恒放行——
-  xhr xlrd 兜底；.doc 看 soffice——dhr 归一化）；`/status` 报
-  `office_render/office_preview`；`_migrate_files` 精简回 original_ext/original_size。
-- [x] **8.4 前端**：reader.js 新增 `renderOffice`（/preview → 摘取引擎 `<style>` →
-  正文过 DOMPurify → CSS 原样挂回——**实测 DOMPurify 会整块丢弃 `<style>` 元素**，
-  导致 xhr class 型 CSS 全灭；CSS 为引擎生成的静态内容无注入面，摘取挂回安全）、
-  Excel 页签接线（`.kbsheet-tab` → aria-selected + `.kbsheet-sheet[hidden]`，与
-  引擎 runtime 行为一致）、TSV 复制；分派改为 docx/doc/xlsx/xls → renderOffice，
-  失败自动回退 mammoth/SheetJS；原生 PDF 仍走 pdf.js。app.js 删除轮询/角标/
-  提示条 pending 分支；style.css 删手绘表格样式、`.kb-office` 容器约束；
-  版本号 v22/v6/v16（F-2）。
-- [x] **8.5 验证**：模块级四格式渲染（docx/xlsx 直读 + soffice 转 .xls/.doc 走
-  归一化/兜底通道）通过；Flask test_client 全链路（上传→首渲染 19~70ms→缓存命中
-  cached 标记→非 Office 404→删除无残留）通过；浏览器目检（IAB，含插件真实
-  DOMPurify 与 style.css）：Word 标题/加粗/表格边框、Excel 蓝色主题/红字负数/
-  货币/日期格式/页签切换全部正常（修复 DOMPurify 丢 style 后复验）。
-- [x] **8.6 文档同步**：本节、知识库设计文档（阶段 9）、插件 README、根 README、
-  requirements.txt 注释、HANDOFF、当日日志。
-- [x] **8.7 阅读卡片贴合内容宽度（2026-09-14 追加，纯前端 CSS）**：`.reader-frame`
-  由「通栏白卡片」改为 `width: fit-content` 收缩居中——卡片宽度由预览件实际宽度
-  决定（Word dhr 版心 `.kbdoc-body` 的 max-width、xhr 表格显式 px 宽、PDF 画布、
-  `.paper` 860px 版心），上限仍为视口宽；不支持 fit-content 的老内核回退
-  `width:auto`（通栏，同旧行为）。配套：≥600px 视口给 520px 最小宽兜底
-  （窄表/加载态不出细条卡片）；`.reader-notice` 限宽 640px，长文案换行不参与
-  撑宽卡片。style.css v24。浏览器（IAB）实测八场景全过：Word 正常 698px /
-  宽表格卡内滚动、Excel 宽表撑满+viewport 内滚 / 窄表 520px / SheetJS 降级、
-  PDF 776px 贴合画布、Markdown 随内容伸缩、加载态 520px、转换提示条不撑宽。
-- [x] **8.7.1 修「会话开发文档」横向滚动条（2026-09-14，用户实测反馈）**：该
-  docx 的参数说明表「说明」列含 `chat.completion/chat.completion.chunk` 类
-  **无空格长 token**，把 auto 表格列 min-content 撑到 345px，整表 601px 超版心
-  （618px body 的内容盒 554px）47px → 触发 8.7 的 `.kb-office-word` 横向滚动。
-  根修：`.kb-office-word` 加 `overflow-wrap:anywhere`（断词且**参与 min-content
-  计算**，`break-word` 不参与）→ 表格列收缩回版心（实测两表均 554px、全层级
-  scrollWidth==clientWidth、零元素溢出、卡片仍 650px 贴合）；正文 NBSP 缩进
-  JSON 长行同获正常折行。同类隐患 `.paper` 一并加 `anywhere`。
-  `.kb-office-word{overflow-x:auto}` 保留为真正超宽表格（引擎 width_px 显式
-  宽度，如 1200px）的兜底滚动——回归验证 guard 仍生效、页面级永不横滚。
-  style.css v24。预览缓存为渲染产物不受 CSS 影响，无需失效。
-- [x] **8.8 dhr 引擎缩进/编号修复（2026-09-14，用户实测反馈）**：两个问题——
-  ① 部分文档预览顶部提示「编号 numId=0.0 未在 numbering.xml 中定义，该列表降级为
-  普通段落」：`<w:numId w:val="0"/>` 是 OOXML 的**取消编号**合法值（Word/WPS 用它
-  清除段落从样式继承的编号），引擎将其误判为「未定义编号」而告警污染提示条；
-  ② 部分段落开头缩进不显示：`w:ind` 的 `leftChars`/`rightChars`（中文文档「缩进
-  N 字符」写法）解析后**无消费方**（margin 丢失）；同一缺陷族还包括 `w:start`/
-  `w:end`（Strict 别名）被忽略、首行/悬挂缩进的 px/em 两形态在「样式 ← 段落直接
-  格式」合并时各自独立继承（样式的字符缩进压过段落直接写的 twips 缩进，实测
-  「样式 leftChars=200 + 段落 left=420」错误输出 2em 而非 28px）。
-  补丁（vendor/dhr 三文件，清单见 `vendor/README.md` 第 3/4 条）：numId=0 静默按
-  普通段落（真未定义的 numId 仍告警且消息整数化）；`para_props_to_css` 消费
-  `_left_chars_em`/`_right_chars_em` 输出 `margin:{n}em`；`parse_ppr` 记录形态标记
-  （`_fl_form`/`_hg_form`/私有 em 键，`merge_para` 无条件透传）实现「最近来源整组
-  覆盖」；`left/right` 缺席时兜底 `start/end`、`startChars/endChars`。
-  适配层：`office_render._meta_warnings` 修正 `meta` 为 dict 时 `getattr` 取不到
-  warnings 的缺陷（此前 `/preview` 的 warnings 字段恒为空）；`routes.py` 新增
-  `PREVIEW_CACHE_VERSION`（本次递增为 2）——引擎行为变化时旧缓存自动重渲染，
-  避免升级后「修复不生效」。
-  验证：模块级探针（numId=0/未定义、四种字符缩进、样式覆盖矩阵 5 例）全过；
-  **已入库 4 份 docx 修复前后 HTML 字节一致**（补丁零副作用）；浏览器实测计算样式
-  （2em=32px 缩进可见、numId=0 无标记无警告、提示条仅剩真实警告）；
-  新增自测 `backend/test_dhr_indent_numid.py`（14 项断言）；`test_routes_preview.py`
-  全链路回归通过。
-- [ ] git 提交（**等用户确认**）。
 
 ### 阶段 8 遗留 / 增强（本期不做，可后补）
 
@@ -768,224 +516,37 @@ def _pdf_task(fid):
 
 ---
 
-## 15. 实施落地与实测踩坑（2026-09-11 真机验证）
+## 15. 实施落地与实测踩坑（2026-09-11 真机验证，**PDF 管线，已退役**）
 
-### 15.1 真机验证结果（含 LibreOffice 25.8.7）
-
-| 维度 | 实测结果 |
-| --- | --- |
-| 引擎安装 | 非管理员 `msiexec /a <msi> /qn TARGETDIR=D://LibreOffice` 解包 25.8.7（1.5GB），注册表无 LibreOffice；通过 `<数据根>/plugins/knowledge-base/config.json` 的 `pdf.soffice_path` 显式指定 |
-| docx（2 页 / 中文/表格/图片/页眉页脚） | pending → ok 用时 45.1s（首次建 profile）/ 18s（profile 复用）；PDF 105KB，2 页 |
-| xlsx（3 sheet / 表头底色/数字格式/求和公式） | pending → ok 用时 18.1s；PDF 230KB，**3 页（按 sheet 分页）**，`SUM(E3:E7)=120200` 被 LibreOffice 求值 |
-| 浏览器目视（agent-browser，1440×1000） | PDF 在 pdf.js 中渲染，**中文正常无方块**、红字/表格边框/列表/图片/页眉保留；xlsx 表头底色、合计行加粗、`15,800.00` 千分位格式全保留 |
-| 重启补偿 | 转换完成后把 `pdf_status` 重置 pending + 删 PDF → 重新加载 routes → `_recover_pending_pdfs()` 自动入队转 ok |
-| 全链路测试（test_client，隔离数据根） | 16/16 通过：登录、/status 引擎、上传/转换/下载字节一致、retry 409、未登录 401 |
-
-### 15.2 本轮相对原方案的关键变更（建议同步到原设计）
-
-1. **profile 从「每次新建临时」改为「固定复用」**——实测 37~40s → 15~18s，profile 损坏时自动重置重试一次；profile 位置 `<数据根>/.lo-profile`（运维可见、可清理）。
-2. **`soffice --version` 短超时**——解包版 LibreOffice（管理安装）的 `--version` 在 URE 未注册场景会启动后不退出（实测 60s+ 挂起）；版本探测超时压到 10s、失败返 `None`（不影响可用性，仅展示丢失）。
-3. **前端轮询上限 60s → 180s**——LibreOffice 冷启动实测 40~90s，原 20×3s=60s 兜底会过早停止轮询，让角标卡在「生成中」；与后端 180s 超时对齐。
-4. **修复 routes.py import 兜底缺失**——`pdf_convert` 原本只有 `try: from . import pdf_convert except Exception: _pdf_convert=None`，**无裸 `import pdf_convert` fallback**，导致脚本方式加载（importlib/补偿测试）的实例永远把引擎当作「不存在」置 failed；与 `doc_convert` 一致补上两步式兜底。
-
-### 15.3 已知坑（已留痕在 HANDOFF §7）
-
-- 解包 LibreOffice 启动会打 stderr `Could not find platform independent libraries <prefix>`，可忽略；设置 `URE_BOOTSTRAP`/`SAL_*` 环境变量**不改善**耗时（实测 17.5s vs 17.8s 基线）。
-- 隔离测试必须复制引擎 config 到临时数据根；category 取分类 id，或 `all`/不传表示全量；未分类文件目前没有独立筛选入口（`all` 会一并返回）。
-- 浏览器自动化：`agent-browser screenshot` 路径用正斜杠；批量点击用 `find text` 绕开 `eval` 的引号歧义；登录 + 全流程要在**同一次 `batch`** 内。
+- 引擎：非管理员 `msiexec /a` 解包 LibreOffice 25.8.7，经数据根 `config.json` 的 `pdf.soffice_path` 指定（探测链 `backend/pdf_convert.py`）；全链路 test_client 16/16、重启补偿 `_recover_pending_pdfs` 通过。
+- 实测口径：docx 2 页 / 105KB、xlsx 3 sheet→3 页 / 230KB（`SUM(E3:E7)=120200` 被求值）；PDF 在 pdf.js 中中文无方块、样式保留。
+- 踩坑（已留痕 HANDOFF §7）：profile 固定复用使 37~40s→15~18s；解包版 `soffice --version` 会挂起，须压 10s 超时；前端轮询上限需 180s（与后端转换超时对齐）；`import` 兜底须两步式（与 `doc_convert` 对齐）。
+- 上述随 §7/§8 的 PDF 管线一并退役，留作史实与踩坑索引。
 
 ---
 
 ## 16. 阶段 9：Word 产物后处理补丁（2026-09-18）
 
-### 16.1 问题与根因
-
-用户反馈 Word 预览三处显示缺陷。模块级复现（`dhr.convert` 直调）+ Canvas 像素签名 +
-agent-browser 实测行高，定位如下（完整报告：`docs/archive/知识库Word预览三问题排查报告.md`）：
-
-| 现象 | 根因 |
-| --- | --- |
-| 中文"莫名加粗"、笔画竖过细 | 多数客户端**没装 仿宋_GB2312**，引擎 fallback 链跳过同类衬线体直落 `Microsoft YaHei`；实测墨量 雅黑 138131 vs 仿宋 53860，**差 2.56 倍** |
-| 单元格文字"穿模" | ① `<tr>` 上 `overflow:hidden` 对 `display:table-row` **无效**；② 引擎 base CSS **未重置 `<p>` 默认 margin**，撑高单元格（实测行高 27px 设定 → 实际 49/67px）；③ `td/th` 缺断行规则 |
-
-### 16.2 决策：后处理而非改 vendor
-
-三处缺陷全在 vendor 输出层，但 vendor 目录除 vendor/README.md 登记的 5 条编号补丁外
-不改引擎源码（升级时整目录替换后逐条重打；相关约束见插件设计规范 S-9/U-2/U-7，
-勿引 B-7——B-7 是禁止跨插件 import 条款），故本批补丁不做在 vendor 内（升级要重打、
-易漏）。改为在 `office_render.render_word()` 出口做 **HTML 后处理**
-（`_polish_word_html`），与既有 5 条 vendor 补丁互不影响。
-
-### 16.3 实现
-
-- `_patch_font_fallback()`：在目标字体与 `Microsoft YaHei` 之间插入
-  `"FangSong","仿宋","SimSun"`；覆盖 6 种 GB2312 写法 + 裸 `仿宋`。
-- `_patch_table_overflow()`：清除 `<tr>` 上无效的 `overflow:hidden`（保留 `height`）。
-- `_patch_css()`：追加 `p{margin:0}` / `word-break:break-all` / `td>p:only-child{overflow:hidden}`，
-  带标记 `/*kbdoc-patch*/`。
-
-### 16.4 关键坑（踩过，勿重犯）
-
-1. **裸 `"仿宋"` 不能进 `_FANGSONG_NAMES`**：它既是查找键又是插入值，二次处理会自我匹配、
-   重复注入（幂等破坏，实测第二次处理链变成 `"仿宋","FangSong","仿宋","FangSong"...`）。
-   现方案把裸 `仿宋` 单独分支处理，并在插入时跳过与目标同名的项。
-2. **CSS 补丁必须做存在性判据**：`_patch_css` 每次往第一个 `<style>` 插入，无判据时
-   重复调用会线性的膨胀产物。
-3. **`<tr>` 清理必须限定标签内部**：用 `<tr\b[^>]*>` 全标签正则，不要用
-   `<tr[^>]*overflow:hidden[^>]*>`——后者在只替换部分匹配时会破坏标签闭合。
-4. **验证断言的口径**：`font-family:` 的声明串**本身含双引号**，用 `[^;}"]+` 取会截断造成假阴性；
-   必须取到 `;` 或 `}`。同理统计 `<tr>` 数要用标签正则，别用 `<tr\b`（会命中 CSS 选择器文本）。
-
-### 16.5 验证与留痕
-
-- 实测对比：字体 微软雅黑 → **仿宋**；正文字重 `font-weight:400`；表格行高 49/67/49px → **33/51/33px**。
-- 回归断言：`backend/test_routes_preview.py` 第 0b 节 5 组（①~⑤：补链正确性/顺序、tr 清理、
-  CSS 重置、幂等、内容完整性）；边界用例（6 种写法 + 裸仿宋 + 已修链 + 无 `style` 块 + 空串/None）全过。
-- 同步：`plugins/knowledge-base/README.md`（新增「Word 产物后处理补丁」小节 + 排查路径提醒）、
-  `docs/archive/知识库Word预览三问题排查报告.md`（状态改已修复）。
+- 根因（报告 `docs/archive/知识库Word预览三问题排查报告.md`）：① 客户端缺 仿宋_GB2312，引擎 fallback 直落微软雅黑（实测墨量差 2.56×）；② `<tr>` 的 `overflow:hidden` 对 table-row 无效 + base CSS 未重置 `<p>` margin 撑高单元格（27px→49/67px）。
+- 决策：不改 vendor（升级整目录替换、易漏），在 `office_render.render_word()` 出口做 HTML 后处理 `_polish_word_html`（`_patch_font_fallback` / `_patch_table_overflow` / `_patch_css`）。
+- 踩坑：裸 `"仿宋"` 既是查找键又是插入值，须单独分支（否则自我匹配、重复注入、幂等破坏）；CSS 补丁须有存在性判据（防重复膨胀）；`<tr>` 清理须用全标签正则（防破坏标签闭合）；`font-family:` 断言取值须到 `;` / `}`（声明串本身含双引号）。
+- 验证：回归 `backend/test_routes_preview.py` 第 0b 节 5 组 + 边界用例全过；字体→仿宋、行高 49/67→33/51px。
 
 ---
 
 ## 17. 阶段 10：异步下载源（2026-09-18）
 
-### 17.1 需求
-
-上传文档时允许**另提供一个下载文档**：用户上传 `Demo.pdf` 并在上传对话框打开
-「异步下载源」开关，出现第二个上传控件（**文案固定：「为预览文档提供异步下载源。」**），
-在其中上传 `Demo.doc`。此后任何用户预览 `Demo.pdf` 并点工具栏「下载」，拿到的
-是 `Demo.doc` 而非 `Demo.pdf`。
-
-典型用途：**预览要版式保真（PDF），下载要可编辑（DOC）**——两个诉求用两个文件满足。
-
-### 17.2 关键决策
-
-| 决策点 | 结论 | 理由 |
-| --- | --- | --- |
-| 下载源与预览件是否必须同格式 | **不要求**，完全解耦 | 需求本意就是「预览用一种、下载给另一种」 |
-| 落盘命名 | `<id>.dl.<download_ext>` | 必须区别于 `<id>.<ext>`（原件）与 `<id>.preview.json`，故用带点中缀 |
-| 下载源校验失败 | **不阻断主上传**（B-4） | 下载源是可选增强件，不能拖垮基础能力；响应带 `download_error` 由前端明确提示 |
-| 下载源盘上文件丢失 | **静默回落原件**，不 404 | 同 B-4：下载是基础能力，不因可选件缺失而失效 |
-| 记录字段 | `download_ext`/`download_name`/`download_size`，**未配置则不写键** | 键缺失即「未配置」，`_migrate_files` 无需为此补键（与 `original_*` 恒有值不同） |
-| 是否递增 `PREVIEW_CACHE_VERSION` | **不递增** | 本阶段不改动任何渲染行为，缓存产物不受影响 |
-
-### 17.3 实现
-
-**后端**（`routes.py`）：
-
-- 抽出 `_read_upload(storage)` 统一主文件与下载源的校验口径（SEC-3 白名单 + 20MB
-  流式硬上限），失败抛 `_UploadError(status, message)`；避免两处各写一份而漂移。
-- `kb_file_upload`：`request.files.get("download_file")` 取可选下载源；校验失败只记
-  `download_error` 继续走主流程；Content-Length 预检放宽到 2× 上限（两个文件各 20MB）。
-- `_download_path(fid, ext)`：与 `_file_path` 同款 SEC-1 白名单校验。
-- `kb_file_download`：**优先下载源，缺失回落原件**；`download_name` 沿用下载源原名。
-- `_file_brief`：新增 `has_download_source`/`download_ext`/`download_name`/`download_size`。
-- `kb_file_delete`：清理路径集合加入下载源（按绝对路径去重）。
-
-**前端**（`app.js` / `index.html` / `style.css`）：
-
-- 上传对话框新增「异步下载源」开关（自绘 pill switch，**不用 emoji、不用原生控件**），
-  打开后 `#m-dl-row` 由 `hidden` 转为显示，内含第二个 `bindDropzone` 拖放区；
-  关闭时清空已选文件（防误提交）。开关开启但未选文件 → 提交前拦截并提示。
-- 下载文案随配置变化：dock 下载按钮 `title`、卡片下载按钮 `title` 与 `.dl-badge` 角标
-  （琥珀色，区别于「已转换」的靛蓝）均按 `has_download_source` 切换。
-- 资源版本：`style.css?v=29`、`reader.js?v=11`、`app.js?v=19`（**三个资源戳都要管**；F-2 纪律；当前值以 `plugins/knowledge-base/frontend/index.html` 的资源戳为准）。
-
-### 17.4 关键坑
-
-1. **落盘名必须唯一**：`<id>.dl.<ext>` 而非 `<id>.<ext>` 之类——后者会在
-   「下载源与原件同扩展名」时**直接互相覆盖**（例如预览 pdf、下载也给 pdf）。
-2. **`_read_upload` 的 `filename` 只取 basename**：沿用既有 `os.path.basename`
-   处理，杜绝 `../` 穿越（SEC-1）。
-3. **前端开关关闭必须清空 `input.files`**：否则「先选后关」会把上一个文件继续提交，
-   与用户可见状态不符（老浏览器 `value=""` 清不掉 files，提交时按开关状态忽略）。
-4. **浏览器探针的 `file://` 相对路径**：探针页放在 `backend/out/` 时引用
-   `frontend/style.css` 要写 `../../frontend/`（写 `../frontend/` 会静默 404，
-   表现为「所有 CSS 全失效」——包括本来就正常的规则，容易误判为新样式写错）。
-
-### 17.5 验证与留痕
-
-- 后端回归（`backend/test_routes_preview.py` 第 4b 节，5 组断言）：
-  `Demo.pdf + Demo.doc` 上传后 `has_download_source=true`、落盘 `<id>.dl.doc`、
-  下载字节 == 下载源字节且文件名 `Demo.doc`；未提供下载源 → 下载原件且记录无
-  `download_ext` 键；下载源非法扩展名/超 20MB → **主上传仍成功**且响应带
-  `download_error`；下载源文件被外力删除 → 下载回落原件不 404；删除文档后
-  `.dl.<ext>` 一并清理（`leftover` 断言）。
-- 浏览器实测（真实 `showUpload` + `bindDropzone` 源码抽取到探针页）：
-  开关默认灰色、下载区 `hidden`；点击后开关变蓝、第二个拖放区出现、文案为
-  「为预览文档提供异步下载源。」；提交 FormData 实测含
-  `file=Demo.pdf` + `download_file=Demo.doc`；开关开启但未选文件时提交被拦截
-  （「已开启「异步下载源」，请选择下载文档（或关闭该开关）」）且零 API 调用。
-- 同步：`plugins/knowledge-base/README.md`（功能 / 落盘表 / 元数据 / 接口节）。
+- 需求：上传时可选另附「异步下载源」（文案固定「为预览文档提供异步下载源。」）；预览 `Demo.pdf` 时下载给 `Demo.doc`——预览保版式、下载给可编辑件，两个诉求两个文件。
+- 决策：与预览件格式解耦；落盘 `<id>.dl.<download_ext>`（区别于原件与预览缓存）；下载源校验失败**不阻断主上传**（B-4，响应带 `download_error`）；盘上缺失**静默回落原件**；记录字段 `download_ext` / `download_name` / `download_size`（未配置不写键）；不递增 `PREVIEW_CACHE_VERSION`。
+- 实现（`backend/routes.py`）：`_read_upload` 统一校验口径、`kb_file_upload` 取 `download_file`、`_download_path`、`kb_file_download` 下载源优先、`_file_brief` 加 `has_download_source` 等、`kb_file_delete` 清理下载源；前端 `frontend/{app.js,index.html,style.css}` 加上传开关与 `.dl-badge`。
+- 踩坑：落盘名必须唯一（下载源与原件同扩展名会互相覆盖）；`_read_upload` 只取 basename（SEC-1）；开关关闭须清空 `input.files`；探针页 `file://` 相对路径写错会静默 404（表现为 CSS 全失效）。
+- 验证：`backend/test_routes_preview.py` 第 4b 节 5 组 + 浏览器实测（FormData 含 `file` 与 `download_file`）。
 
 ---
 
 ## 18. 阶段 11：修复「异步下载源」开关点不动（2026-09-18）
 
-### 18.1 现象与根因
-
-用户反馈：上传对话框里的「异步下载源」开关**点了没反应**。
-
-用真实浏览器复现（探针页 `elementFromPoint` 命中测试）：
-
-```
-元素命中(滑块中心) = <SPAN.slider>
-=> 是否命中 <label>? false
-点 .slider 后 checked: false -> false        ← 点那个"按钮"，开关纹丝不动
-点左侧文字 后 checked: false -> true          ← 只有点文字才有效
-```
-
-**根因**：`.slider` 是 `position:absolute; inset:0` 的覆盖层，视觉上就是用户要点的
-「按钮」，但它盖住了 `<input>`；而它自己既不是 `<label>`，`<span class="switch">`
-也不会把点击转发给内部 `<input>`。唯一能激活 checkbox 的是左侧文字上的
-`<label for="m-dl-switch">`——用户不会去点文字，他点的是那个滑块。
-
-这不是 CSS 写坏，是**标记结构选错**：自定义开关必须让 `<label>` 直接包住 `<input>`，
-靠原生 label↔input 关联生效，不能依赖 `for=` 指向一个被覆盖层遮住的隐藏 input。
-
-### 18.2 修法
-
-`app.js` 的 `showUpload()`：整行 `.switch-row` 改成一个 `<label>`，直接包住
-`<input type="checkbox">` 与 `.slider`：
-
-```js
-'<label class="form-row switch-row">' +
-'<span class="switch-label">异步下载源</span>' +
-'<span class="switch"><input id="m-dl-switch" type="checkbox">' +
-'<span class="slider"></span></span></label>' +
-```
-
-`style.css`：`.switch-row` 加 `cursor:pointer`（整行可点）与 hover 反馈；
-`.switch` 自身不再需要 label 语义，仅保留定位尺寸。
-
-资源版本递增（F-2）：`style.css?v=29→30`、`app.js?v=19→20`（当前值以 `plugins/knowledge-base/frontend/index.html` 的资源戳为准）。
-
-### 18.3 验证
-
-真实指针点击（隔离实例 + 真 `app.js`，非程序化 `.click()`）：
-
-| 动作 | `checked` | `#m-dl-row` class | slider 背景 |
-| --- | --- | --- | --- |
-| 初始 | false | `form-row hidden` | — |
-| 点 `.switch .slider` | **true** | `form-row` | `rgb(92,107,192)` = accent |
-| 再点滑块 | false | `form-row hidden` | `rgb(207,212,220)` |
-| 点 `.switch-label` 文字 | true | `form-row` | accent |
-
-提交链：FormData 实测含 `file=Demo.pdf` + `download_file=Demo.doc`（开关 ON 时）。
-
-静态契约断言（`test_routes_preview.py` 新增第 6 节，回归锁）：
-开关行必须是 `<label class="form-row switch-row">` 且含 `type="checkbox"` 与
-`class="slider"` 且以 `</span></label>` 收尾；**不得出现** `for="m-dl-switch"` 旧写法。
-任何人把 label 改回 div/span，回归立即失败。
-
-### 18.4 关键坑
-
-1. **自定义开关的点击目标**：`.slider` 覆盖层是「看得见但点不着」的——只写
-   `<label for="x">` 指向被遮住的 `<input>` 不够，必须让 label 包住 input。
-2. **浏览器自动化验证不能只用程序化 `.click()`**：`slider.dispatchEvent(new MouseEvent('click'))`
-   在修复前也「看起来」能走通部分路径，只有**真实指针点击**（agent-browser 的
-   `click` 命令）才暴露「点滑块无效」。首次实现时正是只做了程序化点击自测，
-   漏掉了这个真实交互缺陷。
-3. **agent-browser 会话不跨命令**：任何非浏览器命令（如 `echo`）或跨 `;`/`&&` 的
-   独立调用会重置会话；一次链式调用内完成 `open → click → eval → screenshot` 才稳。
-4. 隔离实例做 E2E 时需伪造 `jztools_admin.routes.get_session_user` 返回管理员，
-   否则插件 API 一律 401 并把页面重定向到登录页（表现为「静态资源全 200 但页面变登录页」）。
+- 根因：`.slider` 是 `position:absolute` 覆盖层，盖住 `<input>` 且自身非 `<label>`、`<span class="switch">` 不转发点击，仅左侧 `<label for>` 能激活——用户点滑块无效（标记结构选错，非 CSS）。
+- 修法：`app.js` `showUpload()` 把整行 `.switch-row` 改为 `<label>` 直接包住 `<input type="checkbox">` 与 `.slider`；`style.css` `.switch-row{cursor:pointer}`；资源戳（F-2）`style.css?v=29→30`、`app.js?v=19→20`（现值以 `frontend/index.html` 为准）。
+- 验证 / 回归锁：真实指针点击四态通过；`test_routes_preview.py` 第 6 节断言开关行必须是 `<label class="form-row switch-row">` 且禁旧写法 `for="m-dl-switch"`。
+- 踩坑：浏览器验证不能只用程序化 `.click()`（修复前也「看似」走通），须真实指针点击；agent-browser 会话不跨命令（链式 `open→click→eval→screenshot`）；隔离 E2E 须伪造 `get_session_user` 为管理员，否则一律 401 跳登录页。
