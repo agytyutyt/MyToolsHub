@@ -270,6 +270,68 @@ def main():
     check("B2 正证：全程锁下 %d 轮并发改两个不同工具两处改动都保留" % ROUNDS,
           not lost_on_t, "丢失更新轮=%s" % lost_on_t[:5])
 
+    print("== C 段：/api/admin/plugins/index 两次进锁（裁定 6 方案 b）==")
+    import threading as _th
+    import jz_api
+    from flask import Flask
+    ROOT_USER = {"username": "root", "name": "超管", "super_admin": True, "permissions": []}
+    jz_api.register_providers(get_session_user=lambda: dict(ROOT_USER),
+                              set_operation=lambda op: None)
+    capp = Flask("lock_probe_c")
+    capp.config["TESTING"] = True
+    mod.register(capp)
+    # admin 的 login_required / _plugin_mgr_ok 走本插件自己的 get_session_user（读 flask 会话），
+    # 台架不起真实登录流程，直接按同一签名打桩（与其余套件的 provider 打桩同口径）
+    mod.get_session_user = lambda: dict(ROOT_USER)
+    pa = sys.modules.get("jztools_admin.plugin_admin") or mod._load_plugin_admin()
+    held, errbox = [], []
+    gate = _th.Event()
+    orig_cu = pa.check_updates
+
+    def fake_check_updates(project, data_root, path):
+        # 非阻塞 acquire 成功＝此刻没持锁（共享盘读取确实在锁外）
+        held.append(mod.ADMIN_CFG_LOCK.acquire(blocking=False))
+        if held[-1]:
+            mod.ADMIN_CFG_LOCK.release()
+        gate.set()
+        time.sleep(0.4)                                    # 模拟共享盘读取耗时
+        return {"ok": True, "updates": [], "checked": 0}
+
+    def call_index():
+        try:
+            errbox.append(capp.test_client().get(
+                "/api/admin/plugins/index?path=index-share-01").status_code)
+        except Exception as exc:
+            errbox.append(repr(exc))
+
+    def find_model(cfg, username):
+        for unit in cfg.get("units", []):
+            for dept in unit.get("departments", []):
+                for u in dept.get("users", []):
+                    if u.get("username") == username:
+                        return (u.get("llm") or {}).get("model")
+        return None
+
+    pa.check_updates = fake_check_updates
+    try:
+        t = _th.Thread(target=call_index)
+        t.start()
+        gate.wait(10)                                       # 已进入"读盘"窗口
+        mod.save_user_llm("lock-u1", {"format": "openai", "model": "并发写不被覆盖"})
+        t.join(30)
+    finally:
+        pa.check_updates = orig_cu
+    cfg_now = json.load(open(mod.ADMIN_CONFIG_PATH, "r", encoding="utf-8"))
+    check("C1 共享盘读取不在 ADMIN_CFG_LOCK 内（非阻塞 acquire 必成功）",
+          held == [True], "held=%s" % held)
+    check("C2 读盘期间另一字段的并发写未被覆盖（第二段锁内重新 load）",
+          find_model(cfg_now, "lock-u1") == "并发写不被覆盖",
+          "现值=%s" % find_model(cfg_now, "lock-u1"))
+    check("C3 索引路径仍被记住（功能语义不变）",
+          cfg_now.get("plugin_index_path") == "index-share-01",
+          str(cfg_now.get("plugin_index_path")))
+    check("C4 端点返回 200（登录态与错误语义原样）", errbox == [200], str(errbox))
+
     print("\n== 读改写全程锁台架：%d/%d 通过 ==" % (PASSES[0], PASSES[0] + len(FAILS)))
     for f in FAILS:
         print("  FAIL %s" % f)

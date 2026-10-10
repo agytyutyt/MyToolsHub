@@ -149,10 +149,10 @@ def load_admin_config():
 def save_admin_config(cfg):
     """原子写入 config/admin.json（唯一临时名 + rename，见 `app.save_registry` 同口径）。
 
-    D1：全部 `load → 改 → save` 写路径已把整段包进 `with ADMIN_CFG_LOCK:`（跨步丢失
-    更新窗口就此消除）。唯一例外 = `/api/admin/plugins/index`：其读改写段中间夹着共享盘
-    索引读取（`plugin_admin.check_updates`），整段包锁会把所有配置写排在网络 I/O 之后，
-    故保留原样并登记在整改清单（详见落地方案 L1-3 失败/停卡报告）。
+    D1 已闭合：全部 `load → 改 → save` 写路径都整段包在 `with ADMIN_CFG_LOCK:` 内
+    （跨步丢失更新窗口消除）。唯一特例是 `/api/admin/plugins/index`——它的读改写段中间
+    夹着共享盘读取，按裁定 6 拆成两次进锁（锁内取快照 → 锁外读盘 → 重新 load 后只改
+    目标字段再 save），见该视图的 docstring。
     """
     with ADMIN_CFG_LOCK:
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ADMIN_CONFIG_PATH),
@@ -2211,11 +2211,21 @@ def register(app):
     @app.get("/api/admin/plugins/index")
     @login_required
     def admin_api_plugins_index():
-        """读取共享盘索引并比对已装版本（阶段三）。path 缺省用上次记住的路径。"""
+        """读取共享盘索引并比对已装版本（阶段三）。path 缺省用上次记住的路径。
+
+        D1 裁定 6 方案 (b)：本处读改写段中间夹着共享盘读取（`check_updates` 走网络盘），
+        整段包锁会把全部 admin.json 写排在它之后，故拆成**两次进锁**：
+          ① 锁内只取「上次记住的路径」这一份快照；
+          ② 共享盘读取在锁外（锁内绝不含盘/网络 IO，读失败的错误语义原样保留）；
+          ③ 再进锁**重新 load**（不得复用①的对象，否则②期间其他字段的并发改动会被
+             旧对象整体覆盖）、以快照为依据只改 `plugin_index_path` 一个字段后 save。
+        同一字段的并发（两人同时换索引路径）按「后写者为准」——与其余读改写处同语义。
+        """
         if not _plugin_mgr_ok():
             return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        cfg = load_admin_config()
-        path = (request.args.get("path") or "").strip() or (cfg.get("plugin_index_path") or "")
+        with ADMIN_CFG_LOCK:                  # 第一段锁：只取快照，不做盘/网络 IO
+            remembered = load_admin_config().get("plugin_index_path") or ""
+        path = (request.args.get("path") or "").strip() or remembered
         if not path:
             return jsonify({"error": "请填写索引文件路径（共享盘上的 index.json）"}), 400
         set_operation("检查插件更新")
@@ -2223,9 +2233,11 @@ def register(app):
         if not res.get("ok"):
             return jsonify(res), 400
         # 记住路径，下次免填（同一台机器上通常固定一个共享目录）
-        if cfg.get("plugin_index_path") != path:
-            cfg["plugin_index_path"] = path
-            save_admin_config(cfg)
+        if path != remembered:
+            with ADMIN_CFG_LOCK:              # 第二段锁：重新 load 后只改这一个字段
+                cfg = load_admin_config()
+                cfg["plugin_index_path"] = path
+                save_admin_config(cfg)
         return jsonify(res)
 
     @app.post("/api/admin/plugins/batch-apply")
