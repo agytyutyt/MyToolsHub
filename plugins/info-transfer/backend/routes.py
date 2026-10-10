@@ -1316,10 +1316,40 @@ def _xz_decompress(data):
     return lzma.decompress(data, format=lzma.FORMAT_XZ)
 
 
+# T22 试压策略（解决 P4）：已压缩内容（docx/xlsx 内层 deflate、图片、视频）在 MB 级体积上
+# 白跑一次全量 xz 是纯耗时；用 256KB 采样段预估，收益不足就跳过。
+XZ_SAMPLE_SIZE = 256 * 1024
+XZ_MIN_GAIN = 0.10
+
+
+def _xz_worthwhile(raw):
+    """T22：这份数据值不值得跑**全量** xz（只决定「是否尝试」，不改压缩语义）。
+
+    实测（本机 Python 3.14 lzma，2026-10-10）：xz 9|EXTREME 在 192KB 仅 21ms、2MB 129ms，
+    而小体积重复文本上 xz 相对 zlib 的体积收益高达 30~66% —— 所以**不设「小文件一律不试 xz」
+    的体积门槛**（省下几十毫秒、赔上是二维码页数，见落地方案 §B-5）；
+    ≤ 采样长度的数据直接试（采样==全量，不重复劳动），> 采样长度才用预估：
+    采样上 xz 相对 zlib 的收益 < `XZ_MIN_GAIN` 即跳过全量 xz。
+    采样失败（压缩异常）时按原口径试全量 xz——宁可慢，不丢压缩收益。
+    """
+    if len(raw) <= XZ_SAMPLE_SIZE:
+        return True
+    sample = raw[:XZ_SAMPLE_SIZE]
+    try:
+        z = zlib.compress(sample, 9)
+    except Exception:
+        return True
+    xs = _xz_compress(sample)
+    if xs is None or not z:
+        return True
+    return (len(z) - len(xs)) / len(z) >= XZ_MIN_GAIN
+
+
 def _compress_best(raw):
     """T10 试压：zlib(level 9) → LZMA2(xz, 9|EXTREME, 字典 16MB)，取更小者。
 
     返回 (packed, comp)；xz 失败 fail-open 回退 zlib/none。
+    T22：是否尝试 xz 由 `_xz_worthwhile` 的采样预估决定（小体积与低收益数据跳过全量 xz）。
     """
     best, best_comp = raw, JZ2_COMP_NONE
     try:
@@ -1328,9 +1358,10 @@ def _compress_best(raw):
         packed = None
     if packed is not None and len(packed) < len(best):
         best, best_comp = packed, JZ2_COMP_ZLIB
-    packed_xz = _xz_compress(raw)
-    if packed_xz is not None and len(packed_xz) < len(best):
-        best, best_comp = packed_xz, JZ2_COMP_XZ
+    if _xz_worthwhile(raw):
+        packed_xz = _xz_compress(raw)
+        if packed_xz is not None and len(packed_xz) < len(best):
+            best, best_comp = packed_xz, JZ2_COMP_XZ
     return best, best_comp
 
 
@@ -2145,12 +2176,13 @@ def _render_verified_qr(data_bytes, version, err, out_path):
 
 
 def _single_capacity(version, err):
-    """单张二维码可容纳的 UTF-8 字节数（预留安全余量）。"""
-    try:
-        capacity = qrcode.util.BIT_LIMIT_TABLE[err][version] // 8
-    except KeyError:
-        capacity = 800
-    return max(48, capacity - 16)
+    """单张二维码可容纳的字节数（T19：与视频/v2 路径同口径乘 `PAYLOAD_SAFETY`）。
+
+    此前是「容量 − 16 字节」固定预留（≈97% 容量），与 `_max_chunk_size_v2` /
+    `_chunk_data` 的 90% 系数不一致；满容量高熵载荷在部分解码器上会整码失败（评估报告 §5.3），
+    统一降到 ~90% 的代价是静态页数 +8~10%，换识别稳定性与三条路径口径一致。
+    """
+    return max(48, int(_qr_byte_capacity(version, err) * PAYLOAD_SAFETY))
 
 
 def _char_boundary(raw, idx):

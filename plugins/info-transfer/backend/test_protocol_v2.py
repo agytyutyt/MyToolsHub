@@ -205,6 +205,24 @@ env_obj, _ = it._parse_scanned_codes(codes_x)
 _fmt, _n, data, _e = it.parse_envelope(env_obj)
 check("T10 xz 静态还原", data == rep_text)
 
+# ---- T22 压缩试压策略：大体积先采样预估（低收益不白跑全量 xz）----
+print("== 5b. T22 试压采样预估（P4） ==")
+noise = bytes(random.getrandbits(8) for _ in range(600 * 1024))      # 已压缩形态：xz 无收益
+check("T22 大体积低收益 → 不试全量 xz", it._xz_worthwhile(noise) is False)
+_pn, _cn = it._compress_best(noise)
+check("T22 低收益产物不落 xz", _cn != it.JZ2_COMP_XZ, f"comp={_cn}")
+rep_big = ("轨迹点 2026-10-10 经度 121.47 纬度 31.23 小区 460001234567890\n" * 40).encode("utf-8") * 30
+check("T22 大体积高收益 → 仍走 xz（预估不误伤）", it._xz_worthwhile(rep_big) is True)
+_pb, _cb = it._compress_best(rep_big)
+check("T22 高收益确实选中 xz 且严格小于 zlib",
+      _cb == it.JZ2_COMP_XZ and len(_pb) < len(__import__("zlib").compress(rep_big, 9)), f"comp={_cb}")
+small_rep = "隔断填充。".encode("utf-8") * 12000                      # ~180KB < 采样长度
+check("T22 小体积不设门槛（实测 xz 192KB 仅 21ms，跳过赔的是页数）",
+      len(small_rep) <= it.XZ_SAMPLE_SIZE and it._xz_worthwhile(small_rep) is True)
+_e22 = it.build_envelope_v2("text", "t22", small_rep.decode("utf-8"), ".txt")
+check("T22 小体积重复文本仍选 xz", it.parse_frame_jz2(_e22)["comp"] == it.JZ2_COMP_XZ)
+check("T22 信封可还原（预估不改语义）", it.parse_envelope_v2(_e22)["data"] == small_rep.decode("utf-8"))
+
 print("== 6. T11 拆包重组（mode=rebuild） ==")
 import io as _io
 import zipfile as _zf
