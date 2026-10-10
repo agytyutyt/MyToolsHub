@@ -154,63 +154,6 @@
                                                 "frontend_sha256":  "7e4c23ad788787f12c6625c8dc680ad6e63883d7d759a01f58aec18ad8c5f003",
                                                 "frontend_size":  9279
                                             },
-                     "character-graph":  {
-                                             "version":  "1.2.2",
-                                             "api_version":  1,
-                                             "file":  "JZToolsHub-character-graph-后端-v1.2.2.zip",
-                                             "sha256":  "6065a61451a8b5e1fd768d1e03ba3dcb31dd4c4e1fc5db0de2003cc64e1433d1",
-                                             "size":  313168,
-                                             "built_at":  "2026-10-10T02:14:23+08:00",
-                                             "code_sha256":  "0c3ed92ebbdb0fa04fb92fa085089ac8980c7c050306908ad7f56908c153424e",
-                                             "file_count":  14,
-                                             "requires_restart":  true,
-                                             "file_hashes":  {
-                                                                 "plugins/character-graph/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                 "plugins/character-graph/backend/config.template.json":  "8a80554c91d9fca8",
-                                                                 "plugins/character-graph/backend/document_reader.py":  "ec75d7e1fbeb6d07",
-                                                                 "plugins/character-graph/backend/llm_client.py":  "8f818c8dec3eaf83",
-                                                                 "plugins/character-graph/backend/requirements.txt":  "ea2ca4050efa2fc7",
-                                                                 "plugins/character-graph/backend/routes.py":  "c39c7e5cba3f09f6",
-                                                                 "plugins/character-graph/frontend/css/style.css":  "f8cda1ca4e74adb7",
-                                                                 "plugins/character-graph/frontend/index.html":  "d9f076ac5203529f",
-                                                                 "plugins/character-graph/frontend/js/app.js":  "34d923938646b62e",
-                                                                 "plugins/character-graph/frontend/js/lib/three/addons/controls/OrbitControls.js":  "4efb547b139666d2",
-                                                                 "plugins/character-graph/frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  "950f61ab8b0a8371",
-                                                                 "plugins/character-graph/frontend/js/lib/three/three.module.js":  "a762b8588c6abf23",
-                                                                 "plugins/character-graph/manifest.json":  "8239ad6107b3fe67",
-                                                                 "plugins/character-graph/README.md":  "f626c7d889f3927f"
-                                                             },
-                                             "assets":  {
-                                                            "frontend/css/style.css":  {
-                                                                                           "h":  "f8cda1ca4e74adb7",
-                                                                                           "v":  20260815,
-                                                                                           "referenced":  true
-                                                                                       },
-                                                            "frontend/js/app.js":  {
-                                                                                       "h":  "34d923938646b62e",
-                                                                                       "v":  20260925,
-                                                                                       "referenced":  true
-                                                                                   },
-                                                            "frontend/js/lib/three/addons/controls/OrbitControls.js":  {
-                                                                                                                           "h":  "4efb547b139666d2",
-                                                                                                                           "v":  null,
-                                                                                                                           "referenced":  false
-                                                                                                                       },
-                                                            "frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  {
-                                                                                                                            "h":  "950f61ab8b0a8371",
-                                                                                                                            "v":  null,
-                                                                                                                            "referenced":  false
-                                                                                                                        },
-                                                            "frontend/js/lib/three/three.module.js":  {
-                                                                                                          "h":  "a762b8588c6abf23",
-                                                                                                          "v":  null,
-                                                                                                          "referenced":  false
-                                                                                                      }
-                                                        },
-                                             "frontend_file":  "JZToolsHub-character-graph-前端-v1.2.2.zip",
-                                             "frontend_sha256":  "9ae23740d467d3d3c64fff3e13b3b6acd253f032185fd5c265e4b315db3abc9d",
-                                             "frontend_size":  277862
-                                         },
                      "notice-board":  {
                                           "version":  "1.0.7",
                                           "api_version":  1,
@@ -820,6 +763,63 @@
                                          "frontend_file":  "JZToolsHub-case-report-前端-v1.3.2.zip",
                                          "frontend_sha256":  "f73c818714d696f523a8c9fa5f245d413515a63f603ff1cebbb8809fb21e0ba9",
                                          "frontend_size":  22499
-                                     }
+                                     },
+                     "character-graph":  {
+                                             "version":  "1.2.3",
+                                             "api_version":  1,
+                                             "file":  "JZToolsHub-character-graph-后端-v1.2.3.zip",
+                                             "sha256":  "5ca32e012dfb18effa4f074b416a064feaff0139998ed5bfef3a8ae637af94cf",
+                                             "size":  313443,
+                                             "built_at":  "2026-10-11T01:48:00+08:00",
+                                             "code_sha256":  "1c24156db1a7f782a3ff19037073642e8da3e63ab8a97d99fc320db7f798ab01",
+                                             "file_count":  14,
+                                             "requires_restart":  false,
+                                             "file_hashes":  {
+                                                                 "plugins/character-graph/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                 "plugins/character-graph/backend/config.template.json":  "8a80554c91d9fca8",
+                                                                 "plugins/character-graph/backend/document_reader.py":  "ec75d7e1fbeb6d07",
+                                                                 "plugins/character-graph/backend/llm_client.py":  "8f818c8dec3eaf83",
+                                                                 "plugins/character-graph/backend/requirements.txt":  "ea2ca4050efa2fc7",
+                                                                 "plugins/character-graph/backend/routes.py":  "c39c7e5cba3f09f6",
+                                                                 "plugins/character-graph/frontend/css/style.css":  "f8cda1ca4e74adb7",
+                                                                 "plugins/character-graph/frontend/index.html":  "b5383c82104444d2",
+                                                                 "plugins/character-graph/frontend/js/app.js":  "829a3b378953e68c",
+                                                                 "plugins/character-graph/frontend/js/lib/three/addons/controls/OrbitControls.js":  "4efb547b139666d2",
+                                                                 "plugins/character-graph/frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  "950f61ab8b0a8371",
+                                                                 "plugins/character-graph/frontend/js/lib/three/three.module.js":  "a762b8588c6abf23",
+                                                                 "plugins/character-graph/manifest.json":  "c0911bc34e26b68d",
+                                                                 "plugins/character-graph/README.md":  "f626c7d889f3927f"
+                                                             },
+                                             "assets":  {
+                                                            "frontend/css/style.css":  {
+                                                                                           "h":  "f8cda1ca4e74adb7",
+                                                                                           "v":  20260815,
+                                                                                           "referenced":  true
+                                                                                       },
+                                                            "frontend/js/app.js":  {
+                                                                                       "h":  "829a3b378953e68c",
+                                                                                       "v":  20261011,
+                                                                                       "referenced":  true
+                                                                                   },
+                                                            "frontend/js/lib/three/addons/controls/OrbitControls.js":  {
+                                                                                                                           "h":  "4efb547b139666d2",
+                                                                                                                           "v":  null,
+                                                                                                                           "referenced":  false
+                                                                                                                       },
+                                                            "frontend/js/lib/three/addons/renderers/CSS2DRenderer.js":  {
+                                                                                                                            "h":  "950f61ab8b0a8371",
+                                                                                                                            "v":  null,
+                                                                                                                            "referenced":  false
+                                                                                                                        },
+                                                            "frontend/js/lib/three/three.module.js":  {
+                                                                                                          "h":  "a762b8588c6abf23",
+                                                                                                          "v":  null,
+                                                                                                          "referenced":  false
+                                                                                                      }
+                                                        },
+                                             "frontend_file":  "JZToolsHub-character-graph-前端-v1.2.3.zip",
+                                             "frontend_sha256":  "da917f940cfda96c3c0516799586fd71150bb988fe44d828198ed5da128a0366",
+                                             "frontend_size":  278140
+                                         }
                  }
 }
