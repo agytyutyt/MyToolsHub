@@ -570,47 +570,6 @@
                                    "frontend_sha256":  "e92513dfa9fa031dd4d76b3aa0e7ed931a848061483a2625f8e33dbf37a48cfd",
                                    "frontend_size":  80474
                                },
-                     "case-report":  {
-                                         "version":  "1.3.2",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-case-report-后端-v1.3.2.zip",
-                                         "sha256":  "1a8ec91ff0a2cbd24203913032372e7bd03625c4537a0a288c2bfef38ac737fd",
-                                         "size":  71483,
-                                         "built_at":  "2026-10-11T01:46:16+08:00",
-                                         "code_sha256":  "551f11bb4b300ed73eaaa1fda1303d1fc412ce3c03fc20c9faaa3bac3552e169",
-                                         "file_count":  13,
-                                         "requires_restart":  false,
-                                         "file_hashes":  {
-                                                             "plugins/case-report/backend/__init__.py":  "b3ce1ce6c9b0507a",
-                                                             "plugins/case-report/backend/category_kb.py":  "677db705699bf264",
-                                                             "plugins/case-report/backend/config.template.json":  "8a80554c91d9fca8",
-                                                             "plugins/case-report/backend/llm_client.py":  "e346ead9d0d5c32d",
-                                                             "plugins/case-report/backend/org_units.json":  "0c194b037c05984a",
-                                                             "plugins/case-report/backend/parser.py":  "cc3aa0744feda24a",
-                                                             "plugins/case-report/backend/requirements.txt":  "3a7bf9da29794206",
-                                                             "plugins/case-report/backend/routes.py":  "64676f0a9a775ed7",
-                                                             "plugins/case-report/frontend/app.js":  "d32e99f2a6358e18",
-                                                             "plugins/case-report/frontend/index.html":  "257c38c1fd2fdc91",
-                                                             "plugins/case-report/frontend/style.css":  "a0ea7ebfc35e434d",
-                                                             "plugins/case-report/manifest.json":  "b194ead11283b5ba",
-                                                             "plugins/case-report/README.md":  "fd503a31b58f8a04"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "d32e99f2a6358e18",
-                                                                                "v":  36,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "a0ea7ebfc35e434d",
-                                                                                   "v":  30,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    },
-                                         "frontend_file":  "JZToolsHub-case-report-前端-v1.3.2.zip",
-                                         "frontend_sha256":  "f73c818714d696f523a8c9fa5f245d413515a63f603ff1cebbb8809fb21e0ba9",
-                                         "frontend_size":  22499
-                                     },
                      "character-graph":  {
                                              "version":  "1.2.3",
                                              "api_version":  1,
@@ -819,6 +778,47 @@
                                            "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.22.zip",
                                            "frontend_sha256":  "c6550b2644a13e900fa495f68bcdef29c9d90b2cadfe4a8db9861689db11f656",
                                            "frontend_size":  26357
-                                       }
+                                       },
+                     "case-report":  {
+                                         "version":  "1.3.3",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-case-report-后端-v1.3.3.zip",
+                                         "sha256":  "fda10bc254d369503f9fb3e7197b43173361549f77110c715b029c852a2e61e7",
+                                         "size":  71900,
+                                         "built_at":  "2026-10-11T02:10:59+08:00",
+                                         "code_sha256":  "c0ab607ee6ee450939e8a3ce3f6df6a819e8e2ac6e9be514de26497097be073c",
+                                         "file_count":  13,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/case-report/backend/__init__.py":  "b3ce1ce6c9b0507a",
+                                                             "plugins/case-report/backend/category_kb.py":  "677db705699bf264",
+                                                             "plugins/case-report/backend/config.template.json":  "8a80554c91d9fca8",
+                                                             "plugins/case-report/backend/llm_client.py":  "e346ead9d0d5c32d",
+                                                             "plugins/case-report/backend/org_units.json":  "0c194b037c05984a",
+                                                             "plugins/case-report/backend/parser.py":  "cc3aa0744feda24a",
+                                                             "plugins/case-report/backend/requirements.txt":  "3a7bf9da29794206",
+                                                             "plugins/case-report/backend/routes.py":  "69fdeb317eec0fa2",
+                                                             "plugins/case-report/frontend/app.js":  "d32e99f2a6358e18",
+                                                             "plugins/case-report/frontend/index.html":  "257c38c1fd2fdc91",
+                                                             "plugins/case-report/frontend/style.css":  "a0ea7ebfc35e434d",
+                                                             "plugins/case-report/manifest.json":  "d46c4e9c2d9c6150",
+                                                             "plugins/case-report/README.md":  "fd503a31b58f8a04"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "d32e99f2a6358e18",
+                                                                                "v":  36,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "a0ea7ebfc35e434d",
+                                                                                   "v":  30,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    },
+                                         "frontend_file":  "JZToolsHub-case-report-前端-v1.3.3.zip",
+                                         "frontend_sha256":  "df507610c169c630cbc682932a042742d460182947a59476855f0d27d37e0e36",
+                                         "frontend_size":  22498
+                                     }
                  }
 }
