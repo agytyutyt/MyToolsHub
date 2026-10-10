@@ -101,7 +101,7 @@ EXEMPTIONS = [
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:823", "lines(:819-821) 逐条 esc(展示名/id/from/to/error) ＋ :824 esc(res.restart_message)"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:830", "同 :823（失败分支复用 lines ＋ esc(restart_message)）"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:837", "同行已 esc(err.message)"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:99", "同行已 esc(f.name)（本文件 :15 本地 esc）；fmtSize 数值，note 由静态 runtimeLabel 拼"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:101", "同行已 esc(f.name)（本文件 :15 本地 esc）；fmtSize 数值，note 由静态 runtimeLabel 拼"),
     ("F-3", "plugins/admin/frontend/js/admin-unit.js:14", "同行已 esc(err.message)"),
     ("F-3", "plugins/admin/frontend/js/admin-unit.js:23", "units.map 体 :24-30 id/name/description 全 esc；departments_count/users_count 数值"),
     ("F-3", "plugins/admin/frontend/js/admin-user.js:37", "同行已 esc(err.message)"),
@@ -153,6 +153,13 @@ EXEMPTIONS = [
     ("F-3", "plugins/trajectory-convert/frontend/index.html:691", "同 info-transfer:2071 口径：routes.py:1081-1086 _DEP_FEATURES 字面量常量＋:1110-1126 固定中文文案，无用户/文件数据（未 esc 已记 §B 加固建议）"),
     # ---- L2 批 4（2026-10-10）：trajectory-sketch ----
     ("F-3", "plugins/trajectory-sketch/frontend/app.js:32", "右值＝ICONS[name]，注入前已过本文件 sanitizeIconSvg()（:47-66）：只认根 <svg>、剥 on*/href/xlink:href，含 script/foreignObject 或解析失败整枚弃用并回落 <img>；name 受 ICON_NAMES(:11-12) 白名单约束（C 类按保守修复处置）"),
+    # ---- 裁定 7 ①：F-3 补齐「对象字面量 { innerHTML: }」与「跨行拼接」两形态后的新增命中 ----
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:111", "跨行拼接的侧栏「登录」项：动态部分只有 encodeURIComponent(location.pathname)（属性上下文无法逃逸）与静态文案/本文件 sideIcon() 封装"),
+    ("F-3", "plugins/admin/frontend/js/admin-plugins.js:203", "右值在下一行，模板内插值只有 ${esc(err.message)}（本文件 esc 真替换 &<>\"'）"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:291", "跨行拼接的行模板：r.name/r.id 均 esc()，其余为静态标签与三元常量"),
+    ("F-3", "plugins/case-report/frontend/app.js:672", "units.map 体内两处均为 esc(u)，前段是静态 option 骨架"),
+    ("F-3", "plugins/notice-board/frontend/app.js:356", "同行已 esc(created_by_name||created_by)（L2 批 3 修掉的真风险；本行是 { innerHTML: … } 对象字面量形态，旧口径漏检、现口径命中）"),
+    ("F-3", "plugins/shared-docs/frontend/app.js:163", "跨行拼接的文档卡：卡片各动态字段（d.name/lv/scopeLabel/d.created_by_name/d.updated_by）均 esc()；meta 的 updated_at/version 原为裸插值，本批已补 esc（shared-docs 1.2.6）"),
 ]
 
 # 结构性豁免（逐条给理由，出现在报告里而不是被悄悄过滤掉）
@@ -327,19 +334,38 @@ def check_F1(rel, lines, ctx):
 
 
 def check_F3(rel, lines, ctx):
+    """F-3：innerHTML 动态拼接未见转义。
+
+    2026-10-10 裁定 7 补齐三种形态（旧口径只认 `.innerHTML =` 且要求动态值同行，
+    notice-board 两处后端返回的创建者名直拼 `{ innerHTML: … }` 完全漏检，
+    「F-3 归零」因此是假绿）：
+      ① `.innerHTML =` 赋值（原口径）；
+      ② 对象字面量 / 属性写法 `innerHTML:`；
+      ③ 跨行拼接（右值写在后续行）。
+    """
     out = []
     esc = re.compile(r"escapeHtml|escape_html|sanitize|DOMPurify|textContent|createTextNode")
-    dyn = re.compile(r"\$\{|innerHTML\s*=\s*[^;]*\+\s*\w|innerHTML\s*=\s*\w")
+    inner = re.compile(r"\binnerHTML\b\s*[:=]")
+    dyn = re.compile(r"\$\{|innerHTML\s*[:=][^;\n]*\+\s*\w|innerHTML\s*[:=]\s*\w")
     for i, ln in enumerate(lines, 1):
         s = ln.strip()
         if s.startswith("//") or s.startswith("*") or s.startswith("<!--"):
             continue
         if "innerHTML" not in ln:
             continue
-        if not re.search(r"\.innerHTML\s*=", ln):
+        if not inner.search(ln):
             continue
         if dyn.search(ln) and not esc.search(ln):
             out.append((i, "innerHTML 赋值含动态值且同行未见转义（启发式；确认后可豁免）"))
+            continue
+        # ③ 右值跨行：本行以 + 收尾，或赋值符后仅到半个字符串/无内容 → 并入后两行再判
+        tail = ln.rstrip()
+        opens = (tail.endswith("+") or re.search(r"innerHTML\s*[:=]\s*$", tail)
+                 or re.search(r"innerHTML\s*[:=]\s*[\"'`][^\"'`]*[\"'`]?\s*\+\s*$", tail))
+        if opens:
+            nxt = "\n".join(lines[i:i + 2])
+            if re.search(r"\+\s*\w|\$\{", nxt) and not esc.search(ln) and not esc.search(nxt):
+                out.append((i, "innerHTML 动态拼接未见转义（跨行/对象字面量形态；确认后可豁免）"))
     return out
 
 

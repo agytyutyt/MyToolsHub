@@ -156,7 +156,7 @@
     docs.forEach(function (d) {
       var card = document.createElement("div");
       card.className = "doc-card";
-      var meta = "更新于 " + (d.updated_at || "-") + " · 版本 " + (d.version || 0);
+      var meta = "更新于 " + esc(d.updated_at || "-") + " · 版本 " + esc(d.version || 0);
       if (d.updated_by) meta += " · " + esc(d.updated_by);
       var lv = (d.scope && d.scope.level) || "private";
       var canManage = !!(state.user && (state.user.super_admin || d.created_by === state.user.username));

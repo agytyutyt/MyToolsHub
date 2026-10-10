@@ -1,42 +1,6 @@
 {
     "schema":  1,
     "packages":  {
-                     "shared-docs":  {
-                                         "version":  "1.2.5",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-shared-docs-后端-v1.2.5.zip",
-                                         "sha256":  "ee43289cba4ea4242475f65eae1546ae66b17b7a0aaca642da9d8301f3d93af9",
-                                         "size":  48677,
-                                         "built_at":  "2026-10-08T13:07:02+08:00",
-                                         "code_sha256":  "76f1482d30e3383b9c275cc49c352cd6c0f7bd6ca158e87c4078450f49e232a1",
-                                         "file_count":  8,
-                                         "requires_restart":  false,
-                                         "file_hashes":  {
-                                                             "plugins/shared-docs/backend/__init__.py":  "d41d8cd98f00b204",
-                                                             "plugins/shared-docs/backend/requirements.txt":  "7a79a533b1b5d928",
-                                                             "plugins/shared-docs/backend/routes.py":  "622d999add029d8f",
-                                                             "plugins/shared-docs/frontend/app.js":  "56e15e792f6e82d6",
-                                                             "plugins/shared-docs/frontend/index.html":  "ed70cb26271f54f0",
-                                                             "plugins/shared-docs/frontend/style.css":  "28b43aa1a2817985",
-                                                             "plugins/shared-docs/manifest.json":  "a2011eac96e134ea",
-                                                             "plugins/shared-docs/README.md":  "b94d755a445c7e76"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "56e15e792f6e82d6",
-                                                                                "v":  9,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "28b43aa1a2817985",
-                                                                                   "v":  16,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    },
-                                         "frontend_file":  "JZToolsHub-shared-docs-前端-v1.2.5.zip",
-                                         "frontend_sha256":  "2da8cf717edd13bffc5e077d4c353c3c46d96f7b125a98115366194e5fbeb8b2",
-                                         "frontend_size":  14567
-                                     },
                      "case-report":  {
                                          "version":  "1.3.1",
                                          "api_version":  1,
@@ -682,45 +646,16 @@
                                           "frontend_sha256":  "870ece66c0701f754d220fd508c8c8450b8afb653adc3a6f6a70162568c5e4c1",
                                           "frontend_size":  11677
                                       },
-                     "info-transfer":  {
-                                           "version":  "1.2.18",
-                                           "api_version":  1,
-                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.18.zip",
-                                           "sha256":  "b2ee301f8942116087ecc78d4ae5fcec1ae6c36d848dfbbeb3a5d0ecc84d20e8",
-                                           "size":  114650,
-                                           "built_at":  "2026-10-10T09:10:28+08:00",
-                                           "code_sha256":  "a08e73ad29137fa707c61a7e619a74e99da84205f355ed6db67c5ecef6e5fafe",
-                                           "file_count":  10,
-                                           "requires_restart":  true,
-                                           "file_hashes":  {
-                                                               "plugins/info-transfer/backend/.pytest_cache/.gitignore":  "ae07caff09568018",
-                                                               "plugins/info-transfer/backend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
-                                                               "plugins/info-transfer/backend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
-                                                               "plugins/info-transfer/backend/.pytest_cache/v/cache/nodeids":  "63409764951a9d6a",
-                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
-                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
-                                                               "plugins/info-transfer/backend/routes.py":  "6f43240d86ba7c42",
-                                                               "plugins/info-transfer/frontend/index.html":  "90ef49060012c338",
-                                                               "plugins/info-transfer/manifest.json":  "b8db86208a67694d",
-                                                               "plugins/info-transfer/README.md":  "b99fbcf82ab729cb"
-                                                           },
-                                           "assets":  {
-
-                                                      },
-                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.18.zip",
-                                           "frontend_sha256":  "11e193ae632370d8589e9b266ee4fd5404e03cb1ab4929ab002a45fc631a04a7",
-                                           "frontend_size":  26085
-                                       },
                      "admin":  {
-                                   "version":  "1.4.5",
+                                   "version":  "1.4.6",
                                    "api_version":  1,
-                                   "file":  "JZToolsHub-admin-后端-v1.4.5.zip",
-                                   "sha256":  "f56a667758d2b9e12e292c3a3421fec19f498ee11dd851f7fa9f93f00f146cca",
-                                   "size":  202524,
-                                   "built_at":  "2026-10-10T09:24:11+08:00",
-                                   "code_sha256":  "5ba21241decd6096c6600846c2094b32aa7c11cde03db161e59983ee796edd08",
+                                   "file":  "JZToolsHub-admin-后端-v1.4.6.zip",
+                                   "sha256":  "4b58234c04e8f72343f60c686da7b8dd159eff060f03b3208d6ca54270b747a4",
+                                   "size":  202711,
+                                   "built_at":  "2026-10-10T09:36:28+08:00",
+                                   "code_sha256":  "a7ab9f5c603fe55a53e9a585b4f461b65495e7af6198e371dfecaea77ba629fe",
                                    "file_count":  31,
-                                   "requires_restart":  true,
+                                   "requires_restart":  false,
                                    "file_hashes":  {
                                                        "plugins/admin/backend/__init__.py":  "26b7bb556a0aac8f",
                                                        "plugins/admin/backend/batch_io.py":  "6ade9e38f145a2be",
@@ -735,7 +670,7 @@
                                                        "plugins/admin/frontend/admin-migrate.html":  "6aa8e372603c3158",
                                                        "plugins/admin/frontend/admin-plugins.html":  "ac455b6a4172b7f0",
                                                        "plugins/admin/frontend/admin-settings.html":  "4cb38f88bb81bda3",
-                                                       "plugins/admin/frontend/admin-store.html":  "ed5714c7bdad722a",
+                                                       "plugins/admin/frontend/admin-store.html":  "5cd7d9eee3aa3639",
                                                        "plugins/admin/frontend/admin-unit.html":  "603d5f8fb6f096f6",
                                                        "plugins/admin/frontend/admin-user.html":  "125b415c28308939",
                                                        "plugins/admin/frontend/css/admin.css":  "24d31dda02406f61",
@@ -746,12 +681,12 @@
                                                        "plugins/admin/frontend/js/admin-migrate.js":  "7f1623338c84116a",
                                                        "plugins/admin/frontend/js/admin-plugins.js":  "dbeda60f1a8138f1",
                                                        "plugins/admin/frontend/js/admin-settings.js":  "ea596a34467b254b",
-                                                       "plugins/admin/frontend/js/admin-store.js":  "56aff270eb9100d9",
+                                                       "plugins/admin/frontend/js/admin-store.js":  "b0c989bff1e1f644",
                                                        "plugins/admin/frontend/js/admin-unit.js":  "bdaf76bb8edd5807",
                                                        "plugins/admin/frontend/js/admin-user.js":  "2333f96f98cc7b30",
                                                        "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
                                                        "plugins/admin/frontend/login.html":  "dd84cf7704d3be32",
-                                                       "plugins/admin/manifest.json":  "2bbeff73498e2827",
+                                                       "plugins/admin/manifest.json":  "82c8d7fe2af6e0a4",
                                                        "plugins/admin/README.md":  "f5e452998bc2e9ef"
                                                    },
                                    "assets":  {
@@ -796,7 +731,7 @@
                                                                                         "referenced":  false
                                                                                     },
                                                   "frontend/js/admin-store.js":  {
-                                                                                     "h":  "56aff270eb9100d9",
+                                                                                     "h":  "b0c989bff1e1f644",
                                                                                      "v":  null,
                                                                                      "referenced":  false
                                                                                  },
@@ -816,9 +751,74 @@
                                                                                "referenced":  false
                                                                            }
                                               },
-                                   "frontend_file":  "JZToolsHub-admin-前端-v1.4.5.zip",
-                                   "frontend_sha256":  "b4a9f31e2219f3598ca2dd482b86d7dded4c62086fd3c3408ab0e3a33059792f",
-                                   "frontend_size":  80134
-                               }
+                                   "frontend_file":  "JZToolsHub-admin-前端-v1.4.6.zip",
+                                   "frontend_sha256":  "6193e85493c3a13c20254973bc486505a66459f79ec131d244c0f3526e5411b1",
+                                   "frontend_size":  80318
+                               },
+                     "info-transfer":  {
+                                           "version":  "1.2.19",
+                                           "api_version":  1,
+                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.19.zip",
+                                           "sha256":  "275f33f58a87f8f79a93b8b41b03e8d7b3fd7202ec554164ca84e6dfdf70ad2f",
+                                           "size":  114376,
+                                           "built_at":  "2026-10-10T09:36:32+08:00",
+                                           "code_sha256":  "c69ad5880103aeac24ce511c36b22ce8458fd4c2bca52306164719141e2dc2a6",
+                                           "file_count":  10,
+                                           "requires_restart":  true,
+                                           "file_hashes":  {
+                                                               "plugins/info-transfer/backend/.pytest_cache/.gitignore":  "ae07caff09568018",
+                                                               "plugins/info-transfer/backend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
+                                                               "plugins/info-transfer/backend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
+                                                               "plugins/info-transfer/backend/.pytest_cache/v/cache/nodeids":  "63409764951a9d6a",
+                                                               "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
+                                                               "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
+                                                               "plugins/info-transfer/backend/routes.py":  "f92a006b3cf79720",
+                                                               "plugins/info-transfer/frontend/index.html":  "90ef49060012c338",
+                                                               "plugins/info-transfer/manifest.json":  "050aa7a5da107a66",
+                                                               "plugins/info-transfer/README.md":  "b99fbcf82ab729cb"
+                                                           },
+                                           "assets":  {
+
+                                                      },
+                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.19.zip",
+                                           "frontend_sha256":  "a5f3d966ed78303bcec5d8755893caf3053f4ec71fdc43a00c83d6cf960fcee8",
+                                           "frontend_size":  26085
+                                       },
+                     "shared-docs":  {
+                                         "version":  "1.2.6",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-shared-docs-后端-v1.2.6.zip",
+                                         "sha256":  "6b14f9ab66de398a870ce1b1207abeb60a55de552f4e4788c6faf01bed016bd6",
+                                         "size":  48661,
+                                         "built_at":  "2026-10-10T09:36:33+08:00",
+                                         "code_sha256":  "a6102bb5f6638f76e6d679cd4169f713de028d205e6cf4675a3472634f938a45",
+                                         "file_count":  8,
+                                         "requires_restart":  false,
+                                         "file_hashes":  {
+                                                             "plugins/shared-docs/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/shared-docs/backend/requirements.txt":  "7a79a533b1b5d928",
+                                                             "plugins/shared-docs/backend/routes.py":  "622d999add029d8f",
+                                                             "plugins/shared-docs/frontend/app.js":  "a3d7d4f06dd1dd3e",
+                                                             "plugins/shared-docs/frontend/index.html":  "d385454b2a67edd2",
+                                                             "plugins/shared-docs/frontend/style.css":  "28b43aa1a2817985",
+                                                             "plugins/shared-docs/manifest.json":  "8f32da1f2370d429",
+                                                             "plugins/shared-docs/README.md":  "b94d755a445c7e76"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "a3d7d4f06dd1dd3e",
+                                                                                "v":  10,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "28b43aa1a2817985",
+                                                                                   "v":  16,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    },
+                                         "frontend_file":  "JZToolsHub-shared-docs-前端-v1.2.6.zip",
+                                         "frontend_sha256":  "0e0e26fd6e7af676b5854fe4e64a65214df2a2092d2fc5036eae72740cf0820b",
+                                         "frontend_size":  14564
+                                     }
                  }
 }

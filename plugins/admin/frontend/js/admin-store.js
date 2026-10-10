@@ -13,8 +13,10 @@
   var depProvides = {};      // 已上架依赖条目的 provides 集合（name→true）
 
   function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    // 与 admin-common.js 的 esc 同字符集（含单引号）：值也会进单引号属性/模板语境，
+    // 少替一个 ' 就有逃逸出属性的面（L2 分诊登记的低优先加固项，裁定 7 ③ 现补）。
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
   function toast(t, isErr) {
