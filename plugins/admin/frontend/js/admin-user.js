@@ -128,7 +128,14 @@
 
   function openForm(user) {
     const llm = (user && user.llm) || {};
-    openModal(user ? '编辑人员' : '新建人员', `
+    openModal(user ? '编辑人员' : '新建人员', _userFormHtml(user, llm), (wrap) => {
+      _bindUserFormEvents(wrap, user, llm);
+    });
+  }
+
+  // 人员表单 HTML（登录名/姓名/密码/单位/部门/角色/身份证/大模型五项）
+  function _userFormHtml(user, llm) {
+    return `
       <div class="form-grid">
         <div class="field">
           <label for="f-username">登录名</label>
@@ -191,53 +198,56 @@
           <button class="admin-btn" type="button" data-close>取消</button>
           <button class="admin-btn primary" type="button" id="form-save">保存</button>
         </div>
-      </div>`, (wrap) => {
-      const unitSel = wrap.querySelector('#f-unit');
-      const deptSel = wrap.querySelector('#f-dept');
-      // 大模型调用格式：回显已保存值（选项是静态的，模板里不便逐个判断 selected）
-      wrap.querySelector('#f-llm-format').value = llm.format || 'openai';
-      // 单位切换后刷新部门下拉
-      unitSel.addEventListener('change', () => {
-        deptSel.innerHTML = deptOptionsHtml(unitSel.value, '');
-      });
-      wrap.querySelector('#f-name').focus();
-      wrap.querySelector('#form-save').addEventListener('click', async () => {
-        const password = wrap.querySelector('#f-password').value;
-        const payload = {
-          name: wrap.querySelector('#f-name').value.trim(),
-          unit_id: unitSel.value,
-          department_id: deptSel.value,
-          role: wrap.querySelector('#f-role').value,
-          idcard: wrap.querySelector('#f-idcard').value.trim(),
-          llm: llmPayload(wrap),
-        };
-        if (password) payload.password = password;
-        if (!payload.name) { showToast('姓名不能为空', true); return; }
-        if (!payload.unit_id || !payload.department_id) { showToast('请选择所属单位与部门', true); return; }
-        try {
-          if (user) {
-            await api('/api/admin/users/' + encodeURIComponent(user.username), {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-          } else {
-            const username = wrap.querySelector('#f-username').value.trim();
-            if (!username) { showToast('登录名不能为空', true); return; }
-            if (!password) { showToast('请设置初始密码', true); return; }
-            await api('/api/admin/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ username, ...payload }),
-            });
-          }
-          wrap.querySelector('[data-close]').click();
-          showToast('已保存');
-          load();
-        } catch (err) {
-          showToast('保存失败：' + err.message, true);
+      </div>`;
+  }
+
+  // 人员表单事件：单位→部门联动、格式回显、保存（新建/编辑分叉）
+  function _bindUserFormEvents(wrap, user, llm) {
+    const unitSel = wrap.querySelector('#f-unit');
+    const deptSel = wrap.querySelector('#f-dept');
+    // 大模型调用格式：回显已保存值（选项是静态的，模板里不便逐个判断 selected）
+    wrap.querySelector('#f-llm-format').value = llm.format || 'openai';
+    // 单位切换后刷新部门下拉
+    unitSel.addEventListener('change', () => {
+      deptSel.innerHTML = deptOptionsHtml(unitSel.value, '');
+    });
+    wrap.querySelector('#f-name').focus();
+    wrap.querySelector('#form-save').addEventListener('click', async () => {
+      const password = wrap.querySelector('#f-password').value;
+      const payload = {
+        name: wrap.querySelector('#f-name').value.trim(),
+        unit_id: unitSel.value,
+        department_id: deptSel.value,
+        role: wrap.querySelector('#f-role').value,
+        idcard: wrap.querySelector('#f-idcard').value.trim(),
+        llm: llmPayload(wrap),
+      };
+      if (password) payload.password = password;
+      if (!payload.name) { showToast('姓名不能为空', true); return; }
+      if (!payload.unit_id || !payload.department_id) { showToast('请选择所属单位与部门', true); return; }
+      try {
+        if (user) {
+          await api('/api/admin/users/' + encodeURIComponent(user.username), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        } else {
+          const username = wrap.querySelector('#f-username').value.trim();
+          if (!username) { showToast('登录名不能为空', true); return; }
+          if (!password) { showToast('请设置初始密码', true); return; }
+          await api('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, ...payload }),
+          });
         }
-      });
+        wrap.querySelector('[data-close]').click();
+        showToast('已保存');
+        load();
+      } catch (err) {
+        showToast('保存失败：' + err.message, true);
+      }
     });
   }
 

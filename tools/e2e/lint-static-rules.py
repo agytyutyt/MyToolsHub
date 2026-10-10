@@ -106,8 +106,8 @@ EXEMPTIONS = [
     ("F-3", "plugins/admin/frontend/js/admin-unit.js:14", "同行已 esc(err.message)"),
     ("F-3", "plugins/admin/frontend/js/admin-unit.js:23", "units.map 体 :24-30 id/name/description 全 esc；departments_count/users_count 数值"),
     ("F-3", "plugins/admin/frontend/js/admin-user.js:37", "同行已 esc(err.message)"),
-    ("F-3", "plugins/admin/frontend/js/admin-user.js:201", "deptOptionsHtml(:108-114) 对 d.id/d.name esc，其余为静态 option"),
-    ("F-3", "plugins/admin/frontend/js/admin-user.js:348", "roles.map 体 :349-361：opt.name（本文件 MODULE_OPTIONS 常量）/r.id/r.name/r.description 全 esc；usage 数值"),
+    ("F-3", "plugins/admin/frontend/js/admin-user.js:212", "deptOptionsHtml(:108-114) 对 d.id/d.name esc，其余为静态 option（P3-1 D6-1 拆分自 :201 移行）"),
+    ("F-3", "plugins/admin/frontend/js/admin-user.js:358", "roles.map 体 :359-371：opt.name（本文件 MODULE_OPTIONS 常量）/r.id/r.name/r.description 全 esc；usage 数值（P3-1 D6-1 拆分自 :348 移行）"),
     ("F-3", "plugins/admin/frontend/js/admin.js:120", "moduleCard(:32-47) 已 esc(m.name)；meta/icon 取本文件 MODULE_META 常量与 encodeURIComponent；m.id 为后端 ADMIN_MODULES 闭集（routes.py:60），count 数值"),
     ("F-3", "plugins/admin/frontend/js/admin.js:125", "同行已 esc(err.message)"),
     # ---- L2 批 2（2026-10-10）：case-report / knowledge-base / shared-docs ----

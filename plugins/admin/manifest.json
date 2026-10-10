@@ -17,7 +17,7 @@
     "大模型设置",
     "数据迁移"
   ],
-  "version": "1.4.8",
+  "version": "1.4.9",
   "author": "JZToolsHub 团队",
   "form": "source",
   "core": true,
