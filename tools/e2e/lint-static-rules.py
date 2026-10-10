@@ -134,10 +134,10 @@ EXEMPTIONS = [
     ("F-3", "plugins/shared-docs/frontend/app.js:419", "html＝renderGrid(:402-418) 累加：colName 由字符码生成、r/c 数字，单元格值这一唯一外部项走 esc(v)（本文件 :41 定义）"),
     # ---- L2 批 3（2026-10-10）：map-marker / notice-board / store / json-formatter /
     #      color-picker / info-transfer / md5-generator / trajectory-convert ----
-    ("F-3", "plugins/map-marker/frontend/index.html:743", "右值＝JZIcon.html('▶')＋静态中文标签；JZIcon.html（static/js/jz-icon.js:148-154）只返回原 emoji 或 encodeURIComponent(常量表) 的 <img>"),
-    ("F-3", "plugins/map-marker/frontend/index.html:827", "同 :743（入参 '⏸' 为本行字面量）"),
-    ("F-3", "plugins/map-marker/frontend/index.html:850", "同 :743（入参 '▶' 为本行字面量）"),
-    ("F-3", "plugins/map-marker/frontend/index.html:923", "preview 拼于 :920-922：points.length 数值、COLORS 十六进制常量数组(:249)、escapeHtml(p.label)(:383) 已转义、lng/lat 经 parseCoord(:556-570) parseFloat+isFinite 必为数值"),
+    ("F-3", "plugins/map-marker/frontend/index.html:763", "右值＝JZIcon.html('▶')＋静态中文标签；JZIcon.html（static/js/jz-icon.js:148-154）只返回原 emoji 或 encodeURIComponent(常量表) 的 <img>（P3-1 D6-4 拆分自 :743 移行）"),
+    ("F-3", "plugins/map-marker/frontend/index.html:847", "同 :763（入参 '⏸' 为本行字面量）"),
+    ("F-3", "plugins/map-marker/frontend/index.html:870", "同 :763（入参 '▶' 为本行字面量）"),
+    ("F-3", "plugins/map-marker/frontend/index.html:943", "preview 拼于 :940-942：points.length 数值、COLORS 十六进制常量数组(:249)、escapeHtml(p.label)(:383) 已转义、lng/lat 经 parseCoord(:556-570) parseFloat+isFinite 必为数值（P3-1 D6-4 拆分自 :923 移行）"),
     ("F-3", "plugins/notice-board/frontend/app.js:120", "TYPE_ICON 为本文件 :46 emoji 常量枚举，node.type 仅作键、未命中回落「•」，再经 JZIcon.html"),
     ("F-3", "plugins/notice-board/frontend/app.js:298", "同 :120；兄弟节点 :302/:306 走 textContent"),
     ("F-3", "plugins/notice-board/frontend/app.js:350", "nl2br＝先 esc 再把换行转 <br>（:21-24），item.content 已全量转义"),

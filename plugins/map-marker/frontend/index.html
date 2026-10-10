@@ -654,8 +654,16 @@
     if (!points.length) return;
     trackPoints = points.slice();
     const n = trackPoints.length;
+    _drawTrackLine();
+    _addTrackMarkers();
+    _addMovingMarker();
+    _computeTrackTiming();
+    _initTrackProgress(n);
+    _fitAndShowTrack();
+  }
 
-    // 轨迹折线
+  // 轨迹折线
+  function _drawTrackLine() {
     const path = trackPoints.map(p => [p.lng, p.lat]);
     trackLine = new AMap.Polyline({
       path: path,
@@ -666,8 +674,11 @@
       lineCap: 'round',
     });
     trackLine.setMap(map);
+  }
 
-    // 每个点以圆点标点；默认不显示时间，悬浮标点时才展示完整时间（含日期）
+  // 每个点以圆点标点；默认不显示时间，悬浮标点时才展示完整时间（含日期）
+  function _addTrackMarkers() {
+    const n = trackPoints.length;
     trackInfo = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -10), autoMove: true });
     trackMarkers = trackPoints.map((p, i) => {
       const baseColor = i === 0 ? '#34A853' : (i === n - 1 ? '#EA4335' : '#4285F4');
@@ -702,8 +713,10 @@
     // 同步到右侧标记列表与持久化
     markers.push(...trackMarkers);
     renderList();
+  }
 
-    // 移动的当前位置标记（红色圆点）
+  // 移动的当前位置标记（红色圆点）
+  function _addMovingMarker() {
     movingMarker = new AMap.CircleMarker({
       center: [trackPoints[0].lng, trackPoints[0].lat],
       radius: 10,
@@ -713,8 +726,11 @@
       fillOpacity: 0.95,
     });
     movingMarker.setMap(map);
+  }
 
-    // 计算各点的相对时间偏移（相对首点，单位毫秒），无法解析的点不参与时间插值
+  // 计算各点的相对时间偏移（相对首点，单位毫秒），无法解析的点不参与时间插值
+  function _computeTrackTiming() {
+    const n = trackPoints.length;
     const abs = trackPoints.map(p => parseTime(p.time));
     trackStart = abs[0] ?? 0;
     trackRel = abs.map(x => (x != null ? x - trackStart : null));
@@ -728,15 +744,19 @@
     trackScale = trackDuration / 20000;
     trackT = 0;
     trackCurrent = 0;
+  }
 
-    // 进度条改为「标点数个格子」的非线性步进：min=0、max=点数-1、step=1
+  // 进度条改为「标点数个格子」的非线性步进：min=0、max=点数-1、step=1
+  function _initTrackProgress(n) {
     const pg = document.getElementById('track-progress');
     pg.min = '0';
     pg.max = String(n - 1);
     pg.step = '1';
     pg.value = '0';
+  }
 
-    // 适配视野显示全部轨迹
+  // 适配视野显示全部轨迹
+  function _fitAndShowTrack() {
     map.setFitView([trackLine, ...trackMarkers], false, [80, 80, 80, 80]);
     const bar = document.getElementById('track-bar');
     bar.style.display = 'block';
