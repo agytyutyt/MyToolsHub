@@ -792,13 +792,13 @@
                                           "frontend_size":  11677
                                       },
                      "info-transfer":  {
-                                           "version":  "1.2.14",
+                                           "version":  "1.2.15",
                                            "api_version":  1,
-                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.14.zip",
-                                           "sha256":  "d4220c89b3f646b082db2b959ddecb55e80ec476c8fd5b90340b2e4d21649732",
-                                           "size":  110423,
-                                           "built_at":  "2026-10-10T08:07:55+08:00",
-                                           "code_sha256":  "15644fc5e6da158599fd388940cb49eda6db3cca336553a171bf53322b934e13",
+                                           "file":  "JZToolsHub-info-transfer-后端-v1.2.15.zip",
+                                           "sha256":  "f3ef508c9bceb4192b12eb715418461be2c6014fe295d0d186dfc02c27834aec",
+                                           "size":  110943,
+                                           "built_at":  "2026-10-10T08:19:52+08:00",
+                                           "code_sha256":  "e1a99c8fa4163b3f5617247a62fa4521d97ac9e0a36be90c58a83a3af4d91348",
                                            "file_count":  10,
                                            "requires_restart":  true,
                                            "file_hashes":  {
@@ -808,17 +808,17 @@
                                                                "plugins/info-transfer/backend/.pytest_cache/v/cache/nodeids":  "63409764951a9d6a",
                                                                "plugins/info-transfer/backend/__init__.py":  "d41d8cd98f00b204",
                                                                "plugins/info-transfer/backend/requirements.txt":  "f642497ecf6df882",
-                                                               "plugins/info-transfer/backend/routes.py":  "9b672f554cdd9edc",
+                                                               "plugins/info-transfer/backend/routes.py":  "4f0bed54a2cf7c61",
                                                                "plugins/info-transfer/frontend/index.html":  "4f8057a266fabd74",
-                                                               "plugins/info-transfer/manifest.json":  "fb31cb346c781caa",
+                                                               "plugins/info-transfer/manifest.json":  "61dbc0e4602ff027",
                                                                "plugins/info-transfer/README.md":  "b99fbcf82ab729cb"
                                                            },
                                            "assets":  {
 
                                                       },
-                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.14.zip",
-                                           "frontend_sha256":  "b4cb8be6993f05393934d642f02e0c582f5cec649a2d19fe555bb39411a61597",
-                                           "frontend_size":  25925
+                                           "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.15.zip",
+                                           "frontend_sha256":  "63ed0b8a814235d33da14258bbb32186b4bcadef621a11442898325dae035407",
+                                           "frontend_size":  25926
                                        }
                  }
 }
