@@ -265,6 +265,130 @@ def _clean_task_files():
 
 # ===================== 过滤执行 =====================
 
+def _decide_columns(headers, excluded, keep_fold, valid_targets, store, use_suggested,
+                    mappings_used):
+    """逐列零成本档决策（LLM 路径第一段）：exclude→confirmed→remap→exact→suggested；
+    未命中的列保持 None 留给大模型。返回 (decide, miss_names)。"""
+    decide = [None] * len(headers)  # i -> (keep, matched, source)
+    tier_hits = {"hit_exact": 0, "hit_confirmed": 0, "hit_suggested": 0}
+    for i, h in enumerate(headers):
+        hf = core.clean_text(h).casefold()
+        if not hf:
+            decide[i] = (False, "", "empty")
+            continue
+        if hf in excluded:
+            decide[i] = (False, "", "excluded")
+            continue
+        hit = store.lookup(h, valid_targets, include_suggested=False, tiers="confirmed") \
+            if store is not None else None
+        if hit is not None:
+            if hit["target"]:
+                decide[i] = (True, hit["target"], "confirmed")
+            else:
+                decide[i] = (False, "", "confirmed_drop")
+            tier_hits["hit_confirmed"] += 1
+            mappings_used.append({"key": hit["key"], "sample": hit["sample"],
+                                  "target": hit["target"], "status": "confirmed",
+                                  "source": "confirmed"})
+            continue
+        hit_remap = store.lookup_remap(h) if store is not None else None
+        if hit_remap is not None:
+            # 待重映射（P4）：用户曾翻转保留但目标未定 → 临时保留，交管理员重映射
+            decide[i] = (True, "", "remap_keep")
+            continue
+        if hf in keep_fold:
+            # 名单内同名字段直接保留：那是用户点名要的列，不把判断权交给模型
+            # （模型偶发返回空值时会让用户"明明开着却被删"，与硬过滤口径也不一致）
+            decide[i] = (True, keep_fold[hf], "exact")
+            tier_hits["hit_exact"] += 1
+            continue
+        hit = store.lookup(h, valid_targets, include_suggested=use_suggested,
+                           tiers="suggested") if store is not None else None
+        if hit is not None:
+            if hit["target"]:
+                decide[i] = (True, hit["target"], "suggested")
+            else:
+                decide[i] = (False, "", "suggested_drop")
+            tier_hits["hit_suggested"] += 1
+            mappings_used.append({"key": hit["key"], "sample": hit["sample"],
+                                  "target": hit["target"], "status": "suggested",
+                                  "source": "suggested"})
+        # store 为 None 或缓存未命中 → 留给 LLM（decide 保持 None）
+    if store is not None:
+        store.bump_stats(**tier_hits)
+    miss_names = list(dict.fromkeys(
+        headers[i] for i in range(len(headers)) if decide[i] is None))
+    return decide, miss_names
+
+
+def _apply_llm_decisions(headers, rows, decide, miss_names, keep_columns, valid_targets,
+                         session, store, username, suggest_limit, mappings_used):
+    """对未命中列调大模型并回填 decide（LLM 路径第二段）；返回 llm_used。"""
+    llm_used = False
+    if miss_names:
+        # 样本值注入（P4）：每个未命中表头取前 3 个非空单元格内容，辅助语义判断
+        samples = {}
+        if rows:
+            col_of = {}
+            for i, h in enumerate(headers):
+                col_of.setdefault(h, i)
+            for name in miss_names:
+                col = col_of.get(name)
+                if col is None:
+                    continue
+                vals = []
+                for r in rows:
+                    s = core.cell_to_str(r[col] if col < len(r) else None).strip()
+                    if s:
+                        vals.append(s[:20])
+                    if len(vals) >= 3:
+                        break
+                if vals:
+                    samples[name] = vals
+        mappings = llm_client.match_columns(miss_names, keep_columns, session=session,
+                                            samples=samples or None)
+        llm_used = True
+        model = (getattr(session, "provider", {}) or {}).get("model") \
+            if session is not None else ""
+        if store is not None:
+            store.record_suggestions(miss_names, mappings, valid_targets, model=model,
+                                     prompt_ver=llm_client.PROMPT_VER, user=username,
+                                     limit=suggest_limit)
+            store.bump_stats(llm_calls=1, misses=len(miss_names))
+        for i, h in enumerate(headers):
+            if decide[i] is not None:
+                continue
+            m = str(mappings.get(h) or "").strip()
+            if m and (core.clean_text(m).casefold() not in valid_targets
+                      or (store is not None and store.is_rejected(h, m))):
+                m = ""  # 名单外按未匹配（match_columns 已兜底，这里再兜一道）；被否决的对不回锅
+            if m:
+                decide[i] = (True, m, "llm")
+                mappings_used.append({"key": core.clean_text(h).casefold(),
+                                      "sample": core.clean_text(h), "target": m,
+                                      "status": "suggested", "source": "llm"})
+            else:
+                decide[i] = (False, "", "llm_drop")
+                # 「判定删除」同样进复核区：负映射也要把关（首次运行就能确认/改指）
+                mappings_used.append({"key": core.clean_text(h).casefold(),
+                                      "sample": core.clean_text(h), "target": "",
+                                      "status": "suggested", "source": "llm"})
+    elif store is not None:
+        store.bump_stats(llm_saved=1)  # 全部命中缓存，这次大模型调用省下了
+    return llm_used
+
+
+def _build_result(headers2, rows2, kept, removed_detail, post_rules, llm_used,
+                  mappings_used):
+    """后处理与结果组装（LLM/硬过滤两路共用出口）；返回结构逐字段不变。"""
+    headers2, rows2, count = core.post_process(headers2, rows2, post_rules)
+    return {"headers2": headers2, "rows2": rows2, "kept": kept,
+            "removed": [d["column"] for d in removed_detail],
+            "removed_detail": removed_detail,
+            "replace_count": count, "llm_used": llm_used,
+            "mappings_used": mappings_used}
+
+
 def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=None,
                use_suggested=False, store=None, username="", suggest_limit=None):
     """执行过滤 + 后处理，返回结果字典（自学习方案 P0 起改为 dict 返回）。
@@ -305,105 +429,11 @@ def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=N
         # 最强依据，压过名单内同名自匹配——否则 UI 把预填列传回 columns 后，确认映射的
         # 来源与命中统计会被 exact 遮蔽）→ 名单内同名（exact）→ 建议映射；
         # 全部未命中的表头子集才交给大模型（prompt 只含 miss，省钱省时）。
-        decide = [None] * len(headers)  # i -> (keep, matched, source)
-        tier_hits = {"hit_exact": 0, "hit_confirmed": 0, "hit_suggested": 0}
-        for i, h in enumerate(headers):
-            hf = core.clean_text(h).casefold()
-            if not hf:
-                decide[i] = (False, "", "empty")
-                continue
-            if hf in excluded:
-                decide[i] = (False, "", "excluded")
-                continue
-            hit = store.lookup(h, valid_targets, include_suggested=False, tiers="confirmed") \
-                if store is not None else None
-            if hit is not None:
-                if hit["target"]:
-                    decide[i] = (True, hit["target"], "confirmed")
-                else:
-                    decide[i] = (False, "", "confirmed_drop")
-                tier_hits["hit_confirmed"] += 1
-                mappings_used.append({"key": hit["key"], "sample": hit["sample"],
-                                      "target": hit["target"], "status": "confirmed",
-                                      "source": "confirmed"})
-                continue
-            hit_remap = store.lookup_remap(h) if store is not None else None
-            if hit_remap is not None:
-                # 待重映射（P4）：用户曾翻转保留但目标未定 → 临时保留，交管理员重映射
-                decide[i] = (True, "", "remap_keep")
-                continue
-            if hf in keep_fold:
-                # 名单内同名字段直接保留：那是用户点名要的列，不把判断权交给模型
-                # （模型偶发返回空值时会让用户"明明开着却被删"，与硬过滤口径也不一致）
-                decide[i] = (True, keep_fold[hf], "exact")
-                tier_hits["hit_exact"] += 1
-                continue
-            hit = store.lookup(h, valid_targets, include_suggested=use_suggested,
-                               tiers="suggested") if store is not None else None
-            if hit is not None:
-                if hit["target"]:
-                    decide[i] = (True, hit["target"], "suggested")
-                else:
-                    decide[i] = (False, "", "suggested_drop")
-                tier_hits["hit_suggested"] += 1
-                mappings_used.append({"key": hit["key"], "sample": hit["sample"],
-                                      "target": hit["target"], "status": "suggested",
-                                      "source": "suggested"})
-            # store 为 None 或缓存未命中 → 留给 LLM（decide 保持 None）
-        if store is not None:
-            store.bump_stats(**tier_hits)
-        miss_names = list(dict.fromkeys(
-            headers[i] for i in range(len(headers)) if decide[i] is None))
-        if miss_names:
-            # 样本值注入（P4）：每个未命中表头取前 3 个非空单元格内容，辅助语义判断
-            samples = {}
-            if rows:
-                col_of = {}
-                for i, h in enumerate(headers):
-                    col_of.setdefault(h, i)
-                for name in miss_names:
-                    col = col_of.get(name)
-                    if col is None:
-                        continue
-                    vals = []
-                    for r in rows:
-                        s = core.cell_to_str(r[col] if col < len(r) else None).strip()
-                        if s:
-                            vals.append(s[:20])
-                        if len(vals) >= 3:
-                            break
-                    if vals:
-                        samples[name] = vals
-            mappings = llm_client.match_columns(miss_names, keep_columns, session=session,
-                                                samples=samples or None)
-            llm_used = True
-            model = (getattr(session, "provider", {}) or {}).get("model") \
-                if session is not None else ""
-            if store is not None:
-                store.record_suggestions(miss_names, mappings, valid_targets, model=model,
-                                         prompt_ver=llm_client.PROMPT_VER, user=username,
-                                         limit=suggest_limit)
-                store.bump_stats(llm_calls=1, misses=len(miss_names))
-            for i, h in enumerate(headers):
-                if decide[i] is not None:
-                    continue
-                m = str(mappings.get(h) or "").strip()
-                if m and (core.clean_text(m).casefold() not in valid_targets
-                          or (store is not None and store.is_rejected(h, m))):
-                    m = ""  # 名单外按未匹配（match_columns 已兜底，这里再兜一道）；被否决的对不回锅
-                if m:
-                    decide[i] = (True, m, "llm")
-                    mappings_used.append({"key": core.clean_text(h).casefold(),
-                                          "sample": core.clean_text(h), "target": m,
-                                          "status": "suggested", "source": "llm"})
-                else:
-                    decide[i] = (False, "", "llm_drop")
-                    # 「判定删除」同样进复核区：负映射也要把关（首次运行就能确认/改指）
-                    mappings_used.append({"key": core.clean_text(h).casefold(),
-                                          "sample": core.clean_text(h), "target": "",
-                                          "status": "suggested", "source": "llm"})
-        elif store is not None:
-            store.bump_stats(llm_saved=1)  # 全部命中缓存，这次大模型调用省下了
+        decide, miss_names = _decide_columns(headers, excluded, keep_fold, valid_targets,
+                                             store, use_suggested, mappings_used)
+        llm_used = _apply_llm_decisions(headers, rows, decide, miss_names, keep_columns,
+                                        valid_targets, session, store, username,
+                                        suggest_limit, mappings_used)
         kept, removed_detail = [], []
         for i, h in enumerate(headers):
             keep, matched, source = decide[i]
@@ -423,12 +453,8 @@ def run_filter(headers, rows, mode, keep_columns, post_rules, session, exclude=N
                            "source": "excluded" if core.clean_text(c).casefold() in excluded
                            else "hard_unmatched"} for c in removed]
 
-    headers2, rows2, count = core.post_process(headers2, rows2, post_rules)
-    return {"headers2": headers2, "rows2": rows2, "kept": kept,
-            "removed": [d["column"] for d in removed_detail],
-            "removed_detail": removed_detail,
-            "replace_count": count, "llm_used": llm_used,
-            "mappings_used": mappings_used}
+    return _build_result(headers2, rows2, kept, removed_detail, post_rules, llm_used,
+                         mappings_used)
 
 
 def build_preview(headers, rows, keep_columns, post_rules, store=None):
