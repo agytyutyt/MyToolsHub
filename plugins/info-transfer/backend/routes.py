@@ -2548,13 +2548,49 @@ def decode_image_file(file_bytes):
             for t in found]
 
 
-def decode_video_frames(video_path, progress_cb=None, cancel_check=None):
+def _frame_km(code):
+    """T24：从帧头解出 (帧序号, 总帧数, k, m)；解不出或非 FEC 帧返回 None。
+
+    v1（base64 三段头）与 v2（JZ2 share 帧，meta=k,m）同口径：两者帧序都是
+    `idx = share序号 * nblocks + 组号`，故组号 = idx % nblocks、share 号 = idx // nblocks。
+    v2 信封帧（非 FEC，单帧自带完整信息）返回 None，不参与早停判定。
+    """
+    try:
+        raw = bytes(code) if isinstance(code, (bytes, bytearray)) \
+            else str(code).encode("ascii", "ignore")
+    except Exception:
+        return None
+    if raw.startswith(JZ2_MAGIC):
+        try:
+            d = parse_frame_jz2(raw)
+        except Exception:
+            return None
+        meta = d.get("meta") or b""
+        if not d.get("is_fec") or len(meta) < 2:
+            return None
+        return int(d["seg_i"]), int(d["seg_n"]), meta[0], meta[1]
+    if len(raw) < 12:
+        return None
+    try:
+        idx = int.from_bytes(base64.b64decode(raw[:4]), BYTE_ORDER)
+        n = int.from_bytes(base64.b64decode(raw[4:8]), BYTE_ORDER)
+        km = int.from_bytes(base64.b64decode(raw[8:12]), BYTE_ORDER)
+    except Exception:
+        return None
+    return idx, n, (km >> 8) & 255, km & 255
+
+
+def decode_video_frames(video_path, progress_cb=None, cancel_check=None, early_stop=True):
     _load_cv2()
     _load_numpy()
     """从二维码视频文件逐帧解码，返回内容字节列表（去重保序）。
 
     优先 zxing-cpp（v2 二进制载荷无损）；不可用时回退 cv2（仅 v1 文本可靠）。
     cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（T33：用户停止解析）。
+    early_stop（T24 / P6）：按帧头 k-of-m 判定凑满即停，不再把整段视频解完——
+    相机模式每码重复 5 帧、有效信息只占 1/5，APP 侧（T09）早已"满足即 break"，
+    桌面端此前是全量扫描。同时按重复节奏跳帧：只解每段重复的首帧，其余 grab() 跳过。
+    跳帧若没能换来早停（节奏漂移）则丢弃结果全量重扫，保证不丢码。
     """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         raise RuntimeError("后端缺少 cv2 / numpy，无法解析视频。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-cv2-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
@@ -2563,6 +2599,16 @@ def decode_video_frames(video_path, progress_cb=None, cancel_check=None):
         raise ValueError("无法读取视频文件")
     seen = []
     seen_set = set()
+    # T24 早停判定状态：plan=(总帧数, k, m)；groups[组号] = 该组已收到的 share 号集合。
+    # 每组要凑到 k+1（有冗余时）而不是恰好 k —— 留一份给 T17 的交叉校验，
+    # 否则"早停"会把每次解析都降级成「完整性未校验」。无冗余（m==k）时按 k 停。
+    plan = None
+    groups = []
+    need = 0
+    new_fis = []            # 收到「新码」的帧号序列，用于测重复节奏
+    stride = 0              # 同一码连续重复的帧数，>=2 才跳帧
+    skipped = False         # 本次是否真跳过帧（决定要不要回退全量扫描）
+    stopped_early = False
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
     detector = None if ZXING_AVAILABLE else cv2.QRCodeDetector()
     fi = 0
@@ -2595,14 +2641,57 @@ def decode_video_frames(video_path, progress_cb=None, cancel_check=None):
                         found = []
                 found = [t.encode("utf-8", "surrogateescape") if isinstance(t, str) else t
                          for t in found]
+            got_new = False
             for t in found:
-                if t not in seen_set:
-                    seen_set.add(t)
-                    seen.append(t)
+                if t in seen_set:
+                    continue
+                seen_set.add(t)
+                seen.append(t)
+                got_new = True
+                if not early_stop:
+                    continue
+                info = _frame_km(t)
+                if not info:
+                    continue
+                idx, n, k, mm = info
+                if n <= 0 or k <= 0 or mm < k or n % mm:
+                    continue                       # 帧头不成组：保守放弃早停判定
+                if plan is None:
+                    plan = (n, k, mm)
+                    groups = [set() for _ in range(n // mm)]
+                    need = k + 1 if mm > k else k
+                elif (n, k, mm) != plan:
+                    continue
+                # T24（P6 第二半）：出现新码的帧号节奏连续三段等距即认定「同一码重复 S 帧」，
+                # 之后每个重复段只解首帧，其余用 cap.grab() 只推进不解码（相机模式 S=5）。
+                new_fis.append(fi)
+                if not stride and len(new_fis) >= 4:
+                    d1 = new_fis[-1] - new_fis[-2]
+                    d2 = new_fis[-2] - new_fis[-3]
+                    d3 = new_fis[-3] - new_fis[-4]
+                    if d1 == d2 == d3 and d1 >= 2:
+                        stride = d1
+                if 0 <= idx < plan[0]:
+                    groups[idx % len(groups)].add(idx // len(groups))
+            if groups and all(len(g) >= need for g in groups):
+                stopped_early = True
+                break                              # T24：k-of-m 已凑满，不再解后续帧
+            if got_new and stride >= 2:
+                # 只在「刚解到一帧新码」时跳，锚点始终落在每段重复的首帧上，
+                # 空帧/重复帧不跳——节奏漂移时最多少提速，不会漏码（漏码由收尾回接兜）。
+                for _ in range(stride - 1):
+                    if not cap.grab():
+                        break
+                    fi += 1
+                    skipped = True
             if progress_cb and total and fi % 10 == 0:
                 progress_cb(min(fi, total), total)
     finally:
         cap.release()
+    if skipped and not stopped_early:
+        # 跳了帧却没能早停 = 节奏判断可能漂过未解码的码 → 丢弃本次结果，全量重扫一遍
+        return decode_video_frames(video_path, progress_cb=progress_cb,
+                                   cancel_check=cancel_check, early_stop=False)
     if progress_cb and total:
         progress_cb(total, total)
     if not seen:

@@ -6,7 +6,9 @@
   2. POST /encode/<id>/video 按需生成 mp4（幂等、状态回显 video_status/progress）；
   3. 生成后的 mp4 走 POST /decode（type=video）能完整还原原始数据；
   4. 直出视频（video_file=1）与按需生成两条路径的帧数口径一致；
-  5. 帧序列缺失时的失败路径（不静默产出坏视频）。
+  5. 帧序列缺失时的失败路径（不静默产出坏视频）；
+  6. T21 帧回读自检抽样口径；
+  7. T24 视频解析早停/跳帧与漂移回退（结果须与全量扫描逐字节一致）。
 
 运行：python test_video_ondemand.py
 依赖：qrcode / zfec / opencv-python / numpy / zxing-cpp（venv 齐备）。
@@ -186,6 +188,46 @@ def main():
         check("比例=1.0 时回到逐帧全检", all(it._verify_sampled(i, n) for i in range(n)))
     finally:
         it.FRAME_VERIFY_SAMPLE = orig
+
+    print("\n[7] T24 解析早停与跳帧")
+    it._load_cv2()
+    fd7 = os.path.join(TMP_ROOT, "t24_frames")
+    n7, k7, m7 = it.encode_to_video(b"T24-" * 500, 2, None, frames_dir=fd7)
+    pngs7 = sorted(os.listdir(fd7))
+    imgs7 = [it.cv2.imread(os.path.join(fd7, p)) for p in pngs7]
+    check("台架帧数足以测重复节奏", len(imgs7) >= 12, f"{len(imgs7)} 帧 k={k7} m={m7}")
+
+    def write_video(name, pat):
+        vp = os.path.join(TMP_ROOT, name)
+        vw = it.cv2.VideoWriter(vp, it.cv2.VideoWriter_fourcc(*"mp4v"), 25.0,
+                                (imgs7[0].shape[1], imgs7[0].shape[0]))
+        for i, rep in enumerate(pat):
+            for _ in range(rep):
+                vw.write(imgs7[i])
+        vw.release()
+        return vp
+
+    def reparse(vp, early):
+        codes = it.decode_video_frames(vp, early_stop=early)
+        ver = {}
+        return it.reassemble_any(codes, verified_out=ver), len(codes), ver
+
+    cam = write_video("t24_cam.mp4", [it.CAMERA_FRAME_REPEAT] * len(imgs7))
+    data_full, c_full, _ = reparse(cam, False)
+    data_fast, c_fast, v_fast = reparse(cam, True)
+    check("相机模式（5× 重复）早停还原与全量扫描逐字节一致", data_fast == data_full)
+    check("早停确实少解帧（收到码数 < 全量码数）", c_fast < c_full,
+          f"{c_fast} vs {c_full}")
+    check("早停阈值取 k+1（比恰好 k 多留一帧给 T17 交叉校验）",
+          c_fast > len(imgs7) * k7 / m7, f"{c_fast} vs k={k7}")
+    check("早停后完整性校验未降级（verified=True）", v_fast.get("verified") is True, str(v_fast))
+
+    for tag, pat in (("repeat=1 不跳帧", [1] * len(imgs7)),
+                     ("重复节奏漂移（5→3）", [5] * 5 + [3] * (len(imgs7) - 5))):
+        vp = write_video(f"t24_{abs(hash(tag))}.mp4", pat)
+        got, _, _ = reparse(vp, True)
+        want, _, _ = reparse(vp, False)
+        check(f"{tag}：结果仍与全量扫描一致", got == want)
 
     print(f"\n结果：PASS {PASSES[0]} / FAIL {len(FAILS)}")
     if FAILS:
