@@ -344,11 +344,11 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | --- | --- |
 | 7 | ~~`file-filter` 的 `def status()` 改为带前缀~~ ✅ **2026-09-14 已修**：8 个路由函数统一 `ff_*` 前缀，`admin` 的 `account_change_password` → `admin_account_password`；实测 11 个插件 136 个 endpoint 全部注册成功 |
 | 8 | 统一前端资源版本号起点与步长（现 case-report 用序号 v34、character-graph 用日期戳、admin 各页同一份 CSS 引用了 v1/v2/v5 三个版本） |
-| 9 | 清理随包分发的开发期文件：**仅剩** `trajectory-sketch/frontend/icons/_generate.py`（给 `tools/plugin-payload-rules.json` 补一条 exclude_glob，或把它移出插件目录）；`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}` 与 `map-marker/frontend/*.py` 已由该规则排除，实测包内命中为 0 |
-| 10 | 为 `file-filter`（🧹）补 SVG 回退图标，或统一 SVG 回退为按 codepoint 自动推导（不再维护硬编码映射表） |
-| 11 | 首页空分类处理：`ai` / `design` / `maps` 无启用工具时不应显示 |
-| 12 | 删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file` 字段（前端统一由 `jz-icon.js` 兜底），或将前端改为消费它 |
-| 13 | 在 `/api/tools` 暴露 `plugin_errors`（默认空 dict），首页对加载失败的插件显示"暂不可用"（本轮只做了日志与 `_plugin_load_errors` 记录） |
+| 9 | ~~清理随包分发的开发期文件~~ ✅ **2026-10-10 L4-5 清零**（commit `af59d53`）：最后一项 `trajectory-sketch/frontend/icons/_generate.py` 已进 `tools/plugin-payload-rules.json` 的 `exclude_files`（该规则按路径**末段**匹配，任意层级生效）；`knowledge-base/backend/{_build_phase8.py,test_routes_preview.py}` 与 `map-marker/frontend/*.py` 此前已排除。**下次重出 trajectory-sketch 插件包时**该文件自然消失（本批未单独重出该插件） |
+| 10 | 为 `file-filter`（🧹）补 SVG 回退图标，或统一 SVG 回退为按 codepoint 自动推导（不再维护硬编码映射表）——**2026-10-10 部分收敛**：`app.py` 那份 Python 硬编码表已随 P1-12 删除，映射只剩 `static/js/jz-icon.js` **一处真源**；剩下的"改按 codepoint 自动推导"属**取舍**（自动推导可免维护，但 `#️⃣`→`23-20e3.svg`、`🗺️`→`1f5fa.svg` 这类带变体选择符/历史命名的文件名并不严格等于 codepoint，改名会动到已分发资源的文件名），**待拍板**，未擅自执行 |
+| 11 | ~~首页空分类处理~~ ✅ **早已实现（本条为文档滞后）**：`static/js/main.js:98-102` 注释即「分类下无工具则跳过该区块」，`if (catTools.length === 0) continue;` 生效中；2026-10-10 L4-5 浏览器实测 `ai`/`design`/`maps` 无启用工具时不出空区块 |
+| 12 | ~~删除 `app.py` 中未被消费的 `_EMOJI_ICON_FILES` / `icon_file`~~ ✅ **2026-10-10 L4-5 已删**（commit `af59d53`，选"删死代码"分支）：全仓 grep 确认零消费方（原注释自己就写着"前端实际生效的回退表在 jz-icon.js"），连带删掉 `_icon_svg_file()` 与 `client/local_registry.py` 的同构镜像字段；emoji→SVG 回退从此只有 `static/js/jz-icon.js` 一处 |
+| 13 | **2026-10-10 L4-5 前端半件补齐**（commit `af59d53`）：后端 `plugin_errors` 与 `health`/`health_degraded` 早已在 `/api/tools` 暴露但**前端从不消费**，"降级"与"正常"在首页长得一样。现按解耦设计 §5.3 口径渲染：degraded → 卡片标题行「功能降级」角标（悬停列出缺失依赖）；blocked → 仍由后端**不出卡片**（不显示"暂不可用"占位，与 HANDOFF 原措辞的差异已由 `docs/design/主体与插件解耦-设计文档.md` §5.3 与规范 **B-24** 定案）。真机浏览器验证通过（角标 computed 值正确、控制台 0 报错、12 卡无回归） |
 | 14 | **离线组件真机验证**：在一台**真的断网、无 Office 环境**的机器上走完整链路（解压主包 → 一键安装 → 解压 LibreOffice 组件包 → 双击 `安装LibreOffice核心组件.bat` → 启动 → 知识库打开 `.doc`/`.xls`）。开发机已用**模拟目标机**验证了解压安装（免管理员）/ 应用探测 / 两条转换链路 / 卸载，但 **Chrome 组件静默安装需提权**，开发会话无管理员权限未能实测 |
 | 15 | 每次发版前校准离线组件版本：Chrome 组件用固定 URL `stable`（内容随 Google 更新而变），冻结的 `sha256` 会随之失配 → 需重跑 `fetch-offline-bundle.py --pin`，或改用带版本号的下载地址。`build-offline-component.ps1` 会在打包前按 `tools/offline-components.json` 校验核心包体积与 sha256 |
 | 15.1 | **插件升级链路真机演练**（第七~八轮交付物的最后一步，全部要真实环境）：① 用真实 `JZToolsHub.exe` 走一次"升级 → 停服 → 替换 → 启动 → 冒烟"（沙箱用假进程/HTTP 桩与测试客户端替代）；② **冻结模式自重启**（`_spawn_self_restart()`）：后台应用含后端的插件包 → 断言响应 `restarting=true`
@@ -361,12 +361,27 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 
 | # | 事项 |
 | --- | --- |
-| 16 | 更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等（详见评估报告 §4） |
+| 16 | ~~更新《插件设计规范》：补充数据根目录、`home_card()`、`grant_all`、endpoint 命名前缀、程序化接口、模板同步清单登记等~~ ✅ **2026-10-10 L4-5 已完成**（commit `93876bd`，规范升 v1.2）：逐条从代码取证后新增 **B-22**（`home_card()` 三级优先 `home_card > tools.json > manifest`、register 成功才登记、请求上下文内调用故可按登录者动态出内容、异常/非 dict 一律 `{}` 静默回退；并记下 `name/icon/accent` 用 `or` 与 `description/features` 用 `is not None` 的**不对称坑**）、**B-23**（程序化接口只面向前端与外部脚本，禁止成为插件间后端依赖）、**B-24**（健康三态展示面由框架统一负责：degraded 出角标 / blocked 不出卡片）；`grant_all` 补 §6.2 字段行 + **R-7**（只免"能否打开"，不免插件内部管理权限；对超管无意义；框架侧不直接读）。**两项经查无需新增**：endpoint 命名前缀早有 **B-2a**（含 16 插件 151 视图函数实测）、数据根早覆盖 27 处；模板清单则在 **U-5** 补了反向结论——插件模板**不需要**登记（`_TEMPLATE_SYNC` 只放框架级模板，插件模板按指纹自动发现），并记下 2026-09-19 硬编码清理的背景 |
 | 17 | ~~在目标机做一次「全新安装 → 更新 → 卸载」三段式实测~~ ✅ **2026-09-21 目标机验收已覆盖**（全新安装、插件集与依赖组件安装、卸载 = D 组；升级与回滚 = U 组；当次结果记录见 `docs/guide/验收手册.md` §9.1） |
 | 18 | 清理工作区构建产物：`deploy/`、`dist/`、`build/` 与 `runtime/` **合计约 1.2GB**（deploy 385MB / dist 51MB / build 70MB / runtime 682MB，2026-09-24 实测），均已被 gitignore 但占用磁盘与备份 |
 | 19 | 生产部署评估：当前上限约 300 并发（Flask/waitress 单进程线程模型），高负载建议 Gunicorn 多进程 + Nginx 反代 |
 | 20 | 移动端：恢复或彻底移除「重置」功能；`CameraScanner.averageLuminance` 亮度采样保留但无人调用 |
 | 21 | 知识库 `.xls`/`.doc` 每次转换都新建临时 profile（vendor 行为，实测约 30~60s/次）——若该路径调用频繁，考虑在适配层做 profile 复用（历史上曾用 `<数据根>/.lo-profile/` 把冷启动从 37~40s 降到 15~18s） |
+
+> **L4-5 收尾口径（2026-10-10，本批"一批清"的实际边界）**
+>
+> 已清：**P1-9 / P1-12 / P1-13 / P2-16** 四件（代码 `af59d53`、规范 `93876bd`）；**P1-11** 经查为文档滞后（代码早已实现），一并勾销。
+> 未清的条目**不是遗漏，而是需要拍板或需要真机**，逐条列明：
+>
+> - **需要拍板（涉口径/取舍，未擅自动手）**
+>   - **P1-8** 前端资源版本号统一：现状三套并存（case-report 序号 v34、character-graph 日期戳、admin 同一份 CSS 被引用成 v1/v2/v5）。**F-2 闸门只要求"内容变了必须递增"**，不关心起点与步长，因此统一纯属风格收益，却会连带触发**所有插件的版本递增 + 重出 + 重上架**——建议随下一次"多插件共同出包"的窗口顺带做，不单独立项。
+>   - **P1-10** SVG 回退改按 codepoint 自动推导：映射表已收敛到 `jz-icon.js` 一处（P1-12 顺带完成），剩下的是"要不要为免维护而改文件名"——`#️⃣→23-20e3.svg`、`🗺️→1f5fa.svg` 这类带变体选择符的历史文件名并不严格等于 codepoint，改法会动到已分发资源的文件名。
+>   - **P2-19** 生产部署上限评估（≈300 并发，Flask/waitress 单进程线程模型 → 建议 Gunicorn + Nginx）：属**部署形态决策**，需甲方现场并发量输入，不是代码件。
+>   - **P2-20** 移动端「重置」功能恢复或彻底移除 + `CameraScanner.averageLuminance` 无人调用：**在 APP 侧仓库**，本仓无法闭环。
+> - **需要真机 / 现场环境（已在 `docs/guide/桌面端与商店真机验收清单.md` 挂 R 项）**：P1-14（离线组件真机、Chrome 需提权）、P1-15（发版前离线组件 sha 校准）、P1-15.2（共享盘 UNC 实测）、T2/T3/M2/M3（大模型与数据迁移目标机验收）。
+> - **性能件，建议单独立项**：P2-21（LibreOffice profile 复用，历史实测冷启动 37~40s → 15~18s）——改的是 vendor 适配层，与知识库四件（L4-4）同域，**建议并入 L4-4 一起做**，不夹带在本批小修里。
+> - **P2-18（清理 deploy/dist/build/runtime ≈1.2GB）**：**未执行**——这些目录是当前出包链的产物与验证依据（本批刚出的 1.2.21 双包、真机清单引用的物证都在里面），删除属破坏性且不可自动恢复，**留人工决定**。
+> - **本批新发现（既有问题，非本批引入）**：`tools/e2e/decouple-acceptance.py` 的 **AC-4 两条长期失败**（`-Set` 插件集沙箱退出 1 →「插件集安装后 notice-board 卡片到位」连带红），在 HEAD 干净 worktree 复跑同样红；该台架此前少有人跑，故长期无人发现。建议列入 L4-6 或单独一次台架修复。
 
 ---
 
