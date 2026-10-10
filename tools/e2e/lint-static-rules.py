@@ -149,7 +149,7 @@ EXEMPTIONS = [
     ("F-3", "plugins/json-formatter/frontend/index.html:134", "同 :115（另一处成功态渲染，错误分支 :139 走 textContent）"),
     ("F-3", "plugins/color-picker/frontend/index.html:124", "items 为 ['HEX', hex.toUpperCase()] 等本行组合：hex 来自 <input type=color>（浏览器规范化 #rrggbb），hexToRgb(:82-85) 有正则白名单，rgbToHsl 返回整数，label 静态"),
     ("F-3", "plugins/md5-generator/frontend/index.html:359", "html 拼于 :338-356，v 只可能是 MD5.md5HexOfBytes→bytesToHex(md5.js:83-87) 的纯 [0-9a-f]；标签为字面量，输入文本/文件内容从不进 HTML"),
-    ("F-3", "plugins/info-transfer/frontend/index.html:2126", "items 来自后端 /status 的 missing_deps，值域＝routes.py:3279-3285 _DEP_FEATURES 硬编码常量（包名＋中文功能名）与 :3321-3324 固定文案；manifest hint 链路（_declared）在 routes 内为死代码，不进本行渲染（未 esc 一事已记 §B 加固建议）"),
+    ("F-3", "plugins/info-transfer/frontend/index.html:2129", "items 来自后端 /status 的 missing_deps，值域＝routes.py:3279-3285 _DEP_FEATURES 硬编码常量（包名＋中文功能名）与 :3321-3324 固定文案；manifest hint 链路（_declared）在 routes 内为死代码，不进本行渲染（未 esc 一事已记 §B 加固建议）"),
     ("F-3", "plugins/trajectory-convert/frontend/index.html:691", "同 info-transfer:2071 口径：routes.py:1081-1086 _DEP_FEATURES 字面量常量＋:1110-1126 固定中文文案，无用户/文件数据（未 esc 已记 §B 加固建议）"),
     # ---- L2 批 4（2026-10-10）：trajectory-sketch ----
     ("F-3", "plugins/trajectory-sketch/frontend/app.js:32", "右值＝ICONS[name]，注入前已过本文件 sanitizeIconSvg()（:47-66）：只认根 <svg>、剥 on*/href/xlink:href，含 script/foreignObject 或解析失败整枚弃用并回落 <img>；name 受 ICON_NAMES(:11-12) 白名单约束（C 类按保守修复处置）"),

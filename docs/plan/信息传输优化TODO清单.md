@@ -158,7 +158,19 @@
 **实现方案**：新增 `STATIC_FEC_RATIO=0.2`（可经 `static_fec` 表单覆盖 0/0.1/0.2/0.3）；`_build_static_pages_v2` 切片后走 `_fec_encode`，页帧新增 `JZ2_FLAG_STATIC_FEC=0x10` 标注 + meta 追加 k/m；解析端识别该 flag 走 k-of-m 逐组重组（收任意 k 页即还原）；无 flag 旧码走原逻辑。**等价于既有 T14**，本文补量化依据与 flag 设计。
 **预期效果**：200 页静态传输成功率 13.4% → ≈96%（缺 ≤20% 页可还原）；随机丢 10% 页注入还原成功率 ≥95%。
 
-### T17 · v1 重组路径增加帧级校验（解决 R2） 【状态：未开始】
+### T17 · v1 重组路径增加帧级校验（解决 R2） 【状态：已完成（2026-10-10）】
+
+**落地记录（2026-10-10，L4-2）**：**未动 v1 帧格式**（存量码与外部插件流保持兼容），改在重组侧交叉验证——
+`reassemble_qrtransfer(codes, verified_out=None)` 对每组：收到的 share 数 > k 时，用**偏移一位的另一组 k 子集**
+再解一次，两次结果不一致即抛 `ValueError("v1 帧校验不通过：第 i/n 组交叉解码结果不一致…")`（明确拒错，
+不再静默产出错误数据）；恰好只有 k 个时无从比对，整次标 `verified=false`。
+`reassemble_any(..., verified_out=...)` 同口径回填（v2 每帧自带 CRC32，恒 `verified=true`，via=`v2-crc`）；
+`_run_decode` 把结果写进任务，`/decode/<id>` done 态新增 `verified` 字段（默认 true 兼容历史任务）；
+前端 `renderDecodeResult` 在 `verified===false` 时把「⚠ 完整性未校验：帧数刚好等于 k，无冗余可比对」
+并进格式行。额外开销 ≈ 1/k 次 zfec 解码，实测可忽略。
+验收：`test_protocol_v2` 新增 8 条断言（有冗余 verified=true 且 cross_checked==组数 / 恰好 k 帧仍可还原
+且 verified=false / 污染第 0、1、组半 帧均被拒收），套件 66 → **74 全绿**；另三套 49/26/51 全绿。
+**同一批的旧方案文字保留如下**（口径未变）：
 
 **实现方案**：不动 v1 帧格式（存量码与外部插件流必须兼容），改为重组侧交叉验证——有冗余 share 时用 `blocks[:k]` 与另一组 share 各解一次、比对一致才返回；恰好收齐 k 个时返回 `verified:false` 让前端提示"完整性未校验"。
 **预期效果**：单帧污染从"静默错误数据"变为"可检测"（有冗余直接拒错、无冗余明确告知）；额外开销 +1/k 可忽略。

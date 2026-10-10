@@ -408,6 +408,45 @@ if _p660:
 else:
     print("  SKIP 660.xlsx 真实文件校验（未找到；见 _P660_CANDIDATES）")
 
+print("\n== T17 v1 帧级交叉校验（R2：不动帧格式，重组侧拒错） ==")
+from qrcode import constants as _qrc
+_err17 = getattr(_qrc, "ERROR_CORRECT_L")
+_payload17 = ("轨迹帧级校验样例：" + "经度 121.47 纬度 31.23 " * 90).encode("utf-8")
+_pref17 = len(_payload17).to_bytes(it.SIZE_DATASIZE, it.BYTE_ORDER) + _payload17
+_st17 = {}
+_shares17, _k17, _m17 = it._fec_encode(it._chunk_data(_pref17, 15, _err17))
+_frames17 = it._qrformat_encode(_shares17, _k17, _m17)
+_nb17 = len(_frames17) // _m17
+check("T17 样本有冗余（k<m）", _k17 < _m17, f"k={_k17} m={_m17} 帧={len(_frames17)}")
+_out17 = it.reassemble_qrtransfer(list(_frames17), verified_out=_st17)
+check("T17 全帧重组逐字节一致", _out17 == _payload17)
+check("T17 有冗余可比对 → verified=true",
+      _st17.get("verified") is True and _st17.get("cross_checked") == _nb17, str(_st17))
+
+# 恰好收齐 k 个分块（丢掉的正是冗余那几帧）→ 无从交叉验证
+_only_k = [f for idx, f in enumerate(_frames17) if (idx // _nb17) < _k17]
+_st17b = {}
+_out17b = it.reassemble_qrtransfer(_only_k, verified_out=_st17b)
+check("T17 恰好 k 帧仍可还原", _out17b == _payload17, f"{len(_only_k)} 帧")
+check("T17 恰好 k 帧 → verified=false（前端提示「完整性未校验」）",
+      _st17b.get("verified") is False and _st17b.get("uncrossed") == _nb17, str(_st17b))
+
+# 污染一帧的载荷（帧头不动、base64 长度不变）→ 两次交叉解码必不一致，须拒错
+def _corrupt(frame):
+    body = _b64.b64decode(frame[12:].encode("ascii"))
+    flipped = bytes([body[0] ^ 0xFF]) + body[1:]
+    return frame[:12] + _b64.b64encode(flipped).decode("ascii")
+
+for _pos in (0, _nb17, len(_frames17) // 2):
+    _bad = list(_frames17)
+    _bad[_pos] = _corrupt(_bad[_pos])
+    try:
+        it.reassemble_qrtransfer(_bad)
+        check(f"T17 污染第 {_pos} 帧被交叉校验拒收", False, "未抛错（静默产出错误数据）")
+    except ValueError as _e:
+        check(f"T17 污染第 {_pos} 帧被交叉校验拒收",
+              "交叉解码结果不一致" in str(_e), str(_e)[:70])
+
 print(f"\n结果：PASS={PASSES[0]} FAIL={len(FAILS)}")
 if FAILS:
     print("失败项：", FAILS)

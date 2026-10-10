@@ -2599,10 +2599,16 @@ def decode_video_frames(video_path, progress_cb=None, cancel_check=None):
     return seen
 
 
-def reassemble_any(codes):
-    """v1/v2 双协议自适应重组：codes 为解码端输出的原始内容 bytes 列表。"""
+def reassemble_any(codes, verified_out=None):
+    """v1/v2 双协议自适应重组：codes 为解码端输出的原始内容 bytes 列表。
+
+    verified_out（T17）：回填本次完整性判定。v2 每帧自带 CRC32（不一致直接抛错），
+    故恒 `verified=True`；v1 无帧级校验，按 `reassemble_qrtransfer` 的交叉验证结果回填。
+    """
     if any(isinstance(c, (bytes, bytearray)) and bytes(c).startswith(JZ2_MAGIC)
            for c in codes):
+        if verified_out is not None:
+            verified_out.update({"verified": True, "via": "v2-crc"})
         return reassemble_qrtransfer_v2(codes)
     texts = []
     for c in codes:
@@ -2613,13 +2619,19 @@ def reassemble_any(codes):
                 continue
         else:
             texts.append(c)
-    return reassemble_qrtransfer(texts)
+    return reassemble_qrtransfer(texts, verified_out=verified_out)
 
 
-def reassemble_qrtransfer(codes):
+def reassemble_qrtransfer(codes, verified_out=None):
     """按 QR-transfer 协议重组帧文本列表，返回原始字节。
 
     与 qr-video-decode 插件后端逻辑一致：帧头 4+4+4 字符，zfec 纠错重组。
+
+    T17（R2）：v1 帧**没有** v2 那样的帧级 CRC，单帧被污染会**静默产出错误数据**。
+    帧格式不能动（存量码与外部插件流必须兼容），故改在重组侧做交叉验证：
+      · 某组收到的 share 数 > k（有冗余）→ 用两组不同的 k 子集各解一次，结果不一致即**拒错**；
+      · 某组恰好只有 k 个 → 无从交叉验证，整次标 `verified=false`，由前端提示「完整性未校验」。
+    `verified_out`：可选字典，回填 `{"verified": bool, "cross_checked": int, "uncrossed": int}`。
     """
     if not ZFEC_AVAILABLE:
         raise RuntimeError("后端缺少 zfec 依赖，无法纠错重组。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-zfec-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
@@ -2660,6 +2672,7 @@ def reassemble_qrtransfer(codes):
     nblocks = nframes // m
     decoder = zfec.Decoder(k, m)
     recovered_blocks = []
+    cross_checked = uncrossed = 0
     for i in range(nblocks):
         packet = [data_list[i + j * nblocks] for j in range(m)]
         blocks, blocknums = [], []
@@ -2671,7 +2684,20 @@ def reassemble_qrtransfer(codes):
             raise ValueError(
                 f"第 {i + 1}/{nblocks} 组有效分块不足（{len(blocks)} < k={k}），无法纠错"
             )
-        recovered_blocks.append(decoder.decode(blocks[:k], blocknums[:k]))
+        primary = decoder.decode(blocks[:k], blocknums[:k])
+        if len(blocks) > k:
+            # T17：有冗余才可能交叉验证——换一组偏移一位的 k 子集再解一次，
+            # 任何一帧被污染都会让两次结果不一致（同一份干净数据必得同一结果）。
+            alt_idx = list(range(1, k + 1))
+            alt = decoder.decode([blocks[x] for x in alt_idx], [blocknums[x] for x in alt_idx])
+            if [bytes(b) for b in primary] != [bytes(b) for b in alt]:
+                raise ValueError(
+                    f"v1 帧校验不通过：第 {i + 1}/{nblocks} 组交叉解码结果不一致"
+                    "（有帧被污染），请重新采集完整的二维码视频")
+            cross_checked += 1
+        else:
+            uncrossed += 1                    # 恰好 k 个：无从交叉验证
+        recovered_blocks.append(primary)
 
     recovered = []
     for j in range(k):
@@ -2679,6 +2705,9 @@ def reassemble_qrtransfer(codes):
             recovered.append(recovered_blocks[i][j])
     joined = b"".join(recovered)
     data_size = int.from_bytes(joined[:SIZE_DATASIZE], BYTE_ORDER)
+    if verified_out is not None:
+        verified_out.update({"verified": uncrossed == 0 and nblocks > 0,
+                            "cross_checked": cross_checked, "uncrossed": uncrossed})
     return joined[SIZE_DATASIZE:SIZE_DATASIZE + data_size]
 
 
@@ -3015,10 +3044,12 @@ def _run_decode(task_id, video_path):
             set_task(task_id, progress=round(0.1 + 0.6 * done / max(total, 1), 4),
                      stage=f"解码 {done}/{total} 帧")
 
+        integrity = {}
         codes = decode_video_frames(video_path, progress_cb=progress,
                                     cancel_check=lambda: _canceled(task_id))
         set_task(task_id, progress=0.75, stage=f"收到 {len(codes)} 帧，纠错重组中")
-        raw = reassemble_any(codes)
+        raw = reassemble_any(codes, verified_out=integrity)
+        verified = bool(integrity.get("verified", True))     # T17：v1 无冗余可比对时为 False
         set_task(task_id, progress=0.9, stage="解析信封")
         env = _envelope_from_raw(raw)
         fmt, name, data, ext = parse_envelope(env)
@@ -3029,6 +3060,7 @@ def _run_decode(task_id, video_path):
             payload["ext"] = ext
         set_task(task_id, status="done", progress=1.0,
                  fmt=fmt, name=name, ext=ext, data_size=data_size,
+                 verified=verified,
                  payload_json=json.dumps(payload, ensure_ascii=False))
     except TaskCanceled:
         set_task(task_id, status="canceled", progress=0.0, stage="", detail="已停止解析")
@@ -3438,6 +3470,8 @@ def register(app) -> None:
                 "name": task.get("name"),
                 "ext": task.get("ext"),
                 "data_size": task.get("data_size", 0),
+                # T17：v1 流帧数刚好等于 k 时无冗余可交叉验证 → false，前端提示「完整性未校验」
+                "verified": task.get("verified", True),
                 "payload_json": task.get("payload_json", ""),
             })
         if task.get("status") == "error":

@@ -1842,7 +1842,7 @@
           if (!payload) { setDecStatus("解析数据异常", true); $("decodeBtn").disabled = false; return; }
           renderDecodeResult({
             fmt: s.fmt, name: s.name, ext: s.ext, payload,
-          }, "二维码视频", s.data_size);
+          }, "二维码视频", s.data_size, s.verified);
           return;
         } else if (s.status === "canceled") {
           // T33：用户停止后后端已删除临时视频原件，这里只需收尾状态
@@ -1873,7 +1873,7 @@
     }
   }
 
-  function renderDecodeResult(d, source, dataSize) {
+  function renderDecodeResult(d, source, dataSize, verified) {
     state.payload = d.payload;
     const data = d.payload && d.payload.data;
     const isTable = d.fmt === "excel" && Array.isArray(data);
@@ -1882,7 +1882,10 @@
     const fmtText = d.fmt === "file"
       ? "原始文件"
       : (fmtLabel(d.fmt) + (d.ext ? `（原 ${d.ext}）` : ""));
-    $("decFmt").textContent = fmtText;
+    // T17：v1 流刚好收齐 k 帧时无冗余可交叉验证，明示「完整性未校验」（v2 帧自带 CRC，恒已校验）
+    $("decFmt").textContent = verified === false
+      ? fmtText + " ｜ ⚠ 完整性未校验：帧数刚好等于 k，无冗余可比对"
+      : fmtText;
     $("decName").textContent = d.name || "未命名";
     let sizeText;
     if (isFile) {
