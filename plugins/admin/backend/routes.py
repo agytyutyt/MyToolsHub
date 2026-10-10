@@ -33,8 +33,8 @@ from datetime import timedelta
 from functools import wraps
 
 from cryptography.fernet import Fernet
-from flask import (g, jsonify, redirect, request, send_file, send_from_directory,
-                   session, url_for)
+from flask import (g, has_request_context, jsonify, redirect, request, send_file,
+                   send_from_directory, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import jz_api
@@ -167,6 +167,12 @@ def save_admin_config(cfg):
             except OSError:
                 pass
             raise
+    # P3-1：配置写入后，同请求内已缓存的会话用户可能已过期（如刚授权/改角色）→ 立即作废。
+    if has_request_context():
+        try:
+            g.pop("_sess_user_cache", None)
+        except Exception:
+            pass
 
 
 def _session_settings(cfg):
@@ -454,15 +460,36 @@ def set_operation(op):
         pass
 
 
+def _req_user_cache():
+    """请求级会话用户缓存槽（挂在 flask.g）。
+
+    P3-1：一请求内 get_session_user() 会被多条 before_request 守卫 + 端点处理器 +
+    jz_api provider 反复调用，每次都 `load_admin_config()`（整份 admin.json 解析）+
+    用户检索。请求内会话身份不变，故按 `session["user"]` 为键缓存派生结果，命中即返回
+    —— 单请求由 N 次解析降为 1 次。无请求上下文（如单测直调）时返回 None（不缓存）。
+    """
+    if not has_request_context():
+        return None
+    cache = getattr(g, "_sess_user_cache", None)
+    if cache is None:
+        cache = {}
+        g._sess_user_cache = cache
+    return cache
+
+
 def get_session_user():
     """返回当前登录用户的展示信息，未登录返回 None。
 
     含权限点（可用工具 ID 列表）：拥有全部管理模块的角色视为超级管理员，
     默认授予全部工具；其余账号取自身 permissions 字段。
+    请求级缓存见 `_req_user_cache`（P3-1）；配置一经 save 即作废该缓存（见 save_admin_config）。
     """
     username = session.get("user")
     if not username:
         return None
+    cache = _req_user_cache()
+    if cache is not None and cache.get("key") == username and "val" in cache:
+        return cache["val"]
     cfg = load_admin_config()
     found = find_user(cfg, username)
     if found is None:
@@ -479,7 +506,7 @@ def get_session_user():
         perms = list(user.get("permissions", []))
         perms.extend(tid for tid in _grant_all_tool_ids() if tid not in perms)
         permissions = sorted(perms)
-    return {
+    val = {
         "username": user["username"],
         "name": user.get("name") or user["username"],
         "role": (role or {}).get("name", ""),
@@ -492,6 +519,10 @@ def get_session_user():
         "super_admin": super_admin,
         "permissions": permissions,
     }
+    if cache is not None:                     # 请求内后续调用直接命中（只读消费；无调用方改写）
+        cache["key"] = username
+        cache["val"] = val
+    return val
 
 
 def can_manage_llm(info):
