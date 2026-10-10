@@ -226,6 +226,22 @@ def _v3_void_rows():
     return rows
 
 
+def _v3_edge_rows(kind: str):
+    """首/尾含失联段（≥2 空窗 void）的数据（回归：修前 KeyError('pos'/'addrs')）。"""
+    from engine.timeutil import epoch_to_str
+    rows = [["BEGINTIME", "LONGITUDE", "LATITUDE"]]
+    base = 1786000000
+    a = (109.92401, 21.626743)
+    b = (109.92500, 21.620000)
+    if kind == "tail":                      # 停留 → 3 空窗 → 孤立数据窗（表尾 void）
+        pts = [(t, a) for t in range(0, 1320, 120)] + [(2400, b), (2520, b)]
+    else:                                   # 孤立数据窗 → 3 空窗 → 停留（表头 void）
+        pts = [(0, a), (60, a)] + [(t, b) for t in range(1200, 2520, 120)]
+    for t, p in pts:
+        rows.append([epoch_to_str(base + t), p[0], p[1]])
+    return rows
+
+
 def test_v3_end_to_end() -> None:
     print("· v3 端到端（静止 / 通勤双址 / 隧道桥接 / 跨断档合并）")
     res = analyze_rows(_v3_static_rows(), algo="v3")
@@ -271,6 +287,13 @@ def test_v3_end_to_end() -> None:
     check("v3 断档：不产生出行段", len(res["trips"]) == 0, str(res["trips"])[:100])
     txt = list(res["report"]["text_by_user"].values())[0]
     check("v3 断档：报告含失联叙述", "失联" in txt, txt[-120:])
+
+    res = analyze_rows(_v3_edge_rows("tail"), algo="v3")
+    check("v3 表尾失联段：分析不失败且成条", len(res["stays"]) >= 1 and len(res["trips"]) >= 1,
+          str(res.get("warnings")))
+    res = analyze_rows(_v3_edge_rows("head"), algo="v3")
+    check("v3 表头失联段：分析不失败且成条", len(res["stays"]) >= 1 and len(res["trips"]) >= 1,
+          str(res.get("warnings")))
 
 
 def test_idempotent() -> None:

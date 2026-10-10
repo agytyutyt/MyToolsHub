@@ -177,24 +177,25 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
     for m in range(len(stay_idx) - 1):
         _emit_trip(events[stay_idx[m]], events[stay_idx[m + 1]])
 
-    # 首尾移动段（数据首尾未成停留段的窗口，同 v2 include_leading_trailing 语义）
+    # 首尾移动段（数据首尾未成停留段的窗口，同 v2 include_leading_trailing 语义）。
+    # 注意：head/tail 可能含 void 事件（无 pos/addrs 键），一律用 .get 取。
     if stay_idx:
         first, last = events[stay_idx[0]], events[stay_idx[-1]]
         head = events[:stay_idx[0]]
-        head_pos = next((e["pos"] for e in head if e["pos"]), None)
+        head_pos = next((e.get("pos") for e in head if e.get("pos")), None)
         if head and head_pos and first["pos"]:
-            pseudo_head = {"last_ts": next((e["last_ts"] for e in reversed(head)
+            pseudo_head = {"last_ts": next((e.get("last_ts") for e in reversed(head)
                                             if e.get("last_ts") is not None), None),
-                           "w1": head[-1]["w1"], "pos": head_pos, "addrs":
-                           [a for e in head for a in e["addrs"]]}
+                           "w1": head[-1]["w1"], "pos": head_pos,
+                           "addrs": [a for e in head for a in (e.get("addrs") or [])]}
             _emit_trip(pseudo_head, first)
         tail = events[stay_idx[-1] + 1:]
-        tail_pos = next((e["pos"] for e in tail if e["pos"]), None)
+        tail_pos = next((e.get("pos") for e in tail if e.get("pos")), None)
         if tail and tail_pos and last["pos"]:
-            pseudo_tail = {"first_ts": next((e["first_ts"] for e in tail
+            pseudo_tail = {"first_ts": next((e.get("first_ts") for e in tail
                                              if e.get("first_ts") is not None), None),
-                           "w0": tail[0]["w0"], "pos": tail_pos, "addrs":
-                           [a for e in tail for a in e["addrs"]]}
+                           "w0": tail[0]["w0"], "pos": tail_pos,
+                           "addrs": [a for e in tail for a in (e.get("addrs") or [])]}
             _emit_trip(last, pseudo_tail)
 
     # ---- 连续同态区间（报告附录）与统计 ----
