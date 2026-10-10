@@ -37,6 +37,17 @@ import urllib.request
 import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 与控制台编码和解：校验标签里有 ⊆ / ✅ 这类字符，GBK 控制台（Windows 缺省）会在 print 处抛
+# UnicodeEncodeError——而且本次是在**打印一条通过项**时抛，等于把后面所有校验（含 --smoke 的
+# 解压启动断言）整段吞掉，看起来像"校验提前结束"而不是"校验失败"。与 lint-static-rules.py /
+# v-acceptance-audit.py 同口径处理。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 REQUIRED = ["JZToolsHub.exe", "start.bat", "一键安装.bat", "一键卸载.bat", "install.ps1",
             "config/tools.json", "config/installed-deps.json", "version.json", "README.md", "HANDOFF.md",
             "插件设计规范.md", "移动端APP.md", "docs/README.md", "docs/项目管理手册.md",
