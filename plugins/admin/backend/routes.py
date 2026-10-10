@@ -808,6 +808,123 @@ def _register_batch_io(app):
     })
 
 
+def _load_admin_org():
+    """载入同包 admin_org 子模块（组织/部门/人员/角色管理路由；P3-1 D1 拆出）。
+
+    优先按包内相对导入加载（app.py 以 jztools_admin 包名动态加载本文件）；
+    极端情况下（模块被单独按路径执行）回退为按文件路径加载。
+    """
+    try:
+        from . import admin_org  # noqa: WPS433 - 包内相对导入为常规路径
+        return admin_org
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_org.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_admin_org", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+def _register_admin_org(app):
+    """挂载组织 / 账号管理路由，注入本模块的内部依赖（避免循环导入）。"""
+    admin_org = _load_admin_org()
+    admin_org.register(app, {
+        "login_required": login_required,
+        "permission_required": permission_required,
+        "set_operation": set_operation,
+        "get_session_user": get_session_user,
+        "load_admin_config": load_admin_config,
+        "save_admin_config": save_admin_config,
+        "load_registry": load_registry,
+        "iter_users": iter_users,
+        "find_user": find_user,
+        "find_dept": find_dept,
+        "find_unit": find_unit,
+        "encrypt_field": encrypt_field,
+        "decrypt_field": decrypt_field,
+        "role_super_admin": _role_super_admin,
+        "registered_tool_ids": _registered_tool_ids,
+        "normalize_permission_points": _normalize_permission_points,
+        "append_user": append_user,
+        "admin_cfg_lock": ADMIN_CFG_LOCK,
+        "admin_modules": ADMIN_MODULES,
+    })
+
+
+def _load_admin_plugins_api():
+    """载入同包 admin_plugins_api 子模块（插件管理面 API；P3-1 D1 拆出）。
+
+    优先按包内相对导入加载；极端情况下（模块被单独按路径执行）回退为按文件路径加载。
+    """
+    try:
+        from . import admin_plugins_api  # noqa: WPS433 - 包内相对导入为常规路径
+        return admin_plugins_api
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_plugins_api.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_admin_plugins_api", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+def _register_admin_plugins_api(app):
+    """挂载插件管理面路由，注入本模块的内部依赖（避免循环导入）。"""
+    admin_plugins_api = _load_admin_plugins_api()
+    admin_plugins_api.register(app, {
+        "login_required": login_required,
+        "set_operation": set_operation,
+        "get_session_user": get_session_user,
+        "load_admin_config": load_admin_config,
+        "save_admin_config": save_admin_config,
+        "plugin_admin": _load_plugin_admin(),
+        "project_dir": PROJECT_DIR,
+        "admin_cfg_lock": ADMIN_CFG_LOCK,
+        "plugin_mgr_ok": _plugin_mgr_ok,
+        "plugin_display_name": _plugin_display_name,
+        "staging_uploads_dir": _staging_uploads_dir,
+        "resolve_upload": _resolve_upload,
+        "maybe_auto_restart": _maybe_auto_restart,
+        "spawn_self_restart": _spawn_self_restart,
+    })
+
+
+def _load_admin_store_api():
+    """载入同包 admin_store_api 子模块（商店管理面 API；P3-1 D1 拆出）。
+
+    优先按包内相对导入加载；极端情况下（模块被单独按路径执行）回退为按文件路径加载。
+    """
+    try:
+        from . import admin_store_api  # noqa: WPS433 - 包内相对导入为常规路径
+        return admin_store_api
+    except Exception:
+        import importlib.util
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_store_api.py")
+        spec = importlib.util.spec_from_file_location("jztools_admin_admin_store_api", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+
+def _register_admin_store_api(app):
+    """挂载商店管理面路由，注入本模块的内部依赖（避免循环导入）。"""
+    admin_store_api = _load_admin_store_api()
+    admin_store_api.register(app, {
+        "login_required": login_required,
+        "set_operation": set_operation,
+        "get_session_user": get_session_user,
+        "can_review_store": can_review_store,
+        "load_admin_config": load_admin_config,
+        "save_admin_config": save_admin_config,
+        "plugin_admin": _load_plugin_admin(),
+        "project_dir": PROJECT_DIR,
+        "admin_cfg_lock": ADMIN_CFG_LOCK,
+        "store_root": _store_root,
+        "load_store_admin": _load_store_admin,
+    })
+
+
 def _load_data_migrate():
     """载入同包 data_migrate 子模块（数据迁移：导出/导入，纯逻辑）。
 
@@ -840,6 +957,54 @@ def _load_plugin_admin():
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod
+
+
+def _plugin_mgr_ok():
+    """商店/插件管理面超管门槛（P3-1 D1：自 register 内提升为模块级，供子模块 deps 注入）。"""
+    info = get_session_user()
+    return bool(info and info.get("super_admin"))
+
+
+def _plugin_display_name(pid, extra_entry=None):
+    """插件中文展示名：数据根 tools.json（权威，规范 M-2）→ 包内/注册条目 → manifest.name → id。
+
+    后台页面与所有接口统一走这里，避免出现"表格是中文、计划预览是英文 id"的不一致。
+    """
+    if not pid:
+        return ""
+    plugin_admin = _load_plugin_admin()
+    try:
+        reg = load_registry()
+    except Exception:
+        reg = {}
+    names = plugin_admin.plugin_names(reg if isinstance(reg, dict) else {})
+    try:
+        manifest = plugin_admin.read_json(
+            os.path.join(PROJECT_DIR, "plugins", str(pid), "manifest.json")) or {}
+    except Exception:
+        manifest = {}
+    return plugin_admin.display_name(names, str(pid), manifest, extra=extra_entry or {})
+
+
+def _staging_uploads_dir():
+    path = os.path.join(jztools_data.get_data_root(), ".staging", "uploads")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _resolve_upload(name):
+    """把前端回传的文件名解析为暂存目录内的绝对路径（拒绝任何路径穿越）。"""
+    raw = str(name or "")
+    base = os.path.basename(raw)
+    if not base or base != raw or not base.lower().endswith(".zip"):
+        return None
+    path = os.path.join(_staging_uploads_dir(), base)
+    return path if os.path.isfile(path) else None
+
+
+def _store_root():
+    """商店数据根（store 条目/包/台账都在 <数据根>/store/ 下；P3-1 D1 提升为模块级）。"""
+    return jztools_data.get_data_root()
 
 
 def _load_store_admin():
@@ -1148,455 +1313,9 @@ def register(app):
 
     # ---------------- 单位管理 ----------------
 
-    @app.get("/api/admin/units")
-    @permission_required("unit")
-    def admin_api_units():
-        set_operation("查询单位列表")
-        cfg = load_admin_config()
-        return jsonify({"units": [
-            {
-                "id": u["id"],
-                "name": u["name"],
-                "description": u.get("description", ""),
-                "departments_count": len(u.get("departments", [])),
-                "users_count": sum(len(d.get("users", [])) for d in u.get("departments", [])),
-            }
-            for u in cfg.get("units", [])
-        ]})
+    # ---------------- 组织 / 部门 / 人员 / 角色管理（P3-1 D1 拆出 admin_org.py，原位注册） ----------------
 
-    @app.post("/api/admin/units")
-    @permission_required("unit")
-    def admin_api_units_create():
-        set_operation("新增单位")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "单位名称不能为空"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            units = cfg.setdefault("units", [])
-            if any(u["name"] == name for u in units):
-                return jsonify({"error": "单位名称已存在"}), 400
-            unit = {
-                "id": "unit-" + uuid.uuid4().hex[:8],
-                "name": name,
-                "description": (data.get("description") or "").strip(),
-                "departments": [],
-            }
-            units.append(unit)
-            save_admin_config(cfg)
-        return jsonify({"ok": True, "unit": unit})
-
-    @app.put("/api/admin/units/<unit_id>")
-    @permission_required("unit")
-    def admin_api_units_update(unit_id):
-        set_operation("修改单位")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "单位名称不能为空"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            unit = find_unit(cfg, unit_id)
-            if unit is None:
-                return jsonify({"error": "单位不存在"}), 404
-            if any(u["id"] != unit_id and u["name"] == name for u in cfg.get("units", [])):
-                return jsonify({"error": "单位名称已存在"}), 400
-            unit["name"] = name
-            unit["description"] = (data.get("description") or "").strip()
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    @app.delete("/api/admin/units/<unit_id>")
-    @permission_required("unit")
-    def admin_api_units_delete(unit_id):
-        set_operation("删除单位")
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            unit = find_unit(cfg, unit_id)
-            if unit is None:
-                return jsonify({"error": "单位不存在"}), 404
-            if unit.get("departments"):
-                return jsonify({"error": "该单位下仍有部门，请先调整或删除部门"}), 400
-            cfg["units"] = [u for u in cfg.get("units", []) if u["id"] != unit_id]
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    # ---------------- 部门管理 ----------------
-
-    @app.get("/api/admin/departments")
-    @permission_required("department")
-    def admin_api_departments():
-        set_operation("查询部门列表")
-        cfg = load_admin_config()
-        departments = []
-        for unit in cfg.get("units", []):
-            for dept in unit.get("departments", []):
-                departments.append({
-                    "id": dept["id"],
-                    "name": dept["name"],
-                    "description": dept.get("description", ""),
-                    "unit_id": unit["id"],
-                    "unit_name": unit["name"],
-                    "users_count": len(dept.get("users", [])),
-                })
-        return jsonify({
-            "departments": departments,
-            "units": [{"id": u["id"], "name": u["name"]} for u in cfg.get("units", [])],
-        })
-
-    @app.post("/api/admin/departments")
-    @permission_required("department")
-    def admin_api_departments_create():
-        set_operation("新增部门")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        unit_id = (data.get("unit_id") or "").strip()
-        if not name:
-            return jsonify({"error": "部门名称不能为空"}), 400
-        if not unit_id:
-            return jsonify({"error": "请选择所属单位"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            unit = find_unit(cfg, unit_id)
-            if unit is None:
-                return jsonify({"error": "所属单位不存在"}), 404
-            if any(d["name"] == name for d in unit.get("departments", [])):
-                return jsonify({"error": "该单位下已存在同名部门"}), 400
-            dept = {
-                "id": "dept-" + uuid.uuid4().hex[:8],
-                "name": name,
-                "description": (data.get("description") or "").strip(),
-                "users": [],
-            }
-            unit.setdefault("departments", []).append(dept)
-            save_admin_config(cfg)
-        return jsonify({"ok": True, "department": dept})
-
-    @app.put("/api/admin/departments/<dept_id>")
-    @permission_required("department")
-    def admin_api_departments_update(dept_id):
-        set_operation("修改部门")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "部门名称不能为空"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            found = find_dept(cfg, dept_id)
-            if found is None:
-                return jsonify({"error": "部门不存在"}), 404
-            old_unit, dept = found
-            if any(d["id"] != dept_id and d["name"] == name for d in old_unit.get("departments", [])):
-                return jsonify({"error": "该单位下已存在同名部门"}), 400
-            dept["name"] = name
-            dept["description"] = (data.get("description") or "").strip()
-            # 移动部门到其他单位
-            new_unit_id = (data.get("unit_id") or "").strip()
-            if new_unit_id and new_unit_id != old_unit["id"]:
-                target = find_unit(cfg, new_unit_id)
-                if target is None:
-                    return jsonify({"error": "目标单位不存在"}), 404
-                if any(d["id"] != dept_id and d["name"] == name for d in target.get("departments", [])):
-                    return jsonify({"error": "目标单位下已存在同名部门"}), 400
-                old_unit["departments"] = [d for d in old_unit.get("departments", []) if d["id"] != dept_id]
-                target.setdefault("departments", []).append(dept)
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    @app.delete("/api/admin/departments/<dept_id>")
-    @permission_required("department")
-    def admin_api_departments_delete(dept_id):
-        set_operation("删除部门")
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            found = find_dept(cfg, dept_id)
-            if found is None:
-                return jsonify({"error": "部门不存在"}), 404
-            unit, dept = found
-            if dept.get("users"):
-                return jsonify({"error": "该部门下仍有人员，请先调整其所属部门"}), 400
-            unit["departments"] = [d for d in unit.get("departments", []) if d["id"] != dept_id]
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    # ---------------- 人员管理 ----------------
-
-    @app.get("/api/admin/users")
-    @permission_required("user")
-    def admin_api_users():
-        set_operation("查询人员列表")
-        cfg = load_admin_config()
-        role_map = {r["id"]: r["name"] for r in cfg.get("permissions", [])}
-        users = []
-        for unit, dept, user in iter_users(cfg):
-            users.append({
-                "username": user["username"],
-                "name": user.get("name") or user["username"],
-                "unit_id": unit["id"],
-                "unit_name": unit["name"],
-                "department_id": dept["id"],
-                "department_name": dept["name"],
-                "role": user.get("role", ""),
-                "role_name": role_map.get(user.get("role", ""), ""),
-                "super_admin": _role_super_admin(cfg, user.get("role")),
-                "idcard": decrypt_field(user.get("idcard")),
-                "permissions": user.get("permissions", []),
-                "llm": {
-                    "format": (user.get("llm") or {}).get("format", "openai"),
-                    "base_url": (user.get("llm") or {}).get("base_url", ""),
-                    # API Key **不回明文**，只回"是否已配置"与固定掩码——与
-                    # /api/llm/settings、插件 /config 同一口径（F-4 / SEC-2：
-                    # 明文凭据不进浏览器；代填/清除走本弹窗或批量导入）。
-                    "api_key": jz_llm.mask_key((user.get("llm") or {}).get("api_key")),
-                    "api_key_set": bool((user.get("llm") or {}).get("api_key")),
-                    "model": (user.get("llm") or {}).get("model", ""),
-                },
-            })
-        return jsonify({
-            "users": users,
-            "units": [{"id": u["id"], "name": u["name"]} for u in cfg.get("units", [])],
-            "departments": [
-                {"id": d["id"], "name": d["name"], "unit_id": unit["id"]}
-                for unit in cfg.get("units", []) for d in unit.get("departments", [])
-            ],
-            "permissions": cfg.get("permissions", []),
-        })
-
-    @app.post("/api/admin/users")
-    @permission_required("user")
-    def admin_api_users_create():
-        set_operation("新增人员")
-        data = request.get_json(silent=True) or {}
-        username = (data.get("username") or "").strip()
-        name = (data.get("name") or "").strip()
-        password = data.get("password") or ""
-        unit_id = (data.get("unit_id") or "").strip()
-        dept_id = (data.get("department_id") or "").strip()
-        if not username:
-            return jsonify({"error": "登录名不能为空"}), 400
-        if not re.match(r"^[A-Za-z0-9_.-]+$", username):
-            return jsonify({"error": "登录名只能包含字母、数字、_、.、-"}), 400
-        if not name:
-            return jsonify({"error": "姓名不能为空"}), 400
-        if len(password) < 6:
-            return jsonify({"error": "密码长度不能少于 6 位"}), 400
-        if not unit_id or not dept_id:
-            return jsonify({"error": "请选择所属单位与部门"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            if find_user(cfg, username) is not None:
-                return jsonify({"error": "该登录名已存在"}), 400
-            llm = data.get("llm") or {}
-            if not isinstance(llm, dict):
-                llm = {}
-            role_id = (data.get("role") or "").strip()
-            if "permissions" in data:
-                permissions, perr = _normalize_permission_points(data.get("permissions"))
-                if perr:
-                    return jsonify({"error": perr}), 400
-            else:
-                # 未显式指定权限点时：管理员（超管）不依赖权限点；普通角色（办案员等）
-                # 默认授予全部工具（不含管理后台），管理员可在「权限」弹窗中再调整。
-                if _role_super_admin(cfg, role_id):
-                    permissions = []
-                else:
-                    permissions = sorted(_registered_tool_ids() - {"admin"})
-            user = {
-                "username": username,
-                "password": encrypt_field(generate_password_hash(password)),
-                "name": name,
-                "idcard": encrypt_field(data.get("idcard") or ""),
-                "role": role_id,
-                "permissions": permissions,
-                "llm": {
-                    "format": (str(llm.get("format") or "").strip().lower()
-                               if str(llm.get("format") or "").strip().lower() in jz_llm.FORMAT_META
-                               else "openai"),
-                    "base_url": (llm.get("base_url") or "").strip(),
-                    "api_key": encrypt_field(llm.get("api_key") or ""),
-                    "model": (llm.get("model") or "").strip(),
-                },
-            }
-            if not append_user(cfg, unit_id, dept_id, user):
-                return jsonify({"error": "所属单位或部门不存在"}), 404
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    @app.put("/api/admin/users/<username>")
-    @permission_required("user")
-    def admin_api_users_update(username):
-        set_operation("修改人员")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "姓名不能为空"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            found = find_user(cfg, username)
-            if found is None:
-                return jsonify({"error": "人员不存在"}), 404
-            unit, dept, user = found
-            user["name"] = name
-            user["role"] = (data.get("role") or "").strip()
-            password = data.get("password") or ""
-            if password:
-                if len(password) < 6:
-                    return jsonify({"error": "密码长度不能少于 6 位"}), 400
-                user["password"] = encrypt_field(generate_password_hash(password))
-            # 身份证：传空字符串则清空，不传则保留原值
-            if "idcard" in data:
-                user["idcard"] = encrypt_field(data.get("idcard") or "")
-            # 权限点（tools.json 中的插件 ID）
-            if "permissions" in data:
-                permissions, perr = _normalize_permission_points(data.get("permissions"))
-                if perr:
-                    return jsonify({"error": perr}), 400
-                user["permissions"] = permissions
-            # 大模型配置（用户"各自设置"模式下由本人自助维护，此处供管理员代填）
-            llm = data.get("llm")
-            if isinstance(llm, dict):
-                u_llm = user.setdefault("llm", {})
-                if "format" in llm:
-                    fmt = (llm.get("format") or "").strip().lower()
-                    u_llm["format"] = fmt if fmt in jz_llm.FORMAT_META else "openai"
-                if "base_url" in llm:
-                    u_llm["base_url"] = (llm.get("base_url") or "").strip()
-                if "api_key" in llm:
-                    # 掩码/留空 = 不修改（与 /api/llm/settings、插件 /config、批量导入同一口径）。
-                    # 不这样处理会把字面量 "••••••••" 存成 Key，用户此后调用一律 401 且原因难查。
-                    if not jz_llm.is_mask(llm.get("api_key")):
-                        u_llm["api_key"] = encrypt_field(str(llm.get("api_key")).strip())
-                if "model" in llm:
-                    u_llm["model"] = (llm.get("model") or "").strip()
-            # 调整所属单位 / 部门（移动用户）
-            new_unit_id = (data.get("unit_id") or "").strip()
-            new_dept_id = (data.get("department_id") or "").strip()
-            if new_unit_id and new_dept_id and (new_unit_id != unit["id"] or new_dept_id != dept["id"]):
-                target = find_dept(cfg, new_dept_id)
-                if target is None or target[0]["id"] != new_unit_id:
-                    return jsonify({"error": "目标单位或部门不存在"}), 404
-                dept["users"] = [u for u in dept.get("users", []) if u.get("username") != username]
-                target[1].setdefault("users", []).append(user)
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    @app.delete("/api/admin/users/<username>")
-    @permission_required("user")
-    def admin_api_users_delete(username):
-        set_operation("删除人员")
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            if username == get_session_user()["username"]:
-                return jsonify({"error": "不能删除当前登录账号"}), 400
-            found = find_user(cfg, username)
-            if found is None:
-                return jsonify({"error": "人员不存在"}), 404
-            _unit, dept, _user = found
-            dept["users"] = [u for u in dept.get("users", []) if u.get("username") != username]
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    # ---------------- 权限（角色）管理（已并入人员管理，gate 用 user 模块） ----------------
-
-    @app.get("/api/admin/permission-points")
-    @permission_required("user")
-    def admin_api_permission_points():
-        """返回全部已注册工具（含停用），供人员「权限设置」弹窗勾选权限点。
-
-        与首页「隐藏工具」浮窗的 /api/tools/visibility 解耦：后者按当前
-        登录用户的权限点过滤（未授权插件全流程不可见）；本接口面向拥有
-        人员管理模块权限的管理者，始终返回全量工具清单。
-        """
-        set_operation("查询权限点清单")
-        registry = load_registry()
-        tools = [
-            {"id": t["id"], "name": t.get("name") or t["id"], "enabled": t.get("enabled", True)}
-            for t in registry.get("tools", [])
-        ]
-        return jsonify({"tools": tools})
-
-    @app.get("/api/admin/permissions")
-    @permission_required("user")
-    def admin_api_permissions():
-        set_operation("查询角色列表")
-        cfg = load_admin_config()
-        role_usage = {}
-        for _unit, _dept, user in iter_users(cfg):
-            role_usage[user.get("role")] = role_usage.get(user.get("role"), 0) + 1
-        permissions = [{
-            "id": r["id"],
-            "name": r["name"],
-            "description": r.get("description", ""),
-            "modules": r.get("modules", []),
-            "users": role_usage.get(r["id"], 0),
-        } for r in cfg.get("permissions", [])]
-        return jsonify({"permissions": permissions})
-
-    @app.post("/api/admin/permissions")
-    @permission_required("user")
-    def admin_api_permissions_create():
-        set_operation("新增角色")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "角色名称不能为空"}), 400
-        modules = data.get("modules") or []
-        if not isinstance(modules, list) or any(m not in ADMIN_MODULES for m in modules):
-            return jsonify({"error": "权限模块不合法"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            roles = cfg.setdefault("permissions", [])
-            if any(r["name"] == name for r in roles):
-                return jsonify({"error": "角色名称已存在"}), 400
-            role = {
-                "id": "role-" + uuid.uuid4().hex[:8],
-                "name": name,
-                "description": (data.get("description") or "").strip(),
-                "modules": modules,
-            }
-            roles.append(role)
-            save_admin_config(cfg)
-        return jsonify({"ok": True, "permission": role})
-
-    @app.put("/api/admin/permissions/<role_id>")
-    @permission_required("user")
-    def admin_api_permissions_update(role_id):
-        set_operation("修改角色")
-        data = request.get_json(silent=True) or {}
-        name = (data.get("name") or "").strip()
-        if not name:
-            return jsonify({"error": "角色名称不能为空"}), 400
-        modules = data.get("modules") or []
-        if not isinstance(modules, list) or any(m not in ADMIN_MODULES for m in modules):
-            return jsonify({"error": "权限模块不合法"}), 400
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            role = next((r for r in cfg.get("permissions", []) if r["id"] == role_id), None)
-            if role is None:
-                return jsonify({"error": "角色不存在"}), 404
-            if any(r["id"] != role_id and r["name"] == name for r in cfg.get("permissions", [])):
-                return jsonify({"error": "角色名称已存在"}), 400
-            role["name"] = name
-            role["description"] = (data.get("description") or "").strip()
-            role["modules"] = modules
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
-
-    @app.delete("/api/admin/permissions/<role_id>")
-    @permission_required("user")
-    def admin_api_permissions_delete(role_id):
-        set_operation("删除角色")
-        with ADMIN_CFG_LOCK:                  # D1 全程锁
-            cfg = load_admin_config()
-            if any(u.get("role") == role_id for _u, _d, u in iter_users(cfg)):
-                return jsonify({"error": "该角色已分配给人员，请先调整其角色"}), 400
-            roles = cfg.get("permissions", [])
-            if not any(r["id"] == role_id for r in roles):
-                return jsonify({"error": "角色不存在"}), 404
-            cfg["permissions"] = [r for r in roles if r["id"] != role_id]
-            save_admin_config(cfg)
-        return jsonify({"ok": True})
+    _register_admin_org(app)
 
     # ---------------- 系统数据目录管理（仅超级管理员） ----------------
 
@@ -1936,45 +1655,6 @@ def register(app):
     #   校验通过才允许应用；apply 时服务端**重新校验一遍**（不信任前端传来的任何状态）；
     #   逐条规则与目标机离线安装器 tools/plugin-upgrade/install-plugin.ps1 一致。
 
-    plugin_admin = _load_plugin_admin()
-
-    def _plugin_mgr_ok():
-        info = get_session_user()
-        return bool(info and info.get("super_admin"))
-
-    def _plugin_display_name(pid, extra_entry=None):
-        """插件中文展示名：数据根 tools.json（权威，规范 M-2）→ 包内/注册条目 → manifest.name → id。
-
-        后台页面与所有接口统一走这里，避免出现"表格是中文、计划预览是英文 id"的不一致。
-        """
-        if not pid:
-            return ""
-        try:
-            reg = load_registry()
-        except Exception:
-            reg = {}
-        names = plugin_admin.plugin_names(reg if isinstance(reg, dict) else {})
-        try:
-            manifest = plugin_admin.read_json(
-                os.path.join(PROJECT_DIR, "plugins", str(pid), "manifest.json")) or {}
-        except Exception:
-            manifest = {}
-        return plugin_admin.display_name(names, str(pid), manifest, extra=extra_entry or {})
-
-    def _staging_uploads_dir():
-        path = os.path.join(jztools_data.get_data_root(), ".staging", "uploads")
-        os.makedirs(path, exist_ok=True)
-        return path
-
-    def _resolve_upload(name):
-        """把前端回传的文件名解析为暂存目录内的绝对路径（拒绝任何路径穿越）。"""
-        raw = str(name or "")
-        base = os.path.basename(raw)
-        if not base or base != raw or not base.lower().endswith(".zip"):
-            return None
-        path = os.path.join(_staging_uploads_dir(), base)
-        return path if os.path.isfile(path) else None
-
     @app.get("/admin/plugins")
     @login_required
     def admin_plugins_page():
@@ -1983,385 +1663,9 @@ def register(app):
             return redirect(url_for("admin_index"))
         return send_from_directory(FRONTEND_DIR, "admin-plugins.html")
 
-    @app.get("/api/admin/plugins")
-    @login_required
-    def admin_api_plugins():
-        """插件盘点：代码版本 / 登记版本 / 待重启 / 备份数 / 数据占用 / 启停。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        set_operation("查询插件列表")
-        rows = plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
-        cfg = load_admin_config()
-        # 依赖概况（设计文档 §5.3 展示面）：可运行 / 降级 / 不可运行 三档汇总，
-        # 前端据此显示"逐依赖徽标（绿 / 红 ×）"与顶部横幅。
-        summary = {"ok": 0, "degraded": 0, "blocked": 0, "unknown": 0}
-        for r in rows:
-            d = r.get("deps") or {}
-            st = d.get("status") or "unknown"
-            summary[st if st in summary else "unknown"] += 1
-        return jsonify({
-            "ok": True,
-            "plugins": rows,
-            "deps_summary": summary,
-            "app_version": plugin_admin.app_version(PROJECT_DIR) or "",
-            "data_root": jztools_data.get_data_root(),
-            "index_path": cfg.get("plugin_index_path") or "",
-            "frozen": bool(getattr(sys, "frozen", False)),
-            "restart_pending": [r["id"] for r in rows if r["restart_pending"]],
-        })
+    # ---------------- 插件管理面 API（P3-1 D1 拆出 admin_plugins_api.py，原位注册） ----------------
 
-    @app.get("/api/admin/deps")
-    @login_required
-    def admin_api_deps():
-        """本机「已安装依赖」清单（框架包 / 外部组件 / 插件自带，含版本）。
-
-        设计文档 §5.3 D-7：管理员要能看到"本机装了什么、什么版本"，
-        才能判断插件为什么不可运行（缺什么、要不要装组件）。
-        """
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可查看依赖清单"}), 403
-        set_operation("查询已安装依赖清单")
-        return jsonify(plugin_admin.installed_deps(PROJECT_DIR))
-
-    @app.post("/api/admin/plugins/upload")
-    @login_required
-    def admin_api_plugins_upload():
-        """上传插件包并只读校验；返回应用计划（尚未写程序目录）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        set_operation("上传插件包")
-        f = request.files.get("file")
-        if f is None or not f.filename:
-            return jsonify({"error": "请选择插件包（.zip）"}), 400
-        if not f.filename.lower().endswith(".zip"):
-            return jsonify({"error": "只接受 .zip 插件包（由 tools\\build-plugin-package.ps1 生成）"}), 400
-        if request.content_length and request.content_length > plugin_admin.MAX_ZIP_BYTES:
-            return jsonify({"error": "包体积超过上限 %.0f MB" % (plugin_admin.MAX_ZIP_BYTES / 1048576)}), 413
-        force = str(request.form.get("force") or "").lower() in ("1", "true", "on")
-        safe = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(f.filename))
-        name = "%s-%s" % (plugin_admin.now_stamp(), safe)
-        dest = os.path.join(_staging_uploads_dir(), name)
-        try:
-            f.save(dest)
-        except Exception as e:
-            return jsonify({"error": "保存上传文件失败：%s" % e}), 500
-        try:
-            inspected = plugin_admin.inspect_package(dest, PROJECT_DIR, jztools_data.get_data_root(), force=force)
-        except Exception as e:
-            return jsonify({"error": "校验时出错：%s" % e}), 500
-        if not inspected["ok"]:
-            # 同时给 error 摘要：前端通用 api() 抛错只取 data.error，
-            # 没有它的话管理员只会看到"HTTP 400"而看不到真正的拒绝原因。
-            return jsonify({"ok": False, "file": name,
-                            "error": "；".join(inspected["errors"]),
-                            "errors": inspected["errors"],
-                            "warnings": inspected["warnings"]}), 400
-        meta = inspected["meta"]
-        plan = inspected["plan"]
-        return jsonify({
-            "ok": True, "file": name, "id": meta.get("id"), "version": meta.get("version"),
-            "name": _plugin_display_name(str(meta.get("id") or ""), meta.get("tools_entry")),
-            "from_version": inspected["from_version"],
-            "requires_restart": inspected["restart_needed"],
-            "restart_reason": inspected["restart_reason"],
-            "min_app_version": meta.get("min_app_version") or "",
-            "warnings": inspected["warnings"],
-            "plan": {
-                "new": len(plan.get("new") or []),
-                "changed": len(plan.get("changed") or []),
-                "unchanged": plan.get("unchanged") or 0,
-                "deleted": len(plan.get("deleted") or []),
-                "unknown": len(plan.get("unknown") or []),
-                "base_source": plan.get("base_source") or "",
-                "deleted_files": (plan.get("deleted") or [])[:50],
-                "unknown_files": (plan.get("unknown") or [])[:50],
-            },
-        })
-
-    @app.post("/api/admin/plugins/apply")
-    @login_required
-    def admin_api_plugins_apply():
-        """应用已上传的插件包：服务端重新校验 → 备份 → 替换 → 登记（可回滚）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        path = _resolve_upload(data.get("file"))
-        if not path:
-            return jsonify({"error": "上传的包不存在或已过期，请重新上传"}), 404
-        set_operation("应用插件包")
-        base, root = PROJECT_DIR, jztools_data.get_data_root()
-        inspected = plugin_admin.inspect_package(path, base, root, force=bool(data.get("force")))
-        if not inspected["ok"]:
-            # 同上：带上 error 摘要，避免前端只显示"HTTP 400"
-            return jsonify({"ok": False, "error": "；".join(inspected["errors"]),
-                            "errors": inspected["errors"]}), 400
-        report = plugin_admin.apply_package(
-            base, root, inspected,
-            purge_unknown=bool(data.get("purge_unknown")),
-            update_entry=bool(data.get("update_entry")),
-        )
-        if report.get("ok"):
-            try:
-                os.remove(path)          # 应用成功即清理上传包（PU-5）
-            except OSError:
-                pass
-        report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(base, root)
-                                     if r["restart_pending"]]
-        report["name"] = _plugin_display_name(str(inspected["meta"].get("id") or ""),
-                                               inspected["meta"].get("tools_entry"))
-        # 应用成功且含后端改动 → 自动停服重启（data.auto_restart=false 可关闭）
-        _maybe_auto_restart(report, auto=data.get("auto_restart", True))
-        return jsonify(report), (200 if report.get("ok") else 500)
-
-    @app.get("/api/admin/plugins/backups")
-    @login_required
-    def admin_api_plugins_backups():
-        """某插件的备份清单（供回滚选择）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        pid = (request.args.get("id") or "").strip()
-        if not plugin_admin.PLUGIN_ID_RE.match(pid):
-            return jsonify({"error": "插件 id 非法"}), 400
-        set_operation("查询插件备份")
-        items = plugin_admin.list_backups(jztools_data.get_data_root(), pid)
-        return jsonify({"ok": True, "backups": [
-            {"name": it["name"], "size": it["size"], "mtime": it["mtime"]} for it in items]})
-
-    @app.post("/api/admin/plugins/rollback")
-    @login_required
-    def admin_api_plugins_rollback():
-        """回滚插件到某个备份（缺省=最近一份）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "").strip()
-        if not plugin_admin.PLUGIN_ID_RE.match(pid):
-            return jsonify({"error": "插件 id 非法"}), 400
-        set_operation("回滚插件")
-        # 只允许回滚到该插件备份目录内的文件（拒绝任意路径）
-        backup = None
-        name = os.path.basename(str(data.get("backup") or ""))
-        if name:
-            candidate = os.path.join(plugin_admin.backups_dir(jztools_data.get_data_root(), pid), name)
-            if os.path.isfile(candidate):
-                backup = candidate
-            else:
-                return jsonify({"error": "指定的备份不存在"}), 404
-        report = plugin_admin.rollback_plugin(PROJECT_DIR, jztools_data.get_data_root(), pid, backup)
-        report["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
-                                     if r["restart_pending"]]
-        report["name"] = _plugin_display_name(pid)
-        # 回滚是整目录替换，一律需要重启；同样走自动停服重启
-        _maybe_auto_restart(report, needed=True, auto=data.get("auto_restart", True))
-        return jsonify(report), (200 if report.get("ok") else 500)
-
-    @app.post("/api/admin/plugins/enable")
-    @login_required
-    def admin_api_plugins_enable():
-        """启用 / 停用插件（写数据根 tools.json，不动代码与数据）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "").strip()
-        if not plugin_admin.PLUGIN_ID_RE.match(pid):
-            return jsonify({"error": "插件 id 非法"}), 400
-        enabled = bool(data.get("enabled"))
-        set_operation("启用插件" if enabled else "停用插件")
-        ok = plugin_admin.set_plugin_enabled(jztools_data.get_data_root(), pid, enabled)
-        if not ok:
-            return jsonify({"error": "tools.json 中没有该插件的注册条目"}), 404
-        return jsonify({"ok": True, "id": pid, "enabled": enabled})
-
-    @app.post("/api/admin/plugins/uninstall")
-    @login_required
-    def admin_api_plugins_uninstall():
-        """卸载插件（规范 §11 顺序：删/停注册条目 → 备份数据 → 删目录）。
-
-        - 核心插件（manifest.core = true，如 admin）拒绝卸载（设计文档 §3.5）；
-        - 用户数据默认保留；purge_entry 删除注册条目，backup_data 先只读打包一份数据。
-        """
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "").strip()
-        if not plugin_admin.PLUGIN_ID_RE.match(pid):
-            return jsonify({"error": "插件 id 非法"}), 400
-        set_operation("卸载插件")
-        res = plugin_admin.uninstall_plugin(
-            PROJECT_DIR, jztools_data.get_data_root(), pid,
-            purge_entry=bool(data.get("purge_entry")),
-            backup_data=bool(data.get("backup_data")),
-        )
-        if not res.get("ok"):
-            return jsonify({"error": res.get("error") or "卸载失败", "steps": res.get("steps") or []}), 400
-        app.logger.warning("插件 %s 已被管理员卸载：%s", pid, "；".join(res.get("steps") or []))
-        return jsonify(res)
-
-    @app.post("/api/admin/plugins/align")
-    @login_required
-    def admin_api_plugins_align():
-        """把状态登记的版本对齐到程序目录的实际版本（登记漂移的一键修复）。
-
-        只改数据根 .app_state.json 的登记版本；代码与用户数据不动。
-        防回退比较的是登记版本，漂移会让下次主包升级误判 → 该操作消除这个隐患。
-        """
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "").strip()
-        if pid and pid != "*":                      # 单插件（保留能力）
-            if not plugin_admin.PLUGIN_ID_RE.match(pid):
-                return jsonify({"error": "插件 id 非法"}), 400
-            set_operation("对齐插件登记")
-            res = plugin_admin.align_state_version(PROJECT_DIR, jztools_data.get_data_root(), pid)
-            if not res.get("ok"):
-                return jsonify({"error": res.get("error") or "对齐失败"}), 400
-            if res.get("changed"):
-                app.logger.warning("插件 %s 的登记版本已对齐：%s → %s", pid,
-                                   res.get("from_version") or "（无登记）", res.get("to_version"))
-            return jsonify(res)
-        # 一键对齐（列表外按钮）：不带 id 或 id="*"
-        set_operation("一键对齐插件登记")
-        res = plugin_admin.align_state_versions(PROJECT_DIR, jztools_data.get_data_root())
-        app.logger.warning("一键对齐插件登记：%d 个已对齐（共 %d 个插件，失败 %d）",
-                           len(res.get("aligned") or []), res.get("total"), len(res.get("failed") or []))
-        return jsonify(res)
-
-    @app.get("/api/admin/plugins/index")
-    @login_required
-    def admin_api_plugins_index():
-        """读取共享盘索引并比对已装版本（阶段三）。path 缺省用上次记住的路径。
-
-        D1 裁定 6 方案 (b)：本处读改写段中间夹着共享盘读取（`check_updates` 走网络盘），
-        整段包锁会把全部 admin.json 写排在它之后，故拆成**两次进锁**：
-          ① 锁内只取「上次记住的路径」这一份快照；
-          ② 共享盘读取在锁外（锁内绝不含盘/网络 IO，读失败的错误语义原样保留）；
-          ③ 再进锁**重新 load**（不得复用①的对象，否则②期间其他字段的并发改动会被
-             旧对象整体覆盖）、以快照为依据只改 `plugin_index_path` 一个字段后 save。
-        同一字段的并发（两人同时换索引路径）按「后写者为准」——与其余读改写处同语义。
-        """
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        with ADMIN_CFG_LOCK:                  # 第一段锁：只取快照，不做盘/网络 IO
-            remembered = load_admin_config().get("plugin_index_path") or ""
-        path = (request.args.get("path") or "").strip() or remembered
-        if not path:
-            return jsonify({"error": "请填写索引文件路径（共享盘上的 index.json）"}), 400
-        set_operation("检查插件更新")
-        res = plugin_admin.check_updates(PROJECT_DIR, jztools_data.get_data_root(), path)
-        if not res.get("ok"):
-            return jsonify(res), 400
-        # 记住路径，下次免填（同一台机器上通常固定一个共享目录）
-        if path != remembered:
-            with ADMIN_CFG_LOCK:              # 第二段锁：重新 load 后只改这一个字段
-                cfg = load_admin_config()
-                cfg["plugin_index_path"] = path
-                save_admin_config(cfg)
-        return jsonify(res)
-
-    @app.post("/api/admin/plugins/batch-apply")
-    @login_required
-    def admin_api_plugins_batch_apply():
-        """按索引批量应用插件包（顺序应用；后端改动则最后统一重启一次）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        cfg = load_admin_config()
-        index_path = (data.get("index_path") or "").strip() or (cfg.get("plugin_index_path") or "")
-        ids = [str(x) for x in (data.get("ids") or []) if str(x)]
-        if not index_path or not ids:
-            return jsonify({"error": "请先检查更新并勾选要升级的插件"}), 400
-        set_operation("批量升级插件")
-        res = plugin_admin.batch_apply(PROJECT_DIR, jztools_data.get_data_root(), index_path, ids)
-        res["restart_pending"] = [r["id"] for r in plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
-                                  if r["restart_pending"]]
-        # 批量应用：全部成功后统一重启一次
-        _maybe_auto_restart(res, auto=data.get("auto_restart", True))
-        return jsonify(res)
-
-    @app.post("/api/admin/packages/scan")
-    @login_required
-    def admin_api_packages_scan():
-        """扫描介质目录里的插件包与依赖组件包（只读，不安装）。
-
-        目录缺省用 default_scan_dirs()（程序目录 / 上级 / 桌面 / 下载）；
-        管理员也可指定路径（离线部署时介质常解压到 U 盘或某个临时目录）。
-        """
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        raw = (data.get("dir") or "").strip()
-        dirs = None
-        if raw:
-            if not os.path.isdir(raw):
-                return jsonify({"error": "目录不存在或不可读：%s" % raw}), 400
-            dirs = [raw]
-        set_operation("扫描介质目录")
-        try:
-            res = plugin_admin.scan_packages(PROJECT_DIR, jztools_data.get_data_root(),
-                                             dirs=dirs, force=bool(data.get("force")))
-        except Exception as e:
-            return jsonify({"error": "扫描出错：%s" % e}), 500
-        res["default_dirs"] = plugin_admin.default_scan_dirs(PROJECT_DIR)
-        res["suggest"] = [it for it in res["items"] if it["status"] == "install"]
-        return jsonify(res)
-
-    @app.post("/api/admin/packages/install")
-    @login_required
-    def admin_api_packages_install():
-        """安装扫描到的包（插件包 + 依赖组件包）。
-
-        安全：只接受**服务端重新扫描得到**的包路径，不接受前端传来的任意路径
-        （前端把扫描结果里的 path 回传，服务端再扫一次做白名单比对）。
-        """
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        data = request.get_json(silent=True) or {}
-        wanted = [str(x) for x in (data.get("paths") or []) if str(x)]
-        if not wanted:
-            return jsonify({"error": "请先扫描并勾选要安装的包"}), 400
-        raw = (data.get("dir") or "").strip()
-        dirs = [raw] if raw and os.path.isdir(raw) else None
-        set_operation("安装扫描到的包")
-        scan = plugin_admin.scan_packages(PROJECT_DIR, jztools_data.get_data_root(), dirs=dirs)
-        allowed = {it["path"]: it for it in scan["items"]}
-        picked = [p for p in wanted if p in allowed]
-        rejected = [p for p in wanted if p not in allowed]
-        if not picked:
-            return jsonify({"error": "勾选的包不在扫描结果里（请重新扫描后再装）",
-                            "rejected": rejected}), 400
-        try:
-            res = plugin_admin.install_scanned(PROJECT_DIR, jztools_data.get_data_root(),
-                                               picked, force=bool(data.get("force")))
-        except Exception as e:
-            return jsonify({"error": "安装出错：%s" % e}), 500
-        # 依赖组件装完**无需重启**（主体下次请求会自动补注入路径）；插件含后端改动才需要
-        needs_restart = bool(res.get("restart_pending")) or any(
-            r.get("requires_restart") for r in res.get("results", []) if r.get("ok"))
-        res["rejected"] = rejected
-        res["needs_restart"] = needs_restart
-        if needs_restart:
-            _maybe_auto_restart(res, auto=data.get("auto_restart", True))
-        return jsonify(res)
-
-    @app.post("/api/admin/plugins/restart")
-    @login_required
-    def admin_api_plugins_restart():
-        """重启服务让新插件代码生效（仅打包运行；源码模式提示手工重启）。"""
-        if not _plugin_mgr_ok():
-            return jsonify({"error": "仅超级管理员可管理插件"}), 403
-        set_operation("重启服务（插件生效）")
-        rows = plugin_admin.list_plugins(PROJECT_DIR, jztools_data.get_data_root())
-        pending = [r["id"] for r in rows if r["restart_pending"]]
-        if not getattr(sys, "frozen", False):
-            return jsonify({"ok": False, "pending": pending,
-                            "message": "源码开发模式不自动重启：Flask 调试重载通常会自行重启；"
-                                       "若未生效请手工重启 python app.py"})
-        ok, err = _spawn_self_restart()
-        if not ok:
-            return jsonify({"ok": False, "pending": pending, "error": err}), 500
-        return jsonify({"ok": True, "pending": pending,
-                        "message": "服务正在重启，约 5~10 秒后本页会自动重新加载"})
+    _register_admin_plugins_api(app)
 
     # ---------------- 商店管理（O2 写面：上架/审核/发布/下架/统计） ----------------
     # 设计：docs/design/桌面端插件商店-设计文档.md §3.3 / §3.7。
@@ -2377,280 +1681,11 @@ def register(app):
         """商店管理页（登录即可，不分角色）。"""
         return send_from_directory(FRONTEND_DIR, "admin-store.html")
 
-    def _store_root():
-        return jztools_data.get_data_root()
+    # 商店数据根（P3-1 D1：提升为模块级，供本页与 admin_store_api 子模块共用）
 
-    @app.get("/plugin/admin/store/list")
-    @login_required
-    def admin_store_list():
-        """全量目录（含 pending/delisted，管理视角）+ 服务器侧部署状态。"""
-        set_operation("查询商店目录")
-        root = _store_root()
-        catalog = store_admin.load_catalog(root)
-        rows = []
-        for entry in catalog.get("packages") or []:
-            row = dict(entry)
-            if entry.get("runtime") == "server":
-                row["installed_version"] = plugin_admin.installed_version(PROJECT_DIR, entry.get("id"))
-                state_entry = plugin_admin.read_state(root).get("plugins", {}).get(entry.get("id")) or {}
-                row["restart_pending"] = bool(state_entry.get("restart_pending"))
-                row["backups"] = len(plugin_admin.list_backups(root, entry.get("id")))
-                row["srv_enabled"] = store_admin.srv_enabled(root, entry.get("id"))
-            elif entry.get("runtime") == "dep-slot":
-                row["srv_component_version"] = store_admin.srv_component_version(
-                    PROJECT_DIR, entry.get("id"))
-            rows.append(row)
-        installed = jz_deps.load_installed_deps(PROJECT_DIR)
-        installed_names = sorted({str(k).casefold() for k in (installed.get("modules") or {})}
-                                 | {str(k).casefold() for k in (installed.get("packages") or {})})
-        return jsonify({"ok": True, "packages": rows, "installed_names": installed_names,
-                        "can_review": can_review_store(get_session_user()),
-                        "super_admin": bool((get_session_user() or {}).get("super_admin")),
-                        "index_server_path": store_admin.index_server_path(root),
-                        "data_root": root})
+    # ---------------- 商店管理面 API（P3-1 D1 拆出 admin_store_api.py，原位注册） ----------------
 
-    @app.post("/plugin/admin/store/upload")
-    @login_required
-    def admin_store_upload():
-        """上架第 1 步：包上传 + 机器校验 + 元数据落库（pending）。"""
-        set_operation("商店上架")
-        user = get_session_user() or {}
-        runtime = request.form.get("runtime") or ""
-        form = {k: (request.form.get(k) or "") for k in
-                ("name", "description", "changelog", "icon", "deps_mode", "provides",
-                 "requires_json")}
-        pkg = request.files.get("file")
-        frontend = request.files.get("frontend_file")
-        if pkg is None or not pkg.filename:
-            return jsonify({"ok": False, "errors": ["未选择包文件"]}), 400
-        root = _store_root()
-        staging = os.path.join(root, ".staging", "store")
-        os.makedirs(staging, exist_ok=True)
-        stamp = plugin_admin.now_stamp()
-        pkg_path = os.path.join(staging, "%s-%s" % (stamp, os.path.basename(pkg.filename)))
-        pkg.save(pkg_path)
-        frontend_path = ""
-        if frontend is not None and frontend.filename:
-            frontend_path = os.path.join(staging, "%s-fe-%s" % (stamp, os.path.basename(frontend.filename)))
-            frontend.save(frontend_path)
-        try:
-            report = store_admin.submit(root, runtime, pkg_path, form,
-                                        str(user.get("username") or ""),
-                                        frontend_zip_path=frontend_path or None)
-        finally:
-            for p in (pkg_path, frontend_path):
-                if p and os.path.isfile(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
-        if not report.get("ok"):
-            return jsonify(report), 400
-        return jsonify(report)
-
-    @app.post("/plugin/admin/store/review")
-    @login_required
-    def admin_store_review():
-        """审核：approve（发布；server 条目含发布即部署）/ reject / republish。
-
-        权限（2026-10-08 修订）：仅管理员 / 超级管理员；提交上架不受此限。
-        """
-        set_operation("商店审核")
-        if not can_review_store(get_session_user()):
-            return jsonify({"ok": False, "error": "仅管理员或超级管理员可审核（提交上架不受限）"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "")
-        version = str(data.get("version") or "")
-        action = str(data.get("action") or "")
-        note = str(data.get("note") or "")
-        by = str((get_session_user() or {}).get("username") or "")
-        root = _store_root()
-        if action == "approve":
-            catalog = store_admin.load_catalog(root)
-            entry = store_admin.find_entry(catalog, pid)
-            record = store_admin.find_version_record(entry, version) if entry else None
-            if record is None:
-                return jsonify({"ok": False, "error": "版本不存在：%s v%s" % (pid, version)}), 404
-            # 依赖满足门槛（2026-10-07）：声明的每个依赖，主包未自带且依赖类目未上架时
-            # 审核不通过（可提交、不可发布）——依赖由插件制作者或其他用户上架补齐
-            installed = jz_deps.load_installed_deps(PROJECT_DIR)
-            avail = {str(k).casefold() for k in (installed.get("modules") or {})}
-            avail |= {str(k).casefold() for k in (installed.get("packages") or {})}
-            unsat = store_admin.unsatisfied_deps(catalog, entry, version, avail)
-            if unsat:
-                return jsonify({"ok": False,
-                                "error": "依赖不满足，审核不通过：%s——请先在「依赖」类目上架对应组件包"
-                                         % "、".join(unsat)}), 409
-            if entry.get("runtime") == "server":
-                # 需求⑧：审核通过即发布，发布即自动部署后端包（当前形态=进程内 inspect/apply；
-                # E 架构落地后此处换 supervisor 编排）。上传/待审核阶段绝不部署。
-                dep = store_admin.deploy_backend_package(PROJECT_DIR, root, pid, version)
-                if not dep.get("ok"):
-                    store_admin.mark_deploy_result(root, pid, version, False,
-                                                   dep.get("error", ""), by)
-                    return jsonify({"ok": False,
-                                    "error": "后端包部署失败，发布已回退待审核：%s" % dep.get("error"),
-                                    "deploy": dep}), 500
-                res = store_admin.review(root, pid, version, "approve", by, note)
-                if res.get("ok"):
-                    store_admin.mark_deploy_result(root, pid, version, True,
-                                                   "v%s 自动部署成功" % version, by)
-                    res["dep_deploy"] = _deploy_required_components(root, catalog, entry)
-                return jsonify(res)
-        res = store_admin.review(root, pid, version, action, by, note)
-        if not res.get("ok"):
-            return jsonify(res), 400
-        if action == "approve":
-            # 依赖条目（2026-10-08）：已上架 server 插件需要它 → 发布即部署到服务器
-            catalog2 = store_admin.load_catalog(root)
-            entry2 = store_admin.find_entry(catalog2, pid)
-            if entry2 is not None and entry2.get("runtime") == "dep-slot":
-                need = store_admin.deps_for_published_server(catalog2)
-                provided = {pid.lower()} | {str(x).lower() for x in (entry2.get("provides") or [])}
-                if need & provided:
-                    r = store_admin.deploy_dep_component(PROJECT_DIR, root, pid, version)
-                    res["dep_deploy"] = ["组件已部署到服务器" if r.get("ok")
-                                         else "组件部署失败（%s）" % r.get("error")]
-        return jsonify(res)
-
-    def _deploy_required_components(root, catalog, entry):
-        """server 插件发布后：把 requires 里「已上架依赖条目」的组件补装到**服务器**（尽力而为）。
-
-        2026-10-08 真机报告：商店依赖的安装只落桌面客户端，服务器侧插件（shared-docs 等）
-        在服务器上仍需组件——口径与 server 插件一致：上架（发布）即部署到服务器。
-        """
-        notes = []
-        for x in ((entry.get("requires") or {}).get("python_packages") or []):
-            name = str(x.get("name") or "").strip().lower()
-            if not name:
-                continue
-            dep_entry = next((p for p in catalog.get("packages") or []
-                              if p.get("runtime") == "dep-slot"
-                              and (str(p.get("id") or "").lower() == name
-                                   or name in [str(y).lower() for y in (p.get("provides") or [])])), None)
-            if dep_entry is None:
-                continue
-            ver = next((v.get("version") for v in (dep_entry.get("versions") or [])
-                        if v.get("status") == "published"), "")
-            if not ver:
-                continue
-            r = store_admin.deploy_dep_component(PROJECT_DIR, root, dep_entry.get("id"), ver)
-            notes.append("组件 %s %s" % (dep_entry.get("id"),
-                                        "已部署 v%s" % ver if r.get("ok")
-                                        else "部署失败（%s）" % r.get("error")))
-        return notes
-
-    @app.post("/plugin/admin/store/redeploy")
-    @login_required
-    def admin_store_redeploy():
-        """部署运行面板「重新部署」：把指定版本的 server 后端包重新应用到服务器（当前形态）。
-
-        权限（2026-10-08 修订）：仅管理员 / 超级管理员（发布即部署属服务器敏感操作）。
-        """
-        set_operation("商店重新部署")
-        if not can_review_store(get_session_user()):
-            return jsonify({"ok": False, "error": "仅管理员或超级管理员可重新部署"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "")
-        version = str(data.get("version") or "")
-        root = _store_root()
-        entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
-        if entry is not None and entry.get("runtime") == "dep-slot":
-            # 依赖条目（2026-10-08）：部署到**服务器**（runtime/pylibs；同 install_component_package 链）
-            res = store_admin.deploy_dep_component(PROJECT_DIR, root, pid, version)
-        else:
-            res = store_admin.deploy_backend_package(PROJECT_DIR, root, pid, version)
-        return jsonify(res) if res.get("ok") else (jsonify(res), 500)
-
-    @app.post("/plugin/admin/store/srv-state")
-    @login_required
-    def admin_store_srv_state():
-        """停用/启用已上架插件的服务器端运行（**仅超级管理员**）。
-
-        口径（2026-10-08 需求方拍板）：服务器端后端包**只在商店管理的 停用/卸载 时被撤下**——
-        「下架」只动客户端可见性、桌面端卸载只删前端包副本，两者都不碰服务器部署。
-        停用 = 注册条目 enabled:false（清单/主页即时隐藏；路由随下次服务重启卸载）；后端包保留。
-        """
-        set_operation("商店停用/启用插件")
-        info = get_session_user() or {}
-        if not info.get("super_admin"):
-            return jsonify({"ok": False, "error": "仅超级管理员可停用/启用服务器端插件"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "")
-        enabled = bool(data.get("enabled"))
-        root = _store_root()
-        entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
-        if entry is None or entry.get("runtime") != "server":
-            return jsonify({"ok": False, "error": "仅「服务器」类目已上架条目可停用/启用"}), 400
-        if not plugin_admin.set_plugin_enabled(root, pid, enabled):
-            return jsonify({"ok": False,
-                            "error": "注册表（tools.json）中没有该插件条目——先「重新部署」"}), 400
-        store_admin.record_event(root, pid, str(data.get("version") or ""),
-                                 "srv_enable" if enabled else "srv_disable",
-                                 str(info.get("username") or ""), str(data.get("note") or ""))
-        return jsonify({"ok": True, "enabled": enabled,
-                        "restart_hint": "路由随下次服务重启卸载" if not enabled else "路由随下次服务重启加载"})
-
-    @app.post("/plugin/admin/store/withdraw")
-    @login_required
-    def admin_store_withdraw():
-        """卸载（撤下后端包，**仅超级管理员**）：把已部署后端包从服务器撤下。
-
-        自动备份可「重新部署」原样恢复；条目/版本状态不动（仅记 withdraw 台账）；
-        核心插件（admin/store）由 plugin_admin 拒绝卸载。
-        """
-        set_operation("商店卸载（撤下后端包）")
-        info = get_session_user() or {}
-        if not info.get("super_admin"):
-            return jsonify({"ok": False, "error": "仅超级管理员可卸载（撤下后端包）"}), 403
-        data = request.get_json(silent=True) or {}
-        pid = str(data.get("id") or "")
-        version = str(data.get("version") or "")
-        root = _store_root()
-        entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
-        if entry is None or entry.get("runtime") != "server":
-            return jsonify({"ok": False, "error": "仅「服务器」类目已上架条目可卸载（撤下后端包）"}), 400
-        res = store_admin.withdraw_backend_package(PROJECT_DIR, root, pid)
-        if not res.get("ok"):
-            return jsonify(res), 500
-        store_admin.record_event(root, pid, version, "withdraw",
-                                 str(info.get("username") or ""), str(data.get("note") or ""))
-        return jsonify({"ok": True, "steps": res.get("steps", []),
-                        "unit_stopped": res.get("unit_stopped"),
-                        "restart_hint": "路由随下次服务重启卸载；可用「重新部署」原样恢复"})
-
-    @app.post("/plugin/admin/store/delist")
-    @login_required
-    def admin_store_delist():
-        """下架（version 留空 = 最新已上架版；下架最新版 = 投影自动回落旧版）。
-
-        权限（2026-10-08 修订）：仅管理员 / 超级管理员。
-        """
-        set_operation("商店下架")
-        if not can_review_store(get_session_user()):
-            return jsonify({"ok": False, "error": "仅管理员或超级管理员可下架"}), 403
-        data = request.get_json(silent=True) or {}
-        res = store_admin.delist(_store_root(), str(data.get("id") or ""),
-                                 str(data.get("version") or ""),
-                                 str((get_session_user() or {}).get("username") or ""),
-                                 str(data.get("note") or ""))
-        return jsonify(res) if res.get("ok") else (jsonify(res), 400)
-
-    @app.post("/plugin/admin/store/meta")
-    @login_required
-    def admin_store_meta():
-        """元数据编辑（name/description/icon），记 history 台账。"""
-        set_operation("商店元数据编辑")
-        data = request.get_json(silent=True) or {}
-        res = store_admin.meta_edit(_store_root(), str(data.get("id") or ""), data,
-                                    str((get_session_user() or {}).get("username") or ""))
-        return jsonify(res) if res.get("ok") else (jsonify(res), 400)
-
-    @app.get("/plugin/admin/store/stats")
-    @login_required
-    def admin_store_stats():
-        """下载统计聚合（读 stats.jsonl——store 插件写、admin 只读，单一写方纪律）。"""
-        return jsonify({"ok": True, **store_admin.stats_summary(_store_root())})
+    _register_admin_store_api(app)
 
     # ---------------- 批量导入导出（单位 / 部门 / 人员） ----------------
 
