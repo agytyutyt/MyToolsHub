@@ -202,6 +202,11 @@ SIZE_PREFIX = 4         # base64 字符数（3 字节 → 4 字符）
 SIZE_DATASIZE = 4       # 原始数据长度前缀字节数
 BYTE_ORDER = "big"
 BOX_SIZE = 10           # 二维码渲染模块边长；取较大值提升有损压缩后的可解码率
+# T20（P1）：固定 mask，跳过 qrcode 的 8 档惩罚分选优（实测占单帧渲染约一半耗时：
+# v15 76.3→40.4ms、v25 167.2→92.9ms）。选 0 档的依据：60 组 × 8 档高熵随机载荷回读
+# 严格通过率完全相同（0 失败），即固定任一档都不降低可解性；历史上有缺陷的 mask 只影响
+# cv2 回读，而自检失败时仍会逐档换 mask 重试（见 _render_verified_qr / encode_to_video）。
+QR_MASK_PATTERN = 0
 FRAMERATE = 15
 VIDEO_FOURCC = "avc1"   # H.264，浏览器 <video> 可直接播放
 FEC_RATIO = 0.4         # 前向纠错比例：额外生成 1/(1-fec_ratio) 帧（视频有损压缩下取高冗余）
@@ -2095,16 +2100,22 @@ def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
 # ===================== 静态二维码 =====================
 
 def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
-    """渲染二维码为 PNG 字节（可指定 mask 图案；None=自动选优）。
+    """渲染二维码为 PNG 字节。`mask_pattern=None` → 用固定 mask（T20），显式传入则用该档。
 
     2026-10-08：不再走 qrcode 的 PIL 渲染——pillow 不在依赖清单内（真机
     「开启封装」即 ImportError → 封装失败）；改「qrcode 出矩阵 → numpy 放大 →
     cv2 编码 PNG」，只用清单内已有的 numpy / opencv-python；产物照旧交
     _cv2_can_decode / _zxing_can_decode 回读验证，质量口径不变。
+
+    T20（P1）：qrcode 的 8 档自动选优（逐档算惩罚分）是单帧渲染耗时的大头——
+    实测 v15 76.3 → 40.4 ms/帧、v25 167.2 → 92.9 ms/帧（约省一半，卡内 154ms→0 同向）。
+    默认改为固定 `QR_MASK_PATTERN`；**质量兜底不变**：`_render_verified_qr` 与视频路径的
+    抽样自检一旦发现该档读不出，仍逐档换 mask 重试（失败才付费，成功即免掉选优开销）。
     """
     kwargs = {}
-    if mask_pattern is not None:
-        kwargs["mask_pattern"] = mask_pattern
+    mp = QR_MASK_PATTERN if mask_pattern is None else mask_pattern
+    if mp is not None:
+        kwargs["mask_pattern"] = mp
     qr = qrcode.QRCode(version=version, error_correction=err,
                        box_size=BOX_SIZE, border=4, **kwargs)
     qr.add_data(data_bytes, optimize=0)
