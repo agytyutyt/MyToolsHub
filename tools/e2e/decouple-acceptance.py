@@ -179,16 +179,28 @@ def sandbox_flow(tmp, main_ver_old="2.1.2", main_ver_new="2.2.0"):
     zipf = [f for f in os.listdir(pkg_dir) if f.endswith(".zip") and "notice-board" in f]
     if not zipf:
         check("AC-4", False, "未找到 notice-board 插件包"); return
+    # ★ 双包模型口径（2026-09 起）：出包工具每个插件产 **后端 + 前端** 两个 zip，只有后端包是
+    #   完整可安装单元（内含 plugin-package.json 与 payload/plugins/<id>/… 连前端一起带），
+    #   前端包是商店「配对分发」的半边、不含包清单。真插件集 build-plugin-set.ps1 因此按
+    #   `^JZToolsHub-(.+)-后端-v\d` 只取后端包。本沙箱早先写 `zipf[0]`——那时还是"一插件一 zip"，
+    #   双包上线后字典序恰好选中前端包，-Set 报「包内缺少 plugin-package.json」退出 1，
+    #   连带后面三条断言全红（AC-4 长期红灯的根因，2026-10-10 §B-19 定位）。
+    backends = [f for f in zipf if "-后端-" in f]
+    check("AC-4", len(backends) == 1,
+          "沙箱按双包模型产出成对包、且后端包唯一可安装：%s" % sorted(zipf))
+    if len(backends) != 1:
+        return
     idx = {"schema": 1, "kind": "plugin-set", "name": "验收", "packages": [
-        {"id": "notice-board", "version": "x", "file": zipf[0],
-         "sha256": hashlib.sha256(open(os.path.join(pkg_dir, zipf[0]), "rb").read()).hexdigest()}]}
+        {"id": "notice-board", "version": "x", "file": backends[0],
+         "sha256": hashlib.sha256(open(os.path.join(pkg_dir, backends[0]), "rb").read()).hexdigest()}]}
     json.dump(idx, open(os.path.join(pkg_dir, "index.json"), "w", encoding="utf-8"), ensure_ascii=False)
     shutil.copy2(installer, pkg_dir)
     # 先把目标机的 notice-board 删掉，模拟"全新装机只有 admin"
     shutil.rmtree(os.path.join(app, "plugins", "notice-board"))
     rc3, out3 = run_ps(os.path.join(pkg_dir, "install-plugin.ps1"),
                        ["-Set", pkg_dir, "-InstallDir", app, "-DataRoot", droot, "-NoStart"])
-    check("AC-4", rc3 == 0, "-Set 退出码 %d" % rc3)
+    check("AC-4", rc3 == 0, "-Set 退出码 %d%s" % (rc3, "" if rc3 == 0 else
+          "\n" + out3[-1200:]))          # 失败必带安装器原文：本条红灯排查不出根因就是缺这个
     check("AC-4", os.path.isfile(os.path.join(app, "plugins", "notice-board", "manifest.json")),
           "插件集安装后 notice-board 代码就位")
     tools = json.load(open(os.path.join(droot, "config", "tools.json"), encoding="utf-8"))["tools"]
