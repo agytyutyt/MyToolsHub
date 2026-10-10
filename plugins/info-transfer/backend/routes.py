@@ -2208,13 +2208,12 @@ def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
 
 # ===================== 静态二维码 =====================
 
-def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
-    """渲染二维码为 PNG 字节。`mask_pattern=None` → 用固定 mask（T20），显式传入则用该档。
+def _qr_code_obj(data_bytes, version, err, mask_pattern=None):
+    """将载荷构造成 qrcode 对象（T20 P3 双出口的共同前置：出图与出 PNG 共用同一次构造）。
 
     2026-10-08：不再走 qrcode 的 PIL 渲染——pillow 不在依赖清单内（真机
     「开启封装」即 ImportError → 封装失败）；改「qrcode 出矩阵 → numpy 放大 →
-    cv2 编码 PNG」，只用清单内已有的 numpy / opencv-python；产物照旧交
-    _cv2_can_decode / _zxing_can_decode 回读验证，质量口径不变。
+    cv2 编码 PNG」，只用清单内已有的 numpy / opencv-python。
 
     T20（P1）：qrcode 的 8 档自动选优（逐档算惩罚分）是单帧渲染耗时的大头——
     实测 v15 76.3 → 40.4 ms/帧、v25 167.2 → 92.9 ms/帧（约省一半，卡内 154ms→0 同向）。
@@ -2229,11 +2228,40 @@ def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
                        box_size=BOX_SIZE, border=4, **kwargs)
     qr.add_data(data_bytes, optimize=0)
     qr.make(fit=False)
-    return _qr_matrix_png(qr)
+    return qr
 
 
-def _qr_matrix_png(qr):
-    """QR 矩阵 → 8 位灰度 PNG（含静区；numpy 最近邻放大 box_size，模块边界锐利）。"""
+def _qr_gray_image(data_bytes, version, err, mask_pattern=None):
+    """T20（P3）双出口之一：载荷 → 8 位灰度位图（含静区）。
+
+    视频帧路径用它免掉「imencode(PNG) → imdecode」这一趟往返：PNG 是无损的，
+    往返前后像素逐字节相同，所以直接拿矩阵位图写帧与写视频不改变任何产物字节。
+    """
+    return _qr_matrix_image(_qr_code_obj(data_bytes, version, err, mask_pattern))
+
+
+def _qr_png_bytes(data_bytes, version, err, mask_pattern=None):
+    """渲染二维码为 PNG 字节。`mask_pattern=None` → 用固定 mask（T20），显式传入则用该档。
+
+    与 `_qr_gray_image` 同一条构造/放大链路，只是末端多一次 imencode——PNG 只在**真要落盘**
+    （帧序列 / 静态图 / ZIP）时才编（T20 P3）。
+    """
+    return _qr_png_from_gray(_qr_gray_image(data_bytes, version, err, mask_pattern))
+
+
+def _qr_png_from_gray(img):
+    """灰度位图 → PNG 字节（与旧 `_qr_matrix_png` 末端完全同参，产物逐字节一致）。"""
+    _load_cv2()
+    _load_numpy()
+    # 压缩级别 9：二值图体积与旧 PIL 渲染同档（默认级别 1 会大一个数量级）
+    ok, buf = cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    if not ok:
+        raise RuntimeError("二维码 PNG 编码失败")
+    return buf.tobytes()
+
+
+def _qr_matrix_image(qr):
+    """QR 矩阵 → 8 位灰度位图（含静区；numpy 最近邻放大 box_size，模块边界锐利）。"""
     _load_numpy()
     _load_cv2()
     if np is None or cv2 is None:                   # 依赖缺失时由上层按旗标给出友好提示
@@ -2243,11 +2271,12 @@ def _qr_matrix_png(qr):
     box = int(getattr(qr, "box_size", None) or BOX_SIZE)
     if box > 1:
         img = np.kron(img, np.ones((box, box), dtype=np.uint8))
-    # 压缩级别 9：二值图体积与旧 PIL 渲染同档（默认级别 1 会大一个数量级）
-    ok, buf = cv2.imencode(".png", img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
-    if not ok:
-        raise RuntimeError("二维码 PNG 编码失败")
-    return buf.tobytes()
+    return img
+
+
+def _qr_matrix_png(qr):
+    """QR 矩阵 → 8 位灰度 PNG（旧口径保留：调用方只要 PNG 字节时走这一条）。"""
+    return _qr_png_from_gray(_qr_matrix_image(qr))
 
 
 def _selfcheck_available(is_v2):
@@ -2264,22 +2293,13 @@ def _selfcheck_available(is_v2):
     return bool(CV2_AVAILABLE and NUMPY_AVAILABLE)
 
 
-def _cv2_can_decode(png_bytes, expected=None):
+def _cv2_can_decode_img(img, expected=None):
     _load_cv2()
     _load_numpy()
-    """用 cv2 验证 PNG 字节中的二维码能否被解码（cv2 对个别 mask 有解码缺陷）。
-
-    expected 给定时升级为「逐字节比对」：能读出 ≠ 读对（cv2 实测对满容量
-    高熵载荷可能返回截断内容），只有解码结果与期望字节完全一致才算通过。
-    返回值三态（T18）：True 验过 / False 验不过 / **None 无从验证**（cv2 缺失）。
-    """
+    """cv2 回读**位图**（PNG 字节与内存矩阵位图两条路共用，T20 P3）；三态同 `_cv2_can_decode`。"""
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         return None      # T18：缺解码器＝未验证，不是验证通过
     try:
-        arr = np.frombuffer(png_bytes, dtype=np.uint8)
-        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-        if img is None:
-            return False
         detector = cv2.QRCodeDetector()
 
         def _match(text):
@@ -2301,6 +2321,44 @@ def _cv2_can_decode(png_bytes, expected=None):
         return False
 
 
+def _cv2_can_decode(png_bytes, expected=None):
+    _load_cv2()
+    _load_numpy()
+    """用 cv2 验证 PNG 字节中的二维码能否被解码（cv2 对个别 mask 有解码缺陷）。
+
+    expected 给定时升级为「逐字节比对」：能读出 ≠ 读对（cv2 实测对满容量
+    高熵载荷可能返回截断内容），只有解码结果与期望字节完全一致才算通过。
+    返回值三态（T18）：True 验过 / False 验不过 / **None 无从验证**（cv2 缺失）。
+    """
+    if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
+        return None      # T18：缺解码器＝未验证，不是验证通过
+    try:
+        arr = np.frombuffer(png_bytes, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if img is None:
+            return False
+    except Exception:
+        return False
+    return _cv2_can_decode_img(img, expected)
+
+
+def _zxing_can_decode_img(img, expected=None):
+    _load_cv2()
+    _load_numpy()
+    """zxing-cpp 回读**位图**（T20 P3：视频帧路径直接喂内存矩阵，免 PNG 往返）。"""
+    if not (ZXING_AVAILABLE and NUMPY_AVAILABLE and CV2_AVAILABLE):
+        return None      # T18：缺解码器＝未验证，交由调用方标 verified:false 并明示
+    try:
+        results = zxingcpp.read_barcodes(img)
+        if not results:
+            return False
+        if expected is None:
+            return True
+        return any(r.bytes == expected for r in results)
+    except Exception:
+        return False
+
+
 def _zxing_can_decode(png_bytes, expected=None):
     _load_cv2()
     _load_numpy()
@@ -2318,14 +2376,9 @@ def _zxing_can_decode(png_bytes, expected=None):
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img is None:
             return False
-        results = zxingcpp.read_barcodes(img)
-        if not results:
-            return False
-        if expected is None:
-            return True
-        return any(r.bytes == expected for r in results)
     except Exception:
         return False
+    return _zxing_can_decode_img(img, expected)
 
 
 def _render_verified_qr(data_bytes, version, err, out_path):
