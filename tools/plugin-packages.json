@@ -670,14 +670,56 @@
                                             "frontend_sha256":  "659edf0ebc1080631c900aedae41e4bfab4ba94dc8a1bb296ee09ec59559709c",
                                             "frontend_size":  1055325
                                         },
+                     "qr-video-decode":  {
+                                             "version":  "1.2.2",
+                                             "api_version":  1,
+                                             "file":  "JZToolsHub-qr-video-decode-后端-v1.2.2.zip",
+                                             "sha256":  "c7c9028b9dc0fad274160dd6aba4a330136c52b5ba06de13cee8c4a4fc8d0cd1",
+                                             "size":  105274,
+                                             "built_at":  "2026-10-10T23:30:14+08:00",
+                                             "code_sha256":  "5ee3e9c016c5dc6d200ef7ce6062753af61bf7af897f7ca51f13ed912df4c78f",
+                                             "file_count":  9,
+                                             "requires_restart":  false,
+                                             "file_hashes":  {
+                                                                 "plugins/qr-video-decode/backend/__init__.py":  "d41d8cd98f00b204",
+                                                                 "plugins/qr-video-decode/backend/requirements.txt":  "7500853833af2390",
+                                                                 "plugins/qr-video-decode/backend/routes.py":  "731f38bf5f66c6d2",
+                                                                 "plugins/qr-video-decode/frontend/app.js":  "8eab7a11cef5175a",
+                                                                 "plugins/qr-video-decode/frontend/index.html":  "3acf431804432fd2",
+                                                                 "plugins/qr-video-decode/frontend/jsqr.min.js":  "7c3c379dd1277bce",
+                                                                 "plugins/qr-video-decode/frontend/worker.js":  "15cca4cf97dcccf9",
+                                                                 "plugins/qr-video-decode/manifest.json":  "cf5367351d620bb8",
+                                                                 "plugins/qr-video-decode/README.md":  "cfe8e597fdfbe490"
+                                                             },
+                                             "assets":  {
+                                                            "frontend/app.js":  {
+                                                                                    "h":  "8eab7a11cef5175a",
+                                                                                    "v":  9,
+                                                                                    "referenced":  true
+                                                                                },
+                                                            "frontend/jsqr.min.js":  {
+                                                                                         "h":  "7c3c379dd1277bce",
+                                                                                         "v":  1,
+                                                                                         "referenced":  true
+                                                                                     },
+                                                            "frontend/worker.js":  {
+                                                                                       "h":  "15cca4cf97dcccf9",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   }
+                                                        },
+                                             "frontend_file":  "JZToolsHub-qr-video-decode-前端-v1.2.2.zip",
+                                             "frontend_sha256":  "5cd6827d651cf2fa6a35b29d6c5ddbb400815b19358a0e6109e19ceb945fa8c6",
+                                             "frontend_size":  73694
+                                         },
                      "admin":  {
-                                   "version":  "1.4.7",
+                                   "version":  "1.4.8",
                                    "api_version":  1,
-                                   "file":  "JZToolsHub-admin-后端-v1.4.7.zip",
-                                   "sha256":  "010259b9a77c346d2f9101bb085f1387a6c1d1ce41e3a43f5e4771a7fa1de79c",
-                                   "size":  203068,
-                                   "built_at":  "2026-10-10T23:29:49+08:00",
-                                   "code_sha256":  "9dd10f356e9a82451a84354a7e94a19c65ae84e7a82a2bbe690d17079e72e3e6",
+                                   "file":  "JZToolsHub-admin-后端-v1.4.8.zip",
+                                   "sha256":  "e6863b0071e0f2242115f9122a77c5f4ebad0986328d50e7730e014a69a28ea2",
+                                   "size":  203556,
+                                   "built_at":  "2026-10-11T00:43:54+08:00",
+                                   "code_sha256":  "3a7848ef6c831e851a2babf2f6b895bc90672bff9c5cd92140bc2d93ba0934b9",
                                    "file_count":  31,
                                    "requires_restart":  true,
                                    "file_hashes":  {
@@ -686,7 +728,7 @@
                                                        "plugins/admin/backend/data_migrate.py":  "bc5d1caefe8a2c16",
                                                        "plugins/admin/backend/plugin_admin.py":  "fc4bf331b2f5cd4b",
                                                        "plugins/admin/backend/requirements.txt":  "61b243a19f403736",
-                                                       "plugins/admin/backend/routes.py":  "8e408218e1dd99fc",
+                                                       "plugins/admin/backend/routes.py":  "b17b8946bbc5d9cf",
                                                        "plugins/admin/backend/store_admin.py":  "bb427b8e1eb70ee8",
                                                        "plugins/admin/frontend/admin.html":  "8d22bf26c0e4b5c6",
                                                        "plugins/admin/frontend/admin-department.html":  "953615b26ce74d8c",
@@ -710,7 +752,7 @@
                                                        "plugins/admin/frontend/js/admin-user.js":  "2333f96f98cc7b30",
                                                        "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
                                                        "plugins/admin/frontend/login.html":  "dd84cf7704d3be32",
-                                                       "plugins/admin/manifest.json":  "09b11ea9faf28af6",
+                                                       "plugins/admin/manifest.json":  "678dbae3feab29f0",
                                                        "plugins/admin/README.md":  "f5e452998bc2e9ef"
                                                    },
                                    "assets":  {
@@ -775,51 +817,9 @@
                                                                                "referenced":  false
                                                                            }
                                               },
-                                   "frontend_file":  "JZToolsHub-admin-前端-v1.4.7.zip",
-                                   "frontend_sha256":  "b9c5070bd2f9838c8219ad95ba34e8ccc36e84bf5b3765963cc97cac2899dac2",
-                                   "frontend_size":  80318
-                               },
-                     "qr-video-decode":  {
-                                             "version":  "1.2.2",
-                                             "api_version":  1,
-                                             "file":  "JZToolsHub-qr-video-decode-后端-v1.2.2.zip",
-                                             "sha256":  "c7c9028b9dc0fad274160dd6aba4a330136c52b5ba06de13cee8c4a4fc8d0cd1",
-                                             "size":  105274,
-                                             "built_at":  "2026-10-10T23:30:14+08:00",
-                                             "code_sha256":  "5ee3e9c016c5dc6d200ef7ce6062753af61bf7af897f7ca51f13ed912df4c78f",
-                                             "file_count":  9,
-                                             "requires_restart":  false,
-                                             "file_hashes":  {
-                                                                 "plugins/qr-video-decode/backend/__init__.py":  "d41d8cd98f00b204",
-                                                                 "plugins/qr-video-decode/backend/requirements.txt":  "7500853833af2390",
-                                                                 "plugins/qr-video-decode/backend/routes.py":  "731f38bf5f66c6d2",
-                                                                 "plugins/qr-video-decode/frontend/app.js":  "8eab7a11cef5175a",
-                                                                 "plugins/qr-video-decode/frontend/index.html":  "3acf431804432fd2",
-                                                                 "plugins/qr-video-decode/frontend/jsqr.min.js":  "7c3c379dd1277bce",
-                                                                 "plugins/qr-video-decode/frontend/worker.js":  "15cca4cf97dcccf9",
-                                                                 "plugins/qr-video-decode/manifest.json":  "cf5367351d620bb8",
-                                                                 "plugins/qr-video-decode/README.md":  "cfe8e597fdfbe490"
-                                                             },
-                                             "assets":  {
-                                                            "frontend/app.js":  {
-                                                                                    "h":  "8eab7a11cef5175a",
-                                                                                    "v":  9,
-                                                                                    "referenced":  true
-                                                                                },
-                                                            "frontend/jsqr.min.js":  {
-                                                                                         "h":  "7c3c379dd1277bce",
-                                                                                         "v":  1,
-                                                                                         "referenced":  true
-                                                                                     },
-                                                            "frontend/worker.js":  {
-                                                                                       "h":  "15cca4cf97dcccf9",
-                                                                                       "v":  null,
-                                                                                       "referenced":  false
-                                                                                   }
-                                                        },
-                                             "frontend_file":  "JZToolsHub-qr-video-decode-前端-v1.2.2.zip",
-                                             "frontend_sha256":  "5cd6827d651cf2fa6a35b29d6c5ddbb400815b19358a0e6109e19ceb945fa8c6",
-                                             "frontend_size":  73694
-                                         }
+                                   "frontend_file":  "JZToolsHub-admin-前端-v1.4.8.zip",
+                                   "frontend_sha256":  "253b510d3f051e29e411cb64d0da6f6ff7dd0c2830ff579fc8150c81d5cbd6ad",
+                                   "frontend_size":  80319
+                               }
                  }
 }
