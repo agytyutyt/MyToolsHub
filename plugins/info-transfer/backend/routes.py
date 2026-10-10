@@ -217,6 +217,14 @@ REPEAT_MIN = 1
 REPEAT_MAX = 30
 PAYLOAD_SAFETY = 0.9    # 单码载荷安全系数：实际载荷 ≤ 容量的 90%（满容量高熵载荷在部分
                         # 解码器下不稳定——cv2 回读实测可能整码失败甚至截断，见评估报告 §5.3）
+# T21（P2）：视频帧回读自检的抽样比例。10% → 单帧自检均值 90ms ≈ 9ms。
+FRAME_VERIFY_SAMPLE = 0.10
+
+
+def _verify_sampled(i, total):
+    """T21：第 i 帧是否做 zxing/cv2 回读自检——固定步长抽样（可重现），首帧与末帧必检。"""
+    step = max(1, int(round(1 / FRAME_VERIFY_SAMPLE)))
+    return i == 0 or i == max(total - 1, 0) or i % step == 0
 
 # ===================== 协议 v2（JZ2 二进制帧，T07/T08） =====================
 # v1：信封为 JSON 文本（data 经 base64 承载），FEC 帧头 12 字符 base64，全部 QR 内容
@@ -1981,11 +1989,21 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
             # 不因桌面解码器缺陷阻断生成。v2 二进制载荷只能用 zxing-cpp 验证。
             png = _qr_png_bytes(raw, version, err)
             verify = _zxing_can_decode if is_v2 else _cv2_can_decode
-            if not verify(png, expected=raw) and not verify(png):
-                for mask in range(8):
-                    png = _qr_png_bytes(raw, version, err, mask_pattern=mask)
-                    if verify(png):
-                        break
+            # T21（P2）：逐帧回读自检是单帧耗时的大头（≈90ms/帧），改为按 `FRAME_VERIFY_SAMPLE`
+            # 抽样做「回读 + 换 mask 兜底」，其余帧只做结构校验（渲染即合格）。依据：视频帧本身
+            # 有 FEC 兜底，且真实接收端（ML Kit / jsQR）比桌面 zxing 更稳，抽样足以拦住系统性坏 mask；
+            # 静态单码路径（`_render_verified_qr`）不受影响，仍逐张全检。
+            if _verify_sampled(i, total):
+                # 渲染并验证原始图像可解码（解码器对个别 mask 有缺陷，失败则换 mask）。
+                # 逐字节比对只对默认 mask 做一次（能读出 ≠ 读对，高熵载荷下可能
+                # 截断）；失败即降级宽松档换 mask——视频帧有 FEC 兜底，且高熵帧可能
+                # 所有 mask 都无法逐字节一致（真实接收端 ML Kit/jsQR 更稳），
+                # 不因桌面解码器缺陷阻断生成。v2 二进制载荷只能用 zxing-cpp 验证。
+                if not verify(png, expected=raw) and not verify(png):
+                    for mask in range(8):
+                        png = _qr_png_bytes(raw, version, err, mask_pattern=mask)
+                        if verify(png):
+                            break
             if frames_dir:
                 with open(os.path.join(frames_dir, f"frame_{i + 1:04d}.png"), "wb") as f:
                     f.write(png)

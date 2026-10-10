@@ -172,6 +172,21 @@ def main():
     r = client.post(f"{API}/encode/nonexistent000/video")
     check("未知任务 404", r.status_code == 404, str(r.status_code))
 
+    print("\n[6] T21 帧回读自检抽样")
+    orig = it.FRAME_VERIFY_SAMPLE
+    try:
+        it.FRAME_VERIFY_SAMPLE = 0.10
+        n = 100
+        hits = [i for i in range(n) if it._verify_sampled(i, n)]
+        check("首帧与末帧必检", 0 in hits and (n - 1) in hits, str(hits[:4]))
+        check("按 10% 固定步长抽样（含首末 ≤15%）", 10 <= len(hits) <= 15, f"{len(hits)} 帧")
+        check("抽样步长均匀（相邻间隔∈{9,10}）",
+              all(9 <= b - a <= 10 for a, b in zip(hits, hits[1:])), str(hits[:5]))
+        it.FRAME_VERIFY_SAMPLE = 1.0
+        check("比例=1.0 时回到逐帧全检", all(it._verify_sampled(i, n) for i in range(n)))
+    finally:
+        it.FRAME_VERIFY_SAMPLE = orig
+
     print(f"\n结果：PASS {PASSES[0]} / FAIL {len(FAILS)}")
     if FAILS:
         for f in FAILS:
