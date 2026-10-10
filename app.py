@@ -771,11 +771,9 @@ def get_aggregated_tools():
                 if card.get("description") is not None
                 else (m.get("description") or manifest.get("description", "")),
             "icon": icon,
-            # 兼容无彩色 emoji 字体的环境（Windows Server / 精简系统 / 旧浏览器）：
-            # manifest 的 emoji 图标无法渲染时，前端可回退到 /static/icons/<icon_file>
-            # 的 SVG 图标。注意：前端实际生效的回退表在 static/js/jz-icon.js
-            # （本字段目前无前端消费方，属待清理项，见 20260914评估报告 §5.2 P1-1）。
-            "icon_file": _icon_svg_file(icon),
+            # emoji 图标的 SVG 回退只在**前端一处**维护：static/js/jz-icon.js
+            # （旧方案在此再维护一份 emoji→文件名硬编码表并把 icon_file 塞进 /api/tools，
+            #  实测前端从不消费，等于两处映射表要同步维护——已删，见 20260914 评估报告 D-3）。
             "accent": card.get("accent") or manifest.get("accent", "#4285F4"),
             "entry": manifest.get("entry", "index.html"),
             "features": card.get("features")
@@ -790,36 +788,6 @@ def get_aggregated_tools():
         })
     tools.sort(key=lambda t: t["order"])
     return tools
-
-
-# 已知插件 emoji 图标 → SVG 文件名（static/icons/ 下已内置 Twemoji 图形）。
-# 用于**无彩色 emoji 字体的环境**（Windows Server、精简版系统、旧浏览器）回退显示；
-# 未知 emoji 返回 None，前端继续用 emoji 文本渲染。
-# 注：前端实际使用的是 static/js/jz-icon.js 内的同名映射（本表产物 icon_file 目前
-# 无消费方），新增插件图标时**只需在 jz-icon.js 登记**即可。
-_EMOJI_ICON_FILES = {
-    "⚙️": "2699.svg",          # admin 管理后台
-    "🔐": "1f510.svg",          # base64
-    "📋": "1f4cb.svg",          # case-report
-    "🌌": "1f30c.svg",          # character-graph
-    "🎨": "1f3a8.svg",          # color-picker
-    "🧩": "1f9e9.svg",          # json-formatter
-    "🗺️": "1f5fa.svg",          # map-marker
-    "#️⃣": "23-20e3.svg",        # md5-generator
-    "📢": "1f4e2.svg",          # notice-board
-    "📽️": "1f4fd.svg",          # qr-video-decode
-    "📝": "1f4dd.svg",          # shared-docs
-    "🛰️": "1f6f0.svg",          # trajectory-convert
-    "📚": "1f4da.svg",          # knowledge-base
-    "📨": "1f4e8.svg",          # info-transfer
-}
-
-
-def _icon_svg_file(icon):
-    """返回 emoji 对应的 SVG 文件名；未知/为空返回 None。"""
-    if not icon:
-        return None
-    return _EMOJI_ICON_FILES.get(icon)
 
 
 def _load_backend_module(plugin_id):

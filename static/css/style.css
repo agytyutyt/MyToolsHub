@@ -188,6 +188,18 @@ body {
   color: var(--md-on-surface-variant);
 }
 
+/* 功能降级角标（解耦设计 §5.3）：贴在卡片标题行右侧，用琥珀色与普通 feature chip 区分。
+   写 rgba 而不是 color-mix——随包分发的 WebView2 内核基线是 100.x，color-mix 要 111+。 */
+.chip.chip-degraded {
+  float: right;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: rgba(249, 171, 0, 0.18);
+  color: #b06000;
+  border: 1px solid rgba(249, 171, 0, 0.45);
+}
+
 /* ---------- 右侧分类快速定位标签 ---------- */
 .cat-nav {
   position: fixed;

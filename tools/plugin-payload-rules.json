@@ -14,9 +14,11 @@
     "template_suffix —— 配置模板命名后缀（命名纪律：模板不得叫 config.json，见 jztools_data.py:74）",
     "",
     "★ 测试与开发脚本一律不随包（2026-09-17 起）：exclude_globs 覆盖 test_*.py / *_test.py /",
-    "  conftest.py，exclude_files 覆盖 _build_phase8.py。插件内的单测（如 info-transfer 的",
+    "  conftest.py，exclude_files 覆盖 _build_phase8.py 与 _generate.py。插件内的单测（如 info-transfer 的",
     "  test_protocol_v2.py、knowledge-base 的 test_routes_preview.py）只服务开发与构建期，",
     "  目标机不需要；此前它们随整包与插件包一起分发（20260914 评估报告 P1-3 遗留项）。",
+    "  _generate.py＝trajectory-sketch/frontend/icons/ 下**生成 SVG 图标的开发脚本**（图标产物才是要",
+    "  交付的，生成器不是）——HANDOFF §4 P1-9 的最后一项，2026-10-10 L4-5 收口。",
     "",
     "★ exclude_dirs 里的 \"dev\" 是**保留名**：用于放只服务开发的验证服务（现为 tools/dev/ 下",
     "  的 pdf_research_server.py / e2e_kb_zoom_server.py —— 它们会伪造 admin 会话以隔离测试，",
@@ -35,7 +37,8 @@
     ".env",
     ".DS_Store",
     "Thumbs.db",
-    "_build_phase8.py"
+    "_build_phase8.py",
+    "_generate.py"
   ],
   "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old", "test_*.py", "*_test.py", "conftest.py",
                     "*.mp4", "yunfu*", "simulate_*.py", "generate_qr_stream.py"],

@@ -53,14 +53,20 @@ function hexToRgb(hex) {
 // 生成单个工具卡片 HTML
 function toolCard(tool) {
   const accents = tool.accent || '#4285F4';
+  // 健康角标（主体与插件解耦设计 §5.3 展示面）：blocked（不可运行）的插件后端已不放进
+  // 卡片清单，这里只会遇到 ok / degraded；degraded 必须让用户看出"少了一块功能"而不是
+  // 点进去才发现某个按钮失灵。
+  const degraded = tool.health === 'degraded'
+    ? `<span class="chip chip-degraded" title="${esc((tool.health_degraded || []).join('、'))}">功能降级</span>`
+    : '';
   return `
     <a class="tool-card" data-tool-id="${tool.id}" href="/tool/${encodeURIComponent(tool.id)}"
        style="--tool-accent: ${accents}; --tool-accent-rgb: ${hexToRgb(accents)};">
       <div class="tool-icon">${JZIcon.html(tool.icon || '🧩')}</div>
-      <div class="tool-name">${tool.name}</div>
-      <div class="tool-desc">${tool.description || ''}</div>
+      <div class="tool-name">${esc(tool.name)}${degraded}</div>
+      <div class="tool-desc">${esc(tool.description || '')}</div>
       <div class="tool-features">
-        ${(tool.features || []).map(f => `<span class="chip">${f}</span>`).join('')}
+        ${(tool.features || []).map(f => `<span class="chip">${esc(f)}</span>`).join('')}
       </div>
     </a>`;
 }

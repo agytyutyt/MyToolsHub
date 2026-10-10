@@ -46,7 +46,6 @@ def tool_item(m, order):
         "name": m.get("name") or m.get("_dir", ""),
         "description": m.get("description", ""),
         "icon": m.get("icon", "🧩"),
-        "icon_file": None,
         "accent": m.get("accent", "#4285F4"),
         "entry": entry.get("frontend") or "index.html",
         "features": m.get("features", []),
