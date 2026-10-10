@@ -111,6 +111,47 @@ new_post = ('        res = save_config(cfg)\n'
 assert old_post in s, "ff_config_post 锚点未命中"
 s = s.replace(old_post, new_post, 1)
 
+# 7) 客户端特有增强收编（批次 9 手工增强，2026-10-11 P3-1 D6-5 起纳入重生成）：
+#    mode="llm" 语义段失败 → 自动回退 hard 重跑并明示 degraded 原因（GLM §1.2 降级 UX，
+#    服务器侧无此分支——服务器永远在线，降级语义只属于客户端）；degraded 原因透传页面。
+old_err = ('    except llm_client.LLMError as e:\n'
+           '        set_task(task_id, status="error", detail=f"大模型过滤失败：{e}")\n')
+new_err = (
+    '    except llm_client.LLMError as e:\n'
+    '        if mode == "llm":\n'
+    '            # 存量适配（T-O9-8）降级 UX（GLM §1.2）：服务器语义段不可用 → 自动回退 hard\n'
+    '            # 重跑（本地精确/正则照常），任务明示 degraded 原因；网关缓存同步失效，\n'
+    '            # 后续请求在 _resolve_params 处即降级，不再空跑。\n'
+    '            try:\n'
+    '                jz_llm.invalidate()\n'
+    '                result = run_filter(headers, rows, "hard", keep, post_rules, session,\n'
+    '                                    exclude, use_suggested=False, store=MAPPINGS,\n'
+    '                                    username=username, suggest_limit=_mapping_limit())\n'
+    '                core.write_table(out_path, out_ext, result["headers2"], result["rows2"])\n'
+    '                set_task(task_id, status="done",\n'
+    '                         kept=result["kept"],\n'
+    '                         removed=result["removed"],\n'
+    '                         removed_detail=result["removed_detail"],\n'
+    '                         mappings_used=result["mappings_used"],\n'
+    '                         replace_count=result["replace_count"],\n'
+    '                         llm_used=False,\n'
+    '                         degraded=f"服务器语义过滤暂不可用，已按本地精确过滤执行（{e}）",\n'
+    '                         rows=len(result["rows2"]),\n'
+    '                         filename=os.path.basename(out_path),\n'
+    '                         download=f"{API_PREFIX}/download/{task_id}",\n'
+    '                         output_ext=out_ext)\n'
+    '                return\n'
+    '            except Exception:\n'
+    '                pass\n'
+    '        set_task(task_id, status="error", detail=f"大模型过滤失败：{e}")\n')
+assert old_err in s, "LLMError 分支锚点未命中"
+s = s.replace(old_err, new_err, 1)
+
+old_deg = '            payload["degraded"] = True\n'
+new_deg = '            payload["degraded"] = task.get("degraded")   # 降级原因透传（页面明示用）\n'
+assert old_deg in s, "degraded 透传锚点未命中"
+s = s.replace(old_deg, new_deg, 1)
+
 io.open(P, "w", encoding="utf-8", newline="").write(s)
 py_compile.compile(P, doraise=True)
 print("routes adapted + compile ok")
