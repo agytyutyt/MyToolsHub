@@ -537,15 +537,8 @@ def migrate_record_owner():
 
 # ===================== 路由注册 =====================
 
-def register(app) -> None:
-    """插件入口：由 JZToolsHub 主应用在启动时调用。"""
-    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
-    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
-    jz_deps.install_refresher(app, globals())
-    ensure_files()
-    # 存量记录归属迁移（一次性、幂等）：给历史记录补默认录入人 admin
-    with _LOCK:
-        migrate_record_owner()
+def _register_config_cluster(app) -> None:
+    """配置与解析簇：配置读写/连通性测试、组织架构、状态、解析与结果轮询。"""
 
     @app.get(f"{API_PREFIX}/config")
     def cr_get_config():
@@ -640,6 +633,10 @@ def register(app) -> None:
         if task.get("status") == "error":
             payload["detail"] = task.get("detail", "解析失败")
         return jsonify(payload)
+
+
+def _register_summary_cluster(app) -> None:
+    """汇总与台账簇：汇总聚合、月度清单、案件清单。"""
 
     @app.get(f"{API_PREFIX}/aggregate")
     def cr_aggregate():
@@ -742,6 +739,10 @@ def register(app) -> None:
                for cn, g in groups.items()]
         out.sort(key=lambda x: _case_sort_key(x["name"]))
         return jsonify({"ok": True, "count": len(out), "cases": out})
+
+
+def _register_records_cluster(app) -> None:
+    """记录 CRUD 簇：类别管理与战果记录增删改查、改案件归属、下载。"""
 
     @app.get(f"{API_PREFIX}/categories")
     def cr_categories_list():
@@ -980,6 +981,10 @@ def register(app) -> None:
                 return jsonify({"ok": False, "detail": "删除失败"}), 500
         return jsonify({"ok": True})
 
+
+def _register_export_cluster(app) -> None:
+    """导出与下载簇：Excel 导出、单条记录 JSON 下载。"""
+
     @app.get(f"{API_PREFIX}/export")
     def cr_export():
         """按当前筛选条件导出战果台账为 Excel（.xlsx）。
@@ -1084,3 +1089,21 @@ def register(app) -> None:
         return send_file(buf, as_attachment=True,
                          download_name=f"case-{rid}.json",
                          mimetype="application/json")
+
+
+def register(app) -> None:
+    """插件入口：由 JZToolsHub 主应用在启动时调用。"""
+    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
+    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
+    jz_deps.install_refresher(app, globals())
+    ensure_files()
+    # 存量记录归属迁移（一次性、幂等）：给历史记录补默认录入人 admin
+    with _LOCK:
+        migrate_record_owner()
+    # 分簇注册（P3-1 D5）：注册顺序与拆分前逐点一致
+    # （配置与解析 → 汇总与台账 → 记录 CRUD → 导出与下载；§6 建议「两簇」按注册顺序
+    #   切为四簇——装饰器执行顺序是行为的一部分，不得打乱重排）
+    _register_config_cluster(app)
+    _register_summary_cluster(app)
+    _register_records_cluster(app)
+    _register_export_cluster(app)
