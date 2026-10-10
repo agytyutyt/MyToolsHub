@@ -1109,6 +1109,15 @@
 
   /* ==================== 事件绑定 ==================== */
   function bindEvents() {
+    _bindToolbarEvents();
+    _bindFilterEvents();
+    _bindExportAndScrollEvents();
+    _bindManualEntryEvents();
+    _bindDialogEvents();
+  }
+
+  // 解析/清空/保存/测试/刷新/汇总/新增物品 + Ctrl+Enter
+  function _bindToolbarEvents() {
     $("#parseBtn").addEventListener("click", startParse);
     $("#reparseBtn").addEventListener("click", startParse);
     $("#clearBtn").addEventListener("click", function () {
@@ -1134,9 +1143,11 @@
         startParse();
       }
     });
+  }
 
-    // 缴获物品字段改动时实时预览拆分归类
-    // 作用域切换：我的战果 / 本部门 / 全部（仅超管显示「全部」）
+  // 缴获物品字段改动时实时预览拆分归类
+  // 作用域切换：我的战果 / 本部门 / 全部（仅超管显示「全部」）
+  function _bindFilterEvents() {
     $("#scope-toggle").addEventListener("click", function (e) {
       var btn = e.target.closest(".scope-btn");
       if (!btn) return;
@@ -1183,7 +1194,10 @@
       if (searchTimer) clearTimeout(searchTimer);
       searchTimer = setTimeout(renderCaseList, 150);
     });
+  }
 
+  // 导出 Excel 与台账滚动「返回」悬浮按钮
+  function _bindExportAndScrollEvents() {
     // 导出 Excel
     $("#exportExcel").addEventListener("click", function () {
       var url = "/api/case-report/export" + caseQuery();
@@ -1211,8 +1225,10 @@
       window.addEventListener("resize", updateScrollTop, false);
     }
     updateScrollTop();
+  }
 
-    // 手动录入：展开/收起手动录入卡片（与解析录入互斥显示），字段默认全空
+  // 手动录入：展开/收起手动录入卡片（与解析录入互斥显示），字段默认全空
+  function _bindManualEntryEvents() {
     var manualBtn = $("#manualBtn");
     var manualCard = $("#manualCard");
     var resultCard = $("#resultCard");
@@ -1234,8 +1250,10 @@
       });
       $("#manualSaveBtn").addEventListener("click", saveManualEntry);
     }
+  }
 
-    // 对话框：点遮罩或按 Esc 关闭
+  // 对话框：点遮罩或按 Esc 关闭
+  function _bindDialogEvents() {
     var dialog = $("#dialog");
     dialog.addEventListener("mousedown", function (e) {
       if (e.target === dialog) closeDialog();
