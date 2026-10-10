@@ -590,6 +590,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 Say "  C-14     ：静态纪律门禁（lint-static-rules --gate）通过"
 
+# ---------------- C-15：同源副本台账漂移检查（warning，不阻断；台账 §4.1 接构建链） ----------------
+# 宿主与 C-11/C-14 同侧：出包前跑 ledger-drift-check.py 把副本漂移提示出来。口径是「只 Warn 不 Die」——
+# 重复是合法成本，漂移提示属卫生项，不得拦住出包（有意演进按台账 §5 更新 §2 基准再跑 --sync-check）。
+$ledgerPrevEnc = $env:PYTHONIOENCODING
+$env:PYTHONIOENCODING = "utf-8"          # 输出含 [DRIFT]/中文，子进程按 UTF-8 输出才不被 Stop 偏好误判为错
+$ledgerOut = & $PythonCmd (Join-Path $Root "tools\e2e\ledger-drift-check.py") 2>&1
+$ledgerRc = $LASTEXITCODE
+if ([string]::IsNullOrWhiteSpace($ledgerPrevEnc)) { Remove-Item Env:\PYTHONIOENCODING -ErrorAction SilentlyContinue }
+else { $env:PYTHONIOENCODING = $ledgerPrevEnc }
+if ($ledgerRc -ne 0) {
+    Warn ("同源副本台账漂移（ledger-drift-check.py，非阻断）：`n      " +
+          (($ledgerOut | Select-Object -Last 12) -join "`n      ") + "`n" +
+          "        修法：① 真漂移同步修；② 有意演进按 docs\design\同源副本台账.md §5 更新 §2 基准，再跑 --sync-check 对齐两处。")
+} else {
+    Say "  C-15     ：同源副本台账漂移检查（ledger-drift-check）通过"
+}
+
 # ---------------- 版本与配置模板扫描 ----------------
 # 模板命名/目标映射与 jztools_data._TEMPLATE_SYNC 保持一致：
 #   plugins/<id>/backend/config.template.json → 数据根 plugins/<id>/config.json
