@@ -553,6 +553,203 @@
   // 流式连续布局：全部页面纵向排列（页间留间隔），占位框按各页比例预留尺寸，
   // 进入视口附近才渲染（IntersectionObserver，Chrome 72 可用）——
   // 大文档不卡首屏；页码指示随滚动更新，‹ › 改为滚动到上/下一页。
+  // ==================== PDF 侧栏（目录 / 缩略图，L4-4） ====================
+  // 只在 PDF 渲染器里构建；自带折叠把手，不占用底部公共 dock（其它格式没有这两类导航）。
+  // 两条硬性约束：
+  //  1) 缩略图**懒渲染**——大文档（几百页）一次性渲染会瞬间打出上百个 render 任务，
+  //     与正文视口渲染抢同一 worker；这里用 IntersectionObserver 只画滚到的那几张。
+  //  2) 缩略图任务与正文任务**分开记账**、各自有代次：缩放正文不得作废缩略图，反之亦然。
+  function buildPdfSidebar(doc, meta, total, goToPage, host) {
+    var side = document.createElement("aside");
+    side.className = "pdf-side collapsed";
+    side.setAttribute("aria-label", "PDF 目录与缩略图");
+    var handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "pdf-side-handle";
+    handle.title = "目录 / 缩略图";
+    handle.textContent = "☰";
+    var tabs = document.createElement("div");
+    tabs.className = "pdf-side-tabs";
+    var tabOutline = document.createElement("button");
+    tabOutline.type = "button";
+    tabOutline.className = "on";
+    tabOutline.textContent = "目录";
+    var tabThumbs = document.createElement("button");
+    tabThumbs.type = "button";
+    tabThumbs.textContent = "缩略图";
+    tabs.appendChild(tabOutline);
+    tabs.appendChild(tabThumbs);
+    var body = document.createElement("div");
+    body.className = "pdf-side-body";
+    var outlineBox = document.createElement("div");
+    outlineBox.className = "pdf-outline";
+    var thumbBox = document.createElement("div");
+    thumbBox.className = "pdf-thumbs hidden";
+    body.appendChild(outlineBox);
+    body.appendChild(thumbBox);
+    side.appendChild(handle);
+    side.appendChild(tabs);
+    side.appendChild(body);
+    host.appendChild(side);
+
+    var genT = 0;                 // 缩略图代次
+    var tasksT = {};              // page -> 缩略图 renderTask
+    var thumbIo = null;
+    var activePage = 1;
+
+    function setOpen(open) {
+      side.className = "pdf-side" + (open ? "" : " collapsed");
+      // 展开时给 #view-reader 让出左栏宽度：padding 加在缩放目标 .reader-frame **之外**，
+      // 不受 style.zoom 影响，页面会在剩余宽度里重新居中（窄屏改覆盖式，见 CSS）。
+      if (open) host.className = "view side-open"; else host.className = "view";
+    }
+    handle.onclick = function () {
+      var open = side.className.indexOf("collapsed") >= 0;
+      setOpen(open);
+      if (open) ensureThumbs();
+    };
+    function showTab(which) {
+      var isOutline = which === "outline";
+      tabOutline.className = isOutline ? "on" : "";
+      tabThumbs.className = isOutline ? "" : "on";
+      outlineBox.className = "pdf-outline" + (isOutline ? "" : " hidden");
+      thumbBox.className = "pdf-thumbs" + (isOutline ? " hidden" : "");
+      if (!isOutline) ensureThumbs();
+    }
+    tabOutline.onclick = function () { showTab("outline"); };
+    tabThumbs.onclick = function () { showTab("thumbs"); };
+
+    // ---- 目录：doc.getOutline() 递归；目标页**点击时**才解析（大目录解析全部目标会很慢） ----
+    // 实测本仓 vendor 的 pdf.js 3.32.2：子项字段是 `items`（不是 `children`），
+    // 页号解析方法是 `getPageIndex(ref)`（**没有** `pageIndex`）。两者都用过就静默失效——
+    // 目录点了不跳、嵌套层整个不见，且不报错，所以这里按实测形状写、留一份兼容回落。
+    function childItems(it) {
+      return it.items || it.children || [];
+    }
+
+    function destToPage(dest) {
+      var d = (typeof dest === "string") ? doc.getDestination(dest) : Promise.resolve(dest);
+      return Promise.resolve(d).then(function (arr) {
+        if (!arr || !arr[0]) return 0;
+        return doc.getPageIndex(arr[0]).then(function (ix) {
+          return (typeof ix === "number" && ix >= 0) ? ix + 1 : 0;
+        }, function () { return 0; });
+      }, function () { return 0; });
+    }
+
+    function walk(items, depth) {
+      (items || []).forEach(function (it) {
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "pdf-outline-item";
+        row.style.paddingLeft = (8 + depth * 14) + "px";
+        row.textContent = (it.title || "").trim() || "（无标题）";
+        var pending = it.dest;
+        row.onclick = function () {
+          destToPage(pending).then(function (p) {
+            if (p) { goToPage(p); setActive(p); }
+          });
+        };
+        outlineBox.appendChild(row);
+        var ks = childItems(it);
+        if (ks.length) walk(ks, depth + 1);
+      });
+    }
+    doc.getOutline().then(function (items) {
+      if (!items || !items.length) {
+        outlineBox.innerHTML = '<div class="pdf-side-empty">本文档无目录书签</div>';
+        tabOutline.textContent = "目录（无）";
+        return;
+      }
+      walk(items, 0);
+    }, function () {
+      outlineBox.innerHTML = '<div class="pdf-side-empty">目录读取失败</div>';
+    });
+
+    // ---- 缩略图：占位先建（高度按正文同一份 scale-1 viewport 比例算，避免滚动条跳动），
+    //      画布交给 IO 懒渲染 ----
+    var thumbBuilt = false;
+    function ensureThumbs() {
+      if (thumbBuilt) return;
+      thumbBuilt = true;
+      for (var i = 1; i <= total; i++) {
+        var cell = document.createElement("div");
+        cell.className = "pdf-thumb";
+        cell.setAttribute("data-page", i);
+        var m = meta[i];
+        if (m) cell.style.height = Math.round(112 * (m.height / m.width)) + "px";
+        var no = document.createElement("span");
+        no.className = "pdf-thumb-no";
+        no.textContent = String(i);
+        cell.appendChild(no);
+        (function (p, el) {
+          el.onclick = function () { goToPage(p); setActive(p); };
+        })(i, cell);
+        thumbBox.appendChild(cell);
+      }
+      if (window.IntersectionObserver) {
+        thumbIo = new IntersectionObserver(function (entries) {
+          entries.forEach(function (en) {
+            if (!en.isIntersecting) return;
+            drawThumb(Number(en.target.getAttribute("data-page")), en.target);
+          });
+        }, { root: body, rootMargin: "400px 0px" });
+        var cells = thumbBox.querySelectorAll(".pdf-thumb");
+        for (var ci = 0; ci < cells.length; ci++) thumbIo.observe(cells[ci]);
+      } else {
+        for (var fi = 1; fi <= Math.min(total, 20); fi++) drawThumb(fi, null);
+      }
+    }
+
+    function drawThumb(p, cell) {
+      if (!cell) cell = thumbBox.querySelector('.pdf-thumb[data-page="' + p + '"]');
+      if (!cell || cell.getAttribute("drawn") === "1") return;
+      cell.setAttribute("drawn", "1");
+      var g = genT;
+      doc.getPage(p).then(function (pg) {
+        if (g !== genT) return null;
+        var base = pg.getViewport({ scale: 1 });
+        var s = 112 / base.width;
+        var vp = pg.getViewport({ scale: s });
+        var cv = document.createElement("canvas");
+        cv.width = Math.max(1, Math.round(vp.width));
+        cv.height = Math.max(1, Math.round(vp.height));
+        var task = pg.render({ canvasContext: cv.getContext("2d"), viewport: vp });
+        tasksT[p] = task;
+        return task.promise.then(function () {
+          delete tasksT[p];
+          if (g !== genT) return null;
+          cell.insertBefore(cv, cell.firstChild);
+          return null;
+        });
+      }, function () { /* 单页缩略图失败不影响其余 */ });
+    }
+
+    function setActive(p) {
+      activePage = p;
+      var olds = side.querySelectorAll(".act");
+      for (var i = 0; i < olds.length; i++) olds[i].className = olds[i].className.replace(/\bact\b/g, "").replace(/\s+/g, " ").replace(/^\s|\s$/g, "");
+      var cur = thumbBox.querySelector('.pdf-thumb[data-page="' + p + '"]');
+      if (cur) {
+        cur.className += " act";
+        if (thumbBox.offsetParent !== null && thumbIo) {
+          var r = cur.getBoundingClientRect(), br = body.getBoundingClientRect();
+          if (r.top < br.top || r.bottom > br.bottom) cur.scrollIntoView({ block: "center" });
+        }
+      }
+    }
+    return {
+      setActive: setActive,
+      destroy: function () {
+        genT++;
+        if (thumbIo) { try { thumbIo.disconnect(); } catch (e) { /* 忽略 */ } }
+        for (var tp in tasksT) { try { tasksT[tp].cancel(); } catch (e) { /* 忽略 */ } }
+        host.className = "view";          // 别让让位 padding 残留到下一个文档
+        if (side.parentNode) side.parentNode.removeChild(side);
+      }
+    };
+  }
+
   function renderPdf(file, opts) {
     var src = (opts && opts.url) ? fetchUrl(file, opts.url) : fetchRaw(file);
     return Promise.all([src, loadScript(V + "pdf/pdf.min.js?v=1")])
@@ -642,6 +839,12 @@
             wraps[i] = w;
           }
 
+          // 侧栏（目录 / 缩略图）：占位框建好后即可构建——它只需要 scale-1 的 viewport 比例。
+          // 挂 #view-reader（缩放目标 .reader-frame 之外），与 md-toc 同一套挂载方式。
+          var side = buildPdfSidebar(doc, meta, total, function (p) { scrollToPage(p); },
+                                     $("view-reader"));
+          side.setActive(1);
+
           function enqueue(p) {
             if (!rendered[p] && queue.indexOf(p) < 0) { queue.push(p); pump(); }
           }
@@ -722,6 +925,7 @@
             }
             if (best !== current) {
               current = best;
+              if (side) side.setActive(current);
               if (callbacks.onPage) callbacks.onPage(current, total, scale);
             }
           }
@@ -779,6 +983,7 @@
             var top = wraps[p].getBoundingClientRect().top + window.pageYOffset - 70;
             window.scrollTo(0, top);
             scheduleSnap(150);   // 跳页后滚动位置变化，重校一次设备像素相位
+            if (side) side.setActive(p);
             if (callbacks.onPage) callbacks.onPage(current, total, scale);
           }
 
@@ -833,6 +1038,7 @@
           };
           onCleanup(function () {
             gen++;
+            if (side) { try { side.destroy(); } catch (e) { /* 忽略 */ } }
             if (io) { try { io.disconnect(); } catch (e) { /* 忽略 */ } }
             if (scrollBound) window.removeEventListener("scroll", onScroll, false);
             if (resizeBound) window.removeEventListener("resize", onResizeSnap, false);
