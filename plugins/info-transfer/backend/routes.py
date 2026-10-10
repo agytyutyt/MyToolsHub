@@ -357,6 +357,10 @@ _executor = ThreadPoolExecutor(max_workers=WORKERS)
 TASKS = {}                      # 内存镜像（热路径）；worker 启动时从 .task_cache/*.json 载回
 TASKS_LOCK = threading.Lock()
 TASK_TTL_SECONDS = 30 * 60
+MAX_QUEUED = 8                  # T25（P7）：在飞（排队 + 运行）任务上限，超出即拒绝新提交
+QUEUE_FULL_DETAIL = "服务繁忙，请稍后重试"
+CLEAN_INTERVAL_SECONDS = 60     # T25：清理节流窗口，不再每次提交都遍历全目录
+_last_clean_at = 0.0
 
 _TASK_DIR = jztools_data.get_data_root_dir("plugins", "info-transfer", ".task_cache")
 
@@ -492,6 +496,68 @@ def set_task(task_id, **kwargs):
 def get_task(task_id):
     with TASKS_LOCK:
         return TASKS.get(task_id)      # 内存镜像（启动已载回）；磁盘态由 _task_persist 保证
+
+
+def _inflight_locked():
+    """在飞任务数：排队 + 运行，另计「主任务已 done 但按需视频仍在生成」的占用。"""
+    return sum(1 for t in TASKS.values()
+               if t.get("status") in ("pending", "running")
+               or t.get("video_status") == "building")
+
+
+def _inflight():
+    with TASKS_LOCK:
+        return _inflight_locked()
+
+
+def _reserve_slot(task_id, created_by):
+    """T25 队列准入：在飞达 MAX_QUEUED 即拒绝（返回 False，不留任何任务痕迹）；
+    通过则在同一把锁内把任务占位成 pending。
+
+    计数与占位必须同锁——分两步的话并发提交会同时通过检查，「有界」实际又变回无界。
+    """
+    with TASKS_LOCK:
+        n = _inflight_locked()
+        if n >= MAX_QUEUED:
+            return False, n
+        t = {"status": "pending", "progress": 0.0,
+             "created_at": time.time(), "created_by": created_by}
+        TASKS[task_id] = t
+        _task_persist(task_id, t)
+        return True, n + 1
+
+
+def _release_slot(task_id):
+    """占位后未能真正入队（原件写盘失败等）→ 立即让位，不让空任务白占一个配额。"""
+    with TASKS_LOCK:
+        TASKS.pop(task_id, None)
+    _remove_task_files(task_id)
+
+
+def _queue_pos(task_id, task):
+    """T25 排队位次：排在本任务之前的 pending 数 + 1（同刻按 task_id 定序，保证回显稳定）。"""
+    mine = (task.get("created_at", 0.0), task_id)
+    with TASKS_LOCK:
+        ahead = sum(1 for tid, t in TASKS.items()
+                    if tid != task_id and t.get("status") == "pending"
+                    and (t.get("created_at", 0.0), tid) < mine)
+    return ahead + 1
+
+
+def _maintain_tasks():
+    """T25：内存 TTL 清理 + 磁盘 TTL/配额回收合并为「距上次 >60s 才做」。
+
+    此前每次提交都要 listdir + 逐项 getmtime 全量遍历，任务目录条目多时提交延迟被清理吃掉；
+    节流后最坏情况是过期文件多留一个窗口（配额回收另有任务侧兜底，不影响正确性）。
+    """
+    global _last_clean_at
+    now = time.time()
+    if now - _last_clean_at < CLEAN_INTERVAL_SECONDS:
+        return False
+    _last_clean_at = now
+    cleanup_tasks()
+    _clean_task_files()
+    return True
 
 
 def cleanup_tasks():
@@ -3282,11 +3348,12 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": "后端缺少视频编码依赖（zfec / opencv-python / numpy）"}), 503
 
         task_id = uuid.uuid4().hex[:12]
-        cleanup_tasks()
-        _clean_task_files()
+        _maintain_tasks()
         viewer = _viewer()
-        set_task(task_id, status="pending", progress=0.0, created_at=time.time(),
-                 created_by=(viewer or {}).get("username", ""))
+        admitted, q = _reserve_slot(task_id, (viewer or {}).get("username", ""))
+        if not admitted:
+            return jsonify({"ok": False, "detail": QUEUE_FULL_DETAIL,
+                            "code": "QUEUE_FULL", "queue": q}), 429
         _executor.submit(_run_encode, task_id, mode, filename,
                          file_bytes, text_input, version, frame_repeat, raw_mode,
                          rebuild_mode, want_video)
@@ -3314,6 +3381,10 @@ def register(app) -> None:
             return jsonify({"ok": False, "detail": "帧序列已被清理，请重新封装"}), 409
         if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
             return jsonify({"ok": False, "detail": "后端缺少视频编码依赖（opencv-python / numpy）"}), 503
+        q = _inflight()
+        if q >= MAX_QUEUED:                      # T25：按需视频同样占用同一个 worker 池
+            return jsonify({"ok": False, "detail": QUEUE_FULL_DETAIL,
+                            "code": "QUEUE_FULL", "queue": q}), 429
         set_task(task_id, video_status="building", video_progress=0.0, video_detail="")
         _executor.submit(_run_build_video, task_id)
         return jsonify({"ok": True, "video_status": "building"})
@@ -3331,6 +3402,8 @@ def register(app) -> None:
             "progress": task.get("progress", 0.0),
             "stage": task.get("stage", "") or "",
         }
+        if task.get("status") == "pending":
+            payload["queue_pos"] = _queue_pos(task_id, task)   # T25：排队可见
         if task.get("estimate"):
             payload["estimate"] = task["estimate"]
         if task.get("rebuilt"):
@@ -3494,15 +3567,20 @@ def register(app) -> None:
         if dtype == "video":
             # 视频逐帧解码较慢 → 后台任务
             task_id = uuid.uuid4().hex[:12]
-            cleanup_tasks()
-            _clean_task_files()                    # T30：TTL + 容量配额（含视频原件落盘前）
+            _maintain_tasks()                    # T30：TTL + 容量配额（T25 起按窗口节流）
+            viewer = _viewer()
+            admitted, q = _reserve_slot(task_id, (viewer or {}).get("username", ""))
+            if not admitted:
+                return jsonify({"ok": False, "detail": QUEUE_FULL_DETAIL,
+                                "code": "QUEUE_FULL", "queue": q}), 429
             os.makedirs(_TASK_DIR, exist_ok=True)
             tmp_video = _task_file(task_id, os.path.splitext(f.filename)[1] or ".mp4")
-            with open(tmp_video, "wb") as vf:
-                vf.write(file_bytes)
-            viewer = _viewer()
-            set_task(task_id, status="pending", progress=0.0, created_at=time.time(),
-                     created_by=(viewer or {}).get("username", ""))
+            try:
+                with open(tmp_video, "wb") as vf:
+                    vf.write(file_bytes)
+            except OSError:
+                _release_slot(task_id)
+                raise
             _executor.submit(_run_decode, task_id, tmp_video)
             return jsonify({"ok": True, "task_id": task_id, "async": True})
 
@@ -3564,6 +3642,8 @@ def register(app) -> None:
             "progress": task.get("progress", 0.0),
             "stage": task.get("stage", "") or "",
         }
+        if task.get("status") == "pending":
+            payload["queue_pos"] = _queue_pos(task_id, task)   # T25：排队可见
         if task.get("status") == "done":
             payload.update({
                 "fmt": task.get("fmt"),

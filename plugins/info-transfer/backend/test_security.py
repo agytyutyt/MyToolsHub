@@ -13,6 +13,8 @@
       非加密 PDF 页数上限与提取耗时预算；正常文本 PDF 照常提取。
   T30 响应头与落盘治理：框架级安全响应头（nosniff / SAMEORIGIN / Referrer-Policy /
       保守 CSP）、MAX_CONTENT_LENGTH 兜底 413；任务临时目录容量配额按 mtime 回收。
+  T25 队列准入：在飞（排队+运行，含按需视频）达上限即 429 + code=QUEUE_FULL 且不留任务痕迹；
+      并发提交严格封顶（计数与占位同锁）；pending 态回显排队位次；清理按 60s 窗口节流。
 
 运行：python test_security.py（unittest 风格；失败非零退出）
 依赖：flask（必需）；qrcode / zxing-cpp / opencv-python / numpy（T26 正例）；
@@ -696,6 +698,7 @@ class TestTaskDirQuota(unittest.TestCase):
             calls.append(1)
             return orig()
 
+        it._last_clean_at = 0.0          # T25 后清理按 60s 窗口节流，清零窗口再验接线
         with mock.patch.object(it, "_clean_task_files", spy):
             r = post_file(f"{API}/encode", "配额接线".encode("utf-8"),
                           "quota.txt", {"mode": "static"})
@@ -812,6 +815,124 @@ class TestErrorCodesAndCancel(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.get_json().get("ok"))
         self.assertTrue(it.get_task(tid).get("cancel"))
+
+
+class TestQueueAdmission(unittest.TestCase):
+    """T25（P7）：有界队列准入、排队位次回显、清理按窗口节流。"""
+
+    def setUp(self):
+        self._saved = dict(it.TASKS)
+        self._saved_clean = it._last_clean_at
+        it.TASKS.clear()
+        it._last_clean_at = 0.0
+
+    def tearDown(self):
+        it.TASKS.clear()
+        it.TASKS.update(self._saved)
+        it._last_clean_at = self._saved_clean
+
+    def _fill(self, n, status="pending"):
+        now = time.time()
+        for i in range(n):
+            it.TASKS["fill%02d" % i] = {"status": status, "progress": 0.0,
+                                        "created_at": now, "created_by": TEST_USER["username"]}
+
+    def _submit(self, text="T25 队列"):
+        return CLIENT.post(f"{API}/encode", data={"mode": "static", "text": text})
+
+    def test_01_over_limit_returns_429_and_leaks_no_task(self):
+        """在飞达上限：429 + 机器可读 code + 可读 detail，且被拒请求不留下任何任务态。"""
+        self._fill(it.MAX_QUEUED)
+        before = set(it.TASKS)
+        r = self._submit()
+        self.assertEqual(r.status_code, 429, r.data)
+        j = r.get_json()
+        self.assertFalse(j["ok"])
+        self.assertEqual(j["code"], "QUEUE_FULL")
+        self.assertIn("服务繁忙", j["detail"])
+        self.assertEqual(j["queue"], it.MAX_QUEUED)
+        self.assertEqual(set(it.TASKS), before, "被拒的请求不应产生任务（否则 TASKS 无界堆积）")
+
+    def test_04_slot_release_admits_next(self):
+        """腾出一个坑即放行——上限是「在飞数」而非累计数，历史 done 任务不占配额。"""
+        self._fill(it.MAX_QUEUED)
+        with mock.patch.object(it._executor, "submit", lambda *a, **k: None):
+            self.assertEqual(self._submit().status_code, 429)
+            it.TASKS.pop("fill00")
+            r = self._submit()
+            self.assertEqual(r.status_code, 200, r.data)
+
+    def test_05_running_and_building_occupy_slots(self):
+        """占坑口径：running 占坑、done 不占坑，但 done + video_status=building 仍占坑
+        （按需视频走的是同一个 worker 池，不计入就会被绕开上限）。"""
+        it.TASKS["run"] = {"status": "running", "created_at": time.time()}
+        self.assertEqual(it._inflight(), 1)
+        it.TASKS["run"]["status"] = "done"
+        self.assertEqual(it._inflight(), 0)
+        it.TASKS["run"]["video_status"] = "building"
+        self.assertEqual(it._inflight(), 1)
+
+    def test_06_build_video_rejected_when_full(self):
+        """按需生成视频同样受准入约束（429），不再无声排队。"""
+        tid = "vodfull00001"
+        it.TASKS[tid] = {"status": "done", "output_type": "video", "frame_count": 3,
+                         "created_at": time.time(), "created_by": TEST_USER["username"]}
+        os.makedirs(it._frames_dir(tid), exist_ok=True)
+        self._fill(it.MAX_QUEUED)                    # 另凑满 MAX（本任务 done，不占坑）
+        r = CLIENT.post(f"{API}/encode/{tid}/video")
+        self.assertEqual(r.status_code, 429, r.data)
+        self.assertEqual(r.get_json()["code"], "QUEUE_FULL")
+        self.assertNotEqual((it.get_task(tid) or {}).get("video_status"), "building")
+
+    def test_07_queue_pos_visible_while_pending(self):
+        """排队位次：pending 态回显「第 n 位」，按提交先后定序，前面的完成后位次前移。"""
+        with mock.patch.object(it._executor, "submit", lambda *a, **k: None):
+            ids = [self._submit("位次-%d" % i).get_json()["task_id"] for i in range(3)]
+        base = time.time()
+        for i, tid in enumerate(ids):
+            it.TASKS[tid]["created_at"] = base + i      # 显式定序，避免同刻时间戳带来的随机序
+        for exp, tid in enumerate(ids, start=1):
+            j = CLIENT.get(f"{API}/task/{tid}").get_json()
+            self.assertEqual(j["status"], "pending")
+            self.assertEqual(j["queue_pos"], exp, f"{tid} 应排第 {exp} 位")
+        it.TASKS[ids[0]]["status"] = "running"
+        self.assertEqual(CLIENT.get(f"{API}/task/{ids[1]}").get_json()["queue_pos"], 1)
+        self.assertNotIn("queue_pos", CLIENT.get(f"{API}/task/{ids[0]}").get_json())
+
+    def test_08_concurrent_admission_caps_exactly_at_max(self):
+        """0917 §T25 验收：并发 20 个提交，只有 MAX_QUEUED 个被受理。
+
+        计数与占位必须同锁完成——分两步的话这里会超过上限，「有界」实际仍是无界。
+        """
+        accepted = []
+        rejected = []
+        clients = [make_app().test_client() for _ in range(20)]   # 预先建好，线程内不做注册
+        with mock.patch.object(it._executor, "submit", lambda *a, **k: None):
+            def one(i):
+                r = clients[i].post(
+                    f"{API}/encode", data={"mode": "static", "text": "并发-%d" % i})
+                (accepted if r.status_code == 200 else rejected).append(r.status_code)
+
+            from concurrent.futures import ThreadPoolExecutor as _TPE
+            with _TPE(max_workers=20) as ex:
+                list(ex.map(one, range(20)))
+        self.assertEqual(len(accepted), it.MAX_QUEUED,
+                         f"应受理 {it.MAX_QUEUED} 个，实得 {len(accepted)}")
+        self.assertEqual(len(rejected), 20 - it.MAX_QUEUED)
+        self.assertTrue(all(c == 429 for c in rejected))
+        self.assertEqual(it._inflight(), it.MAX_QUEUED)
+
+    def test_09_cleanup_is_throttled(self):
+        """清理按 60s 窗口节流：窗口内不重复遍历任务目录，超窗后恢复。"""
+        calls = []
+        with mock.patch.object(it, "_clean_task_files", lambda: calls.append("disk")), \
+             mock.patch.object(it, "cleanup_tasks", lambda: calls.append("mem")):
+            self.assertTrue(it._maintain_tasks(), "首次（或窗口已过）必须清理")
+            self.assertFalse(it._maintain_tasks(), "窗口内不得再遍历目录")
+            self.assertEqual(calls, ["mem", "disk"])
+            it._last_clean_at = time.time() - it.CLEAN_INTERVAL_SECONDS - 1
+            self.assertTrue(it._maintain_tasks(), "超过窗口必须重新清理")
+        self.assertEqual(len(calls), 4)
 
 
 class TestSelfcheckVisibility(unittest.TestCase):

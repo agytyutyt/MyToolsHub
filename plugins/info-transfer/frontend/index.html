@@ -693,13 +693,24 @@
     INCOMPLETE_PAGES: "请补扫缺失的页，或改用视频/APP 通道",
     FEC_INSUFFICIENT: "缺码过多：请放慢播放速度、重拍或用手机 APP 扫码",
     INTEGRITY_UNVERIFIED: "码流校验失败：请重新生成二维码后重传",
-    QUEUE_FULL: "任务队列已满，请稍候重试",
+    QUEUE_FULL: "队列已满，请等前面的任务完成后再提交",
     INTERNAL: "服务器内部错误，请查看服务日志",
   };
   function decodeErrorText(resp, fallback) {
     const detail = (resp && resp.detail) || fallback || "解析失败";
     const guide = resp && resp.code ? DEC_GUIDE[resp.code] : "";
-    return guide ? detail + "｜" + guide : detail;
+    let text = guide ? detail + "｜" + guide : detail;
+    if (resp && resp.code === "QUEUE_FULL") {     // T25：把「在飞几个」说清楚，便于判断等多久
+      const n = Math.max(0, Number(resp.queue) || 0);
+      if (n) text += `（当前 ${n} 个任务在跑或排队）`;
+    }
+    return text;
+  }
+
+  /* T25：排队可见——pending 态后端回 queue_pos，前端显示「排队中（第 n 位）」 */
+  function queueText(s) {
+    const n = Math.max(0, Number(s && s.queue_pos) || 0);
+    return n > 1 ? `排队中（第 ${n} 位）…` : "排队中…";
   }
 
   /* ---------- 内凹胶囊切换 ---------- */
@@ -907,7 +918,8 @@
     try {
       const d = await fetchJson("/api/info-transfer/encode", { method: "POST", body: fd });
       if (!d.ok) {
-        job.status = "error"; job.failed = true; job.stage = d.detail || "提交失败";
+        job.status = "error"; job.failed = true;
+        job.stage = d.code === "QUEUE_FULL" ? decodeErrorText(d, "提交失败") : (d.detail || "提交失败");
       } else {
         job.taskId = d.task_id;
         job.status = "running"; job.stage = "排队中…";
@@ -935,8 +947,9 @@
           if (s.status === "pending" || s.status === "running") {
             job.status = "running";
             job.progress = s.progress || 0;
+            const st = s.status === "pending" ? queueText(s) : (s.stage || "处理中…");
             if (s.estimate && !job.estimate) { job.estimate = s.estimate; dirty = true; }
-            if (job.stage !== (s.stage || "处理中…")) { job.stage = s.stage || "处理中…"; dirty = true; }
+            if (job.stage !== st) { job.stage = st; dirty = true; }
           } else {
             job.status = s.status;   // done / error / canceled
             job.done = true; dirty = true;
@@ -1833,7 +1846,8 @@
         }
         if (s.status === "pending" || s.status === "running") {
           setDecodeCancel(true);
-          showDecProgress(Math.round((s.progress || 0) * 100), s.stage || "解析中…");
+          const st = s.status === "pending" ? queueText(s) : (s.stage || "解析中…");
+          showDecProgress(Math.round((s.progress || 0) * 100), st);
         } else if (s.status === "done") {
           setDecodeCancel(false);
           showDecProgress(100, "解析完成");
