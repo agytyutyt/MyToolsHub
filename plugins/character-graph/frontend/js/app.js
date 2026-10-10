@@ -172,7 +172,21 @@ function buildGraph(graph) {
   const characters = graph.characters || [];
   const relationships = graph.relationships || [];
 
-  /* 节点度（连接数） */
+  const layout = _computeCharacterLayout(characters, relationships);
+  const posByIndex = _addNodeMeshes(layout);
+
+  relationshipTypes = _collectRelationshipTypes(relationships);
+  _addRelationLines(relationships, posByIndex);
+
+  _renderLegend(relationships);
+
+  fitCamera(layout.positions);
+  controls.autoRotate = true;
+  log(`成功生成立体图：${layout.n} 个人物，${relationships.length} 条关系`, "ok");
+}
+
+/* 节点度（连接数）、按度排序与球面分布布局 */
+function _computeCharacterLayout(characters, relationships) {
   const degree = {};
   characters.forEach((c) => (degree[c.name] = 0));
   relationships.forEach((r) => {
@@ -187,14 +201,17 @@ function buildGraph(graph) {
   const n = sorted.length;
   const radius = n <= 1 ? 4 : 6 + Math.log2(n + 1) * 1.2;
   const positions = fibSpherePositions(n, radius);
-  const posByIndex = {};
-
   const maxDeg = Math.max(1, ...Object.values(degree));
+  return { degree, sorted, n, positions, maxDeg };
+}
 
-  sorted.forEach((ch, i) => {
-    const deg = degree[ch.name] || 0;
-    const t = deg / maxDeg; // 0~1 重要度
-    const pos = positions[i];
+/* 节点小球 + 辉光精灵 + 文字标签；返回名字→位置索引表 */
+function _addNodeMeshes(layout) {
+  const posByIndex = {};
+  layout.sorted.forEach((ch, i) => {
+    const deg = layout.degree[ch.name] || 0;
+    const t = deg / layout.maxDeg; // 0~1 重要度
+    const pos = layout.positions[i];
 
     const hex = new THREE.Color("#5b8cff").lerp(
       new THREE.Color("#ffd93d"),
@@ -238,19 +255,26 @@ function buildGraph(graph) {
     });
     posByIndex[ch.name] = pos;
   });
+  return posByIndex;
+}
 
-  /* 连线 */
+/* 收集关系类型（保持首现顺序）并写入模块级 relationshipTypes */
+function _collectRelationshipTypes(relationships) {
   const typeSet = [];
   relationships.forEach((r) => {
     if (!typeSet.includes(r.type)) typeSet.push(r.type);
   });
   relationshipTypes = typeSet;
+  return typeSet;
+}
 
+/* 关系弧线（主线 + 发光弱线叠加） */
+function _addRelationLines(relationships, posByIndex) {
   relationships.forEach((r) => {
     const a = posByIndex[r.source];
     const b = posByIndex[r.target];
     if (!a || !b) return;
-    const color = new THREE.Color(typeColor(r.type, typeSet.indexOf(r.type)));
+    const color = new THREE.Color(typeColor(r.type, relationshipTypes.indexOf(r.type)));
     const strength = Math.max(0.15, Math.min(1, (r.strength || 5) / 10));
 
     /* 弧线让图形更立体 */
@@ -279,8 +303,10 @@ function buildGraph(graph) {
     const glowLine = new THREE.Line(geo.clone(), glowMat);
     groups.edges.add(glowLine);
   });
+}
 
-  /* 图例 */
+/* 关系类型图例 */
+function _renderLegend(relationships) {
   const legendEl = $("legend");
   if (relationshipTypes.length === 0) {
     legendEl.innerHTML = '<div class="none">暂无关系数据</div>';
@@ -296,11 +322,6 @@ function buildGraph(graph) {
       legendEl.appendChild(row);
     });
   }
-
-  /* 相机取景 */
-  fitCamera(positions);
-  controls.autoRotate = true;
-  log(`成功生成立体图：${n} 个人物，${relationships.length} 条关系`, "ok");
 }
 
 function fitCamera(positions) {
