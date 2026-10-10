@@ -125,7 +125,7 @@ def ac1_main_package(zip_path):
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
     dirs = sorted({n.split("/")[1] for n in names if n.startswith("plugins/") and n.count("/") >= 2})
-    check("AC-1", dirs == ["admin"], "主包 plugins/ = %s（期望 ['admin']）；体积 %.1f MB"
+    check("AC-1", dirs == ["admin", "store"], "主包 plugins/ = %s（期望 ['admin', 'store']）；体积 %.1f MB"
           % (dirs, os.path.getsize(zip_path) / 1048576))
     check("AC-1", not any(n.startswith("wheels/") for n in names), "不含 wheels/")
     check("AC-1", not any(n.startswith("tools/dev/") for n in names), "不含 tools/dev/")
