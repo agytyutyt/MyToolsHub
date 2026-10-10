@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
 import time
 import zipfile
+
+log = logging.getLogger("jztools.plugin.admin")
 
 try:                                  # 框架模块：状态登记 / 模板同步 / 待重启标记
     import jztools_data
@@ -605,16 +608,16 @@ def apply_package(base_dir, data_root, inspected, purge_unknown=False, update_en
                 try:
                     jztools_data.mark_plugin_restart_pending(pid, inspected.get("restart_reason", ""))
                 except Exception:
-                    pass
+                    log.warning("标记插件 %s 待重启失败（部署已完成，重启标记可能缺失）", pid, exc_info=True)
             except Exception:
-                pass
+                log.warning("标记插件 %s 待重启失败（部署已完成，重启标记可能缺失）", pid, exc_info=True)
 
     # ⑥ 配置模板就地补键（不等重启；同一份 sync_plugin_templates 实现）
     if jztools_data is not None:
         try:
             jztools_data.sync_plugin_templates(base_dir, data_root)
         except Exception:
-            pass
+            log.warning("插件 %s 配置模板就地补键失败（下次启动会重试）", pid, exc_info=True)
 
     # ⑦ 备份轮转 + 清理暂存
     prune_backups(data_root, pid)

@@ -112,7 +112,7 @@ async function render() {
       section.id = 'cat-' + cat.id;
       section.dataset.category = cat.id;
       section.innerHTML = `
-        <h2>${cat.name}</h2>
+        <h2>${esc(cat.name)}</h2>
         <div class="tool-grid">${catTools.map(toolCard).join('')}</div>`;
       content.appendChild(section);
     }
@@ -124,7 +124,7 @@ async function render() {
     // 若正处编辑模式，重新铺好分类标题的可拖拽属性
     applyEditAttrs();
   } catch (err) {
-    grid.innerHTML = `<div class="loading">加载失败：${err.message}</div>`;
+    grid.innerHTML = `<div class="loading">加载失败：${esc(err.message)}</div>`;
   }
 }
 

@@ -207,6 +207,7 @@ def _resolve_home_card(plugin_id):
         result = hook()  # 在请求上下文内调用，插件可用 flask.request / get_session_user()
         return result if isinstance(result, dict) else {}
     except Exception:
+        log.debug("插件 %s 的首页卡片钩子求值失败，回退 tools.json/manifest", plugin_id, exc_info=True)
         return {}
 
 
@@ -370,6 +371,7 @@ def _worker_units_snapshot():
         from supervisor.mainapp_bridge import worker_units_snapshot
         return worker_units_snapshot(jztools_data.get_data_root())
     except Exception:
+        log.debug("supervisor 注册表快照不可用，按未 worker 化处理", exc_info=True)
         return {}
 
 

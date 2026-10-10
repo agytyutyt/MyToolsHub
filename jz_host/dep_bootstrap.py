@@ -140,6 +140,7 @@ def migrate_plugin_legacy_llm():
             with open(path, "r", encoding="utf-8-sig") as f:
                 data = json.load(f)
         except Exception:
+            log.debug("旧版 LLM 迁移：跳过不可读的插件配置 %s", path, exc_info=True)
             continue
         llm = (data or {}).get("llm") if isinstance(data, dict) else None
         if not isinstance(llm, dict):

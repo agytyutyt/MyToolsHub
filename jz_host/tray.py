@@ -2,7 +2,10 @@
 
 从 app.py 拆出（2026-10-10 P2-4 / 报告 §4.4「托盘」块）。
 """
+import logging
 import os
+
+log = logging.getLogger("jztools.app")
 
 # 托盘图标对象引用：notify_service_started 需跨线程经它弹系统气泡通知
 _tray_icon = None
@@ -33,7 +36,7 @@ def run_tray_icon(host, port):
         try:
             webbrowser.open(url)
         except Exception:
-            pass
+            log.debug("托盘「打开浏览器」失败（不阻断）", exc_info=True)
 
     def _quit():
         # 打包运行的 GUI 程序：直接结束进程即可（waitress 由 OS 回收）
@@ -50,7 +53,9 @@ def run_tray_icon(host, port):
         _tray_icon = icon
         icon.run()
     except Exception:
-        pass  # 托盘启动失败不阻断服务（后台静默运行）
+        # 托盘启动失败不阻断服务（后台静默运行），但要留痕——否则真机上"没有托盘图标"
+        # 这一现象完全无从排查（报告 §5.3 点名的"无日志"）。
+        log.warning("系统托盘启动失败（服务仍正常，后台运行）", exc_info=True)
 
 
 def notify_service_started(host, port):

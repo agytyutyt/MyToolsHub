@@ -52,6 +52,7 @@ _get_session_user = jz_api.get_session_user
 _set_operation = jz_api.set_operation
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -135,6 +136,10 @@ EXT_MIME = {
 
 # 全局文件写锁（categories.json / files.json 读写共用）
 _LOCK = threading.RLock()
+
+# 插件侧日志统一走 jztools.plugin.<id>（与 info-transfer 同口径；宿主的 jztools.app 是
+# 另一条流，插件不得 import 宿主模块，仅用 stdlib logging 的标准名）。
+log = logging.getLogger("jztools.plugin.knowledge_base")
 
 
 # ===================== 会话与权限 =====================
@@ -610,11 +615,11 @@ def register(app) -> None:
     try:
         _migrate_files()   # 幂等补齐元数据字段（旧数据升级）
     except Exception:
-        pass               # 迁移失败不影响插件主体可用（下一轮启动继续尝试）
+        log.warning("知识库文件元数据迁移失败（不影响主体可用，下次启动重试）", exc_info=True)
     try:
         _migrate_categories()   # 幂等补齐分类可见范围（旧数据补 all，零行为变化）
     except Exception:
-        pass
+        log.warning("知识库分类可见范围迁移失败（不影响主体可用，下次启动重试）", exc_info=True)
 
     @app.get(f"{API_PREFIX}/status")
     def kb_status():
@@ -957,6 +962,9 @@ def register(app) -> None:
                 render_blob, render_ext = new_blob, new_ext
                 converted_from = ext
 
+        # 两段式进锁（同 D1-裁定6 口径）：锁内只做校验与 id 分配，文件体写盘（重 I/O，最大
+        # 20MB）挪到锁外，避免慢盘把上传与列表一起串行化；写盘成功后再进锁**重新 load**
+        # 提交元数据（防丢失更新）。并发窗口内的配额/撞号在提交段兜底回退。
         with _LOCK:
             fstore = _load_store(_files_file())
             cstore = _load_store(_categories_file())
@@ -970,59 +978,89 @@ def register(app) -> None:
             if len(fstore["files"]) >= MAX_FILES:
                 return jsonify({"ok": False, "error": "文件数量已达上限"}), 409
             fid = _gen_id("f-", {f.get("id") for f in fstore["files"]})
-            # 1) 原件落盘（所有类型；下载端点返回它）
+            # 1) 原件路径（所有类型；下载端点返回它）
             orig_path = _file_path(fid, upload_ext)
             if orig_path is None:
                 return jsonify({"ok": False, "error": "文件标识不合法"}), 400
-            with open(orig_path, "wb") as f:
-                f.write(blob)
-            # 2) 渲染件落盘（与原件不同名时才额外写一份：doc/xls 的 docx/xlsx 转换产物）
+            # 2) 渲染件路径（与原件不同名时才额外写一份：doc/xls 的 docx/xlsx 转换产物）
             path = _file_path(fid, render_ext)
             if path is None:
                 return jsonify({"ok": False, "error": "文件标识不合法"}), 400
+            # 3) 异步下载源路径（可选；`<fid>.dl.<ext>`，与原件/渲染件/缓存均不同名）
+            dl_path = _download_path(fid, dl_ext) if (dl_ext and dl_blob) else None
+            if dl_ext and dl_blob and dl_path is None:
+                # 走到这里说明 _read_upload 的白名单校验失效（两者口径一致，理论上不可达）；
+                # 不阻断上传，仅丢弃下载源并告知（SEC-5 不外抛内部状态）。
+                dl_ext = dl_name = dl_blob = None
+                download_error = download_error or "下载源文件格式不被支持，已忽略"
+
+        # —— 锁外：文件体落盘（重 I/O）——
+        written = []
+        try:
+            with open(orig_path, "wb") as f:
+                f.write(blob)
+            written.append(orig_path)
             if os.path.abspath(path) != os.path.abspath(orig_path):
                 with open(path, "wb") as f:
                     f.write(render_blob)
-            # 3) 异步下载源落盘（可选；`<fid>.dl.<ext>`，与原件/渲染件/缓存均不同名）
-            dl_path = None
-            if dl_ext and dl_blob:
-                dl_path = _download_path(fid, dl_ext)
-                if dl_path is None:
-                    # 走到这里说明 _read_upload 的白名单校验失效（两者口径一致，理论上不可达）；
-                    # 不阻断上传，仅丢弃下载源并告知（SEC-5 不外抛内部状态）。
-                    dl_ext = dl_name = dl_blob = None
-                    download_error = download_error or "下载源文件格式不被支持，已忽略"
-                else:
-                    with open(dl_path, "wb") as f:
-                        f.write(dl_blob)
-            # 4) 元数据
-            rec = {
-                "id": fid,
-                "name": name,
-                "summary": summary,
-                "original_name": upload_name,
-                "ext": render_ext,
-                "size": len(render_blob),
-                # 原件（下载用）：扩展名与字节数
-                "original_ext": upload_ext,
-                "original_size": len(blob),
-                # 异步下载源（可选）：扩展名/原始文件名/字节数；无下载源时三字段不写
-                # （键缺失 = 未配置，_migrate_files 也不需要为此补键）
-                "category_id": category_id or None,
-                # 归属四字段：来源为会话（规范 9.2 铁律一）
-                "created_by": user.get("username", ""),
-                "created_by_name": user.get("name", ""),
-                "unit_id": user.get("unit_id", ""),
-                "department_id": user.get("department_id", ""),
-                "created_at": _now(),
-                "updated_at": None,
-            }
-            if dl_ext and dl_blob and dl_name:
-                rec["download_ext"] = dl_ext
-                rec["download_name"] = dl_name
-                rec["download_size"] = len(dl_blob)
-            fstore["files"].append(rec)
-            _save_store(_files_file(), fstore)
+                written.append(path)
+            if dl_path:
+                with open(dl_path, "wb") as f:
+                    f.write(dl_blob)
+                written.append(dl_path)
+        except OSError:
+            for p in written:                 # 回退半写文件，不留孤儿
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            log.warning("知识库文件落盘失败（已回退半写文件）", exc_info=True)
+            return jsonify({"ok": False, "error": "文件保存失败，请稍后重试"}), 500
+
+        rec = {
+            "id": fid,
+            "name": name,
+            "summary": summary,
+            "original_name": upload_name,
+            "ext": render_ext,
+            "size": len(render_blob),
+            # 原件（下载用）：扩展名与字节数
+            "original_ext": upload_ext,
+            "original_size": len(blob),
+            # 异步下载源（可选）：扩展名/原始文件名/字节数；无下载源时三字段不写
+            # （键缺失 = 未配置，_migrate_files 也不需要为此补键）
+            "category_id": category_id or None,
+            # 归属四字段：来源为会话（规范 9.2 铁律一）
+            "created_by": user.get("username", ""),
+            "created_by_name": user.get("name", ""),
+            "unit_id": user.get("unit_id", ""),
+            "department_id": user.get("department_id", ""),
+            "created_at": _now(),
+            "updated_at": None,
+        }
+        if dl_ext and dl_blob and dl_name:
+            rec["download_ext"] = dl_ext
+            rec["download_name"] = dl_name
+            rec["download_size"] = len(dl_blob)
+
+        # 提交段：锁内只做元数据 RMW（小 JSON 写 = 临界区本体，同 D1 口径保留在锁内）；
+        # 并发窗口内的配额/撞号回退属文件 I/O，放到锁外执行。
+        _abort = False
+        with _LOCK:
+            fstore = _load_store(_files_file())          # 重新 load（锁外期间可能有并发写）
+            if (len(fstore["files"]) >= MAX_FILES
+                    or any(f.get("id") == fid for f in fstore["files"])):
+                _abort = True
+            else:
+                fstore["files"].append(rec)
+                _save_store(_files_file(), fstore)
+        if _abort:
+            for p in written:                            # 并发窗口：配额满/撞号 → 回退刚写的文件体
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            return jsonify({"ok": False, "error": "系统繁忙，请稍后重试"}), 409
         _index_one(rec)          # 锁外入索引（要读盘）：新上传的文档立刻可全文检索
         resp = {"ok": True, "id": fid, "item": _file_brief(rec)}
         if converted_from:
@@ -1089,6 +1127,8 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
         if not _can_manage(user):
             return jsonify({"ok": False, "error": "仅管理员可管理知识库文件"}), 403
+        # 两段式进锁（同上传）：锁内只做权限校验与待删路径计算，删文件体（重 I/O）在锁外，
+        # 末段再进锁重新 load 提交元数据删除（防丢失更新）。
         with _LOCK:
             fstore = _load_store(_files_file())
             cstore = _load_store(_categories_file())
@@ -1118,12 +1158,18 @@ def register(app) -> None:
                 _push(_file_path(fid, e))
             _push(_download_path(fid, rec.get("download_ext") or ""))
             _push(_preview_cache_path(fid))
-            for p in paths:
-                if os.path.isfile(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        return jsonify({"ok": False, "error": "删除失败，请稍后重试"}), 500
+
+        # —— 锁外：删文件体（重 I/O）——
+        for p in paths:
+            if os.path.isfile(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    log.warning("知识库删除文件体失败：%s", p, exc_info=True)
+                    return jsonify({"ok": False, "error": "删除失败，请稍后重试"}), 500
+
+        with _LOCK:
+            fstore = _load_store(_files_file())      # 重新 load（锁外期间可能有并发写）
             fstore["files"] = [f for f in fstore["files"] if f.get("id") != fid]
             _save_store(_files_file(), fstore)
         _unindex(fid)            # 锁外摘索引，避免已删文档继续被检索命中

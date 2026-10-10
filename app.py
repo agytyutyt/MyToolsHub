@@ -107,9 +107,17 @@ def tool_page(tool_id):
     return send_from_directory(os.path.join(BASE_DIR, "static"), "tool.html")
 
 
+# 插件前端静态资源**禁服务**的扩展名：插件目录里可能留有只服务开发的生成器/测试脚本
+# （如 map-marker/frontend/generate_qr_stream.py），它们按 tools/plugin-payload-rules.json
+# 不随包分发；开发机上也不得经 /plugin/<id>/... 静态路由对外暴露（P3-2 卫生项，2026-10-10）。
+_PLUGIN_ASSET_DENY_EXT = {".py", ".pyc", ".pyo", ".pyd"}
+
+
 @app.route("/plugin/<plugin_id>/<path:filename>")
 def plugin_assets(plugin_id, filename):
     """以 iframe 方式对外提供插件前端资源（plugins/<id>/frontend/）。"""
+    if os.path.splitext(filename)[1].lower() in _PLUGIN_ASSET_DENY_EXT:
+        return jsonify({"error": "not found"}), 404
     plugin_dir = get_plugin_dir(plugin_id)
     if not plugin_dir:
         return jsonify({"error": "plugin not found"}), 404

@@ -737,18 +737,6 @@ def _enforce_tool_access():
     return None
 
 
-def _protect_admin_ops():
-    """保护首页布局写操作：编辑位置 / 隐藏工具需登录。"""
-    path = request.path
-    if path == "/api/tools/reorder":
-        if get_session_user() is None:
-            return jsonify({"error": "未登录或登录已过期"}), 401
-    if path == "/api/tools/visibility" and request.method == "POST":
-        if get_session_user() is None:
-            return jsonify({"error": "未登录或登录已过期"}), 401
-    return None
-
-
 # ===================== 批量导入导出（同包子模块） =====================
 
 def _load_batch_io():
@@ -959,12 +947,12 @@ def register(app):
 
     # 全局拦截（注册顺序即执行顺序，必须先超时守卫、再登录拦截）：
     #   1. make_session_guard    空闲/绝对超时登出 + 滑动续期（R1）
-    #   2. _enforce_login        白名单外一律要求登录（R2）
-    #   3. _protect_admin_ops    首页布局写操作需登录（保留，语义已被 2 覆盖）
-    #   4. _enforce_tool_access  非超管按权限点拦工具（保持不变）
+    #   2. _enforce_login        白名单外一律要求登录（R2）——已覆盖 /api/tools/reorder 与
+    #                            /api/tools/visibility（二者不在 PUBLIC_PATHS/PREFIXES），
+    #                            故原第 3 道 _protect_admin_ops 系冗余死代码，已随 P3-2 清理
+    #   3. _enforce_tool_access  非超管按权限点拦工具（保持不变）
     app.before_request(make_session_guard(idle_minutes, absolute_hours))
     app.before_request(_enforce_login)
-    app.before_request(_protect_admin_ops)
     app.before_request(_enforce_tool_access)
 
     # ---------------- 登录 / 会话 ----------------

@@ -15,9 +15,16 @@
 const $ = (id) => document.getElementById(id);
 
 /* Worker 缓存参数，用于绕过 /plugin 静态资源 24h 长缓存（F-2）。
- * 注：index.html 中 app.js 的 ?v= 与它相互独立（本次改动未含 index.html），
- * 部署后需 Ctrl+F5 强制刷新页面以取到新版 app.js/worker.js。 */
-const APP_VER = "v=8";
+ * 单源：从本文件自身的 <script src="...?v=N"> 取查询串——即**跟随 index.html 的
+ * app.js ?v=**，worker.js 与 app.js 因此永远同版；不再需要两处手同步（P3-2：原为
+ * 常量 v=8 与 index.html ?v=8 各写一处，漏改一侧即旧 worker 被长缓存）。
+ * 升级前端时只需递增 index.html 里 app.js 的 ?v=。拿不到 currentScript（罕见）则
+ * 退化为不带版本，仍可正常加载（仅丢失缓存绕过）。 */
+const APP_VER = (function () {
+  const src = (document.currentScript && document.currentScript.src) || "";
+  const q = src.indexOf("?") >= 0 ? src.slice(src.indexOf("?") + 1) : "";
+  return q;
+})();
 
 window.addEventListener("error", (e) => {
   try { setStatus("页面错误：" + (e.message || "未知"), true); } catch (_) {}
@@ -75,7 +82,7 @@ function fmtDuration(sec) {
 function ensureWorker() {
   if (worker) return;
   try {
-    worker = new Worker("./worker.js?" + APP_VER);
+    worker = new Worker("./worker.js" + (APP_VER ? "?" + APP_VER : ""));
   } catch (e) {
     setStatus("无法启动解码线程：" + e.message, true);
     return;
