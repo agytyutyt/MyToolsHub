@@ -34,6 +34,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, REPO)
 
+# 与控制台编码和解：本台架打印 ✅/❌，GBK 控制台（Windows 缺省）会在 print 处抛
+# UnicodeEncodeError 直接崩掉整个台架；与 lint-static-rules.py 同口径把流切到 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 WORK = tempfile.mkdtemp(prefix="jz-lock-")
 os.environ["JZTOOLS_DATA_ROOT"] = WORK        # 必须在导入被测模块之前
 

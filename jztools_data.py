@@ -29,6 +29,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 
 log = logging.getLogger("jztools.data")
 
@@ -119,16 +120,43 @@ def _read_pointer_file(path):
         return None
 
 
-def _write_pointer_file(path, root):
-    """原子写入单个指针文件。"""
+def atomic_write_bytes(path, data):
+    """原子写任意字节：同目录唯一临时名（mkstemp）+ ``os.replace``，失败清理临时文件不留残骸。
+
+    固定名 ``<path>.tmp`` 在并发写（请求线程 + 后台线程）或上次写入被强杀留残file时，
+    会出现两个写者往同一个临时文件落笔、后者把前者的半成品提升为正式文件；唯一临时名
+    消除该冲突面（口径承 D2）。
+    """
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=parent or ".", prefix=os.path.basename(path) + ".", suffix=".tmp")
     try:
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"data_root": root}, f, ensure_ascii=False, indent=2)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
         os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_json(path, obj, *, newline=""):
+    """原子写 JSON：utf-8（无 BOM）/ ``ensure_ascii=False`` / ``indent=2``，可选结尾换行。
+
+    BOM 只在**读**侧容忍（外部可手工编辑的 JSON 可能被记事本加 BOM，口径见 D4），
+    写侧恒不带 BOM——避免把 BOM 传染给下游解析。
+    """
+    text = json.dumps(obj, ensure_ascii=False, indent=2) + newline
+    atomic_write_bytes(path, text.encode("utf-8"))
+
+
+def _write_pointer_file(path, root):
+    """原子写入单个指针文件（失败仅告警——指针属尽力而为，不阻断主流程）。"""
+    try:
+        atomic_write_json(path, {"data_root": root})
     except Exception as e:
         log.warning("写入数据根目录指针失败（%s）：%s", path, e)
 
@@ -191,10 +219,7 @@ def _safe_move(src, dst):
         return False  # 目标已存在则不覆盖（幂等）
     try:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.isdir(src):
-            shutil.move(src, dst)
-        else:
-            shutil.move(src, dst)
+        shutil.move(src, dst)
         return True
     except Exception as e:
         log.warning("迁移数据失败：%s -> %s（%s）", src, dst, e)
@@ -311,15 +336,9 @@ def _read_json_file(path, default=None):
 
 
 def _write_json_file(path, obj):
-    """写入 JSON 文件（原子写）。"""
+    """写入 JSON 文件（原子写；失败仅告警——模板同步属尽力而为，不阻断主流程）。"""
     try:
-        parent = os.path.dirname(path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
+        atomic_write_json(path, obj)
     except Exception as e:
         log.warning("写入 JSON 文件失败（%s）：%s", path, e)
 
@@ -338,15 +357,13 @@ def _file_hash16(path):
 
 
 def _read_app_state():
-    """读取数据根目录 config/.app_state.json。"""
-    path = get_data_root_file(*_APP_STATE_FILE)
-    return _read_json_file(path) or {}
+    """读取数据根目录 config/.app_state.json（单源：_read_state_at）。"""
+    return _read_state_at(get_data_root())
 
 
 def _write_app_state(state):
-    """写入数据根目录 config/.app_state.json。"""
-    path = get_data_root_file(*_APP_STATE_FILE)
-    _write_json_file(path, state)
+    """写入数据根目录 config/.app_state.json（单源：_write_state_at）。"""
+    _write_state_at(get_data_root(), state)
 
 
 def _read_version(base=None):

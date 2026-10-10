@@ -176,10 +176,7 @@ def _get_fernet():
                 key = f.read().strip()
         else:
             key = Fernet.generate_key()
-            tmp = path + ".tmp"
-            with open(tmp, "wb") as f:
-                f.write(key)
-            os.replace(tmp, path)
+            jztools_data.atomic_write_bytes(path, key)
         _fernet = Fernet(key)
     return _fernet
 
@@ -315,10 +312,7 @@ def save_global(cfg):
     stored["provider"] = dict(cfg["provider"])
     stored["provider"]["api_key"] = encrypt_secret(stored["provider"]["api_key"])
     path = config_path()
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(stored, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    jztools_data.atomic_write_json(path, stored)
     return cfg
 
 
@@ -352,13 +346,7 @@ def provider_usable(provider):
     OpenAI / Anthropic 少了它必然 401，判定为"未配置完"能更早给出可读提示；
     Ollama / 自定义（内网网关常无认证）不强制。
     """
-    p = provider or {}
-    if not (p.get("url") or "").strip():
-        return False
-    meta = FORMAT_META.get(p.get("format") or DEFAULT_FORMAT) or {}
-    if meta.get("key_required") and not (p.get("api_key") or "").strip():
-        return False
-    return True
+    return not provider_problem(provider)
 
 
 def provider_problem(provider):
@@ -636,8 +624,16 @@ def _http_error_detail(resp, error_path=""):
         return str(data)[:300]
 
 
-def _post(provider, system, user, messages, timeout):
-    """发起一次请求，返回 (响应 JSON 或原文, 取到的正文文本)。"""
+def _send_and_parse(provider, system, user, messages, timeout, *, probe=False):
+    """发起一次请求并解析正文（chat 与 test_connection 的公共实现）；失败一律抛 LLMError。
+
+    返回 ``(data, text)``：
+      - ``data`` = 响应 JSON（dict/list）；**非 JSON 响应时为原文 str**（调用方按
+        ``isinstance(data, str)`` 可辨出这一情形）；
+      - ``text`` = 按取值路径取到的正文（可为空串——探测场景推理模型会把额度花在
+        reasoning 上，是否为空算不可用由调用方定）。
+    ``probe=True``：探测请求尽量小（限制输出长度，避免真的花掉一次完整推理）。
+    """
     if not REQUESTS_AVAILABLE:
         raise LLMError("缺少 requests：大模型功能不可用。请安装依赖组件包 "
                        "JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。")
@@ -646,6 +642,14 @@ def _post(provider, system, user, messages, timeout):
 
     method, url, headers, body, text_paths, error_path = _build_request(
         provider, system, user, messages, timeout)
+    if probe and isinstance(body, dict):
+        # 探测请求尽量小：限制输出长度，避免真的花掉一次完整推理
+        if provider.get("format") == "anthropic":
+            body["max_tokens"] = 16
+        elif provider.get("format") == "ollama":
+            body.setdefault("options", {})["num_predict"] = 16
+        else:
+            body["max_tokens"] = 16
     try:
         resp = requests.request(method, url, headers=headers, json=body, timeout=timeout)
     except Exception as e:  # requests.RequestException 及其子类；requests 缺失也已在上方拦掉
@@ -660,16 +664,16 @@ def _post(provider, system, user, messages, timeout):
         data = resp.json()
     except Exception:
         # 非 JSON 响应：自定义格式允许直接把原文当正文（未配置取值路径时）
-        text = (resp.text or "").strip()
-        if text:
-            return text, text
+        raw = (resp.text or "").strip()
+        if raw:
+            return raw, raw
         raise LLMError("大模型返回内容为空或不是 JSON")
 
     text = _extract_text(data, text_paths)
     if text is None:
         where = "、".join(".".join(str(s) for s in p) for p in text_paths) or "（未配置取值路径）"
         raise LLMError(f"大模型返回结构异常：按 {where} 未取到正文，"
-                       "请检查模型名称与调用格式是否正确")
+                       "请检查调用格式与模型名称是否正确")
     return data, text
 
 
@@ -706,7 +710,7 @@ def chat(system=None, user=None, messages=None, *, session=None, plugin_id=None,
     if timeout is None:
         timeout = provider.get("timeout") or DEFAULT_TIMEOUT
 
-    data, text = _post(provider, system, user, messages, timeout)
+    data, text = _send_and_parse(provider, system, user, messages, timeout)
     result = {
         "text": text,
         "json": parse_model_output(text) if json_mode else None,
@@ -750,37 +754,9 @@ def test_connection(session=None, provider=None, plugin_id=None, timeout=15):
         problem = provider_problem(provider)
         if problem:
             return False, problem
-        if not REQUESTS_AVAILABLE:
-            return False, ("缺少 requests：大模型功能不可用。请安装依赖组件包 "
-                           "JZToolsHub-依赖-requests-v*.zip（解压后双击「安装依赖组件.bat」）后刷新页面（免重启）。")
-        method, url, headers, body, text_paths, error_path = _build_request(
-            provider, "", "ping", None, timeout)
-        # 探测请求尽量小：限制输出长度，避免真的花掉一次完整推理
-        if isinstance(body, dict):
-            if provider.get("format") == "anthropic":
-                body["max_tokens"] = 16
-            elif provider.get("format") == "ollama":
-                body.setdefault("options", {})["num_predict"] = 16
-            else:
-                body["max_tokens"] = 16
-        try:
-            resp = requests.request(method, url, headers=headers, json=body, timeout=timeout)
-        except Exception as e:
-            return False, f"无法连接大模型服务，请检查网络与接口地址（{type(e).__name__}）"
-        if resp.status_code >= 400:
-            detail = _http_error_detail(resp, error_path)
-            hint = "（请检查 API Key）" if resp.status_code in (401, 403) else ""
-            return False, f"接口返回错误（HTTP {resp.status_code}）{hint}：{detail}"
-        try:
-            data = resp.json()
-        except Exception:
-            if (resp.text or "").strip():
-                return True, "连通正常（接口返回的不是 JSON，但已收到响应）"
-            return False, "返回内容为空，请检查接口地址是否为完整的调用地址"
-        text = _extract_text(data, text_paths)
-        if text is None:
-            where = "、".join(".".join(str(s) for s in p) for p in text_paths) or "（未配置取值路径）"
-            return False, f"返回结构异常：按 {where} 未取到正文，请检查调用格式与模型名称"
+        data, text = _send_and_parse(provider, "", "ping", None, timeout, probe=True)
+        if isinstance(data, str):
+            return True, "连通正常（接口返回的不是 JSON，但已收到响应）"
         snippet = (text or "").strip()
         if snippet:
             return True, f"连通正常，模型响应：{snippet[:40]}"
@@ -824,11 +800,7 @@ def load_prompt(plugin_id, defaults=None):
 def save_prompt(plugin_id, prompt):
     """保存插件提示词（原子写）。只收字符串值，非字符串键值丢弃。"""
     clean = {str(k): str(v) for k, v in (prompt or {}).items() if isinstance(v, str)}
-    path = prompt_path(plugin_id)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(clean, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    jztools_data.atomic_write_json(prompt_path(plugin_id), clean)
     return clean
 
 

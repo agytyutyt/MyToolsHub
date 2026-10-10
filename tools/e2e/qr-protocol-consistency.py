@@ -33,6 +33,15 @@ REPO = os.path.dirname(os.path.dirname(HERE))
 VEC = os.path.join(REPO, "testdata", "protocol")
 sys.path.insert(0, REPO)
 
+# 与控制台编码和解：本台架打印 ✅/❌，GBK 控制台（Windows 缺省）会在 print 处抛
+# UnicodeEncodeError 直接崩掉整个台架（§B-20 同类隐患统一处置）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+
 TMP_ROOT = tempfile.mkdtemp(prefix="qrc-proto-")
 os.environ["JZTOOLS_DATA_ROOT"] = TMP_ROOT       # 隔离真实数据根（必须在 routes 导入前）
 

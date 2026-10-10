@@ -3,6 +3,7 @@ import importlib.util
 import gzip
 import io
 import json
+import functools
 import logging
 import logging.handlers
 import os
@@ -10,7 +11,6 @@ import queue
 import re
 import shutil
 import sys
-import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
@@ -180,11 +180,8 @@ def migrate_plugin_legacy_llm():
     failed = []
     for path, data in targets:
         data.pop("llm", None)
-        tmp = path + ".tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, path)
+            jztools_data.atomic_write_json(path, data)
             cleared.append(os.path.basename(os.path.dirname(path)))
         except OSError as e:
             failed.append("%s（%s）" % (path, e.strerror or e))
@@ -585,23 +582,13 @@ def load_registry():
 
 
 def save_registry(registry):
-    """原子写入 config/tools.json：唯一临时名 + rename。
+    """原子写入 config/tools.json（统一走 ``jztools_data.atomic_write_json``：唯一临时名 + rename）。
 
     固定名 `tools.json.tmp` 在同进程并发写（请求线程 + 后台线程）或上次写入被强杀留残file时，
     会出现两个写者往同一个临时文件落笔、后者 `os.replace` 把前者的半成品提升为正式文件。
     唯一临时名（`tempfile.mkstemp` 同目录）消除该冲突面；失败清理临时文件不留残骸。
     """
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CONFIG_PATH), prefix="tools.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(registry, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, CONFIG_PATH)
-    except Exception:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    jztools_data.atomic_write_json(CONFIG_PATH, registry)
 
 
 def load_manifests():
@@ -698,6 +685,19 @@ def _resolve_home_card(plugin_id):
         return {}
 
 
+def _gate_state_of(verdict):
+    """门控结论（jz_deps.evaluate）→ _plugin_states 记录。
+
+    启动加载与请求期刷新两处组装点共用同一映射，避免字段集在两边悄悄漂移。
+    """
+    return {
+        "status": verdict["status"],
+        "missing": verdict["missing"],
+        "degraded": verdict.get("degraded", []),
+        "reason": verdict.get("reason", ""),
+    }
+
+
 def _refresh_plugin_states():
     """请求期重算**已加载**插件的依赖状态（只重算当前非 ok 的那些）。
 
@@ -723,8 +723,7 @@ def _refresh_plugin_states():
                                    app_version=_vj.get("app"), plugin_api=_vj.get("plugin_api"))
         if verdict["status"] != st.get("status"):
             log.info("插件 %s 依赖状态刷新：%s → %s", pid, st.get("status"), verdict["status"])
-            _plugin_states[pid] = {"status": verdict["status"], "missing": verdict["missing"],
-                                   "degraded": verdict.get("degraded", []), "reason": verdict.get("reason", "")}
+            _plugin_states[pid] = _gate_state_of(verdict)
 
 
 def get_aggregated_tools():
@@ -917,12 +916,7 @@ def register_plugin_backends(app):
             continue
         verdict = jz_deps.evaluate(plugin_id, plugin_dir, manifest, app_dir=app_dir,
                                    app_version=app_version, plugin_api=plugin_api)
-        _plugin_states[plugin_id] = {
-            "status": verdict["status"],
-            "missing": verdict["missing"],
-            "degraded": verdict.get("degraded", []),
-            "reason": verdict.get("reason", ""),
-        }
+        _plugin_states[plugin_id] = _gate_state_of(verdict)
         if verdict["status"] == "blocked":
             why = verdict.get("reason") or ("缺少必需依赖：" + "、".join(verdict["missing"]))
             app.logger.warning("插件 %s 不可运行，已跳过加载（%s）", plugin_id, why)
@@ -1003,16 +997,30 @@ def api_org_tree():
 # 登录拦截由 admin 的 _enforce_login 兜底（/api/llm/* 不在白名单）；
 # 权限拦截不适用——该前缀不是已注册工具 ID，_enforce_tool_access 会放行。
 
+def require_login(fn):
+    """框架级路由的登录门：未登录/会话不可读独立返回 401（不依赖 admin 兜底）。
+
+    登录用户放进取 flask.g.current_user，视图函数直接取用（避免重复调用 provider）。
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        info = jz_api.get_session_user()
+        if info is None:
+            return jsonify({"error": "未登录或登录已过期"}), 401
+        g.current_user = info
+        return fn(*args, **kwargs)
+    return wrapper
+
+
 @app.get("/api/llm/settings")
+@require_login
 def api_llm_settings():
     """返回当前生效的大模型设置：模式、格式清单、本人配置（脱敏）与生效来源。
 
     悬浮卡片据此决定是否显示入口（user_mode 为假时整条入口不出现）、
     回显表单、并提示"当前实际生效的是哪一份配置"。
     """
-    info = jz_api.get_session_user()
-    if info is None:
-        return jsonify({"error": "未登录或登录已过期"}), 401
+    info = g.current_user
     user_mode = jz_llm.user_mode()
     username = info.get("username")
     own = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
@@ -1039,15 +1047,14 @@ def api_llm_settings():
 
 
 @app.post("/api/llm/settings")
+@require_login
 def api_llm_settings_save():
     """保存**本人**的大模型接入配置（仅"用户各自设置"模式开放）。
 
     请求体：{format, url, api_key, model}；api_key 留空或回传掩码表示不修改已保存的 Key。
     管理员统一配置模式下直接 403——避免用户以为自己的设置生效了（实际被忽略）。
     """
-    info = jz_api.get_session_user()
-    if info is None:
-        return jsonify({"error": "未登录或登录已过期"}), 401
+    info = g.current_user
     if not jz_llm.user_mode():
         return jsonify({"error": "当前由管理员统一配置大模型，个人设置未开放"}), 403
     data = request.get_json(silent=True) or {}
@@ -1067,14 +1074,13 @@ def api_llm_settings_save():
 
 
 @app.post("/api/llm/test")
+@require_login
 def api_llm_test():
     """连通性测试：优先测请求体里的这套（表单里刚填、还没保存的），否则测当前生效的。
 
     请求体：{format, url, api_key, model}（可缺省）；api_key 为掩码/留空时用已保存的。
     """
-    info = jz_api.get_session_user()
-    if info is None:
-        return jsonify({"error": "未登录或登录已过期"}), 401
+    info = g.current_user
     data = request.get_json(silent=True) or {}
     username = info.get("username")
     own = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})

@@ -248,6 +248,7 @@ def apply_pending_components(app_dir):
     删除暂存目录。失败时保留暂存（下次启动再试）并记录日志，绝不阻塞启动。
     """
     import shutil
+    import jztools_data                          # 框架模块；原子写清单（本模块此前不用）
     pylibs = os.path.join(app_dir, "runtime", "pylibs")
     pend = os.path.join(pylibs, PENDING_DIR)
     if not os.path.isdir(pend):
@@ -292,9 +293,7 @@ def apply_pending_components(app_dir):
             keep = [c for c in comps if isinstance(c, dict) and str(c.get("id")) != str(entry.get("id") or cid)]
             merged = {"schema": 1, "kind": "dep-components", "updated_at": "",
                       "components": keep + [entry]}
-            with open(m_path, "w", encoding="utf-8", newline="\n") as f:
-                json.dump(merged, f, ensure_ascii=False, indent=2)
-                f.write("\n")
+            jztools_data.atomic_write_json(m_path, merged, newline="\n")
             shutil.rmtree(stage, ignore_errors=True)
             applied.append(cid)
             log.info("已应用暂存的依赖组件：%s v%s", cid, entry.get("version"))
