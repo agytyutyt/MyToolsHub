@@ -247,15 +247,20 @@ deploy\JZToolsHub\
 ```
 
 打包脚本依次完成：**校验打包解释器版本与依赖完整性** → PyInstaller 按 `JZToolsHub.spec` 打包后端 →
-组装部署目录（复制 `static/`、`plugins/`（仅核心插件 `admin`）、`docs/guide/`、`docs/design/`、`docs/README.md`、根目录 `README.md`/`HANDOFF.md`/`插件设计规范.md`/`移动端APP.md`、`install.ps1`、`一键安装.bat`、`一键卸载.bat`、`config/tools.json`；`tools/` 仅带 `plugin-upgrade/`，`wheels/` 不随主包）
+组装部署目录（**组装由 `tools/build-deploy-local.py` 单一实现，`build-deploy.ps1` 全程跑时调用它；
+随包清单真源 = `tools/package-content.json`**；复制 `static/`、`plugins/`（仅核心插件）、`docs/guide/`、
+`docs/design/`、`docs/README.md`、根目录 `README.md`/`HANDOFF.md`/`插件设计规范.md`/`移动端APP.md`、
+`install.ps1`、`一键安装.bat`、`一键卸载.bat`、`config/tools.json`；`tools/` 仅带 `plugin-upgrade/`，
+`wheels/` 不随主包）
 → 清理插件运行时数据（`data/`、`.task_cache/`、`__pycache__/`、`out/`、`*.pyc`、**仅精确名 `config.json`**）
 → **自检同步模板 `*.template.json` 数量** → 仅当传 `-WithOfflineRuntime` 时**组装 `runtime/` 离线组件
 并按 `manifest.json` 校验完整性**（LibreOffice 的 MSI 被裁剪核心包替代，清单如实改写为
 `core_pruned` + 核心包体积）→ 复制安装/卸载脚本并写 `version.json` → 生成 `start.bat` → 压缩为 zip。
 
 > 打包脚本会在开工前检查三件事：① `-Python` 指定的解释器版本是否为基线 **3.14**（不符则告警）；
-> ② 该解释器是否已装齐 `build-deploy.ps1` 自带的 14 项依赖自检探针清单所列的库（`build-deploy.ps1:104-105`，与 `JZToolsHub.spec` 的 `PACKAGES` 不是同一份清单；缺库不会让打包失败，只会打出
-> 功能残缺的包，所以显式拦截；其中 `zfec` 需 `--find-links wheels` 才能装上）；
+> ② 该解释器是否已装齐 `JZToolsHub.spec` 的 `PACKAGES` 清单所列的库（**清单真源即 spec**，
+> 2026-10-10 P2-2 起不再另存手抄清单）——缺任何一个**直接中止打包**（此前仅告警继续，会静默
+> 产出功能残缺的包；其中 `zfec` 需 `--find-links wheels` 才能装上，它是「依赖组件包」的取源依赖）；
 > ③ **胖包模式（`-WithOfflineRuntime`）下**，`runtime/manifest.json` 声明的离线组件是否齐全且体积
 > 一致（缺一即中止，避免发出"声称离线可用但缺组件"的包）；**瘦包模式跳过此项**。
 
@@ -383,9 +388,11 @@ JZToolsHub/
 │   ├── fetch-offline-bundle.py#   ★ 下载离线运行组件到 runtime/（断点续传 + sha256 校验）
 │   ├── offline-components.json#   ★ 组件清单：URL / 版本 / 冻结 sha256 / 许可证（入库，可评审）
 │   ├── build-offline-component.ps1 # ★ 把组件打成可单独分发的一键安装包（默认 LibreOffice 核心）
-│   ├── build-deploy-local.py  #   ★ 主包「组装」阶段：dist + 仓库源码 → deploy\<DeployName>\（增量合并）
+│   ├── build-deploy-local.py  #   ★ 主包「组装」唯一实现：dist + 仓库源码 → deploy\<DeployName>\（增量合并；build-deploy.ps1 全程跑时调用它）
 │   ├── verify-package.py      #   ★ 主包校验：结构 + 内容 +（可选）解压冒烟；出包后必跑
 │   ├── gen-installed-deps.py  #   ★ 生成 config/installed-deps.json（主体侧"装了哪些依赖"的唯一真源）
+│   ├── package-content.json   #   ★ 主包随包清单单一真源（core_plugins / copy_dirs / copy_files / tools_dirs；组装脚本与 verify-package.py 共读）
+│   ├── _shared.psm1           #   ★ 出包链共用函数（Say/Warn/Die、Compare-SemVer、Write-Utf8NoBom、压缩、spec 清单解析…）
 │   ├── plugin-payload-rules.json   # ★ 插件 payload 的"代码/数据"边界规则（插件包与整包清理共用同一份）
 │   ├── build-plugin-package.ps1    # ★ 出「插件包」：单个插件独立升级用的小包
 │   ├── build-plugin-set.ps1   #   ★ 出「插件集」：一组插件包 + index.json + 一键安装脚本（新机首装 / 批量收敛）
@@ -882,9 +889,10 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 
 > **模板命名纪律：配置模板一律命名 `config.template.json`，与运行时 `config.json` 分离。**
 > 打包脚本会删除插件树内所有 `config.json`（清掉本机含 API Key 的运行时配置），模板若沿用
-> `config.json` 命名会被一并删除，导致同步链路静默失效。新增带模板配置的插件时，**只需**在
-> 安装器 `install.ps1` 的 `$cfgPairs` 登记（应用侧自动发现，见上）
-> （`build-deploy.ps1` 打包后会自检 `*.template.json` 数量，防止误删）。
+> `config.json` 命名会被一并删除，导致同步链路静默失效。新增带模板配置的插件时**无需任何登记**：
+> 安装期（`install.ps1` 的 `Sync-ConfigTemplates`，2026-10-10 P2-2 起自动发现）与运行期
+> （`jztools_data.sync_plugin_templates`）都会递归发现 `*.template.json` 并按目标名同步
+> （组装阶段会自检 `*.template.json` 数量，防止误删）。
 >
 > **提示词（`prompt.json`）不再随版本下发**：模板已删除，提示词由插件内 `llm_client` 的内置默认值
 > 提供（代码即唯一来源）。如需在目标机调整，直接手写 `<数据根>/plugins/<id>/prompt.json` 即可，

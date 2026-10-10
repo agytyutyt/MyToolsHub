@@ -21,13 +21,14 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# 出包链共用函数（Say、压缩、LibreOffice 核心包核验…；见 tools\_shared.psm1 头部说明）
+Import-Module (Join-Path $PSScriptRoot "_shared.psm1") -Force
+
 $Root    = Split-Path -Parent $PSScriptRoot          # tools\ → 仓库根
 $RtSrc   = Join-Path $Root "runtime"
 $RtTools = Join-Path $Root "tools\offline-runtime"
 $Deploy  = Join-Path $Root "deploy"
 $Work    = Join-Path $Root "build\offline-component"
-
-function Say { param([string]$m = "") Write-Host $m }
 
 function Assert-File {
     param([string]$Path, [string]$Hint)
@@ -63,13 +64,11 @@ function New-StageDir {
     return $p
 }
 
-# 打成 zip：zip 内保留顶层目录名，便于目标机解压后一眼看出是什么
+# 打成 zip：zip 内保留顶层目录名，便于目标机解压后一眼看出是什么。
+# 压缩机制收口 tools\_shared.psm1（.NET ZipFile——中文条目名 UTF-8 标志位与其它包链路一致）
 function Compress-Stage {
     param([string]$StageRoot, [string]$OutZip)
-    if (Test-Path -LiteralPath $OutZip) { Remove-Item -LiteralPath $OutZip -Force }
-    New-Item -ItemType Directory -Force -Path (Split-Path $OutZip) | Out-Null
-    Compress-Archive -Path $StageRoot -DestinationPath $OutZip -CompressionLevel Fastest
-    return (Get-Item -LiteralPath $OutZip).Length
+    return (Compress-DirectoryToZip -SourceDir $StageRoot -ZipPath $OutZip -Level Fastest -IncludeBaseDirectory)
 }
 
 # ============================================================================
@@ -82,16 +81,10 @@ function Build-LibreOfficeCore {
     Assert-File $coreZip  "先运行：python tools\fetch-offline-bundle.py --core（会顺带生成裁剪核心包）"
     Assert-File $coreMeta "核心包元数据缺失；重跑：python tools\build-libreoffice-core.py --force"
 
-    # 出厂前核验：zip 体积与 sha256 必须与元数据一致，避免分发出去的包本身是坏的
-    $meta = Get-Content $coreMeta -Raw -Encoding UTF8 | ConvertFrom-Json
+    # 出厂前核验：zip 体积与 sha256 必须与元数据一致，避免分发出去的包本身是坏的。
+    # 核验实现在 tools\_shared.psm1（与整包随带分支 build-deploy.ps1 共用，此前两处各写一份）
+    $meta = Test-LibreOfficeCoreBundle -CoreZip $coreZip -CoreMeta $coreMeta
     $sz = (Get-Item -LiteralPath $coreZip).Length
-    if ($sz -ne [int64]$meta.artifact.size) {
-        throw "libreoffice-core.zip 体积与元数据不符（$sz vs $($meta.artifact.size)）；请重建核心包。"
-    }
-    $sha = (Get-FileHash -LiteralPath $coreZip -Algorithm SHA256).Hash.ToLower()
-    if ($sha -ne ([string]$meta.artifact.sha256).ToLower()) {
-        throw "libreoffice-core.zip 的 sha256 与元数据不符；请重建核心包。"
-    }
 
     Say "==> 组装 LibreOffice 核心组件包（$loVer）"
     $pkgName = "LibreOffice核心组件"

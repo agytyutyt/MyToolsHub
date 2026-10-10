@@ -2,27 +2,27 @@
 # -*- coding: utf-8 -*-
 r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<DeployName>\（增量合并）。
 
-**为什么不用 build-deploy.ps1 全程跑**（详见 docs\guide\打包部署手册.md §0）：
-  ① 它开头 `Remove-Item -Recurse` 删 dist/ build/ 部署目录 —— 本机工具会话的 safe-delete
-     会把「批量删除 >50 项」拦成进程中断；
+**组装逻辑的单一实现**（P2-2，2026-10-10）：build-deploy.ps1 全程跑时也**调用本脚本**组装
+（它只保留 清理/前置检查/PyInstaller/离线组件/压缩 五段，不再有第二份 PS 组装实现）。
+随包清单（核心插件白名单 / 随包目录与文件 / tools 子目录）真源 = tools\package-content.json，
+本脚本 / build-deploy.ps1 / verify-package.py 三方共读。
+
+**为什么两段式**（详见 docs\guide\打包部署手册.md §0）：
+  ① 整包 build-deploy.ps1 开头 `Remove-Item -Recurse` 删 dist/ build/ 部署目录 —— 本机工具
+     会话的 safe-delete 会把「批量删除 >50 项」拦成进程中断；
   ② 整包构建（PyInstaller 冷缓存 ~6 min + 组装 + 压缩 ~3 min）会撞工具 600 s 命令上限。
 所以拆两段：PyInstaller 与压缩各自单跑，组装交给本脚本 —— **只合并、从不删库**。
 
-与 build-deploy.ps1 的对应关系（行为逐一复刻，勿擅自改口径）：
+组装内容（行为逐一复刻自原 build-deploy.ps1 §3.1–§4，勿擅自改口径）：
   §3.1   dist\JZToolsHub\*（exe + _internal）
-  §3.2   static/ + docs/guide/ + docs/design/（COPY_DIRS）
-         + docs/README.md + docs/项目管理手册.md + README.md + HANDOFF.md + 插件设计规范.md + 移动端APP.md
-         + install.ps1 + 一键安装.bat + 一键卸载.bat（COPY_FILES）
-         + plugins/<核心插件白名单>（CORE_PLUGINS，admin+store）+ tools/plugin-upgrade
+  §3.2   copy_dirs（static / docs/guide / docs/design）+ copy_files（顶层契约文档 + docs 索引 +
+         install.ps1 / 一键安装·卸载.bat）+ plugins/<core_plugins> + tools/<tools_dirs>
          + config\tools.json（收窄为「site + 分类骨架 + 核心插件条目」）
          复制与清理均按 tools\plugin-payload-rules.json（与「插件包」共用同一份真源）
-         ★ plugins / wheels / tools **不再整目录随包**：plugins 只拷核心插件白名单、
+         ★ plugins / wheels / tools **不整目录随包**：plugins 只拷核心插件白名单、
            tools 只拷 plugin-upgrade（目标机离线装插件）、wheels 不随包（无运行时消费方）
-         ★ docs 分层随包（2026-09-17）：只带「交付层 guide + 设计层 design + 索引」，
-           内部层 docs/eval（一次性评估）、docs/plan（活清单）、docs/archive（历史留证）
-           不随包 —— 口径与 build-deploy.ps1 §3.2 一致，改一处要两处一起改
   §3.2.1 模板自检：包内 *.template.json 数 >= 核心插件白名单内实有数，否则中止
-         （期望值按 CORE_PLUGINS 动态累计，当前 admin 无模板 → 期望 0；
+         （期望值按 core_plugins 动态累计，当前核心插件无模板 → 期望 0；
            硬编码 4 会在主包收窄后直接误报中止）
   §3.2.3 已安装依赖清单：调 tools\gen-installed-deps.py 生成 config\installed-deps.json
          （插件依赖判定的真源，也是 verify-package.py 的 REQUIRED 之一 —— 缺它校验必失败）
@@ -35,6 +35,9 @@ r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<Deploy
     python tools\build-deploy-local.py -Version 2.1.0     # 指定版本
     python tools\build-deploy-local.py --force            # 允许与上一版同号（只改了文档/工具时）
     python tools\build-deploy-local.py --check-only       # 只做前置检查 + 打印计划，不写任何文件
+    python tools\build-deploy-local.py --offline "chrome X; libreoffice Y"
+                                                          # 随包离线组件摘要 → version.json.offline
+                                                          # （由 build-deploy.ps1 -WithOfflineRuntime 传入）
 之后：powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -ZipOnly
 """
 import argparse
@@ -49,20 +52,25 @@ from datetime import datetime
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PY_BASELINE = "3.14"
-# 核心插件白名单：解耦后主包**只带核心插件**，业务插件走插件包 / 插件集独立分发
-# （见 docs/design/主体与插件解耦-设计文档.md §3.3 / §3.5）。口径与 build-deploy.ps1 的
-# $CorePlugins 一致 —— 改一处要两处一起改。store=第二核心插件（插件商店，O2）。
-CORE_PLUGINS = ["admin", "store"]
+# 主包随包清单的单一真源（build-deploy.ps1 / 本脚本 / verify-package.py 三方共读）。
+MANIFEST_FILE = os.path.join(ROOT, "tools", "package-content.json")
 
-# §3.2 复制清单（顺序与 build-deploy.ps1 一致，勿随意增删）
-# ★ docs 只列「随包层」：guide（交付手册）+ design（设计文档）+ 根索引
-#   不随包：docs/eval、docs/plan、docs/archive（内部评估稿 / 活清单 / 历史留证）
-# ★ plugins / wheels / tools 不再整目录随包：plugins 只拷核心插件白名单、
-#   tools 只拷 plugin-upgrade（目标机离线装插件）、wheels 不随包（无运行时消费方）。
-COPY_DIRS = ["static", "docs/guide", "docs/design"]
-COPY_FILES = ["install.ps1", "一键安装.bat", "一键卸载.bat", "docs/README.md",
-              "docs/项目管理手册.md",
-              "README.md", "HANDOFF.md", "插件设计规范.md", "移动端APP.md"]
+
+def load_package_manifest():
+    """读主包随包清单（单一真源）：核心插件白名单 / 随包目录 / 随包文件 / tools 子目录。
+
+    此前这三组清单在 build-deploy-local.py、build-deploy.ps1、verify-package.py 三处
+    各自手抄（注释自认"改一处要两处一起改"，且已出现失同步）；P2-2 起以此为唯一真源。
+    """
+    try:
+        with open(MANIFEST_FILE, encoding="utf-8-sig") as f:
+            m = json.load(f)
+    except OSError as e:
+        raise SystemExit("缺少主包随包清单 %s（单一真源）：%s" % (MANIFEST_FILE, e))
+    for key in ("core_plugins", "copy_dirs", "copy_files", "tools_dirs"):
+        if not m.get(key):
+            raise SystemExit("主包随包清单缺键或为空：%s（%s）" % (key, MANIFEST_FILE))
+    return m
 
 START_BAT = """@echo off
 title JZToolsHub
@@ -173,7 +181,16 @@ def main():
     ap.add_argument("--force", action="store_true", help="允许与上一版同号重出（只改了文档/工具时）")
     ap.add_argument("--check-only", action="store_true", help="只做前置检查与差异报告，不写任何文件")
     ap.add_argument("-DeployName", dest="deploy_name", default=os.path.join("服务端", "JZToolsHub"), help="部署目录名")
+    ap.add_argument("--offline", dest="offline_summary", default="",
+                    help="随包离线组件摘要（写入 version.json.offline；由 build-deploy.ps1 "
+                         "-WithOfflineRuntime 传入，常规瘦包留空）")
     args = ap.parse_args()
+
+    man = load_package_manifest()
+    core_plugins = man["core_plugins"]
+    copy_dirs = man["copy_dirs"]
+    copy_files = man["copy_files"]
+    tools_dirs = man["tools_dirs"]
 
     dist = os.path.join(ROOT, "dist", "JZToolsHub")   # PyInstaller 产物名固定（spec 决定）
     deploy = os.path.join(ROOT, "deploy")
@@ -214,11 +231,11 @@ def main():
     if not args.check_only:
         os.makedirs(app, exist_ok=True)
     merge_copy(dist, app, rules, stats, args.check_only)                      # §3.1
-    for d in COPY_DIRS:                                                       # §3.2
+    for d in copy_dirs:                                                       # §3.2
         s = os.path.join(ROOT, d)
         if os.path.isdir(s):
             merge_copy(s, os.path.join(app, d), rules, stats, args.check_only)
-    for f in COPY_FILES:
+    for f in copy_files:
         s = os.path.join(ROOT, f)
         if not os.path.exists(s):
             continue
@@ -230,7 +247,7 @@ def main():
         if not args.check_only:
             shutil.copy2(s, t)
     # §3.2 插件：只拷核心插件白名单（业务插件不随主包）
-    for cp in CORE_PLUGINS:
+    for cp in core_plugins:
         src = os.path.join(ROOT, "plugins", cp)
         if not os.path.isdir(src):
             raise SystemExit("核心插件目录缺失：plugins/%s（见设计文档 §3.5）" % cp)
@@ -239,14 +256,15 @@ def main():
     pdir = os.path.join(app, "plugins")
     if os.path.isdir(pdir):
         stray = [d for d in os.listdir(pdir)
-                 if os.path.isdir(os.path.join(pdir, d)) and d not in CORE_PLUGINS]
+                 if os.path.isdir(os.path.join(pdir, d)) and d not in core_plugins]
         if stray:
             raise SystemExit("主包 plugins/ 内出现非核心插件：%s（解耦要求主包只带 %s）"
-                             % (", ".join(stray), "/".join(CORE_PLUGINS)))
-    # tools：只带目标机运维需要的 plugin-upgrade
-    tools_src = os.path.join(ROOT, "tools", "plugin-upgrade")
-    if os.path.isdir(tools_src):
-        merge_copy(tools_src, os.path.join(app, "tools", "plugin-upgrade"), rules, stats, args.check_only)
+                             % (", ".join(stray), "/".join(core_plugins)))
+    # tools：只带目标机运维需要的子目录（tools_dirs，缺省仅 plugin-upgrade）
+    for td in tools_dirs:
+        tools_src = os.path.join(ROOT, "tools", td)
+        if os.path.isdir(tools_src):
+            merge_copy(tools_src, os.path.join(app, "tools", td), rules, stats, args.check_only)
     # config/tools.json：首装模板收窄为「site + 分类骨架 + 核心插件条目」
     # （仓库里的 config/tools.json 保持全量，便于源码开发；收窄只发生在打包产物里）
     if not args.check_only:
@@ -255,7 +273,7 @@ def main():
             tpl_obj = json.load(f)
         narrowed = {"site": tpl_obj.get("site"),
                     "categories": tpl_obj.get("categories", []),
-                    "tools": [t for t in tpl_obj.get("tools", []) if t.get("id") in CORE_PLUGINS]}
+                    "tools": [t for t in tpl_obj.get("tools", []) if t.get("id") in core_plugins]}
         with open(os.path.join(app, "config", "tools.json"), "w", encoding="utf-8", newline="") as f:
             f.write(json.dumps(narrowed, ensure_ascii=False, indent=2))
 
@@ -284,13 +302,13 @@ def main():
     for cur, _d, files in os.walk(os.path.join(app, "plugins")):
         tpl += [f for f in files if f.endswith(".template.json")]
     tpl_expect = 0
-    for cp in CORE_PLUGINS:
+    for cp in core_plugins:
         for cur, _d, files in os.walk(os.path.join(ROOT, "plugins", cp)):
             tpl_expect += len([f for f in files if f.endswith(".template.json")])
     if len(tpl) < tpl_expect:
         raise SystemExit("模板自检失败：仅 %d 个 *.template.json（期望 >= %d，来自核心插件 %s）。"
                          "检查清理规则是否误删模板（模板不得命名为 config.json）。"
-                         % (len(tpl), tpl_expect, "/".join(CORE_PLUGINS)))
+                         % (len(tpl), tpl_expect, "/".join(core_plugins)))
 
     # ---- §3.3 / §3.4 / §4 ----
     if not args.check_only:
@@ -303,7 +321,7 @@ def main():
             plugin_api = 1
         obj = {"app": version, "schema": 1, "commit": commit,
                "built_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-               "python": pyver, "offline": "", "plugin_api": plugin_api}
+               "python": pyver, "offline": args.offline_summary, "plugin_api": plugin_api}
         with open(vf, "w", encoding="utf-8", newline="") as f:   # UTF-8 无 BOM
             f.write(json.dumps(obj, indent=4, ensure_ascii=False))
         with open(os.path.join(app, "start.bat"), "w", encoding="gbk", newline="\r\n") as f:

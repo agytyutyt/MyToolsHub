@@ -47,6 +47,10 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# 出包链共用函数（Say/Warn/Die、Write-Utf8NoBom、Compare-SemVer、压缩、spec 清单解析…；
+# P2-2 起这组函数不再各自手抄——见 tools\_shared.psm1 头部说明）
+Import-Module (Join-Path $PSScriptRoot "_shared.psm1") -Force
+
 $ScriptVer = "1.0.0"
 $Root      = Split-Path -Parent $PSScriptRoot          # 仓库根目录
 $PythonCmd = $Python
@@ -61,19 +65,8 @@ $RulesFile = Join-Path $PSScriptRoot "plugin-payload-rules.json"
 if ([string]::IsNullOrWhiteSpace($RegistryFile)) { $RegistryFile = Join-Path $PSScriptRoot "plugin-packages.json" }
 if (-not [System.IO.Path]::IsPathRooted($RegistryFile)) { $RegistryFile = Join-Path $Root $RegistryFile }
 $InstallerDir = Join-Path $PSScriptRoot "plugin-upgrade"
-$SpecFile  = Join-Path $Root "JZToolsHub.spec"
 # 命名族（2026-10-08 改版）：JZToolsHub-<id>-后端-v<版本>.zip —— id 前置使前后端包排序相邻
 $NameTail  = "后端"
-
-function Say { param([string]$m = "") Write-Host $m }
-function Warn { param([string]$m) Write-Warning $m }
-function Die  {
-    param([string]$m)
-    Write-Host ""
-    Write-Host "  [失败] $m" -ForegroundColor Red
-    Write-Host ""
-    exit 1
-}
 
 # ---------------- 基础工具 ----------------
 function Read-JsonFile {
@@ -84,40 +77,6 @@ function Read-JsonFile {
     } catch {
         Die "JSON 解析失败：$Path`n         $($_.Exception.Message)"
     }
-}
-
-function Write-Utf8NoBom {
-    param([string]$Path, [string]$Text)
-    $dir = Split-Path -Parent $Path
-    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
-}
-
-# 相对路径（PS 5.1 没有 [IO.Path]::GetRelativePath，手写一个）
-function Get-RelPath {
-    param([string]$Base, [string]$Full)
-    $b = [System.IO.Path]::GetFullPath($Base).TrimEnd('\', '/')
-    $f = [System.IO.Path]::GetFullPath($Full)
-    if ($f.StartsWith($b, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $f.Substring($b.Length).TrimStart('\', '/') -replace '\\', '/'
-    }
-    return $f -replace '\\', '/'
-}
-
-function Get-Sha256 {
-    param([string]$Path)
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
-}
-
-# 16 位内容指纹（MD5 前 16 位；与 jztools_data._file_hash16 同语义，用于"内容是否变过"）
-function Get-Hash16 {
-    param([string]$Path)
-    $md5 = [System.Security.Cryptography.MD5]::Create()
-    try {
-        $fs = [System.IO.File]::OpenRead($Path)
-        try { return ([BitConverter]::ToString($md5.ComputeHash($fs)) -replace '-', '').ToLower().Substring(0, 16) }
-        finally { $fs.Dispose() }
-    } finally { $md5.Dispose() }
 }
 
 function Test-ExcludedPath {
@@ -133,19 +92,6 @@ function Test-ExcludedPath {
         if ($name -like $g) { return $true }
     }
     return $false
-}
-
-function Compare-SemVer {
-    # 返回 -1 / 0 / 1；非法版本号按 (0,0,0) 处理并告警
-    param([string]$A, [string]$B)
-    $pa = @(0, 0, 0); $pb = @(0, 0, 0)
-    if ($A -match '^(\d+)\.(\d+)\.(\d+)$') { $pa = @([int]$matches[1], [int]$matches[2], [int]$matches[3]) }
-    if ($B -match '^(\d+)\.(\d+)\.(\d+)$') { $pb = @([int]$matches[1], [int]$matches[2], [int]$matches[3]) }
-    for ($i = 0; $i -lt 3; $i++) {
-        if ($pa[$i] -gt $pb[$i]) { return 1 }
-        if ($pa[$i] -lt $pb[$i]) { return -1 }
-    }
-    return 0
 }
 
 # ---------------- 读取规则与登记 ----------------
@@ -209,6 +155,15 @@ if ($Registry.packages -and ($Registry.packages.PSObject.Properties.Name -contai
 }
 if ($prevEntry) {
     $cmp = Compare-SemVer $Version $prevEntry.version
+    if ($null -eq $cmp) {
+        # 登记里的版本号非法：不得无声放行（原实现把非法按 0.0.0 处理，与 install.ps1 /
+        # install-plugin.ps1 / build-plugin-set.ps1 三处"非法→$null"的语义相反——P2-2 统一）
+        if (-not $Force) {
+            Die "上一发布版本号非法（登记里是 '$($prevEntry.version)'），无法判定递增。`n         请核对登记文件（$RegistryFile）的 $Id 条目，或确需重打时加 -Force。"
+        }
+        Warn "上一发布版本号非法（'$($prevEntry.version)'），-Force 放行按递增处理"
+        $cmp = 1
+    }
     if ($cmp -le 0 -and -not $Force) {
         Die ("版本未递增：本次 $Version，上一发布 $($prevEntry.version)。`n" +
              "         请递增 plugins\$Id\manifest.json 的 version（规范 V-1，语义化：修订=修复/次版本=兼容增强/主版本=不兼容），`n" +
@@ -220,8 +175,7 @@ $forceRepack = [bool]($prevEntry -and $cmp -le 0 -and $Force)
 Say "  版本      ：$Version（上一发布：$(if ($prevEntry) { $prevEntry.version } else { '（无）' })）"
 
 # ---------------- 暂存目录与 payload 拷贝（排除运行态数据） ----------------
-$ts = Get-Date -Format "yyyyMMdd-HHmmss"
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-pkg-" + $Id + "-" + $ts)
+$staging = Get-TempStagingPath "jz-pkg-$Id-"
 $payloadRoot = Join-Path $staging "payload"
 $payloadPlugin = Join-Path (Join-Path $payloadRoot "plugins") $Id
 New-Item -ItemType Directory -Force -Path $payloadPlugin | Out-Null
@@ -296,20 +250,15 @@ foreach ($req in $Rules.required) {
 }
 
 # ---------------- C-4：依赖白名单（第三方库必须 ∈ 框架 PACKAGES ∪ vendor ∪ 标准库） ----------------
-$specText = ""
-if (Test-Path -LiteralPath $SpecFile) { $specText = Get-Content -LiteralPath $SpecFile -Raw -Encoding UTF8 }
-$fwPkgs = @()
-if ($specText -match '(?s)PACKAGES\s*=\s*\[(.*?)\]') {
-    $fwPkgs = @([regex]::Matches($matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
-}
-# 「依赖组件包」提供的库（cv2/numpy）：不随主包，但允许插件声明——
+# 清单解析收口到 tools\_shared.psm1（与 build-deploy.ps1 的前置依赖检查共用同一实现；
+# 行首锚定——PACKAGES 不会把 DEP_COMPONENT_PACKAGES 的前缀段误命中）。
+$fwPkgs = @(Get-SpecPackages)
+# 「依赖组件包」提供的库（cv2/numpy 等）：不随主包，但允许插件声明——
 # 目标机装了对应组件即满足；没装则插件降级并提示"安装依赖组件包"（见设计文档 §3.4 / T25）。
-if ($specText -match '(?s)DEP_COMPONENT_PACKAGES\s*=\s*\[(.*?)\]') {
-    $depPkgs = @([regex]::Matches($matches[1], '"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
-    if ($depPkgs.Count -gt 0) {
-        $fwPkgs = @($fwPkgs + $depPkgs | Select-Object -Unique)
-        Write-Host "    依赖组件包提供的库（允许声明，需目标机装组件）：$($depPkgs -join ', ')"
-    }
+$depPkgs = @(Get-SpecDepComponentPackages)
+if ($depPkgs.Count -gt 0) {
+    $fwPkgs = @($fwPkgs + $depPkgs | Select-Object -Unique)
+    Write-Host "    依赖组件包提供的库（允许声明，需目标机装组件）：$($depPkgs -join ', ')"
 }
 if ($fwPkgs.Count -eq 0) { Warn "未能从 JZToolsHub.spec 解析出 PACKAGES 白名单（C-4 将只对照 vendor 与标准库）" }
 
@@ -422,7 +371,7 @@ print(json.dumps({'no_backend': False, 'own': own, 'vendor': vend_bad, 'test': t
 # 关键：脚本与白名单都走临时文件，而不是 python -c 内联参数。
 #   PS 5.1 把含双引号的参数传给原生命令行时会剥掉引号（$PSNativeCommandArgumentPassing 是 PS 7.3+ 才有），
 #   内联脚本里的 f"..." 与 JSON 都会被打坏（实测报 File "<string>", line NN 语法错）。
-$depWork = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-depscan-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
+$depWork = Get-TempStagingPath "jz-depscan-"
 New-Item -ItemType Directory -Force -Path $depWork | Out-Null
 $depFile = Join-Path $depWork "dep_scan.py"
 $fwFile = Join-Path $depWork "allowed.json"
@@ -431,10 +380,23 @@ if ($fwPkgs.Count -gt 0) { $fwJson = $fwPkgs | ConvertTo-Json -Compress }
 [System.IO.File]::WriteAllText($depFile, $depScript, (New-Object System.Text.UTF8Encoding($false)))
 [System.IO.File]::WriteAllText($fwFile, $fwJson, (New-Object System.Text.UTF8Encoding($false)))
 $depJson = & $PythonCmd $depFile $payloadPlugin $fwFile $Root 2>&1 | Select-Object -Last 1
+$depExit = $LASTEXITCODE
 Remove-Item -LiteralPath $depWork -Recurse -Force -ErrorAction SilentlyContinue
-if (-not $depJson) { $depJson = "{}" }
 $depObj = $null
-try { $depObj = $depJson | ConvertFrom-Json } catch { Warn "依赖扫描结果无法解析，跳过 C-4：$depJson" }
+if ($depJson) {
+    try { $depObj = $depJson | ConvertFrom-Json } catch { $depObj = $null }
+}
+# ★ 扫描失败必须拦住（P2-2）：此前解析失败仅 Warn 后按空结果继续走，
+#   C-4/C-10/C-11 三道依赖纪律被静默跳过——"打出的包缺依赖却无人察觉"正是它们要防的事故。
+#   正常唯一结果是含 no_backend 键的 JSON；拿不到即视为失败（-SkipChecks 才降级告警）。
+$scanOk = ($depExit -eq 0) -and ($null -ne $depObj) -and
+          ($depObj.PSObject.Properties.Name -contains 'no_backend')
+if (-not $scanOk) {
+    $msg = "依赖扫描未产出可解析结果（exit=$depExit，输出：$depJson）——C-4/C-10/C-11 无法执行。`n" +
+           "        修法：确认 -Python 指定的解释器可运行（$PythonCmd）后重跑；排障可用 -SkipChecks 降级。"
+    if ($SkipChecks) { Warn $msg } else { Die $msg }
+    $depObj = $null          # 降级路径下不得拿半截结果当断言输入
+}
 
 $depsVendored = @()
 $depsFramework = @()
@@ -802,7 +764,7 @@ $pkgMeta = [ordered]@{
     # 真源是 jz_deps.PLUGIN_API（见 docs\design\主体与插件解耦-设计文档.md §5.2）。
     api_version       = $pluginApi
     requires_restart  = [bool]$restart
-    built_at          = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+    built_at          = (Get-IsoTimestamp)
     built_from        = [ordered]@{ commit = $gitCommit; dirty = [bool]$gitDirty }
     python            = (& $PythonCmd -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null | Select-Object -First 1)
     code_sha256       = $codeSha
@@ -902,11 +864,8 @@ if ($NoZip) {
     Say "    校验结果全部通过；检查无误后可重跑去掉 -NoZip 出包。"
     exit 0
 } else {
-    if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::CreateFromDirectory($staging, $zipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
+    $zipSize = Compress-DirectoryToZip -SourceDir $staging -ZipPath $zipPath -Level Optimal
     $zipSha = Get-Sha256 $zipPath
-    $zipSize = (Get-Item -LiteralPath $zipPath).Length
     Write-Utf8NoBom "$zipPath.sha256" ("$zipSha  $zipName`n")
     Say ""
     Say "==> 已产出插件包：$zipPath"
@@ -927,10 +886,10 @@ if (-not $NoZip -and (Test-Path -LiteralPath $frontendDir)) {
     $feManifest = [ordered]@{
         id       = $Id
         version  = $Version
-        built_at = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+        built_at = (Get-IsoTimestamp)
         files    = $feList
     }
-    $feStaging = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-fe-" + $Id + "-" + $ts)
+    $feStaging = Get-TempStagingPath "jz-fe-$Id-"
     New-Item -ItemType Directory -Force -Path (Join-Path $feStaging "frontend") | Out-Null
     foreach ($f in $feFiles) {
         $rel = Get-RelPath $frontendDir $f.FullName
@@ -940,11 +899,9 @@ if (-not $NoZip -and (Test-Path -LiteralPath $frontendDir)) {
         Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
     }
     Write-Utf8NoBom (Join-Path $feStaging "frontend-manifest.json") (($feManifest | ConvertTo-Json -Depth 5) + "`n")
-    if (Test-Path -LiteralPath $frontendZipPath) { Remove-Item -LiteralPath $frontendZipPath -Force }
-    [IO.Compression.ZipFile]::CreateFromDirectory($feStaging, $frontendZipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
+    $feSize = Compress-DirectoryToZip -SourceDir $feStaging -ZipPath $frontendZipPath -Level Optimal
     Remove-Item -LiteralPath $feStaging -Recurse -Force -ErrorAction SilentlyContinue
     $feSha = Get-Sha256 $frontendZipPath
-    $feSize = (Get-Item -LiteralPath $frontendZipPath).Length
     $feCount = $feList.Count
     Write-Utf8NoBom "$frontendZipPath.sha256" ("$feSha  $frontendZipName`n")
     Say "==> 已产出前端包：$frontendZipPath"
@@ -1006,7 +963,7 @@ $list += [pscustomobject][ordered]@{
     size             = [long]$zipSize
     requires_restart = [bool]$restart
     min_app_version  = $MinApp
-    published_at     = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+    published_at     = (Get-IsoTimestamp)
     changelog        = ($changelog -split "`n" | Select-Object -First 3) -join "；"
 }
 if ($feCount -gt 0) {
@@ -1014,7 +971,7 @@ if ($feCount -gt 0) {
     $list[-1] | Add-Member -NotePropertyName frontend_sha256 -NotePropertyValue $feSha
     $list[-1] | Add-Member -NotePropertyName frontend_size -NotePropertyValue ([long]$feSize)
 }
-[pscustomobject]@{ schema = 1; updated_at = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"); packages = @($list) } |
+[pscustomobject]@{ schema = 1; updated_at = (Get-IsoTimestamp); packages = @($list) } |
     ConvertTo-Json -Depth 8 | ForEach-Object { Write-Utf8NoBom $indexPath ($_ + "`n") }
 
 if ($Publish) {

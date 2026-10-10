@@ -48,24 +48,44 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
-REQUIRED = ["JZToolsHub.exe", "start.bat", "一键安装.bat", "一键卸载.bat", "install.ps1",
-            "config/tools.json", "config/installed-deps.json", "version.json", "README.md", "HANDOFF.md",
-            "插件设计规范.md", "移动端APP.md", "docs/README.md", "docs/项目管理手册.md",
-            "_internal/python3*"]
+
+def _load_package_manifest():
+    """读主包随包清单（单一真源）：tools/package-content.json。
+
+    与 tools/build-deploy-local.py / build-deploy.ps1 共读同一份——核心插件白名单、随包
+    文件清单（REQUIRED / S11 文档层由此派生）此前在本文件手抄，与组装侧失同步过。
+    """
+    path = os.path.join(ROOT, "tools", "package-content.json")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            m = json.load(f)
+    except Exception as e:
+        raise SystemExit("缺少主包随包清单（单一真源）%s：%s" % (path, e))
+    for key in ("core_plugins", "copy_dirs", "copy_files", "tools_dirs"):
+        if not m.get(key):
+            raise SystemExit("主包随包清单缺键或为空：%s（%s）" % (key, path))
+    return m
+
+
+_MANIFEST = _load_package_manifest()
+# 核心插件白名单：主包 plugins/ 内只允许出现它
+CORE_PLUGINS = list(_MANIFEST["core_plugins"])
+# 不随主包（解耦后）：业务插件目录、wheels（无运行时消费方）、tools 下白名单以外的子目录
+ALLOWED_TOOLS_SUBDIRS = list(_MANIFEST["tools_dirs"])
+# REQUIRED = 主包固定必备（exe/启动器/注册表/依赖清单/版本）+ 随包清单里的全部文件
+# （install.ps1、一键安装/卸载.bat、README/HANDOFF/契约文档、docs 两份索引）
+REQUIRED = ["JZToolsHub.exe", "start.bat", "config/tools.json", "config/installed-deps.json",
+            "version.json", "_internal/python3*"] + list(_MANIFEST["copy_files"])
 TEMPLATE_MIN = 0   # 解耦后主包只带核心插件（admin 无 *.template.json）；模板随业务插件包分发
-# 核心插件白名单：主包 plugins/ 内只允许出现它（口径与 build-deploy-local.py 的 CORE_PLUGINS 一致）
-CORE_PLUGINS = ["admin", "store"]
-# 不随主包（解耦后）：业务插件目录、wheels（无运行时消费方）、tools 下除 plugin-upgrade 的子目录
-ALLOWED_TOOLS_SUBDIRS = ["plugin-upgrade"]
 BAD_IN_PLUGINS = re.compile(r"(__pycache__|/data/|/out/|\.task_cache/|/config\.json$|\.pyc$)")
 # 不随包清单：内部文档层（docs/eval|plan|archive）与插件内测试脚本（口径见
-# tools/plugin-payload-rules.json 的 _comment 与 tools/build-deploy-local.py 的 COPY_DIRS）
+# tools/plugin-payload-rules.json 的 _comment 与 tools/package-content.json 的 copy_dirs）
 FORBIDDEN_IN_PACKAGE = re.compile(r"^(docs/(eval|plan|archive)/|plugins/.+/test_.*\.py$|plugins/.+/conftest\.py$)")
 
-# S11 包内文档层（口径 = tools/build-deploy-local.py 的 COPY_FILES + COPY_DIRS：4 份顶层 + 2 份 docs 索引 + guide/design 两目录）
-DOC_SINGLES = ["README.md", "HANDOFF.md", "插件设计规范.md", "移动端APP.md",
-               "docs/README.md", "docs/项目管理手册.md"]
-DOC_DIRS = ["docs/guide", "docs/design"]
+# S11 包内文档层（口径 = tools/package-content.json 的 copy_dirs/copy_files：
+# 顶层 .md 契约文档 + docs 两份索引 + guide/design 两目录）
+DOC_SINGLES = [f for f in _MANIFEST["copy_files"] if f.lower().endswith(".md")]
+DOC_DIRS = [d for d in _MANIFEST["copy_dirs"] if d.startswith("docs/")]
 
 
 def norm_bytes(data):

@@ -264,34 +264,51 @@ function Sync-ConfigTemplates {
     # 3) ensure-keys：插件 config.json 仅补缺失键（保留用户 LLM 配置与自定义阈值）
     # ★ 模板一律命名 config.template.json：打包与安装过程中插件树内的 config.json
     #   会被当作「本机运行时配置」清理，模板若同名会被连带删除（历史缺陷，见
-    #   docs/archive/P0问题修复方案.md FIX-1）。新增带模板的插件时，本清单须与
-    #   jztools_data._TEMPLATE_SYNC 同时登记且保持一致。
-    $cfgPairs = @(
-        @("plugins\case-report\backend\config.template.json",      "plugins\case-report\config.json"),
-        @("plugins\character-graph\backend\config.template.json",  "plugins\character-graph\config.json"),
-        @("plugins\trajectory-sketch\backend\config.template.json","plugins\trajectory-sketch\config.json"),
-        @("plugins\file-filter\backend\config.template.json",      "plugins\file-filter\config.json")
-    )
-    foreach ($cp in $cfgPairs) {
-        $src = Join-Path $SourceDir $cp[0]
-        $dst = Join-Path $DataDir    $cp[1]
-        if (-not (Test-Path $src)) { continue }
-        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
-        if (Test-Path $dst) {
-            try {
-                $t = Get-Content $src -Raw -Encoding UTF8 | ConvertFrom-Json
-                $u = Get-Content $dst -Raw -Encoding UTF8 | ConvertFrom-Json
-                # 递归补键（与 jztools_data._ensure_deep_keys 语义一致：只补缺失、不覆盖已有）
-                Merge-DeepKeys -User $u -Template $t
-                $json = $u | ConvertTo-Json -Depth 20
-                ConvertTo-Utf8NoBom -Path $dst -Json $json
-                Write-Host "  [同步] 已补全 $($cp[1])（保留用户 LLM 配置）"
-            } catch {
-                Write-Host "  [同步] $($cp[1]) 处理失败，保留原配置：$($_.Exception.Message)"
+    #   docs/archive/P0问题修复方案.md FIX-1）。
+    # ★ 自动发现（P2-2，2026-10-10）：此前是 4 个业务插件的硬编码清单——主包收窄为
+    #   核心插件后永远空转，新增插件也无人登记。现按 jztools_data.sync_plugin_templates
+    #   同款口径递归发现 源目录\plugins\<id>\**\*.template.json：
+    #   落点 = 数据根 plugins\<id>\<去掉 .template 标记的文件名>（与运行期同步链路同约定）。
+    $tplSkipDirs = @("__pycache__", ".task_cache", "data", "out", "node_modules", ".venv", "venv", ".git", "vendor")
+    $pluginRoot = Join-Path $SourceDir "plugins"
+    if (Test-Path $pluginRoot) {
+        # 用 Where-Object 显式按名过滤（-Filter 的通配符语义对双点后缀不可靠，实测会静默 0 命中）
+        $tplFiles = @(Get-ChildItem -Path $pluginRoot -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "*.template.json" })
+        foreach ($tplFile in $tplFiles) {
+            $rel = $tplFile.FullName.Substring($pluginRoot.Length).TrimStart('\')
+            $parts = $rel -split '\\'
+            if ($parts.Count -lt 2) { continue }                       # 至少 plugins\<id>\<文件>
+            # 插件 id 段必须形如插件 id；其后、文件名之前的各段不得落入跳过目录
+            $pluginId = $parts[0]
+            if ($pluginId -notmatch '^[A-Za-z0-9_-]+$') { continue }
+            $skipHit = $false
+            for ($i = 1; $i -lt $parts.Count - 1; $i++) {
+                if ($tplSkipDirs -contains $parts[$i]) { $skipHit = $true; break }
             }
-        } else {
-            Copy-Item $src $dst -Force
-            Write-Host "  [同步] 已初始化 $($cp[1])"
+            if ($skipHit) { continue }
+            $dstName = $tplFile.Name -replace '\.template\.', '.'
+            $dstRel  = "plugins\$pluginId\$dstName"
+            $dst = Join-Path $DataDir $dstRel
+            New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+            if (Test-Path $dst) {
+                try {
+                    $t = Get-Content $tplFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+                    $u = Get-Content $dst -Raw -Encoding UTF8 | ConvertFrom-Json
+                    # _mode 是模板元信息（运行期同步按它选同步模式），不进用户配置
+                    if ($t.PSObject.Properties.Name -contains "_mode") { $t.PSObject.Properties.Remove("_mode") }
+                    # 递归补键（与 jztools_data._ensure_deep_keys 语义一致：只补缺失、不覆盖已有）
+                    Merge-DeepKeys -User $u -Template $t
+                    $json = $u | ConvertTo-Json -Depth 20
+                    ConvertTo-Utf8NoBom -Path $dst -Json $json
+                    Write-Host "  [同步] 已补全 $dstRel（保留用户 LLM 配置）"
+                } catch {
+                    Write-Host "  [同步] $dstRel 处理失败，保留原配置：$($_.Exception.Message)"
+                }
+            } else {
+                Copy-Item $tplFile.FullName $dst -Force
+                Write-Host "  [同步] 已初始化 $dstRel"
+            }
         }
     }
 }

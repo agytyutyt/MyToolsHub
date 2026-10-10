@@ -504,13 +504,13 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 25. **`install.ps1` 只能在「含 JZToolsHub.exe 的解压目录」里跑**（`install.ps1` 有守卫，见其 `:364-369`，会直接报「当前目录不是一键安装包」并退出）。历史上曾在仓库根目录误跑——那里的 `config/data_root.json` 备份指针会让"既有安装判定"分支（install.ps1:380 附近）误判为就地更新；该误导已在守卫 + 注释中说明修复，**别再拆掉这个守卫**。
 26. **发版必须递增 `-Version`**，否则 `sync_templates()` 判定未升级而跳过模板同步。
     *（2026-09-14 起 `build-deploy.ps1` 已防呆：不传 `-Version` 会自动递增 patch；最终版本号与上一版相同时**直接报错中止**，确需同号重打要显式加 `-Force`。）*
-27. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。打包脚本 `build-deploy.ps1` 的清理规则是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。打包后脚本会自检 `*.template.json` 数量（期望数按核心插件白名单动态计算，当前 `admin` 无模板 → 阈值为 0）。
+27. **配置模板必须命名 `config.template.json`，绝不能叫 `config.json`**。组装阶段的清理规则（`tools/build-deploy-local.py`；`build-deploy.ps1` 全程跑时调用它）是"删插件树内所有 `config.json`"（意图是清掉本机含 API Key 的运行时配置），精确名匹配；模板若沿用 `config.json` 会被顺带删掉，导致部署形态下模板同步**静默失效**（实测曾使 6 条登记项只剩 `tools.json` 有效）。组装后会自动自检 `*.template.json` 数量（期望数由 `tools/package-content.json` 的 `core_plugins` 动态累计，当前 `admin` 无模板 → 阈值为 0）。
 28. **`JZToolsHub.spec` 的 PACKAGES 不要为纯标准库引擎加条目**（知识库 xhr/dhr 随插件目录分发，PyInstaller 不感知也不需要）；只有 pip 包才需要 `collect_all`。
 29. **打包解释器必须与基线一致，且依赖必须装齐**（2026-09-14 起脚本已加两道前置检查）：
     - `build-deploy.ps1` 会打印解释器版本，**与基线 3.14 不符时告警**（用 3.8/3.10 打出来的包会缺功能且无人察觉）；
-    - 会逐个 import `build-deploy.ps1` 自带的 14 项依赖自检探针清单所列的库（`build-deploy.ps1:104-105`，与 `JZToolsHub.spec` 的 `PACKAGES` 不是同一份清单）并列出缺失项——**缺库不会让打包失败**，只会产出功能残缺的包，所以必须显式拦截；
+    - 会逐个 import `JZToolsHub.spec` 的 `PACKAGES` 所列的库（**清单真源即 spec**，2026-10-10 P2-2 起不再另存手抄清单——旧手抄清单早已与 spec 对不上）——**缺任何一个直接中止打包**（旧行为只是告警继续，会静默产出功能残缺的包）；
     - `version.json` 现在记录 `{app, schema, commit, built_at, python, offline, plugin_api}`（共 7 字段，写入逻辑见 `build-deploy.ps1:402-412`），目标机可据此核对"包是哪个提交、哪个 Python 打的、是否含离线组件、插件 API 版本"；
-    - 其中 **`zfec` 需要 `--find-links wheels`**（无 3.14 官方 wheel），详见 `wheels/README.md`。
+    - 其中 **`zfec` 需要 `--find-links wheels`**（无 3.14 官方 wheel，详见 `wheels/README.md`）——它是「依赖组件包」的取源依赖（`tools/build-dep-component.ps1 -Id zfec`），**不在主包 PACKAGES 内**。
 30. **`install.ps1` 与 `jztools_data.py` 的模板同步是两套实现，必须语义等价**：`ensure-keys` 在 Python 侧是**递归**补键（`_ensure_deep_keys`），PowerShell 侧此前只并顶层键——模板在嵌套层新增键时，一键安装路径补不上。现 `install.ps1` 已改用 `Merge-DeepKeys` 递归实现（已在 PS 5.1 实测：已有值保留、嵌套新键补入）；改任一侧都要同步另一侧。
 31. **本机 PowerShell 环境会把子脚本（`& script.ps1`）的输出整个吞掉**，且 `Invoke-Expression` 被安全策略拦截；验证脚本逻辑时要么把函数体直接写在命令里，要么让脚本自己 `Out-File` 落盘再 Read。
 32. **工作区脏文件提示**：`git status` 常报 `.workbuddy/memory/*.md` 与 `*.ps1` 的 LF→CRLF 警告，属换行符归一化提示（`.gitattributes` 只对 `.bat/.ps1/.cmd` 强制 CRLF），非错误。
@@ -710,7 +710,8 @@ README.md（架构 / 环境 / API / 目录 / 使用示例 / 插件一览 / 故�
 
 > **docs/ 分层规则**（`guide` 交付 / `design` 设计 / `eval` 评估 / `plan` 方案 / `archive` 归档）
 > 与「哪些随包」见 `docs/README.md` §1/§8；改 `docs/` 目录结构要同步
-> `tools/build-deploy-local.py` 的 `COPY_DIRS`/`COPY_FILES` 与 `build-deploy.ps1` §3.2 **两处**。
+> `tools/package-content.json`（随包清单单一真源，组装脚本 `tools/build-deploy-local.py` 与
+> `tools/verify-package.py` 共读）**一处**。
 ```
 
 改动**打包 / 安装 / 离线组件 / 插件升级**链路时，另外几处必须一起改：

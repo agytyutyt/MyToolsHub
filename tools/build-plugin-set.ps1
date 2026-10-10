@@ -28,17 +28,13 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
+# 出包链共用函数（Say/Warn/Die、Compare-SemVer、压缩…；见 tools\_shared.psm1 头部说明）
+Import-Module (Join-Path $PSScriptRoot "_shared.psm1") -Force
+
 $Root       = Split-Path -Parent $PSScriptRoot
 if (-not $From)   { $From   = Join-Path $Root "deploy\插件包\服务器插件" }
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\插件包\插件集" }
 $ToolVer    = "1.0.0"
-
-function Say  { param([string]$m = "") Write-Host $m }
-function Warn { param([string]$m) Write-Warning $m }
-function Die  { param([string]$m) Write-Host ""; Write-Host "  [失败] $m" -ForegroundColor Red; exit 1 }
-function Write-Utf8NoBom { param([string]$Path, [string]$Text)
-    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
-}
 
 Say ""
 Say "================================================"
@@ -72,15 +68,6 @@ function Get-PkgMeta {
         } finally { $z.Dispose() }
     } catch { return $null }
 }
-function Compare-Ver {
-    param([string]$A, [string]$B)
-    if ($A -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
-    $pa = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
-    if ($B -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
-    $pb = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
-    for ($i = 0; $i -lt 3; $i++) { if ($pa[$i] -gt $pb[$i]) { return 1 } elseif ($pa[$i] -lt $pb[$i]) { return -1 } }
-    return 0
-}
 
 $best = @{}
 foreach ($z in $zips) {
@@ -92,7 +79,8 @@ foreach ($z in $zips) {
     if ($Ids.Count -gt 0 -and ($Ids -notcontains [string]$meta.id)) { continue }
     $cur = $best[[string]$meta.id]
     if (-not $cur) { $best[[string]$meta.id] = @{ meta = $meta; zip = $z } ; continue }
-    $c = Compare-Ver ([string]$meta.version) ([string]$cur.meta.version)
+    # 语义统一的共享比较（任一版本号非法 → $null，按"保留现有"处理）
+    $c = Compare-SemVer ([string]$meta.version) ([string]$cur.meta.version)
     if ($null -eq $c -or $c -gt 0) { $best[[string]$meta.id] = @{ meta = $meta; zip = $z } }
 }
 if ($best.Count -eq 0) { Die "没有可用的插件包（-Ids 过滤后为空？）：$From" }
@@ -104,7 +92,7 @@ $zipPath = Join-Path $OutDir "$setName.zip"
 if ((Test-Path -LiteralPath $zipPath) -and -not $Force) {
     Die "产物已存在：$zipPath`n         换 -Name，或加 -Force 覆盖（同名重打会覆盖旧产物）。"
 }
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-set-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
+$staging = Get-TempStagingPath "jz-set-"
 New-Item -ItemType Directory -Force -Path $staging | Out-Null
 
 Say ""
@@ -113,7 +101,7 @@ $entries = @()
 foreach ($id in ($best.Keys | Sort-Object)) {
     $it = $best[$id]
     $zipSrc = $it.zip.FullName
-    $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipSrc).Hash.ToLower()
+    $sha = Get-Sha256 $zipSrc
     Copy-Item -LiteralPath $zipSrc -Destination $staging -Force
     $shaSide = "$zipSrc.sha256"
     if (Test-Path -LiteralPath $shaSide) { Copy-Item -LiteralPath $shaSide -Destination $staging -Force }
@@ -134,7 +122,7 @@ $indexObj = [ordered]@{
     schema     = 1
     kind       = "plugin-set"
     name       = $Name
-    built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+    built_at   = (Get-IsoTimestamp)
     built_from = [ordered]@{ commit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1); source = $From }
     packages   = @($entries)
 }
@@ -187,18 +175,10 @@ if ($NoZip) {
     exit 0
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-# ★ 用 .NET ZipFile 的 4 参重载（不传编码）：默认按 UTF-8 写条目名，并对非 ASCII 名置
-#   UTF-8 标志位（bit 11）——中文文件名（JZToolsHub-<id>-后端-v<版本>.zip）在资源管理器 /
-#   7-Zip / Python 里都能正确显示。若显式传 UTF8Encoding，.NET 反而**不置标志位**，
-#   在中文系统上会被按 GBK 解码成乱码。
-Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-# ★ 不要传 entryNameEncoding：显式传编码时 .NET **不会**给非 ASCII 条目名写 UTF-8 标志位
-#   （bit 11），Windows 资源管理器 / 7-Zip / Python 会按系统代码页解码 → 中文名乱码。
-#   不传编码时 .NET 默认 UTF-8 且按需置标志位（与 build-plugin-package.ps1 一致）。
-[System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $staging, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
-$setSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLower()
+# 压缩机制收口 tools\_shared.psm1 的 Compress-DirectoryToZip（.NET ZipFile——中文条目名
+# UTF-8 标志位的坑见模块内注释；与 build-plugin-package.ps1 同一实现）
+[void](Compress-DirectoryToZip -SourceDir $staging -ZipPath $zipPath -Level Fastest)
+$setSha = Get-Sha256 $zipPath
 Write-Utf8NoBom "$zipPath.sha256" ("{0}  {1}`n" -f $setSha, (Split-Path -Leaf $zipPath))
 
 Say ""

@@ -35,6 +35,7 @@ PACKAGES = [
 #   装到 <程序目录>/runtime/pylibs/，主体启动时注入 sys.path（见 app.py:_setup_dep_components）。
 #   ★ 本清单同样是「插件依赖白名单」的一部分：出包工具 C-4 允许插件声明这些包，
 #     但要求目标机装了对应依赖组件（缺则插件降级，提示"安装依赖组件包"）。
+#   ★ 下方 excludes 直接由本清单派生（P2-2 起两处名单合一，不再手抄两份 19 项）。
 DEP_COMPONENT_PACKAGES = [
     # 由「依赖组件包」按需提供、**不随主包**（组件划分见 tools/build-dep-component.ps1（$UNITS 预置表）与 tools/offline-components.json）：
     #   numpy      → numpy, numpy.libs                （cv2/pandas 的公共底层）
@@ -42,8 +43,6 @@ DEP_COMPONENT_PACKAGES = [
     #   office     → openpyxl, docx, lxml, xlrd, olefile, pypdf（+ et-xmlfile / typing_extensions）
     #   qr         → qrcode, zfec, zxingcpp           （+ colorama）
     #   llm        → requests                         （+ urllib3 / certifi / idna / charset_normalizer）
-    # 本清单同时是「插件依赖白名单」的一部分：出包工具 C-4 允许插件声明这些包，
-    # 但要求目标机装了对应组件（缺则插件降级，后台/插件页面提示安装对应 <id> 依赖组件）。
     "cv2", "numpy",
     "openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions", "xlrd", "olefile", "pypdf",
     "qrcode", "colorama", "zfec", "zxingcpp",
@@ -108,9 +107,9 @@ a = Analysis(
     # 全部「由依赖组件提供」的包都显式排除：只从 PACKAGES 移除还不够，
     # PyInstaller 仍会以传递依赖把它们收集回来（实测 numpy 残留 21 MB），
     # 那会让"未装组件"场景被 _internal 里的副本掩盖，门控与提示全部失真。
-    excludes=["pandas", "numpy", "cv2", "openpyxl", "et_xmlfile", "docx", "lxml", "typing_extensions",
-              "xlrd", "olefile", "pypdf", "qrcode", "colorama", "zfec", "zxingcpp",
-              "requests", "urllib3", "certifi", "idna", "charset_normalizer"],
+    # ★ 名单 = DEP_COMPONENT_PACKAGES（本文件单份真源，P2-2 起不再手抄；此前两份
+    #   19 项列表靠人肉同步）+ pandas（无人使用，见上）。
+    excludes=["pandas"] + DEP_COMPONENT_PACKAGES,
     noarchive=False,
 )
 

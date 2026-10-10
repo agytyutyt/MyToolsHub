@@ -1,17 +1,17 @@
 ﻿# JZToolsHub 打包部署脚本
-# 产物：deploy\JZToolsHub\ —— 后端单目录可执行程序（JZToolsHub.exe + _internal/）
+# 产物：deploy\服务端\JZToolsHub\ —— 后端单目录可执行程序（JZToolsHub.exe + _internal/）
 #       + 前端源码（static/、plugins/）+ 配置（config/）+ 一键启动脚本（start.bat）
 #       + 一键安装/更新（一键安装.bat + install.ps1）+ 一键卸载（一键卸载.bat）+ 版本号（version.json）
 # 用法：powershell -ExecutionPolicy Bypass -File build-deploy.ps1 [-Python "python"] [-DeployName "JZToolsHub"] [-Version "1.3.6"] [-Force]
-#       默认用 PATH 上的 python 打包、输出到 deploy\JZToolsHub\；
+#       默认用 PATH 上的 python 打包、输出到 deploy\服务端\JZToolsHub\；
 #       可用 -Python 指定其他解释器（如 Python 3.8：C:\...\Python38\python.exe）、
 #       用 -DeployName 指定不同的部署目录名（如 py38 版输出到 deploy\JZToolsHub-py38）、
 #       用 -Version 指定版本号（写入 version.json，一键安装脚本据此判断更新）。
 #       未传 -Version 时自动在上一版基础上递增 patch；若最终版本号与上一版相同会直接报错中止
 #       （版本号不变 → 目标机 sync_templates() 判定未升级 → 全部配置模板同步被跳过），
 #       确需同号重打时加 -Force。
-#       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json，并在与基线
-#       3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
+#       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json（组装阶段写入），
+#       并在与基线 3.14 不一致时告警（用旧解释器打包会打出版本残缺却无人察觉的包）。
 #       默认**不**把离线运行组件打进包（主包瘦身，约 27 MB 级（以出包产物为准））：Chrome 与 LibreOffice
 #       改由独立的「离线组件包」分发，目标机按需一键安装（见 tools\build-offline-component.ps1
 #       与 docs\guide\LibreOffice核心组件一键安装评估.md）。要出旧式「组件随包」的胖包时加
@@ -20,6 +20,12 @@
 #       用 tools\build-libreoffice-core.py 生成），随包时默认「用它替代原始 MSI」，
 #       包内体积由 357.5 MB 降到约 166 MB；加 -KeepFullLibreOffice 保留包内完整 LibreOffice MSI
 #       （与裁剪核心包并存，包体约 682 MB；默认仅留裁剪核心包）。
+#
+# ★ P2-2「构建脚本单一真源」（2026-10-10）：本脚本只保留 清理 / 前置检查 / PyInstaller /
+#   离线组件 / 压缩 五段；**组装段调用 tools\build-deploy-local.py**（与「两段式」流程同一份
+#   实现，不再有第二份 PS 组装代码）。随包清单真源 = tools\package-content.json（本脚本 /
+#   组装脚本 / tools\verify-package.py 三方共读）；打包解释器依赖清单真源 = JZToolsHub.spec
+#   的 PACKAGES；共用工具函数见 tools\_shared.psm1。
 param(
     [string]$Python = "python",
     [string]$DeployName = "服务端\JZToolsHub",
@@ -32,8 +38,8 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-# 打包解释器基线（与 Windows 10+ 目标机配套；见 docs/eval/Python版本选型评估.md）
-$PyBaseline = "3.14"
+# 出包链共用函数（Say/Warn/Die、Compare-SemVer、压缩、spec 清单解析、解释器信息…）
+Import-Module (Join-Path $PSScriptRoot "tools\_shared.psm1") -Force
 
 $Root    = $PSScriptRoot
 $Dist    = Join-Path $Root "dist"
@@ -42,15 +48,10 @@ $AppDir  = Join-Path $Deploy $DeployName
 $WorkDir = Join-Path $Root "build"
 
 # 打包解释器及其版本（尽早取，便于出错时定位）
-$PyExe = (Get-Command $Python -ErrorAction SilentlyContinue).Source
-if (-not $PyExe) { $PyExe = $Python }
-$PyVer = ""
-try { $PyVer = (& $Python -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null | Select-Object -First 1) } catch {}
-if (-not $PyVer) { $PyVer = "unknown" }
-$PyShort = if ($PyVer -match '^(\d+\.\d+)') { $matches[1] } else { "unknown" }
-Write-Host "  [解释器] $Python → $PyVer（$PyExe）"
-if ($PyShort -ne $PyBaseline) {
-    Write-Warning "打包解释器版本 $PyShort 与基线 $PyBaseline 不一致！产物可能功能残缺（如知识库 Office 预览引擎）。建议用 Python $PyBaseline 打包。"
+$py = Get-PythonRuntimeInfo $Python
+Write-Host "  [解释器] $Python → $($py.Ver)（$($py.Exe)）"
+if (-not $py.MatchesBaseline) {
+    Write-Warning "打包解释器版本 $($py.Short) 与基线 $($py.Baseline) 不一致！产物可能功能残缺（如知识库 Office 预览引擎）。建议用 Python $($py.Baseline) 打包。"
 }
 
 # 上一版版本号：读取既有部署目录的 version.json（必须在下方清理旧产物之前读取）
@@ -72,11 +73,10 @@ if ($ZipOnly) {
     # 注意：变量名不能叫 $zipOnly —— PowerShell 变量名不区分大小写，
     # 会与开关参数 -ZipOnly 撞成同一个变量（赋值字符串给 SwitchParameter 直接报错）。
     $zipPath = Join-Path (Join-Path $Deploy "服务端") "JZToolsHub-v$Version.zip"
-    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     Write-Host "==> [-ZipOnly] 压缩既有部署目录（版本 $Version，跳过打包与组装）..."
     Write-Host "    提示：部署目录里若还是旧文档，请先从仓库复制最新文件进去。"
-    Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $zipPath -CompressionLevel Fastest
-    Write-Host "==> 已生成安装包：$zipPath（$([math]::Round((Get-Item $zipPath).Length/1MB,1)) MB）"
+    $zipLen = Compress-DirectoryToZip -SourceDir $AppDir -ZipPath $zipPath -Level Fastest
+    Write-Host "==> 已生成安装包：$zipPath（$([math]::Round($zipLen/1MB,1)) MB）"
     exit 0
 }
 
@@ -99,11 +99,16 @@ if (Test-Path $WorkDir){ Remove-Item -Recurse -Force $WorkDir }
 # 1.5 前置检查：打包解释器必须已装齐 spec 里 collect_all 的第三方库
 #     （插件后端由 importlib 动态加载，PyInstaller 静态扫描看不到；缺库不会报错，
 #       只会打出功能残缺的包，所以在这里显式拦一下）
+# ★ 清单真源 = JZToolsHub.spec 的 PACKAGES（经 tools\_shared.psm1 解析，不另存抄本；
+#   此前这里是手写清单，早已与 spec 对不上——记的仍是"改由依赖组件分发"的库）。
+#   缺任何一个直接中止：spec 的 collect_all 失败会被 except 静默吞掉，不拦就是出残包。
 Write-Host "==> 检查打包解释器的依赖完整性..."
+$depPkgs = @(Get-SpecPackages)
+if ($depPkgs.Count -eq 0) { throw "未能从 JZToolsHub.spec 解析出 PACKAGES（打包前置检查无法进行）。" }
+$depList = ($depPkgs | ForEach-Object { "'$_'" }) -join ", "
 $depCheck = @"
 import importlib
-pkgs = ['waitress','cryptography','requests','docx','openpyxl','xlrd','olefile',
-        'qrcode','zfec','cv2','numpy','pypdf','pystray','PIL']
+pkgs = [$depList]
 missing = []
 for p in pkgs:
     try:
@@ -112,166 +117,24 @@ for p in pkgs:
         missing.append(f'{p} ({type(e).__name__})')
 print('|'.join(missing))
 "@
-$missingDeps = (& $Python -c $depCheck 2>$null | Select-Object -First 1)
-if ($missingDeps) {
-    Write-Warning ("打包解释器缺少以下依赖，产物将缺少对应功能：`n  " + ($missingDeps -replace '\|', "`n  "))
-    Write-Warning "提示：zfec 无 Python 3.14 官方 wheel，需先 pip install --find-links wheels zfec（见 wheels/README.md）"
-} else {
-    Write-Host "    依赖完整（14/14）"
+$depOut = (& $Python -c $depCheck 2>$null)
+$depExit = $LASTEXITCODE
+if ($depExit -ne 0) {
+    throw "依赖完整性检查自身失败（exit $depExit）——打包解释器 $Python 不可用？请先在命令行跑通 `$Python -c ""import flask"" 排查。"
 }
+$missingDeps = ($depOut | Select-Object -First 1)
+if ($missingDeps) {
+    throw ("打包解释器缺少 spec PACKAGES 里的依赖，产物将功能残缺（collect_all 失败被静默跳过）：`n  " +
+           ($missingDeps -replace '\|', "`n  ") + "`n  请先在打包解释器上安装后重跑。")
+}
+Write-Host "    依赖完整（$($depPkgs.Count)/$($depPkgs.Count)）"
 
 # 2. PyInstaller 打包后端（单目录：exe + _internal/）
 Write-Host "==> PyInstaller 打包后端（$Python）..."
 & $Python -m PyInstaller --noconfirm --clean --distpath $Dist --workpath $WorkDir (Join-Path $Root "JZToolsHub.spec")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 打包失败（exit $LASTEXITCODE）" }
 
-# 3. 组装部署目录
-Write-Host "==> 组装部署目录：$AppDir"
-New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
-
-# 3.1 exe + _internal
-Copy-Item -Recurse -Force (Join-Path $Dist "JZToolsHub\*") $AppDir
-
-# 3.2 前端与插件源码（可修改）、配置模板、文档
-# ★ 主体与插件解耦（S1，见 docs\design\主体与插件解耦-设计文档.md §3.3 / §7 #1）：
-#   主包**只带核心插件白名单**（当前 = admin + store，store 为第二核心插件/插件商店），
-#   业务插件走「插件包 / 插件集」独立分发。
-#   这样主体升级（整包覆盖）从机制上不可能碰到业务插件代码——「升级只针对主体」成立。
-#   目标机已装的业务插件原地保留；全新装机由插件集安装（install.ps1 完成时提示）。
-$CorePlugins = @("admin", "store")
-Copy-Item -Recurse -Force (Join-Path $Root "static")  $AppDir
-$dstPlugins = Join-Path $AppDir "plugins"
-New-Item -ItemType Directory -Force -Path $dstPlugins | Out-Null
-foreach ($cp in $CorePlugins) {
-    $src = Join-Path $Root "plugins\$cp"
-    if (-not (Test-Path $src)) { throw "核心插件目录缺失：plugins\$cp（见 docs\design\主体与插件解耦-设计文档.md §3.5）" }
-    Copy-Item -Recurse -Force $src $dstPlugins
-}
-# 组装自检：包内 plugins\ 只允许出现核心插件白名单内的目录（漏改会静默把业务插件带回主包）
-$strayPlugins = @(Get-ChildItem -Directory $dstPlugins | Where-Object { $CorePlugins -notcontains $_.Name })
-if ($strayPlugins.Count -gt 0) {
-    throw "主包 plugins\ 内出现非核心插件：$(($strayPlugins | ForEach-Object { $_.Name }) -join ', ')（主体与插件解耦要求主包只带 $($CorePlugins -join '/')）"
-}
-Write-Host "    插件随包：仅核心插件 $($CorePlugins -join '/')（业务插件走插件包 / 插件集）"
-
-# tools 随包：只带**目标机运维需要**的 plugin-upgrade（离线装插件）。
-# 其余子目录（dev 伪造会话的验证服务 / e2e 回归 / offline-runtime 胖包脚本 / __pycache__）不上目标机
-# （设计文档 §3.3；dev 与 e2e 由 tools\plugin-payload-rules.json 的 exclude_dirs 兜底排除）。
-$toolsSrc = Join-Path $Root "tools\plugin-upgrade"
-if (Test-Path $toolsSrc) {
-    New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "tools") | Out-Null
-    Copy-Item -Recurse -Force $toolsSrc (Join-Path $AppDir "tools")
-}
-# wheels/ 不随主包（无运行时消费方，仅构建机重建 zfec 用；设计文档 §3.3）
-# docs 分层随包（2026-09-17）：只带「交付层 guide + 设计层 design + 索引」。
-# 内部层 docs/eval（一次性评估稿）/ docs/plan（活清单）/ docs/archive（历史留证）不随包。
-# ★ 口径与 tools\build-deploy-local.py 的 COPY_DIRS 一致 —— 改一处要两处一起改。
-New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "docs") | Out-Null
-foreach ($sub in @("guide", "design")) {
-    $p = Join-Path $Root "docs\$sub"
-    if (Test-Path $p) { Copy-Item -Recurse -Force $p (Join-Path $AppDir "docs") }
-}
-$docIndex = Join-Path $Root "docs\README.md"
-if (Test-Path $docIndex) { Copy-Item -Force $docIndex (Join-Path $AppDir "docs") }
-# docs/项目管理手册.md 随包（S4：包内 docs/README.md 多处引用它，漏拷即死链）
-# ★ 口径与 tools\build-deploy-local.py 的 COPY_DIRS/COPY_FILES 一致 —— 改一处要两处一起改。
-$docManual = Join-Path $Root "docs\项目管理手册.md"
-if (Test-Path $docManual) { Copy-Item -Force $docManual (Join-Path $AppDir "docs") }
-Copy-Item -Force (Join-Path $Root "README.md") $AppDir
-Copy-Item -Force (Join-Path $Root "HANDOFF.md") $AppDir
-# 顶层契约文档（README/HANDOFF 会引用它们，此前漏拷导致部署包内引用悬空）
-foreach ($doc in @("插件设计规范.md", "移动端APP.md")) {
-    $p = Join-Path $Root $doc
-    if (Test-Path $p) { Copy-Item -Force $p $AppDir }
-}
-
-# config 仅复制 tools.json 模板（admin.json / .admin_key 属密钥，首启自动生成）
-# ★ 首装模板**收窄为「site + 分类骨架 + 核心插件条目」**（设计文档 §3.2 / §7 #7）：
-#   分类必须保留（否则插件卡片会落到"未分类"）；业务插件的注册条目由各自的插件包
-#   tools_entry 在安装时写入（机制已有）。仓库里的 config\tools.json 保持全量，
-#   便于源码开发与既有安装继续工作——收窄只发生在**打包产物**里。
-New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "config") | Out-Null
-$toolsTemplate = Join-Path $Root "config\tools.json"
-try {
-    $tpl = Get-Content -LiteralPath $toolsTemplate -Raw -Encoding UTF8 | ConvertFrom-Json
-    $kept = @($tpl.tools | Where-Object { $CorePlugins -contains $_.id })
-    $narrowed = [ordered]@{
-        site       = $tpl.site
-        categories = $tpl.categories
-        tools      = $kept
-    }
-    [System.IO.File]::WriteAllText(
-        (Join-Path $AppDir "config\tools.json"),
-        ($narrowed | ConvertTo-Json -Depth 10),
-        (New-Object System.Text.UTF8Encoding($false))
-    )
-    Write-Host "    首装注册表：site + $($tpl.categories.Count) 个分类 + $($kept.Count) 条核心插件条目（业务插件由插件包写入）"
-} catch {
-    Write-Warning "收窄首装注册表失败，回退为原样复制：$($_.Exception.Message)"
-    Copy-Item -Force $toolsTemplate (Join-Path $AppDir "config")
-}
-
-# 3.2.3 已安装依赖清单（插件依赖判定的真源；见 docs\design\主体与插件解耦-设计文档.md §5.3）
-# 冻结 exe 现场没有 pip、_internal 内 .dist-info 也不保证完整，故由**构建期**在打包解释器上
-# 采集一次（发行包名 → 版本 + import 名 → 发行包名），随主包分发；后台据此展示"已安装依赖"
-# 并与插件 manifest.requires 比对得出可运行性结论（jz_deps.py）。
-& $Python (Join-Path $Root "tools\gen-installed-deps.py") --out (Join-Path $AppDir "config\installed-deps.json")
-if ($LASTEXITCODE -ne 0) { throw "生成已安装依赖清单失败（tools\gen-installed-deps.py）" }
-
-# 清理插件目录中的运行时数据 / 密钥 / 缓存（全新部署由程序自动重建）
-# out 为插件本地测试产物目录（如 knowledge-base 渲染引擎的目检样例，已 gitignore）
-# ★ 只删精确名 config.json（本机运行时配置，含 API Key）——配置模板一律命名
-#   *.template.json，与运行时配置分离，不会被这条规则命中（历史教训见
-#   docs/archive/P0问题修复方案.md FIX-1：模板曾叫 config.json，被此处删掉导致同步链路静默失效）。
-# ★ 规则来自 tools\plugin-payload-rules.json —— 与「插件包」构建工具共用同一份清单，
-#   避免"整包"与"插件包"两条链路漂移（见 docs\design\插件独立升级方案-设计文档.md §4.4 / §6.3）。
-$rulesFile = Join-Path $Root "tools\plugin-payload-rules.json"
-$excludeDirs  = @("data", ".task_cache", "__pycache__", "out")
-$excludeFiles = @("config.json", "config.local.json", ".env", ".DS_Store", "Thumbs.db")
-$excludeGlobs = @("*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old")
-if (Test-Path $rulesFile) {
-    try {
-        $rules = Get-Content -LiteralPath $rulesFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($rules.exclude_dirs)  { $excludeDirs  = @($rules.exclude_dirs) }
-        if ($rules.exclude_files) { $excludeFiles = @($rules.exclude_files) }
-        if ($rules.exclude_globs) { $excludeGlobs = @($rules.exclude_globs) }
-        Write-Host "    运行态清理规则来自 tools\plugin-payload-rules.json"
-    } catch {
-        Write-Warning "读取 $rulesFile 失败，改用内置默认规则：$($_.Exception.Message)"
-    }
-} else {
-    Write-Warning "缺少 $rulesFile，改用内置默认规则"
-}
-$pluginDir = Join-Path $AppDir "plugins"
-if (Test-Path $pluginDir) {
-  Get-ChildItem -Recurse -Directory $pluginDir |
-    Where-Object { $excludeDirs -contains $_.Name } |
-    Remove-Item -Recurse -Force
-  Get-ChildItem -Recurse -File $pluginDir |
-    Where-Object {
-        $n = $_.Name
-        ($excludeFiles -contains $n) -or (@($excludeGlobs | Where-Object { $n -like $_ }).Count -gt 0)
-    } | Remove-Item -Force
-}
-
-# 3.2.1 模板自检：清理后必须仍保留同步模板（防止未来有人把模板又命名回 config.json）
-# ★ 期望值随**核心插件白名单**动态计算（解耦后主包只带核心插件 admin+store，业务插件的模板不随主包）：
-#   硬编码 4 会在主包收窄后直接误报中止（设计文档 §7 #2）。
-$tplExpect = 0
-foreach ($cp in $CorePlugins) {
-    $cpDir = Join-Path $Root "plugins\$cp"
-    if (Test-Path $cpDir) {
-        $tplExpect += @(Get-ChildItem -Recurse -File $cpDir -Filter *.template.json -ErrorAction SilentlyContinue).Count
-    }
-}
-$tpl = @(Get-ChildItem -Recurse -File $pluginDir -Filter *.template.json -ErrorAction SilentlyContinue)
-if ($tpl.Count -lt $tplExpect) {
-    throw "打包清理异常：包内配置模板仅剩 $($tpl.Count) 个（期望 >= $tplExpect，来自核心插件 $($CorePlugins -join '/')）。" +
-          "请检查上方清理规则是否误删了 *.template.json（模板不得命名为 config.json）。"
-}
-Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留（核心插件期望 $tplExpect）"
-
-# 3.2.2 离线运行组件（Chrome / LibreOffice 安装包 + 随包安装脚本）
+# 3.（可选）离线运行组件（Chrome / LibreOffice 安装包 + 随包安装脚本）
 #   源 A：<仓库>\runtime\           —— 由 tools/fetch-offline-bundle.py 从官方源下载（已 gitignore）
 #        其中 libreoffice\libreoffice-core.zip 由 tools\build-libreoffice-core.py 生成（裁剪核心包）
 #   源 B：tools\offline-runtime\    —— 随包脚本与说明（入库，随每版一起更新）
@@ -279,7 +142,8 @@ Write-Host "  模板自检通过：$($tpl.Count) 个 *.template.json 已保留�
 #                              install-libreoffice-core.ps1, 安装LibreOffice核心组件.bat, 卸载LibreOffice核心组件.bat,
 #                              chrome\*.msi, libreoffice\{libreoffice-core.zip,.json} 或 libreoffice\*.msi }
 #   （安装日志-LibreOffice核心.txt 由安装器在目标机运行时生成，不随包）
-#   $offlineSummary 记录随包的离线组件（写进 version.json.offline）；默认瘦包时为空串。
+#   $offlineSummary 记录随包的离线组件，经 --offline 传给组装脚本写进 version.json.offline；
+#   默认瘦包时为空的字符串数组（组装脚本落空串）。
 $offlineSummary = @()
 
 # 离线组件清单自检（体积 + R5 sha256 冻结值比对）。
@@ -408,25 +272,13 @@ if (-not $WithOfflineRuntime) {
     # --- LibreOffice：默认用「裁剪核心包」替代原始 MSI（357.5 MB → 约 166 MB）---
     #     核心包由 tools\build-libreoffice-core.py 生成：官方 MSI 管理安装解包后裁掉
     #     词典/语言包/图标主题/字体等死重，只留 .doc→.docx 与 .xls→.xlsx 需要的那套。
+    #     体积/sha256/溯源三项校验的单一实现在 tools\_shared.psm1（与
+    #     build-offline-component.ps1 共用，此前两处各写一份）。
     $loDstDir = Join-Path $rtDst "libreoffice"
     $coreZip  = Join-Path $loDstDir "libreoffice-core.zip"
     $coreMeta = Join-Path $loDstDir "libreoffice-core.json"
     if ((Test-Path $coreZip) -and (-not $KeepFullLibreOffice)) {
-        if (-not (Test-Path $coreMeta)) {
-            throw "包内有 libreoffice-core.zip 但缺 libreoffice-core.json，无法校验溯源。请重跑：python tools\build-libreoffice-core.py --force"
-        }
-        $cm = Get-Content $coreMeta -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ((Get-Item $coreZip).Length -ne [int64]$cm.artifact.size) {
-            throw ("libreoffice-core.zip 体积与元数据不符（{0} vs {1}）；请重跑：python tools\build-libreoffice-core.py --force" -f (Get-Item $coreZip).Length, [int64]$cm.artifact.size)
-        }
-        if ((Get-FileHash -LiteralPath $coreZip -Algorithm SHA256).Hash.ToLower() -ne ([string]$cm.artifact.sha256).ToLower()) {
-            throw "libreoffice-core.zip 的 sha256 与元数据不符；请重跑：python tools\build-libreoffice-core.py --force"
-        }
-        $srcMsiPath = Join-Path $loDstDir ([string]$cm.source.file)
-        if ((Test-Path $srcMsiPath) -and
-            ((Get-FileHash -LiteralPath $srcMsiPath -Algorithm SHA256).Hash.ToLower() -ne ([string]$cm.source.sha256).ToLower())) {
-            throw "runtime\libreoffice\$($cm.source.file) 与核心包的溯源 sha256 不符（换了 MSI 却没重建核心包）；请重跑：python tools\build-libreoffice-core.py --force"
-        }
+        $cm = Test-LibreOfficeCoreBundle -CoreZip $coreZip -CoreMeta $coreMeta -SourceDir $loDstDir
         Get-ChildItem -LiteralPath $loDstDir -Filter *.msi -File | Remove-Item -Force
         $coreZm = $cm
         $coreMb = [math]::Round($cm.artifact.size / 1MB, 1)
@@ -442,66 +294,23 @@ if (-not $WithOfflineRuntime) {
         -ComponentsFile (Join-Path $Root "tools\offline-components.json") -CoreMeta $coreZm)
 }
 
-# 3.3 运行期目录
-New-Item -ItemType Directory -Force -Path (Join-Path $AppDir "logs") | Out-Null
-
-# 3.4 一键安装 / 卸载脚本 + 版本号（含 commit / built_at / python，便于核对包内代码与运行时来源）
-Write-Host "==> 写入一键安装/卸载脚本与 version.json（版本 $Version）..."
-foreach ($f in @("install.ps1", "一键安装.bat", "一键卸载.bat")) {
-    $srcF = Join-Path $Root $f
-    if (Test-Path $srcF) { Copy-Item -Force $srcF $AppDir }
-}
-$gitCommit = ""
-try { $gitCommit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1) } catch {}
-if (-not $gitCommit) { $gitCommit = "unknown" }
-# 工作区有未提交改动时标 -dirty：否则 version.json 的 commit 会指向一个
-# **并不包含包内代码**的提交，事后无法据此定位"这个包到底是哪份源码打出来的"。
-$gitDirty = ""
-try {
-    $porcelain = (& git -C $Root status --porcelain 2>$null)
-    if ($porcelain) { $gitDirty = "-dirty" }
-} catch {}
-$gitCommit = "$gitCommit$gitDirty"
-$verObj = @{
-    app      = $Version
-    schema   = 1
-    commit   = $gitCommit
-    built_at = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    python   = $PyVer          # 打包解释器版本（基线 $PyBaseline，不符时已在开头告警）
-    offline  = ($offlineSummary -join "; ")   # 随包离线组件（空串表示瘦包）
-    # 插件 API 版本（主体对插件的承诺面版本；真源在 jz_deps.PLUGIN_API）。
-    # 插件包据此声明 api_version，主体启动时按它做门控（见 docs\design\主体与插件解耦-设计文档.md §5.2）。
-    plugin_api = [int](& $Python -c "import jz_deps,sys;sys.stdout.write(str(jz_deps.PLUGIN_API))")
-}
-# 注意：必须 UTF-8 无 BOM（Python json.load 遇 BOM 会报错）
-[System.IO.File]::WriteAllText(
-    (Join-Path $AppDir "version.json"),
-    ($verObj | ConvertTo-Json),
-    (New-Object System.Text.UTF8Encoding($false))
-)
-Write-Host "    版本 $Version（commit $gitCommit，Python $PyVer）"
-
-# 4. 一键启动脚本
-Write-Host "==> 生成 start.bat..."
-$startBat = @'
-@echo off
-title JZToolsHub
-echo 正在启动 JZToolsHub...（无窗口运行，托盘图标常驻右下角）
-echo 浏览器访问 http://localhost:5000 ；退出服务请右键托盘图标选择「退出服务」
-start "" /min JZToolsHub.exe
-exit
-'@
-Set-Content -Path (Join-Path $AppDir "start.bat") -Value $startBat -Encoding Default
+# 4. 组装部署目录 —— 单一实现：tools\build-deploy-local.py（P2-2）
+#    与「两段式」流程（PyInstaller 各跑一段，再跑本脚本 -ZipOnly）共用同一份组装逻辑：
+#    组装内容（随包清单、复制/清理、模板自检、installed-deps、version.json、start.bat）
+#    全部由该脚本按 tools\package-content.json 完成，本脚本不再复刻。
+Write-Host "==> 组装部署目录（tools\build-deploy-local.py）..."
+$localArgs = @((Join-Path $Root "tools\build-deploy-local.py"), "-Version", $Version, "-DeployName", $DeployName)
+if ($offlineSummary.Count -gt 0) { $localArgs += @("--offline", ($offlineSummary -join "; ")) }
+& $Python @localArgs
+if ($LASTEXITCODE -ne 0) { throw "组装失败（tools\build-deploy-local.py，exit $LASTEXITCODE）" }
 
 # 5.（可选）生成版本 zip：deploy\JZToolsHub-v<版本>.zip
 if (Test-Path (Join-Path $AppDir "JZToolsHub.exe")) {
     $zip = Join-Path $Deploy "JZToolsHub-v$Version.zip"
-    if (Test-Path $zip) { Remove-Item $zip -Force }
     # 离线组件（仅 -WithOfflineRuntime 随包）约 330MB 且本身已是压缩格式，用 Fastest 换时间：
     # 体积影响极小、打包时长从数分钟降到可接受范围。解压兼容性不受影响。
     Write-Host "==> 压缩安装包..."
-    Compress-Archive -Path (Join-Path $AppDir "*") -DestinationPath $zip -CompressionLevel Fastest
-    $zipMB = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+    $zipMB = [math]::Round((Compress-DirectoryToZip -SourceDir $AppDir -ZipPath $zip -Level Fastest) / 1MB, 1)
     Write-Host "==> 已生成安装包：$zip（$zipMB MB）"
 }
 

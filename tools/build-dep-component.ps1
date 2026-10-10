@@ -31,6 +31,8 @@ param(
     [string]$From = "",
     [string]$OutDir = "",
     [string]$MinApp = "",             # 写入 min_app_version（缺省留空=不限制）
+    [string]$Python = "python",       # 取源/查版本用的解释器（须与主包解释器同版本——组件内
+                                      # C 扩展只被同版本同架构的解释器加载，换 Python 版本必须重出组件）
     [switch]$NoVcRuntime,            # 不随组件分发 VC++ 运行时（默认：含 C 扩展的组件自动带）
     [switch]$Force,
     [switch]$NoZip
@@ -129,15 +131,21 @@ $UNITS = @{
 }
 
 $ErrorActionPreference = "Stop"
+
+# 出包链共用函数（Say/Warn/Die、Write-Utf8NoBom、压缩、时间戳、解释器信息…；
+# 见 tools\_shared.psm1 头部说明）
+Import-Module (Join-Path $PSScriptRoot "_shared.psm1") -Force
+
 $Root = Split-Path -Parent $PSScriptRoot
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy\依赖包\组件包" }
 $ToolVer = "1.0.0"
 
-function Say { param([string]$m = "") Write-Host $m }
-function Warn { param([string]$m) Write-Warning $m }
-function Die { param([string]$m) Write-Host ""; Write-Host "  [失败] $m" -ForegroundColor Red; exit 1 }
-function Write-Utf8NoBom { param([string]$Path, [string]$Text)
-    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+# 取源/查版本解释器：-Python 可指定（此前四处硬编码 python、无基线核对——用旧解释器
+# 取源会打出与主包 ABI 不匹配的组件，目标机加载即失败，现象极隐蔽）
+$pyInfo = Get-PythonRuntimeInfo $Python
+Write-Host "  [解释器] $Python → $($pyInfo.Ver)（$($pyInfo.Exe)）"
+if (-not $pyInfo.MatchesBaseline) {
+    Write-Warning "解释器版本 $($pyInfo.Short) 与基线 $($pyInfo.Baseline) 不一致！组件内的 C 扩展按该解释器 ABI 取源，装到目标机可能与主包解释器不匹配。"
 }
 
 Say ""
@@ -177,7 +185,7 @@ foreach ($probe in @(
     "import sysconfig;print(sysconfig.get_paths()['purelib'])",
     "import cv2,os;print(os.path.dirname(os.path.dirname(cv2.__file__)))")) {
     try {
-        $sp = & python -c $probe 2>$null | Select-Object -First 1
+        $sp = & $Python -c $probe 2>$null | Select-Object -First 1
         if ($sp) { $cands += $sp.Trim() }
     } catch {}
 }
@@ -194,7 +202,7 @@ Say "  取源    ：$srcDir"
 function Get-DistName {
     param([string]$ImportName)
     try {
-        $d = & python -c "import importlib.metadata as m;d=m.packages_distributions().get('$ImportName') or [];print(d[0] if d else '$ImportName')" 2>$null | Select-Object -First 1
+        $d = & $Python -c "import importlib.metadata as m;d=m.packages_distributions().get('$ImportName') or [];print(d[0] if d else '$ImportName')" 2>$null | Select-Object -First 1
         if ($d) { return $d.Trim() }
     } catch {}
     return $ImportName
@@ -202,13 +210,13 @@ function Get-DistName {
 function Get-DistVersion {
     param([string]$DistName)
     try {
-        $v = & python -c "import importlib.metadata as m;print(m.version('$DistName'))" 2>$null | Select-Object -First 1
+        $v = & $Python -c "import importlib.metadata as m;print(m.version('$DistName'))" 2>$null | Select-Object -First 1
         if ($v) { return $v.Trim() }
     } catch {}
     return ""
 }
 $mods = [ordered]@{}      # import 名 → 发行包名
-$pyVer = (& python -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null | Select-Object -First 1)
+$pyVer = (& $Python -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null | Select-Object -First 1)
 if (-not $pyVer) { $pyVer = "unknown" }
 $verMap = [ordered]@{}    # 发行包名 → 版本（供组件清单 packages 字段）
 foreach ($m in $provideList) {
@@ -226,7 +234,7 @@ Say ("  提供     ：" + ($provideList -join ", ") + "（" + (($verMap.GetEnume
 if ($verMap.Values -contains "unknown") { Die "有包查不到版本（import 名 → 发行包名映射失败）：$($verMap.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })" }
 
 # ---- 3. 组装 ----
-$staging = Join-Path ([System.IO.Path]::GetTempPath()) ("jz-dep-" + [Guid]::NewGuid().ToString("N").Substring(0, 8))
+$staging = Get-TempStagingPath "jz-dep-"
 $pylibs = Join-Path $staging "payload\pylibs"
 New-Item -ItemType Directory -Force -Path $pylibs | Out-Null
 $totalBytes = 0
@@ -242,30 +250,9 @@ foreach ($it in $pkgList) {
     Say ("    + {0,-12} {1,8:N1} MB" -f $it, ($sz / 1MB))
 }
 
-$manifest = [ordered]@{
-    schema     = 1
-    kind       = "dep-component"
-    id         = $Id
-    name       = $Name
-    version    = $Version
-    built_at   = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
-    python     = $pyVer
-    platform   = "win-amd64"
-    components = @([ordered]@{
-        id       = $Id
-        name     = $Name
-        version  = $Version
-        packages = $verMap
-        modules  = $mods
-        provides = @($provideList)
-        affects  = $affText
-        python   = $pyVer
-        platform = "win-amd64"
-        vc_runtime = @($vcBundled)
-        requires_components = @($requireList)
-    })
-}
 # ---- VC++ 运行时：组件含 C 扩展（.pyd/.dll）时自动随包（-NoVcRuntime 可关） ----
+# ★ 必须在 $manifest 组装**之前**执行：此前这段排在 manifest 之后，靠一句事后覆写
+#   （components[0].vc_runtime = …）救回，属"先用后定义"的隐式耦合（P2-2 修）。
 $vcBundled = @()
 $hasNative = @(Get-ChildItem -LiteralPath $pylibs -Recurse -File -Include *.pyd, *.dll -ErrorAction SilentlyContinue).Count -gt 0
 if ($hasNative -and -not $NoVcRuntime) {
@@ -284,9 +271,32 @@ if ($hasNative -and -not $NoVcRuntime) {
     Say "    （纯 Python 组件：无需 VC++ 运行时）"
 }
 
-# 清单在 VC 运行时打包**之后**定稿：vc_runtime 必须反映实际随包的 DLL（写在打包前会恒为空），
-# 并登记本组件的文件清单（相对 pylibs 的路径）——安装器据此按组件精确清理旧文件，
-# 而不是清空整个 pylibs（cv2 与 numpy 必须共存）。
+$manifest = [ordered]@{
+    schema     = 1
+    kind       = "dep-component"
+    id         = $Id
+    name       = $Name
+    version    = $Version
+    built_at   = (Get-IsoTimestamp)
+    python     = $pyVer
+    platform   = "win-amd64"
+    components = @([ordered]@{
+        id       = $Id
+        name     = $Name
+        version  = $Version
+        packages = $verMap
+        modules  = $mods
+        provides = @($provideList)
+        affects  = $affText
+        python   = $pyVer
+        platform = "win-amd64"
+        vc_runtime = @($vcBundled)
+        requires_components = @($requireList)
+    })
+}
+
+# 定稿清单：登记本组件的文件清单（相对 pylibs 的路径）——安装器据此按组件精确清理旧文件，
+# 而不是清空整个 pylibs（cv2 与 numpy 必须共存）；vc_runtime 已在上方按实际随包的 DLL 取值。
 # 清理载荷里的构建机字节码：__pycache__/*.pyc 体积大、且只对构建机的 Python 版本有效
 # （目标机解释器版本不同会直接忽略，留着纯属浪费体积，还会进文件清单）。
 $pyc = @(Get-ChildItem -LiteralPath $pylibs -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue)
@@ -300,7 +310,6 @@ if ($pyc.Count -gt 0 -or $pycFiles.Count -gt 0) {
     Say ("    已剔除构建机字节码：" + $pyc.Count + " 个 __pycache__ 目录 / " + $pycFiles.Count + " 个 .pyc")
 }
 
-$manifest.components[0].vc_runtime = @($vcBundled)
 $manifest.components[0].files = @(
     Get-ChildItem -LiteralPath $pylibs -Recurse -File | Sort-Object FullName |
     ForEach-Object { $_.FullName.Substring($pylibs.Length).TrimStart([char]92) } |
@@ -317,7 +326,7 @@ $pkgMeta = [ordered]@{
     version         = $Version
     provides        = @($provideList)
     affects         = $affText
-    built_at        = (Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz")
+    built_at        = (Get-IsoTimestamp)
     built_from      = [ordered]@{ commit = (& git -C $Root rev-parse --short HEAD 2>$null | Select-Object -First 1); source = $srcDir }
     size_bytes      = [long]$totalBytes
     # ABI 契约：组件里的 C 扩展只能被同版本同架构的解释器加载（主包换 Python 版本必须重出组件）
@@ -379,13 +388,10 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $zipPath = Join-Path $OutDir ("JZToolsHub-依赖-{0}-v{1}.zip" -f $Id, $Version)
 if ((Test-Path -LiteralPath $zipPath) -and -not $Force) { Die "产物已存在：$zipPath（加 -Force 覆盖）" }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
-# ★ 不要传 entryNameEncoding：显式传编码时 .NET **不会**给非 ASCII 条目名写 UTF-8 标志位
-#   （bit 11），Windows 资源管理器 / 7-Zip / Python 会按系统代码页解码 → 中文名乱码。
-#   不传编码时 .NET 默认 UTF-8 且按需置标志位（与 build-plugin-package.ps1 一致）。
-[System.IO.Compression.ZipFile]::CreateFromDirectory(
-    $staging, $zipPath, [System.IO.Compression.CompressionLevel]::Fastest, $false)
-$sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLower()
+# 压缩机制收口 tools\_shared.psm1 的 Compress-DirectoryToZip（.NET ZipFile——中文条目名
+# UTF-8 标志位的坑见模块内注释；与插件包 / 插件集同一实现）
+[void](Compress-DirectoryToZip -SourceDir $staging -ZipPath $zipPath -Level Fastest)
+$sha = Get-Sha256 $zipPath
 Write-Utf8NoBom "$zipPath.sha256" ("{0}  {1}`n" -f $sha, (Split-Path -Leaf $zipPath))
 
 Say ""

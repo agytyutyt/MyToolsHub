@@ -105,8 +105,8 @@ docs/
 | **当前主体版本号** | `deploy/JZToolsHub/version.json`（出包时写入）；源码状态见 `HANDOFF.md` §2 |
 | 插件**版本号** | 各 `plugins/<id>/manifest.json`（**禁止**在文档里写死） |
 | `JZToolsHub.spec` 的 `PACKAGES` **项数与内容** | `JZToolsHub.spec` ∪ `DEP_COMPONENT_PACKAGES`；文档不复述项数 |
-| 打包/校验的**阈值常量**（模板数、必需文件…） | `build-deploy.ps1` 与 `tools/verify-package.py`；口径说明见 `docs/guide/打包部署手册.md` |
-| **随包清单**（哪些目录/文件进包） | 脚本实参：`build-deploy.ps1` §3.2 与 `tools/build-deploy-local.py`；口径表见本文件 §8 |
+| 打包/校验的**阈值常量**（模板数、必需文件…） | `tools/verify-package.py`（`REQUIRED`/`DOC_SINGLES`/`DOC_DIRS` 由 `tools/package-content.json` 派生）；口径说明见 `docs/guide/打包部署手册.md` |
+| **随包清单**（哪些目录/文件进包） | **单一真源 `tools/package-content.json`**（组装脚本 `tools/build-deploy-local.py` 与 `tools/verify-package.py` 共读）；口径表见本文件 §8 |
 | **自动验收用例条数** | `tools/e2e/acceptance-runner.py`（条数随用例增删变化） |
 | 活清单**条目区间**（T01–Txx） | 该清单自身；被归档后在 `docs/archive/` 内冻结，不再更新 |
 | 依赖组件包 / 离线组件包的**产物名与入口脚本名** | `tools/build-dep-component.ps1`、`tools/build-offline-component.ps1` |
@@ -278,17 +278,18 @@ docs/
 
 | 内容 | 是否随包 | 依据 |
 | --- | --- | --- |
-| `docs/README.md` + `docs/guide/` + `docs/design/` | ✅ 是 | `tools/build-deploy-local.py` 的 `COPY_DIRS`/`COPY_FILES`；`build-deploy.ps1` §3.2 |
-| `docs/项目管理手册.md` | ✅ 是 | `tools/build-deploy-local.py` 的 `COPY_FILES`；`build-deploy.ps1` §3.2 |
+| `docs/README.md` + `docs/guide/` + `docs/design/` | ✅ 是 | `tools/package-content.json` 的 `copy_dirs` |
+| `docs/项目管理手册.md` | ✅ 是 | `tools/package-content.json` 的 `copy_files` |
 | `docs/eval/` `docs/plan/` `docs/archive/` | ❌ 否 | 同上（内部评估稿与活清单不进交付包） |
-| 根契约四文档（README/HANDOFF/插件设计规范/移动端APP） | ✅ 是 | `tools/verify-package.py` 的 `REQUIRED` 断言 |
-| 业务插件（除核心插件 `admin`、`store`） | ❌ 否 | 主包只带核心插件白名单：`tools/build-deploy-local.py` 的 `CORE_PLUGINS`（当前=admin+store，商店为第二核心插件）；由 `verify-package.py` 断言「`plugins/` 仅含核心插件」|
-| `wheels/`（zfec 预编译 wheel） | ❌ 否 | `build-deploy.ps1` 明确不拷；由 `verify-package.py` 断言「不含 `wheels/`」。zfec 改由「依赖组件包」提供 |
-| `tools/`（仅带 `plugin-upgrade/`） | ❌ 否 | `COPY_DIRS` 根本不含 `tools`；仅显式拷 `tools/plugin-upgrade`，由 `verify-package.py` 断言「`tools/` 仅含 `plugin-upgrade`」|
+| 根契约四文档（README/HANDOFF/插件设计规范/移动端APP） | ✅ 是 | `tools/package-content.json` 的 `copy_files`；由 `tools/verify-package.py` 断言 |
+| 业务插件（除核心插件 `admin`、`store`） | ❌ 否 | 主包只带核心插件白名单：`tools/package-content.json` 的 `core_plugins`（当前=admin+store，商店为第二核心插件）；由 `verify-package.py` 断言「`plugins/` 仅含核心插件」|
+| `wheels/`（zfec 预编译 wheel） | ❌ 否 | 随包清单不含它（`tools/package-content.json` 即口径）；由 `verify-package.py` 断言「不含 `wheels/`」。zfec 改由「依赖组件包」提供 |
+| `tools/`（仅带 `plugin-upgrade/`） | ❌ 否 | `tools/package-content.json` 的 `tools_dirs` 仅列 `plugin-upgrade`；由 `verify-package.py` 断言「`tools/` 仅含 `plugin-upgrade`」|
 | 插件的 `test_*.py` / `conftest.py` / `_build_phase8.py` | ❌ 否 | `tools/plugin-payload-rules.json` 的 `exclude_globs`/`exclude_files` |
-| `tools/dev/`（开发验证服务：伪造 admin 会话，绝不能上目标机） | ❌ 否 | `COPY_DIRS` 不含 `tools`（只显式拷 `plugin-upgrade`）；插件包另有 `exclude_dirs` 保留名 `dev` |
+| `tools/dev/`（开发验证服务：伪造 admin 会话，绝不能上目标机） | ❌ 否 | `tools_dirs` 只含 `plugin-upgrade`；插件包另有 `exclude_dirs` 保留名 `dev` |
 
-> ⚠️ **改口径要两处一起改**：`tools/build-deploy-local.py` 与 `build-deploy.ps1` §3.2。
+> ⚠️ **改随包口径只改一处**：`tools/package-content.json`（组装脚本与 `tools/verify-package.py` 共读；
+> `build-deploy.ps1` 全程跑时组装段已委托组装脚本执行）。
 > 出包后 `tools/verify-package.py` 会断言"内部文档层与插件测试脚本未随包"，漏改会被拦下。
 > 另：`docs/` 目录结构调整后，**首次出包前需清空 `deploy\<部署目录>\docs\`** ——
 > 组装是增量合并，不会删除源里已不存在的旧文件。

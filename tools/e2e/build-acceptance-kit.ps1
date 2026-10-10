@@ -25,6 +25,9 @@ param(
     [switch]$NoZip
 )
 $ErrorActionPreference = "Stop"
+
+# 出包链共用函数（Say/Die/Write-Utf8NoBom…；见 tools\_shared.psm1 头部说明）
+Import-Module (Join-Path (Split-Path -Parent $PSScriptRoot) "_shared.psm1") -Force
 $Root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $OutDir) { $OutDir = Join-Path $Root "deploy" }
 $Entry  = Join-Path $Root "tools\e2e\acceptance-runner.py"
@@ -32,14 +35,9 @@ $Testdata = Join-Path $Root "testdata"
 $Work   = Join-Path $Root "build\acceptance-kit"
 $Staging = Join-Path $Work "kit"
 
-function Say  { param([string]$m = "") Write-Host $m }
-function Fail { param([string]$m) Write-Host ""; Write-Host ("  [失败] " + $m) -ForegroundColor Red; exit 1 }
-function Write-Utf8NoBom { param([string]$Path, [string]$Text)
-    [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false))) }
-
-if (-not (Test-Path -LiteralPath $Entry)) { Fail "缺少脚本：$Entry" }
+if (-not (Test-Path -LiteralPath $Entry)) { Die "缺少脚本：$Entry" }
 if (-not (Test-Path -LiteralPath (Join-Path $Testdata "README.md"))) {
-    Fail "缺少测试数据：$Testdata（先跑 python tools\e2e\make-acceptance-testdata.py）"
+    Die "缺少测试数据：$Testdata（先跑 python tools\e2e\make-acceptance-testdata.py）"
 }
 
 # ---- 1. 冻结 exe ----
@@ -53,10 +51,10 @@ if (-not $SkipBuild) {
     & $Python -m PyInstaller --noconfirm --clean --onefile --console `
         --name $exeName --distpath $dist --workpath $work2 `
         --specpath $Work $Entry
-    if ($LASTEXITCODE -ne 0) { Fail "PyInstaller 打包失败（exit $LASTEXITCODE）" }
+    if ($LASTEXITCODE -ne 0) { Die "PyInstaller 打包失败（exit $LASTEXITCODE）" }
     Copy-Item -LiteralPath (Join-Path $dist "$exeName.exe") -Destination $exeSrc -Force
 } elseif (-not (Test-Path -LiteralPath $exeSrc)) {
-    Fail "-SkipBuild 需要已有 exe：$exeSrc"
+    Die "-SkipBuild 需要已有 exe：$exeSrc"
 }
 Say ("    体积：{0:N1} MB" -f ((Get-Item -LiteralPath $exeSrc).Length / 1MB))
 

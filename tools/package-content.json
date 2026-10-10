@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "_comment": "主包随包清单的单一真源（P2-2，2026-10-10）：build-deploy.ps1 / tools/build-deploy-local.py / tools/verify-package.py 三方共读——改这里一处 = 改主包随包口径（此前是三处手抄同步）。说明表见 docs/README.md §8。打包解释器的依赖清单不在此处，真源 = JZToolsHub.spec 的 PACKAGES。",
+  "core_plugins": ["admin", "store"],
+  "copy_dirs": ["static", "docs/guide", "docs/design"],
+  "copy_files": [
+    "install.ps1",
+    "一键安装.bat",
+    "一键卸载.bat",
+    "docs/README.md",
+    "docs/项目管理手册.md",
+    "README.md",
+    "HANDOFF.md",
+    "插件设计规范.md",
+    "移动端APP.md"
+  ],
+  "tools_dirs": ["plugin-upgrade"]
+}
