@@ -16,7 +16,6 @@
     python -m unittest test_filter_mapping_store -v   # 无需 pytest
 """
 
-import importlib.util
 import json
 import os
 import shutil
@@ -28,25 +27,15 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+from conftest import load_plugin_module  # noqa: E402
+
 PLUGIN_DIR = os.path.join(HERE, "plugins", "file-filter")
 
 # 与 test_filter_preview.py 同一份保留名单口径（规整后）
 KEEP = {"姓名", "所属单位", "开始时间"}
 
-
-def load_store_module():
-    """复刻框架的 jztools_<id> 动态加载，只取 mapping_store（不拉起 routes/Flask）。"""
-    backend = os.path.join(PLUGIN_DIR, "backend")
-    spec = importlib.util.spec_from_file_location(
-        "jztools_file_filter", os.path.join(backend, "__init__.py"),
-        submodule_search_locations=[backend])
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["jztools_file_filter"] = module
-    spec.loader.exec_module(module)
-    return importlib.import_module("jztools_file_filter.mapping_store")
-
-
-MS = load_store_module()
+# 只取 mapping_store（不拉起 routes/Flask）
+MS = load_plugin_module("jztools_file_filter", PLUGIN_DIR, "mapping_store")
 
 
 class StoreCase(unittest.TestCase):

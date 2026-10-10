@@ -418,12 +418,14 @@ JZToolsHub/
 ├── openh264-2.5.0-win64.dll   # OpenCV 视频编码依赖（cv2 缺 DLL 时手工放置；来源与许可证见 docs/guide/离线部署包说明.md §9）
 ├── demo/                      # 多码同屏 PoC（方案已否决，仅背景留存，gitignore）
 ├── .bench_corpus/             # 压缩评估语料与脚本（可随时重建，gitignore）
+├── conftest.py                 # 根测试共享夹：load_plugin / 临时数据根 / USER / PLUGIN_DIRS（P2-3 收敛）
 ├── test_plugin_templates.py    # 插件级配置模板同步单测
 ├── test_plugin_admin.py        # 插件包校验/应用/回滚逻辑单测（含与出包工具的交叉验证）
 ├── test_admin_plugin_manager.py # 后台插件管理页 HTTP 全链路测试
 ├── test_bg_image.py            # 背景图清理单测（含两份副本一致性断言）
 ├── test_xlsx_stale_dimension.py # xlsx 失真 <dimension> 声明回归（覆盖四个读表插件）
 ├── test_filter_preview.py      # 过滤器上传预览/按列开关/后处理开关回归
+├── test_filter_mapping_store.py # 过滤器「自学习字段映射存储」单测
 ├── test_data_migrate.py        # 数据迁移（导出/导入）回归：打包口径 + 加密口径
 ├── test_llm_module.py          # 统一大模型模块回归：配置 / 四种调用格式 / 解析顺序
 ├── 一键安装.bat  一键卸载.bat   # 双击入口
@@ -432,6 +434,8 @@ JZToolsHub/
 
 > 仓库根 `test_*.py`（数量随用例新增变化，以仓库根实际文件为准）用 `python -m unittest <模块名>`
 > 在**仓库根**运行（模块就在根，不是包）。
+> 共享测试夹 `conftest.py`（`load_plugin` / 临时数据根 / 固定用户 / 插件目录映射）在根，
+> 各测试文件 `from conftest import ...` 引用；`pytest <文件>` 与 `unittest` 两种跑法均适用。
 > 插件自带测试在 `plugins/<id>/backend/test_*.py`，端到端脚本在 `tools/e2e/`；
 > 测试脚本**不随包分发**（口径见 `tools/plugin-payload-rules.json`）。
 

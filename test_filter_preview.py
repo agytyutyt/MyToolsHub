@@ -22,24 +22,20 @@
 """
 
 import importlib
-import importlib.util
 import io
 import json
 import os
-import shutil
 import sys
-import tempfile
 import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+from conftest import OTHER, USER, load_plugin, temp_data_root  # noqa: E402
+
 PLUGIN_DIR = os.path.join(HERE, "plugins", "file-filter")
 SAMPLE_XLSX = os.path.join(HERE, "testdata", "file-filter", "花名册.xlsx")
-
-USER = {"username": "tester", "role_id": "role-admin", "super_admin": True}
-OTHER = {"username": "someone-else", "role_id": "role-user", "super_admin": False}
 
 # 夹具：表头含「开始时间」便于验证"后处理改表头"，数据含「开始」便于验证逐列计数
 FIXTURE_HEADERS = ["开始时间", "姓名", "手机号", "备注"]
@@ -68,25 +64,12 @@ def make_xlsx(rows, sheet="Sheet1") -> bytes:
     return buf.getvalue()
 
 
-def load_plugin(pkg_name, plugin_dir):
-    """复刻框架的 jztools_<id> 动态加载（与 test_xlsx_stale_dimension.py 同口径）。"""
-    backend = os.path.join(plugin_dir, "backend")
-    spec = importlib.util.spec_from_file_location(
-        pkg_name, os.path.join(backend, "__init__.py"), submodule_search_locations=[backend])
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[pkg_name] = module
-    spec.loader.exec_module(module)
-    return importlib.import_module(pkg_name + ".routes")
-
-
 class Base(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
         from flask import Flask
-        cls.tmp = tempfile.mkdtemp(prefix="jz-ffprev-")
-        cls.data_root = os.path.join(cls.tmp, "data")
-        os.environ["JZTOOLS_DATA_ROOT"] = cls.data_root
+        cls.data_root, cls._restore = temp_data_root("jz-ffprev-", subdir="data")
         cls.ff = load_plugin("jztools_file_filter", PLUGIN_DIR)
         cls.core = cls.ff.core
         cls.ff._get_session_user = lambda: dict(USER)
@@ -98,8 +81,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        shutil.rmtree(cls.tmp, ignore_errors=True)
+        cls._restore()
 
     @classmethod
     def write_config(cls, cfg):

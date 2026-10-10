@@ -22,14 +22,12 @@ admin 插件提供，单测里不引入）。
 """
 
 import importlib
-import importlib.util
 import io
 import json
 import os
 import shutil
 import struct
 import sys
-import tempfile
 import time
 import unittest
 import zipfile
@@ -38,13 +36,12 @@ import zlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-PLUGIN_DIRS = {
-    "file-filter": os.path.join(HERE, "plugins", "file-filter"),
-    "trajectory-sketch": os.path.join(HERE, "plugins", "trajectory-sketch"),
-}
-REAL_SAMPLE = r"D:\SQLRewrite\demoData_real.xlsx"
+from conftest import PLUGIN_DIRS, USER, load_plugin, temp_data_root  # noqa: E402
 
-USER = {"username": "tester", "role_id": "role-admin", "super_admin": True}
+# 本文件比对的两份同源副本（B-7 禁止插件间 import，故刻意双份）
+COPY_PLUGINS = ("file-filter", "trajectory-sketch")
+
+REAL_SAMPLE = r"D:\SQLRewrite\demoData_real.xlsx"
 
 
 # ==========================================================================
@@ -193,17 +190,6 @@ def build_xlsx(sheets=("Sheet1",), *, background=True, shared_with_drawing=False
 # 夹具与辅助
 # ==========================================================================
 
-def load_plugin(pkg_name: str, plugin_dir: str):
-    """按框架的方式把插件后端加载为包（``jztools_<id>``）并返回其 routes 模块。"""
-    backend = os.path.join(plugin_dir, "backend")
-    spec = importlib.util.spec_from_file_location(
-        pkg_name, os.path.join(backend, "__init__.py"), submodule_search_locations=[backend])
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[pkg_name] = module
-    spec.loader.exec_module(module)
-    return importlib.import_module(pkg_name + ".routes")
-
-
 def zip_names(blob: bytes):
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
         return z.namelist()
@@ -218,9 +204,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.mkdtemp(prefix="jz-bgimg-")
-        cls.data_root = os.path.join(cls.tmp, "data")
-        os.environ["JZTOOLS_DATA_ROOT"] = cls.data_root
+        cls.data_root, cls._restore = temp_data_root("jz-bgimg-", subdir="data")
         # 每个插件在临时数据根里独立加载，避免互相污染
         cls.ff = load_plugin("jztools_file_filter", PLUGIN_DIRS["file-filter"])
         cls.ts = load_plugin("jztools_trajectory_sketch", PLUGIN_DIRS["trajectory-sketch"])
@@ -229,8 +213,7 @@ class Base(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        shutil.rmtree(cls.tmp, ignore_errors=True)
+        cls._restore()
 
 
 # ==========================================================================
@@ -241,7 +224,8 @@ class TestCopies(Base):
 
     def test_two_copies_identical(self):
         """B-7 禁止插件间 import → 刻意双份；两份必须逐字节一致（防单边改动漂移）。"""
-        paths = [os.path.join(d, "backend", "bg_image.py") for d in PLUGIN_DIRS.values()]
+        paths = [os.path.join(PLUGIN_DIRS[pid], "backend", "bg_image.py")
+                 for pid in COPY_PLUGINS]
         blobs = [open(p, "rb").read() for p in paths]
         self.assertEqual(blobs[0], blobs[1],
                          "plugins/file-filter 与 plugins/trajectory-sketch 下的 bg_image.py "

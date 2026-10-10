@@ -27,12 +27,21 @@ import zipfile
 import hashlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SANDBOX = tempfile.mkdtemp(prefix="jz-pmgr-")
-APP = os.path.join(SANDBOX, "app")
-DATA = os.path.join(SANDBOX, "data")
-SHARE = os.path.join(SANDBOX, "share")
+
+# 注意：沙箱目录树**不**在导入期创建（pytest --collect-only 也会导入本模块），
+# 延迟到 setUpModule 的 _init_sandbox()；tearDownModule 里连同目录一起复位。
+SANDBOX = None
+APP = DATA = SHARE = None
 
 REPO_PLUGINS = os.path.join(HERE, "plugins")
+
+
+def _init_sandbox():
+    global SANDBOX, APP, DATA, SHARE
+    SANDBOX = tempfile.mkdtemp(prefix="jz-pmgr-")
+    APP = os.path.join(SANDBOX, "app")
+    DATA = os.path.join(SANDBOX, "data")
+    SHARE = os.path.join(SANDBOX, "share")
 
 
 def sha256(path):
@@ -102,6 +111,7 @@ def make_package(plugin_id, version, frontend="", backend_extra="", requires_res
 
 def setUpModule():
     """搭沙箱：程序目录（app.py + jztools_data.py + static/ + plugins/ + config/ + version.json）+ 数据根。"""
+    _init_sandbox()
     os.makedirs(SHARE, exist_ok=True)
     os.makedirs(APP, exist_ok=True)
     os.makedirs(DATA, exist_ok=True)
@@ -147,6 +157,7 @@ def tearDownModule():
     否则同一进程里后续测试（如 test_plugin_templates）会拿到指向已删除沙箱目录的
     jztools_data 副本，出现难以理解的失败。
     """
+    global SANDBOX, APP, DATA, SHARE
     os.environ.pop("JZTOOLS_DATA_ROOT", None)
     sandbox = os.path.abspath(SANDBOX)
     for name in ("jztools_data", "app", "plugin_admin", "jztools_admin"):
@@ -158,6 +169,7 @@ def tearDownModule():
         while p in sys.path:
             sys.path.remove(p)
     shutil.rmtree(SANDBOX, ignore_errors=True)
+    SANDBOX = APP = DATA = SHARE = None
 
 
 class AdminPluginManagerTest(unittest.TestCase):

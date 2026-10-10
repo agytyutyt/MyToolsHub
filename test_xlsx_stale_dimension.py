@@ -33,14 +33,12 @@
 """
 
 import importlib
-import importlib.util
 import io
 import json
 import os
 import re
 import shutil
 import sys
-import tempfile
 import time
 import unittest
 import zipfile
@@ -49,20 +47,13 @@ from datetime import datetime, timedelta
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-PLUGIN_DIRS = {
-    "file-filter": os.path.join(HERE, "plugins", "file-filter"),
-    "trajectory-sketch": os.path.join(HERE, "plugins", "trajectory-sketch"),
-    "trajectory-convert": os.path.join(HERE, "plugins", "trajectory-convert"),
-    "info-transfer": os.path.join(HERE, "plugins", "info-transfer"),
-}
+from conftest import PLUGIN_DIRS, USER, load_plugin, temp_data_root  # noqa: E402
 
 SHEET_PART = "xl/worksheets/sheet1.xml"
 REAL_SAMPLE = os.path.join(HERE, ".workbuddy", "test-materials",
                            "xlsx-stale-dimension", "660.xlsx")
 SKETCH_SAMPLE = os.path.join(HERE, "testdata", "trajectory-sketch", "轨迹表.xlsx")
 FILTER_SAMPLE = os.path.join(HERE, "testdata", "file-filter", "花名册.xlsx")
-
-USER = {"username": "tester", "role_id": "role-admin", "super_admin": True}
 
 TRAJ_HEADERS = ["BEGINTIME", "USERNUM", "LAI", "CI", "ADDRESS", "LONGITUDE", "LATITUDE"]
 
@@ -206,37 +197,25 @@ def read_sample(path: str) -> bytes:
 
 
 # ==========================================================================
-# 插件加载（复刻框架的 jztools_<id> 动态加载）
+# 插件加载（复刻框架的 jztools_<id> 动态加载，共享实现见根 conftest.py）
 # ==========================================================================
-
-def load_plugin(pkg_name: str, plugin_dir: str):
-    backend = os.path.join(plugin_dir, "backend")
-    spec = importlib.util.spec_from_file_location(
-        pkg_name, os.path.join(backend, "__init__.py"), submodule_search_locations=[backend])
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[pkg_name] = module
-    spec.loader.exec_module(module)
-    return importlib.import_module(pkg_name + ".routes")
-
 
 class Base(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.mkdtemp(prefix="jz-dim-")
-        cls.data_root = os.path.join(cls.tmp, "data")
-        os.environ["JZTOOLS_DATA_ROOT"] = cls.data_root
+        cls.data_root, cls._restore = temp_data_root("jz-dim-", subdir="data")
+        cls.tmp = os.path.dirname(cls.data_root)
         cls.ff = load_plugin("jztools_file_filter", PLUGIN_DIRS["file-filter"])
         cls.ts = load_plugin("jztools_trajectory_sketch", PLUGIN_DIRS["trajectory-sketch"])
         cls.tc = load_plugin("jztools_trajectory_convert", PLUGIN_DIRS["trajectory-convert"])
         cls.it = load_plugin("jztools_info_transfer", PLUGIN_DIRS["info-transfer"])
-        # 框架把插件 backend/ 目录本身加载为包 jztools_<id>（见 load_plugin）
+        # 框架把插件 backend/ 目录本身加载为包 jztools_<id>（见 conftest.load_plugin）
         cls.sketch_io = importlib.import_module("jztools_trajectory_sketch.excel_io")
 
     @classmethod
     def tearDownClass(cls):
-        os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        shutil.rmtree(cls.tmp, ignore_errors=True)
+        cls._restore()
 
     def write_tmp(self, name: str, blob: bytes) -> str:
         path = os.path.join(self.tmp, name)

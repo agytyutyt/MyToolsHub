@@ -23,8 +23,6 @@
     python -m unittest test_data_migrate -v
 """
 
-import importlib
-import importlib.util
 import io
 import json
 import os
@@ -38,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "plugins", "admin", "backend"))
 
+from conftest import load_plugin_by_id, temp_data_root  # noqa: E402
 from cryptography.fernet import Fernet  # noqa: E402
 
 import data_migrate as dm  # noqa: E402
@@ -426,26 +425,15 @@ FRAMEWORK_MIGRATE_ROUTES = (
 
 
 def _load_plugin(pid):
-    """按框架的加载方式（jztools_<id> 包 + backend/routes.py）载入插件后端。"""
-    pkg_name = "jztools_" + pid.replace("-", "_")
-    for name in [n for n in sys.modules if n == pkg_name or n.startswith(pkg_name + ".")]:
-        sys.modules.pop(name, None)
-    backend = os.path.join(HERE, "plugins", pid, "backend")
-    spec = importlib.util.spec_from_file_location(
-        pkg_name, os.path.join(backend, "__init__.py"), submodule_search_locations=[backend])
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[pkg_name] = module
-    spec.loader.exec_module(module)
-    return importlib.import_module(pkg_name + ".routes")
+    """按插件 id 载入插件后端（共享实现见根 conftest.py；默认清同名旧模块）。"""
+    return load_plugin_by_id(pid)
 
 
 class TestHttpLayer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from flask import Flask
-        cls.tmp = tempfile.mkdtemp(prefix="jz-migrate-http-")
-        cls._env = os.environ.get("JZTOOLS_DATA_ROOT")
-        os.environ["JZTOOLS_DATA_ROOT"] = cls.tmp
+        cls.tmp, cls._restore = temp_data_root("jz-migrate-http-")
         import app as A
         cls.A = A
         A.init_data_root()
@@ -466,11 +454,7 @@ class TestHttpLayer(unittest.TestCase):
         mod = sys.modules.get("app")
         if mod and os.path.abspath(getattr(mod, "__file__", "") or "").startswith(HERE):
             del sys.modules["app"]
-        if cls._env is None:
-            os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        else:
-            os.environ["JZTOOLS_DATA_ROOT"] = cls._env
-        shutil.rmtree(cls.tmp, ignore_errors=True)
+        cls._restore()
 
     def _client(self, username="admin", password="admin123"):
         c = self.app.test_client()

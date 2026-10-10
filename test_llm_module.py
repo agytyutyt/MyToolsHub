@@ -25,7 +25,6 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -34,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import jz_llm  # noqa: E402
+from conftest import load_plugin_by_id, temp_data_root  # noqa: E402
 
 
 # ==========================================================================
@@ -126,16 +126,10 @@ class MockServer:
 
 class TestGlobalConfig(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="jz-llm-")
-        self._env = os.environ.get("JZTOOLS_DATA_ROOT")
-        os.environ["JZTOOLS_DATA_ROOT"] = self.tmp
+        self.tmp, self._restore = temp_data_root("jz-llm-")
 
     def tearDown(self):
-        if self._env is None:
-            os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        else:
-            os.environ["JZTOOLS_DATA_ROOT"] = self._env
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self._restore()
 
     def test_defaults(self):
         cfg = jz_llm.load_global()
@@ -281,9 +275,7 @@ class TestFormatRequest(unittest.TestCase):
 
 class TestResolve(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="jz-llm-res-")
-        self._env = os.environ.get("JZTOOLS_DATA_ROOT")
-        os.environ["JZTOOLS_DATA_ROOT"] = self.tmp
+        self.tmp, self._restore = temp_data_root("jz-llm-res-")
         self._user = None
         self._logged_in = True
         # 用 provider 冒充 admin 插件（框架 API 门面），避免依赖真实后台：
@@ -298,11 +290,7 @@ class TestResolve(unittest.TestCase):
         import jz_api
         jz_api.register_providers(get_session_user=lambda: None,
                                   get_user_llm=lambda u: None)
-        if self._env is None:
-            os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        else:
-            os.environ["JZTOOLS_DATA_ROOT"] = self._env
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self._restore()
 
     def _global(self, **kw):
         jz_llm.save_global(kw)
@@ -385,17 +373,11 @@ class TestChat(unittest.TestCase):
         cls.srv.close()
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="jz-llm-chat-")
-        self._env = os.environ.get("JZTOOLS_DATA_ROOT")
-        os.environ["JZTOOLS_DATA_ROOT"] = self.tmp
+        self.tmp, self._restore = temp_data_root("jz-llm-chat-")
         self.srv.requests.clear()
 
     def tearDown(self):
-        if self._env is None:
-            os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        else:
-            os.environ["JZTOOLS_DATA_ROOT"] = self._env
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self._restore()
 
     def _provider(self, path, fmt="openai", key="K", **extra):
         prov = {"format": fmt, "url": self.srv.base + path, "api_key": key, "model": "m"}
@@ -499,16 +481,10 @@ class TestChat(unittest.TestCase):
 
 class TestPrompts(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="jz-llm-prompt-")
-        self._env = os.environ.get("JZTOOLS_DATA_ROOT")
-        os.environ["JZTOOLS_DATA_ROOT"] = self.tmp
+        self.tmp, self._restore = temp_data_root("jz-llm-prompt-")
 
     def tearDown(self):
-        if self._env is None:
-            os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        else:
-            os.environ["JZTOOLS_DATA_ROOT"] = self._env
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        self._restore()
 
     def test_roundtrip_and_default_fallback(self):
         defaults = {"system": "内置系统", "user_template": "{text}"}
@@ -558,35 +534,15 @@ PLUGINS_UNDER_TEST = ("admin", "case-report", "character-graph", "file-filter")
 
 
 def _load_plugin(pid):
-    """按框架的加载方式（jztools_<id> 包 + backend/routes.py）载入插件后端。
-
-    先清掉同名旧模块：其它测试文件（test_bg_image / test_filter_preview）也以同样的包名
-    加载过插件，其模块级常量（如 CONFIG_FILE）指向各自的临时数据根；不清会拿到那份
-    实例，读到已删除目录下的路径。
-    """
-    import importlib
-    import importlib.util
-    pkg_name = "jztools_" + pid.replace("-", "_")
-    for name in [n for n in sys.modules
-                 if n == pkg_name or n.startswith(pkg_name + ".")]:
-        sys.modules.pop(name, None)
-    backend = os.path.join(HERE, "plugins", pid, "backend")
-    spec = importlib.util.spec_from_file_location(
-        pkg_name, os.path.join(backend, "__init__.py"),
-        submodule_search_locations=[backend])
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[pkg_name] = module
-    spec.loader.exec_module(module)
-    return importlib.import_module(pkg_name + ".routes")
+    """按插件 id 载入插件后端（共享实现见根 conftest.py；默认清同名旧模块，口径见其注释）。"""
+    return load_plugin_by_id(pid)
 
 
 class TestRoutesAndPlugins(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from flask import Flask
-        cls.tmp = tempfile.mkdtemp(prefix="jz-llm-routes-")
-        cls._env = os.environ.get("JZTOOLS_DATA_ROOT")
-        os.environ["JZTOOLS_DATA_ROOT"] = cls.tmp
+        cls.tmp, cls._restore = temp_data_root("jz-llm-routes-")
         import app as A
         cls.A = A
         A.init_data_root()                       # 把 tools.json 模板铺进临时数据根
@@ -614,11 +570,7 @@ class TestRoutesAndPlugins(unittest.TestCase):
         mod = sys.modules.get("app")
         if mod and os.path.abspath(getattr(mod, "__file__", "") or "").startswith(HERE):
             del sys.modules["app"]
-        if cls._env is None:
-            os.environ.pop("JZTOOLS_DATA_ROOT", None)
-        else:
-            os.environ["JZTOOLS_DATA_ROOT"] = cls._env
-        shutil.rmtree(cls.tmp, ignore_errors=True)
+        cls._restore()
 
     def _client(self, username="admin", password="admin123"):
         c = self.app.test_client()
