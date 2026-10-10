@@ -2106,8 +2106,11 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
             if cancel_check and cancel_check():
                 raise TaskCanceled()
             raw = code if is_v2 else code.encode("ascii")
-            png = _qr_png_bytes(raw, version, err)
-            verify = _zxing_can_decode if is_v2 else _cv2_can_decode
+            # T20（P3）：视频帧路径不再走「PNG 编码 → imdecode」往返——PNG 是无损的，
+            # 往返前后像素逐字节相同，所以矩阵位图可以直接写帧、直接喂自检；
+            # PNG 只在真要落盘（frames_dir）时才编一次。产物字节与改造前一致（台架取证）。
+            img = _qr_gray_image(raw, version, err)
+            verify = _zxing_can_decode_img if is_v2 else _cv2_can_decode_img
             # T21（P2）：逐帧回读自检是单帧耗时的大头（≈90ms/帧），改为按 `FRAME_VERIFY_SAMPLE`
             # 抽样做「回读 + 换 mask 兜底」，其余帧只做结构校验（渲染即合格）。依据：视频帧本身
             # 有 FEC 兜底，且真实接收端（ML Kit / jsQR）比桌面 zxing 更稳，抽样足以拦住系统性坏 mask；
@@ -2120,11 +2123,11 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
                 # 逐字节比对只对默认 mask 做一次（能读出 ≠ 读对，高熵载荷下可能返回截断内容）；
                 # 失败即降级宽松档换 mask——高熵帧可能所有 mask 都无法逐字节一致
                 # （真实接收端 ML Kit / jsQR 更稳），不因桌面解码器缺陷阻断生成。
-                ok = (verify(png, expected=raw) is True) or (verify(png) is True)
+                ok = (verify(img, expected=raw) is True) or (verify(img) is True)
                 if not ok:
                     for mask in range(8):
-                        png = _qr_png_bytes(raw, version, err, mask_pattern=mask)
-                        if verify(png) is True:
+                        img = _qr_gray_image(raw, version, err, mask_pattern=mask)
+                        if verify(img) is True:
                             ok = True
                             break
                 if not ok:
@@ -2136,19 +2139,18 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
                             % (selfcheck_failures, VIDEO_SELFCHECK_TOLERANCE * 100))
             if frames_dir:
                 with open(os.path.join(frames_dir, f"frame_{i + 1:04d}.png"), "wb") as f:
-                    f.write(png)
+                    f.write(_qr_png_from_gray(img))
             if out_path is not None:
-                gray = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
-                img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
+                bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
                 if writer is None:
-                    h, w = img.shape[:2]
+                    h, w = bgr.shape[:2]
                     writer, used_fourcc, pinned = _open_video_writer(out_path, (w, h))
                     if codec_out is not None:
                         codec_out.update({"fourcc": used_fourcc,
                                           "quality": VIDEO_QUALITY,
                                           "quality_pinned": pinned})
                 for _ in range(max(1, frame_repeat)):
-                    writer.write(img)
+                    writer.write(bgr)
             if progress_cb and (i % 4 == 0 or i == total - 1):
                 progress_cb(i + 1, total)
     finally:
