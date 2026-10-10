@@ -133,7 +133,7 @@ def roundtrip_static(fmt, name, env_bytes, version):
     """静态二维码全链路还原，返回 (fmt, name, data, ext, 页数)。"""
     out_dir = os.path.join(TMP_ROOT, "static_out")
     os.makedirs(out_dir, exist_ok=True)
-    paths, count = it.encode_static_output(fmt, name, env_bytes, version,
+    paths, count, _v = it.encode_static_output(fmt, name, env_bytes, version,
                                            out_dir, "t")
     codes = []
     for p in paths:

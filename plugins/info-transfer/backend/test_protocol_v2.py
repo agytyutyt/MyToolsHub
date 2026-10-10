@@ -111,7 +111,7 @@ def _png_to_file(png):
 
 small = "小数据静态码 roundtrip。"
 env_s = it.build_envelope_v2("text", "单张", small, ".txt")
-paths, count = it.encode_static_output("text", "单张", env_s, 15, TMP_ROOT, "v2s")
+paths, count, _v = it.encode_static_output("text", "单张", env_s, 15, TMP_ROOT, "v2s")
 check("v2 单张页数", count == 1, f"count={count}")
 codes = it.decode_image_file(open(paths[0], "rb").read())
 env_obj, page_info = it._parse_scanned_codes(codes)
@@ -120,7 +120,7 @@ check("v2 单张还原", data == small and name == "单张" and fmt == "text")
 
 big = "多页静态码测试载荷。" * 2000   # 高度可压缩 → 单帧属正常，多页用高熵原件验证
 env_b = it.build_envelope_v2("text", "多页", big, ".txt")
-paths, count = it.encode_static_output("text", "多页", env_b, 15, TMP_ROOT, "v2m")
+paths, count, _v = it.encode_static_output("text", "多页", env_b, 15, TMP_ROOT, "v2m")
 check("v2 可压缩小数据单帧", count == 1, f"count={count}")
 codes = []
 for p in paths:
@@ -133,7 +133,7 @@ check("v2 单帧还原", data == big, f"len={len(data)} vs {len(big)}")
 import base64 as _b64
 big_raw = bytes(random.getrandbits(8) for _ in range(6000))
 big_env = it.build_envelope_v2("file", "blob.bin", _b64.b64encode(big_raw).decode())
-paths, count = it.encode_static_output("file", "blob.bin", big_env, 15, TMP_ROOT, "v2b")
+paths, count, _v = it.encode_static_output("file", "blob.bin", big_env, 15, TMP_ROOT, "v2b")
 check("v2 高熵多页拆分", count > 1, f"count={count}")
 codes = []
 for p in paths:
@@ -197,7 +197,7 @@ check("T10 xz 信封还原", it.parse_envelope_v2(env_x)["data"] == rep_text)
 high = bytes(random.getrandbits(8) for _ in range(800))
 env_h = it.build_envelope_v2("file", "h.bin", _b64.b64encode(high).decode())
 check("T10 高熵不启用压缩", it.parse_frame_jz2(env_h)["comp"] == it.JZ2_COMP_NONE)
-paths_x, _c = it.encode_static_output("text", "xz测试", env_x, 15, TMP_ROOT, "xz1")
+paths_x, _c, _v = it.encode_static_output("text", "xz测试", env_x, 15, TMP_ROOT, "xz1")
 codes_x = []
 for p in paths_x:
     codes_x.extend(it.decode_image_file(open(p, "rb").read()))
@@ -251,7 +251,7 @@ env_bad = it.build_envelope_v2("file", "bad.docx",
                                _b64.b64encode(b"not a zip container").decode(),
                                "docx", rebuild=True)
 check("T11 非 zip 容器回退纯压缩", it.parse_frame_jz2(env_bad)["mode"] == 0)
-paths_r, _c = it.encode_static_output("file", "r.docx", env_r, 15, TMP_ROOT, "rb1")
+paths_r, _c, _v = it.encode_static_output("file", "r.docx", env_r, 15, TMP_ROOT, "rb1")
 codes_r = []
 for p in paths_r:
     codes_r.extend(it.decode_image_file(open(p, "rb").read()))
@@ -320,7 +320,7 @@ env_obj1 = it._envelope_from_raw(raw1)
 fmt, name, data, ext = it.parse_envelope(env_obj1)
 check("v1 视频流经新解码端还原", data == "旧协议文本载荷。" * 50)
 # v1 静态
-paths1, c1 = it.encode_static_output("text", "v1兼容", env_v1, 15, TMP_ROOT, "v1s")
+paths1, c1, _v = it.encode_static_output("text", "v1兼容", env_v1, 15, TMP_ROOT, "v1s")
 codes1s = []
 for p in paths1:
     codes1s.extend(it.decode_image_file(open(p, "rb").read()))

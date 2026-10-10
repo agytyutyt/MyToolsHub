@@ -17,7 +17,7 @@
 
 > **覆盖范围**：信息传输优化的**全部待办条目、批次划分、预期效果与验收红线**（唯一活清单）
 > ｜**不覆盖**：收益口径 → `docs/eval/信息传输格式开销评估与优化方案.md`；缺陷诊断 → `docs/plan/信息传输优化方案0917.md`
-> ｜**随包**：否 ｜**最后核对**：2026-10-10（L4-1：T32/T33 落地并回写，T15 观察项收口；L4-2：T19/T22/T23/T21 落地并回写，其中 T22 按实测未采纳 256KB 硬门槛、T23 实测 144×、T21 单独实测 1.4×（余下收益待 T20））
+> ｜**随包**：否 ｜**最后核对**：2026-10-10（L4-1：T32/T33 落地并回写，T15 观察项收口；L4-2：T19/T22/T23/T21/T18 落地并回写，其中 T22 按实测未采纳 256KB 硬门槛、T23 实测 144×、T21 单独实测 1.4×（余下收益待 T20）、T18 缺依赖按「降级+明示」不做 503）
 
 ## 总览
 
@@ -163,10 +163,28 @@
 **实现方案**：不动 v1 帧格式（存量码与外部插件流必须兼容），改为重组侧交叉验证——有冗余 share 时用 `blocks[:k]` 与另一组 share 各解一次、比对一致才返回；恰好收齐 k 个时返回 `verified:false` 让前端提示"完整性未校验"。
 **预期效果**：单帧污染从"静默错误数据"变为"可检测"（有冗余直接拒错、无冗余明确告知）；额外开销 +1/k 可忽略。
 
-### T18 · 生成端验证失败不再静默降级（解决 R3） 【状态：未开始】
+### T18 · 生成端验证失败不再静默降级（解决 R3） 【状态：已完成（2026-10-10，**缺依赖按「降级 + 明示」而非 503**，见落地记录）】
 
-**实现方案**：`_render_verified_qr` 返回 `(path, verified)`；静态路径验证失败抛错置 `error`；视频路径单帧容忍但累计失败 >5% 中止；`_zxing_can_decode` 依赖缺失时不再 `return True` 跳过，改为 `/status` 暴露 `zxing:false` 且 `PROTOCOL_V2=True` 时 encode 直接 503。
+**实现方案**：`_render_verified_qr` 返回 `(path, verified)`；静态路径验证失败抛错置 `error`；视频路径单帧容忍但累计失败 >5% 中止；`_zxing_can_decode` 依赖缺失时不再 `return True` 跳过，改为 `/status` 暴露 `zxing:false` ~~且 `PROTOCOL_V2=True` 时 encode 直接 503~~。
 **预期效果**：消除"生成成功但扫不出"的静默故障；依赖缺失在发码前暴露。
+**落地记录（2026-10-10，L4-2）**：
+- `_zxing_can_decode` / `_cv2_can_decode` 改**三态返回**（`True` 验过 / `False` 验不过 / `None` 无从验证），
+  新增 `_selfcheck_available(is_v2)`；旧实现缺解码器时 `return True` 是把「没验」上报成「验过」。
+- `_render_verified_qr` 返回 `(out_path, verified)`，`encode_static_output` 返回 `(paths, pages, verified)`：
+  ① 解码器齐备而 8 档 mask 全读不通 → **抛 ValueError 置 error**（不再静默落盘出"生成成功却扫不出"），
+     文案含「自检未通过」，经 `_error_of` 归到 `INTEGRITY_UNVERIFIED`；
+  ② 缺解码器 → 照常出码但 `verified=false` + `note` 明示「未安装 zxingcpp：本次出码未经桌面解码器自检…」。
+- 视频路径 `encode_to_video` 新增 `selfcheck_out` 回填（available/verified/failures/sampled），
+  单帧读不通先换 mask、**累计失败 > `VIDEO_SELFCHECK_TOLERANCE`(5%) 即中止**；缺解码器整批标未自检。
+- **未采纳卡内的「encode 直接 503」**（裁定依据：manifest 里 zxingcpp 声明 `required:false`，hint 原文即
+  「v2 二进制码的解码与校验不可用（v1 文本码不受影响）」；规范 B-4 要求缺依赖优雅降级、禁止整插件 500；
+  卡内标题也只是"不再静默降级"）。要改成 503 属规范级口径变更，须同时把 manifest 改 `required:true` +
+  改 hint/README + 在 B-4 立例外。
+- `/task` done 态新增 `verified` 字段（默认 true，兼容历史任务）；明示文案走既有 `note` 渲染位
+  （`frontend/index.html:1086`），无需改前端。
+- 验收：`test_security.TestSelfcheckVisibility` 3 例（/status 暴露 zxing 布尔、monkeypatch 缺 zxing →
+  `verified:false` 且 `_zxing_can_decode` 返回 None、`_run_encode` 任务透出 verified=false + note 含
+  「未经…zxingcpp」，对照组在位时 true）；四套回归 **49 / 66 / 26 / 51** 全绿。
 
 ### T19 · 统一载荷安全系数（解决 R4） 【状态：已完成（2026-10-10，四套回归 49/66/22/48）】
 

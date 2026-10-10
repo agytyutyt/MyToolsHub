@@ -219,6 +219,17 @@ PAYLOAD_SAFETY = 0.9    # 单码载荷安全系数：实际载荷 ≤ 容量的 
                         # 解码器下不稳定——cv2 回读实测可能整码失败甚至截断，见评估报告 §5.3）
 # T21（P2）：视频帧回读自检的抽样比例。10% → 单帧自检均值 90ms ≈ 9ms。
 FRAME_VERIFY_SAMPLE = 0.10
+# T18（R3）：视频路径的自检容忍度——单帧读不通先换 mask（有 FEC 兜底），
+# 累计失败超过该比例即中止封装，不再"生成成功却扫不出"。
+VIDEO_SELFCHECK_TOLERANCE = 0.05
+
+
+def _unverified_note(env_bytes):
+    """T18：缺桌面解码器时的明示文案（进 `note`，前端现有渲染位即可显示）。"""
+    dep = ("zxingcpp", "v2 二进制码的解码与自检") if bytes(env_bytes).startswith(JZ2_MAGIC) \
+        else ("cv2", "静态码回读自检")
+    return (f"未安装 {dep[0]}：本次出码未经桌面解码器自检（{dep[1]}不可用）。"
+            "请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包」后重新封装。")
 
 
 def _verify_sampled(i, total):
@@ -422,6 +433,7 @@ _ERR_CODE_RULES = (
     (("过大", "超过上限", "超限", "容量", "配额"), "TOO_LARGE"),
     (("不支持", "无法承载", "白名单", "受支持"), "UNSUPPORTED_FORMAT"),
     (("队列", "排队"), "QUEUE_FULL"),
+    (("自检未通过",), "INTEGRITY_UNVERIFIED"),
     (("无法读取", "解码失败", "解析失败", "信封", "为空", "请选择"), "DECODE_FAILED"),
 )
 
@@ -1931,10 +1943,14 @@ def _open_video_writer(out_path, size):
 
 
 def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat=1,
-                    frames_dir=None, cancel_check=None):
+                    frames_dir=None, cancel_check=None, selfcheck_out=None):
     _load_cv2()
     _load_numpy()
     """把字节数据按 QR-transfer 编码为二维码帧序列 / 视频文件。返回 (nframes, k, m)。
+
+    selfcheck_out（T18）：可选字典，回填本次自检情况
+    `{"available": bool, "verified": bool, "failures": int, "sampled": int}`——
+    `available=False` 表示缺 zxingcpp（v2）而整批未经自检，调用方须透出 `verified:false` 并明示。
 
     out_path：mp4 输出路径；为 None 时**不编码视频**，只把每张二维码 PNG 落盘到
     frames_dir。视频体积为帧序列的 ~18 倍（实测 v25/1250px：mp4 120KB/码 vs
@@ -1975,6 +1991,9 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
 
     total = len(codes)
     writer = None
+    selfcheck_avail = _selfcheck_available(is_v2)
+    selfcheck_failures = 0
+    selfcheck_sampled = 0
     if frames_dir:
         os.makedirs(frames_dir, exist_ok=True)
     try:
@@ -1982,28 +2001,34 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
             if cancel_check and cancel_check():
                 raise TaskCanceled()
             raw = code if is_v2 else code.encode("ascii")
-            # 渲染并验证原始图像可解码（解码器对个别 mask 有缺陷，失败则换 mask）。
-            # 逐字节比对只对默认 mask 做一次（能读出 ≠ 读对，高熵载荷下可能
-            # 截断）；失败即降级宽松档换 mask——视频帧有 FEC 兜底，且高熵帧可能
-            # 所有 mask 都无法逐字节一致（真实接收端 ML Kit/jsQR 更稳），
-            # 不因桌面解码器缺陷阻断生成。v2 二进制载荷只能用 zxing-cpp 验证。
             png = _qr_png_bytes(raw, version, err)
             verify = _zxing_can_decode if is_v2 else _cv2_can_decode
             # T21（P2）：逐帧回读自检是单帧耗时的大头（≈90ms/帧），改为按 `FRAME_VERIFY_SAMPLE`
             # 抽样做「回读 + 换 mask 兜底」，其余帧只做结构校验（渲染即合格）。依据：视频帧本身
             # 有 FEC 兜底，且真实接收端（ML Kit / jsQR）比桌面 zxing 更稳，抽样足以拦住系统性坏 mask；
             # 静态单码路径（`_render_verified_qr`）不受影响，仍逐张全检。
-            if _verify_sampled(i, total):
-                # 渲染并验证原始图像可解码（解码器对个别 mask 有缺陷，失败则换 mask）。
-                # 逐字节比对只对默认 mask 做一次（能读出 ≠ 读对，高熵载荷下可能
-                # 截断）；失败即降级宽松档换 mask——视频帧有 FEC 兜底，且高熵帧可能
-                # 所有 mask 都无法逐字节一致（真实接收端 ML Kit/jsQR 更稳），
-                # 不因桌面解码器缺陷阻断生成。v2 二进制载荷只能用 zxing-cpp 验证。
-                if not verify(png, expected=raw) and not verify(png):
+            # T18：自检三态——缺解码器（selfcheck_avail=False）整批标记「未经自检」，不再当成通过；
+            # 单帧读不通先换 mask（视频有 FEC，容忍），累计失败超过 5% 直接中止，
+            # 不再"生成成功却扫不出"。
+            if selfcheck_avail and _verify_sampled(i, total):
+                selfcheck_sampled += 1
+                # 逐字节比对只对默认 mask 做一次（能读出 ≠ 读对，高熵载荷下可能返回截断内容）；
+                # 失败即降级宽松档换 mask——高熵帧可能所有 mask 都无法逐字节一致
+                # （真实接收端 ML Kit / jsQR 更稳），不因桌面解码器缺陷阻断生成。
+                ok = (verify(png, expected=raw) is True) or (verify(png) is True)
+                if not ok:
                     for mask in range(8):
                         png = _qr_png_bytes(raw, version, err, mask_pattern=mask)
-                        if verify(png):
+                        if verify(png) is True:
+                            ok = True
                             break
+                if not ok:
+                    selfcheck_failures += 1
+                    if selfcheck_failures > VIDEO_SELFCHECK_TOLERANCE * total:
+                        raise ValueError(
+                            "二维码流自检未通过：累计 %d 帧桌面解码器读不出（超过 %.0f%% 容忍度），"
+                            "请调大二维码版本、放慢播放帧率或改走静态模式"
+                            % (selfcheck_failures, VIDEO_SELFCHECK_TOLERANCE * 100))
             if frames_dir:
                 with open(os.path.join(frames_dir, f"frame_{i + 1:04d}.png"), "wb") as f:
                     f.write(png)
@@ -2020,6 +2045,13 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
     finally:
         if writer is not None:
             writer.release()
+    if selfcheck_out is not None:
+        selfcheck_out.update({
+            "available": selfcheck_avail,          # False＝缺 zxingcpp/cv2，整批未经自检
+            "verified": selfcheck_avail,
+            "failures": selfcheck_failures,
+            "sampled": selfcheck_sampled,
+        })
     return total, k, m
 
 
@@ -2098,6 +2130,20 @@ def _qr_matrix_png(qr):
     return buf.tobytes()
 
 
+def _selfcheck_available(is_v2):
+    """T18：桌面自检能力是否具备。
+
+    v2 二进制载荷只能用 zxing-cpp 验（cv2 的 detectAndDecode 会破坏非 UTF-8 字节）；
+    v1 文本载荷用 cv2 即可。缺对应解码器时**不再伪装成「自检通过」**（旧
+    `_zxing_can_decode` 缺依赖时 `return True` 就是把「没验」说成「验过」），
+    而是让调用方拿到 `verified:false` 走「优雅降级 + 明示」——规范 B-4 禁止因缺
+    可选依赖把整个插件打挂，manifest 里 zxingcpp 也声明为 `required:false`。
+    """
+    if is_v2:
+        return bool(ZXING_AVAILABLE and NUMPY_AVAILABLE and CV2_AVAILABLE)
+    return bool(CV2_AVAILABLE and NUMPY_AVAILABLE)
+
+
 def _cv2_can_decode(png_bytes, expected=None):
     _load_cv2()
     _load_numpy()
@@ -2105,9 +2151,10 @@ def _cv2_can_decode(png_bytes, expected=None):
 
     expected 给定时升级为「逐字节比对」：能读出 ≠ 读对（cv2 实测对满容量
     高熵载荷可能返回截断内容），只有解码结果与期望字节完全一致才算通过。
+    返回值三态（T18）：True 验过 / False 验不过 / **None 无从验证**（cv2 缺失）。
     """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
-        return True  # 无 cv2 时跳过验证（解析端也将缺少 cv2，验证无意义）
+        return None      # T18：缺解码器＝未验证，不是验证通过
     try:
         arr = np.frombuffer(png_bytes, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -2140,11 +2187,12 @@ def _zxing_can_decode(png_bytes, expected=None):
     """用 zxing-cpp 验证 PNG 中的二维码可解码（返回原始 bytes，二进制载荷无损）。
 
     v2 JZ2 二进制载荷在 cv2 下无法可靠解码（detectAndDecode 输出 str 会破坏
-    非 UTF-8 字节），生成端自检一律走 zxing。zxing 缺失时返回 True 跳过验证
-    （解析端同样缺 zxing，验证无意义）。
+    非 UTF-8 字节），生成端自检一律走 zxing。
+    返回值三态（T18）：True 验过 / False 验不过 / **None 无从验证**（zxing 缺失）——
+    旧实现在这里 `return True`，等于把「没装 zxingcpp」上报成「自检通过」。
     """
     if not (ZXING_AVAILABLE and NUMPY_AVAILABLE and CV2_AVAILABLE):
-        return True  # 解码器不可用时跳过验证
+        return None      # T18：缺解码器＝未验证，交由调用方标 verified:false 并明示
     try:
         arr = np.frombuffer(png_bytes, dtype=np.uint8)
         img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -2174,37 +2222,32 @@ def _render_verified_qr(data_bytes, version, err, out_path):
     mask——静态页载荷已有 90% 容量余量，且真实接收端 ML Kit / jsQR 更稳，
     不因桌面解码器的比对缺陷阻断生成。
     v2 JZ2 二进制载荷（b"JZ2" 开头）用 zxing-cpp 验证（cv2 会破坏非 UTF-8 字节）。
+
+    T18 返回 `(out_path, verified)`：
+      · 桌面解码器齐备且任一档 mask 读通 → `verified=True`；
+      · 缺解码器（zxingcpp / cv2 未装）→ 照常出码但 `verified=False`（规范 B-4 优雅降级，
+        由响应与前端明示「未经自检」，不再像旧实现那样把「没验」当「验过」）；
+      · 齐备却 8 档 mask 全读不通 → **抛错置 error**，不再静默落盘出「生成成功但扫不出」。
     """
-    if data_bytes.startswith(JZ2_MAGIC):
-        png = _qr_png_bytes(data_bytes, version, err)
-        if _zxing_can_decode(png, expected=data_bytes) or _zxing_can_decode(png):
-            with open(out_path, "wb") as f:
-                f.write(png)
-            return out_path
-        for mask in range(8):
-            png = _qr_png_bytes(data_bytes, version, err, mask_pattern=mask)
-            if _zxing_can_decode(png):
-                with open(out_path, "wb") as f:
-                    f.write(png)
-                return out_path
-        with open(out_path, "wb") as f:
-            f.write(png)
-        return out_path
+    is_v2 = data_bytes.startswith(JZ2_MAGIC)
+    verify = _zxing_can_decode if is_v2 else _cv2_can_decode
     png = _qr_png_bytes(data_bytes, version, err)
-    if _cv2_can_decode(png, expected=data_bytes) or _cv2_can_decode(png):
+    if not _selfcheck_available(is_v2):
         with open(out_path, "wb") as f:
             f.write(png)
-        return out_path
+        return out_path, False
+    if verify(png, expected=data_bytes) is True or verify(png) is True:
+        with open(out_path, "wb") as f:
+            f.write(png)
+        return out_path, True
     for mask in range(8):
         png = _qr_png_bytes(data_bytes, version, err, mask_pattern=mask)
-        if _cv2_can_decode(png):
+        if verify(png) is True:
             with open(out_path, "wb") as f:
                 f.write(png)
-            return out_path
-    # 全部 mask 均无法通过 cv2 验证（理论不可达）：落盘默认版本并交由上层报错
-    with open(out_path, "wb") as f:
-        f.write(png)
-    return out_path
+            return out_path, True
+    raise ValueError("静态二维码自检未通过：桌面解码器在 8 档 mask 下均读不出该码，"
+                     "请重新封装或改走相机传输（视频）模式")
 
 
 def _single_capacity(version, err):
@@ -2310,6 +2353,8 @@ def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix, cancel_
     v2（env_bytes 为 JZ2 帧）：按容量把信封 payload 拆页，每页 = JZ2 帧
     （meta 每页重复 + payload 切片 + 独立 CRC）。
     cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
+    返回 `(paths, pages, verified)`（T18）：`verified=False` 表示本次桌面解码器缺失、
+    出码未经自检（缺依赖不阻断生成，但必须让响应与前端明示）。
     """
     if not QRCODE_AVAILABLE:
         raise RuntimeError("后端缺少 qrcode 依赖。请管理员在「管理后台 → 插件管理」按依赖徽标安装「依赖组件包 JZToolsHub-依赖-qrcode-v*.zip」（解压后双击「安装依赖组件.bat」，免重启生效）")
@@ -2317,32 +2362,36 @@ def encode_static_output(fmt, name, env_bytes, version, out_dir, prefix, cancel_
     if env_bytes.startswith(JZ2_MAGIC):
         pages = _build_static_pages_v2(env_bytes, version, err)
         paths = []
+        verified = True
         for i, frame in enumerate(pages):
             if cancel_check and cancel_check():
                 raise TaskCanceled()
             p = os.path.join(out_dir, f"{prefix}_{i + 1:02d}.png")
-            _render_verified_qr(frame, version, err, p)
+            _out, ok = _render_verified_qr(frame, version, err, p)
+            verified = verified and ok
             paths.append(p)
-        return paths, len(pages)
+        return paths, len(pages), verified
     single = os.path.join(out_dir, f"{prefix}_01.png")
     try:
         if cancel_check and cancel_check():
             raise TaskCanceled()
-        _render_verified_qr(env_bytes, version, err, single)
-        return [single], 1
+        _out, ok = _render_verified_qr(env_bytes, version, err, single)
+        return [single], 1, ok
     except QR_OVERFLOW:
         pass
     except Exception:
         raise
     pages = _build_static_pages(fmt, name, env_bytes, version, err)
     paths = []
+    verified = True
     for i, page_json in enumerate(pages):
         if cancel_check and cancel_check():
             raise TaskCanceled()
         p = os.path.join(out_dir, f"{prefix}_{i + 1:02d}.png")
-        _render_verified_qr(page_json.encode("utf-8"), version, err, p)
+        _out, ok = _render_verified_qr(page_json.encode("utf-8"), version, err, p)
+        verified = verified and ok
         paths.append(p)
-    return paths, len(pages)
+    return paths, len(pages), verified
 
 
 def estimate_output(mode, fmt, name, env_bytes, version, frame_repeat):
@@ -2820,9 +2869,11 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
 
         if mode == "static":
             set_task(task_id, progress=0.4, stage="生成静态二维码")
-            img_paths, count = encode_static_output(fmt, name, env_bytes, qr_version,
-                                                    _TASK_DIR, task_id,
-                                                    cancel_check=lambda: _canceled(task_id))
+            img_paths, count, verified = encode_static_output(
+                fmt, name, env_bytes, qr_version, _TASK_DIR, task_id,
+                cancel_check=lambda: _canceled(task_id))
+            if not verified:
+                note = _unverified_note(env_bytes)
             if count == 1:
                 single = img_paths[0]
                 size = os.path.getsize(single) if os.path.exists(single) else 0
@@ -2831,7 +2882,7 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                          env_size=len(env_bytes), qr_version=qr_version,
                          image_count=1, image_size=size,
                          image_name=f"{base_name}二维码.png", note=note,
-                         rebuilt=rebuilt)
+                         verified=verified, rebuilt=rebuilt)
             else:
                 zip_path = _task_file(task_id, ".zip")
                 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -2843,7 +2894,7 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                          env_size=len(env_bytes),
                          image_count=count, zip_size=size,
                          zip_name=f"{base_name}二维码（共{count}张）.zip", note=note,
-                         rebuilt=rebuilt)
+                         verified=verified, rebuilt=rebuilt)
             return
 
         def progress(done, total):
@@ -2856,10 +2907,15 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
         # （want_video=True 时当场编码，供「发手机 / 给其他插件」的一次性交付）。
         out_path = _task_file(task_id, ".mp4") if want_video else None
         fdir = _frames_dir(task_id)
+        selfcheck = {}
         nframes, k, m = encode_to_video(env_bytes, qr_version, out_path,
                                         progress_cb=progress, frame_repeat=frame_repeat,
                                         frames_dir=fdir,
-                                        cancel_check=lambda: _canceled(task_id))
+                                        cancel_check=lambda: _canceled(task_id),
+                                        selfcheck_out=selfcheck)
+        verified = bool(selfcheck.get("verified", True))
+        if not verified:
+            note = _unverified_note(env_bytes)
         size = os.path.getsize(out_path) if (out_path and os.path.exists(out_path)) else 0
         set_task(task_id, status="done", progress=1.0,
                  output_type="video", fmt=fmt, name=name, ext=ext,
@@ -2870,6 +2926,7 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                  frame_count=nframes, frame_repeat=frame_repeat,
                  display=round(frame_repeat / FRAMERATE, 3),  # 实际每码显示秒数（前端轮播节奏用）
                  video_name=f"{base_name}二维码流.mp4", note=note,
+                 verified=verified,
                  rebuilt=rebuilt)
     except TaskCanceled:
         # 用户停止：清理已写入的部分产物，任务标记为 canceled
@@ -3155,6 +3212,8 @@ def register(app) -> None:
                 "note": task.get("note", "") or "",
                 "env_size": task.get("env_size", 0),
                 "qr_version": task.get("qr_version"),
+                # T18：出码是否经桌面解码器自检过（False＝缺解码器，前端须明示）
+                "verified": task.get("verified", True),
             })
             if task.get("output_type") == "static":
                 payload.update({

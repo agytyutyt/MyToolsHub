@@ -188,7 +188,7 @@ class TestZipResourceLimits(unittest.TestCase):
         env = it.build_envelope("text", "安全测试", payload, None)
         out_dir = tempfile.mkdtemp(prefix="it_sec_qr_", dir=TMP_ROOT)
         try:
-            paths, pages = it.encode_static_output("text", "安全测试", env, 10,
+            paths, pages, _v = it.encode_static_output("text", "安全测试", env, 10,
                                                   out_dir, "sec")
         except RuntimeError as e:            # cv2 等运行期缺依赖
             self.skipTest(str(e))
@@ -812,6 +812,59 @@ class TestErrorCodesAndCancel(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.get_json().get("ok"))
         self.assertTrue(it.get_task(tid).get("cancel"))
+
+
+class TestSelfcheckVisibility(unittest.TestCase):
+    """T18（R3）：出码自检可见性——缺桌面解码器不再伪装「已自检」，也不再静默出坏码。
+
+    裁定口径：缺 zxingcpp 属**优雅降级 + 明示**（规范 B-4；manifest 里 zxingcpp 为 required:false），
+    不做 503；缺解码器时 `verified:false` + note 明示，齐备而所有 mask 都读不通才抛错。
+    """
+
+    def _env(self):
+        return it.build_envelope_v2("text", "自检可见性", "信息传输自检文案" * 30, ".txt")
+
+    def test_01_status_exposes_zxing_capability(self):
+        """缺依赖在 /status 上可见（前端据此提示装依赖组件包），不是只在失败时才暴露。"""
+        j = CLIENT.get(f"{API}/status").get_json()
+        self.assertIn("zxing", j)
+        self.assertIsInstance(j["zxing"], bool)
+
+    def test_02_missing_zxing_marks_unverified_not_passed(self):
+        """三态自检：在位→verified True；缺 zxing→False（旧实现是缺也报"验过"）。"""
+        env = self._env()
+        self.assertTrue(env.startswith(it.JZ2_MAGIC))
+        _p, _c, ok_on = it.encode_static_output("text", "自检", env, 15, TMP_ROOT, "t18on")
+        with mock.patch.object(it, "ZXING_AVAILABLE", False):
+            self.assertFalse(it._selfcheck_available(True))
+            self.assertIsNone(it._zxing_can_decode(b"not a png"))      # None＝无从验证
+            _p2, _c2, ok_off = it.encode_static_output("text", "自检", env, 15, TMP_ROOT, "t18off")
+        self.assertTrue(ok_on, "zxing 在位时静态出码应通过自检")
+        self.assertFalse(ok_off, "缺 zxing 必须报「未经自检」，不得当作通过")
+
+    def test_03_encode_task_carries_verified_and_note(self):
+        """任务与响应透出 verified:false + 明示文案（缺依赖不阻断出码）。"""
+        tid = "t18task0001"
+        it.set_task(tid, status="pending", progress=0.0, created_at=time.time(),
+                    created_by=TEST_USER["username"])
+        with mock.patch.object(it, "ZXING_AVAILABLE", False):
+            it._run_encode(tid, "static", None, None, "信息传输自检" * 40, 15)
+        task = it.get_task(tid)
+        self.assertEqual(task.get("status"), "done", task)
+        self.assertFalse(task.get("verified"))
+        self.assertIn("未经", task.get("note", ""))
+        self.assertIn("zxingcpp", task.get("note", ""))
+        r = CLIENT.get(f"{API}/task/{tid}")
+        self.assertIs(r.get_json().get("verified"), False)
+
+        tid2 = "t18task0002"
+        it.set_task(tid2, status="pending", progress=0.0, created_at=time.time(),
+                    created_by=TEST_USER["username"])
+        it._run_encode(tid2, "static", None, None, "信息传输自检" * 40, 15)
+        task2 = it.get_task(tid2)
+        self.assertEqual(task2.get("status"), "done", task2)
+        self.assertTrue(task2.get("verified"), "zxing 在位时应完成自检")
+        self.assertIs(CLIENT.get(f"{API}/task/{tid2}").get_json().get("verified"), True)
 
 
 if __name__ == "__main__":
