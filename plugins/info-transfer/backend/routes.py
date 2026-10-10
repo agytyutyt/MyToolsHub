@@ -3355,11 +3355,8 @@ def _run_decode(task_id, video_path):
 
 # ===================== 路由注册 =====================
 
-def register(app) -> None:
-    """插件入口：由 JZToolsHub 主应用在启动时调用。"""
-    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
-    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
-    jz_deps.install_refresher(app, globals())
+def _register_encode_cluster(app) -> None:
+    """编码/静态码簇：状态与格式清单、封装提交（P3-1 D4 拆分，端点体逐字未动）。"""
 
     @app.get(f"{API_PREFIX}/status")
     def it_status():
@@ -3463,6 +3460,10 @@ def register(app) -> None:
                          file_bytes, text_input, version, frame_repeat, raw_mode,
                          rebuild_mode, want_video)
         return jsonify({"ok": True, "task_id": task_id})
+
+
+def _register_result_cluster(app) -> None:
+    """任务与结果簇：按需视频、任务状态与取消、下载与图片预览。"""
 
     @app.post(f"{API_PREFIX}/encode/<task_id>/video")
     def it_encode_build_video(task_id):
@@ -3650,6 +3651,10 @@ def register(app) -> None:
         # img.src 赋值都回源一次条件请求（1000 帧长轮播下是 1000 次/轮）
         return send_file(path, mimetype="image/png", max_age=3600)
 
+
+def _register_decode_cluster(app) -> None:
+    """解码/视频/导出簇：解析与视频后台任务、任务轮询与取消、导出、探活。"""
+
     # ---------- 信息解析 ----------
 
     @app.post(f"{API_PREFIX}/decode")
@@ -3816,6 +3821,17 @@ def register(app) -> None:
     @app.get(f"{API_PREFIX}/ping")
     def it_ping():
         return jsonify({"ok": True})
+
+
+def register(app) -> None:
+    """插件入口：由 JZToolsHub 主应用在启动时调用。"""
+    # 依赖可用性按请求实时刷新：服务运行中装「依赖组件包」后无需重启即可生效
+    # （标记在模块导入时算好，不刷新会让插件页面一直显示"未安装"——jz_deps.refresh_flags）
+    jz_deps.install_refresher(app, globals())
+    # 分簇注册（P3-1 D4）：注册顺序与拆分前逐点一致（编码 → 任务与结果 → 解码）
+    _register_encode_cluster(app)
+    _register_result_cluster(app)
+    _register_decode_cluster(app)
 
 
 # 依赖 → 失效功能 → 修复指引（供 /status 的 missing_deps 与前端横幅使用）
