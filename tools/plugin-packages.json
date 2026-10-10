@@ -135,33 +135,6 @@
                                            "frontend_sha256":  "16ff0d842676c0ae0c91fe7a0d23421e9776669ae63bf24bf88699425690a074",
                                            "frontend_size":  8069
                                        },
-                     "map-marker":  {
-                                        "version":  "1.0.3",
-                                        "api_version":  1,
-                                        "file":  "JZToolsHub-map-marker-后端-v1.0.3.zip",
-                                        "sha256":  "64644d11f1cb3a608bdf232ec3ec066601ae27a550ebbac78ede02c4261639c1",
-                                        "size":  94768,
-                                        "built_at":  "2026-10-09T00:58:16+08:00",
-                                        "code_sha256":  "6c8a6ad6898e62d2100e8eaabc141d07b3fef713d19aaede2b6b0de299dea254",
-                                        "file_count":  4,
-                                        "requires_restart":  false,
-                                        "file_hashes":  {
-                                                            "plugins/map-marker/frontend/index.html":  "046aeea2dd4bec4d",
-                                                            "plugins/map-marker/frontend/jsqr.min.js":  "7c3c379dd1277bce",
-                                                            "plugins/map-marker/manifest.json":  "a35fee8b4ad7053e",
-                                                            "plugins/map-marker/README.md":  "8ea3ed9d5c0017e5"
-                                                        },
-                                        "assets":  {
-                                                       "frontend/jsqr.min.js":  {
-                                                                                    "h":  "7c3c379dd1277bce",
-                                                                                    "v":  1,
-                                                                                    "referenced":  true
-                                                                                }
-                                                   },
-                                        "frontend_file":  "JZToolsHub-map-marker-前端-v1.0.3.zip",
-                                        "frontend_sha256":  "2a4ec6958c979b044418e479fed3f6fac181a633aa8e415136d88fb222de6c6a",
-                                        "frontend_size":  71528
-                                    },
                      "store":  {
                                    "version":  "1.0.0",
                                    "api_version":  1,
@@ -820,6 +793,33 @@
                                    "frontend_file":  "JZToolsHub-admin-前端-v1.4.8.zip",
                                    "frontend_sha256":  "253b510d3f051e29e411cb64d0da6f6ff7dd0c2830ff579fc8150c81d5cbd6ad",
                                    "frontend_size":  80319
-                               }
+                               },
+                     "map-marker":  {
+                                        "version":  "1.0.4",
+                                        "api_version":  1,
+                                        "file":  "JZToolsHub-map-marker-后端-v1.0.4.zip",
+                                        "sha256":  "8e69217947032b4798994d25763f9cbf3e434005c0779f92e42a03c3c82250e4",
+                                        "size":  95381,
+                                        "built_at":  "2026-10-11T01:36:03+08:00",
+                                        "code_sha256":  "56cec11718a39dba84aefe41aee9c64388c902d28542fdb0de1515230155a708",
+                                        "file_count":  4,
+                                        "requires_restart":  false,
+                                        "file_hashes":  {
+                                                            "plugins/map-marker/frontend/index.html":  "de39adcb784a250d",
+                                                            "plugins/map-marker/frontend/jsqr.min.js":  "7c3c379dd1277bce",
+                                                            "plugins/map-marker/manifest.json":  "4fc529700fd33095",
+                                                            "plugins/map-marker/README.md":  "8ea3ed9d5c0017e5"
+                                                        },
+                                        "assets":  {
+                                                       "frontend/jsqr.min.js":  {
+                                                                                    "h":  "7c3c379dd1277bce",
+                                                                                    "v":  1,
+                                                                                    "referenced":  true
+                                                                                }
+                                                   },
+                                        "frontend_file":  "JZToolsHub-map-marker-前端-v1.0.4.zip",
+                                        "frontend_sha256":  "1af8d37a7bfe4d4fb532bc3e5019438d895ef0c859d702d9b00e5b9def103f59",
+                                        "frontend_size":  71634
+                                    }
                  }
 }
