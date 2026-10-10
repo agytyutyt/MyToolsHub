@@ -2,8 +2,8 @@
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 状态 | 现行（活清单；2026-10-09 Q6 批次后：P0 C1/C2/C3/C4 已销项（C1b 删除窗口仍待 flag 全覆盖），P1 D3/D4/D7 已修、D1/D2 部分完成（跨处理器读改写锁需人工），D5 需拍板、D6/D8 已完成（8105ae9）、L-13 债·admin 已完成（fcae857）；P2/P3 未开始） |
-| 最后核对 | 2026-10-09（对照 `docs/eval/20260929代码质量分析报告.md` v2 全文与 `git log` 实况） |
+| 状态 | 现行（活清单；2026-10-09 Q6 批次后：P0 C1/C2/C3/C4 已销项（C1b 删除窗口仍待 flag 全覆盖），P1 D3/D4/D7 已修、D1/D2 部分完成（跨处理器读改写锁需人工），D5 需拍板、D6/D8 已完成（8105ae9）、L-13 债·admin 已完成（fcae857）；**P2 四件已完成（2026-10-10，见 §3.1）**；P3 未开始） |
+| 最后核对 | 2026-10-10（P2 四件完成后对照 `docs/eval/20260929代码质量分析报告.md` v2 与 `git log` 实况） |
 | 作用域 | 框架 + 跨插件 + 插件内部（宿主 / 构建 / 测试 / 各插件） |
 | 随包 | 否（`docs/plan/` 层，见 `docs/README.md` §8） |
 | 覆盖范围 | 报告结论的**整改状态登记**：P0 C1–C4（含 C1b）、P1 D1–D8、P2 §4.1–§4.4、P3 §5.1/§5.3 |
@@ -54,10 +54,10 @@
 
 | # | 范围（报告 §） | 要点摘要 | 状态 |
 | --- | --- | --- | --- |
-| P2-1 | §4.1 宿主核心重复 | `jz_llm._post`/`test_connection` 约 30 行逐字重复 → `_send_and_parse`；「tmp 写入 + os.replace」4 模块 6 处 → `atomic_write_json`（顺带统一 D4 编码）；删 `_EMOJI_ICON_FILES`/`icon_file` 死代码；`@require_login` 收口三条 LLM 路由等 | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
-| P2-2 | §4.2 构建脚本重复 | `build-deploy.ps1` ↔ `build-deploy-local.py` 整段双实现；包内容清单单一真源数据文件；`tools/_shared.psm1` 统一 `Compare-SemVer` 等；`install.ps1` cfgPairs 死清单改自动发现；spec 两份 19 项列表合一；修 `$vcBundled` 先用后定义与 depCheck 漂移；zip 机制对齐 | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
-| P2-3 | §4.3 测试重复（无 conftest.py） | 根 `conftest.py` 收敛 `load_plugin`/数据根 fixture/USER/PLUGIN_DIRS 四类样板；`test_admin_plugin_manager` 导入期副作用入 fixture | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
-| P2-4 | §4.4 宿主复杂结构 | `app.py` 拆模块（dep_bootstrap / access_log / plugin_loader / LLM Blueprint / tray）；长函数拆分；每请求开销两项（refresher 退避、轻量 `/api/site`） | 未开始（2026-10-09 拍板：单独立项、版本窗口执行） |
+| P2-1 | §4.1 宿主核心重复 | `jz_llm._post`/`test_connection` 约 30 行逐字重复 → `_send_and_parse`；「tmp 写入 + os.replace」4 模块 6 处 → `atomic_write_json`（顺带统一 D4 编码）；删 `_EMOJI_ICON_FILES`/`icon_file` 死代码；`@require_login` 收口三条 LLM 路由等 | ✅ **已完成 2026-10-10**（`268bc32`，详见方案 §B-23） |
+| P2-2 | §4.2 构建脚本重复 | `build-deploy.ps1` ↔ `build-deploy-local.py` 整段双实现；包内容清单单一真源数据文件；`tools/_shared.psm1` 统一 `Compare-SemVer` 等；`install.ps1` cfgPairs 死清单改自动发现；spec 两份 19 项列表合一；修 `$vcBundled` 先用后定义与 depCheck 漂移；zip 机制对齐 | ✅ **已完成 2026-10-10**（`d47764c`，含"整段双实现"改单源委派：组装段删除、改调 local.py；详见方案 §B-23） |
+| P2-3 | §4.3 测试重复（无 conftest.py） | 根 `conftest.py` 收敛 `load_plugin`/数据根 fixture/USER/PLUGIN_DIRS 四类样板；`test_admin_plugin_manager` 导入期副作用入 fixture | ✅ **已完成 2026-10-10**（`01567c7`，详见方案 §B-23） |
+| P2-4 | §4.4 宿主复杂结构 | `app.py` 拆模块（dep_bootstrap / access_log / plugin_loader / LLM Blueprint / tray）；长函数拆分；每请求开销两项（refresher 退避、轻量 `/api/site`） | ✅ **已完成 2026-10-10**（`28f2f3d`+`63c1197`，jz_host/ 五模块拆出、app.py 1476→526 行；详见方案 §B-23） |
 
 ### 3.2 P3（报告 §5.1 / §5.3）
 
