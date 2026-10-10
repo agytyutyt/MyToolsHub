@@ -77,6 +77,16 @@ except ImportError:
     except ImportError:
         _office_render = None
 
+# 全文检索（L4-4）：纯标准库 + 已声明的 docx/openpyxl/xlrd；模块缺失 = 检索降级为
+# 仅文件名匹配（列表照常工作），兜底口径同上。
+try:
+    from . import text_index as _text_index
+except ImportError:
+    try:
+        import text_index as _text_index
+    except ImportError:
+        _text_index = None
+
 DATA_DIR = jztools_data.get_data_root_dir("plugins", "knowledge-base", "data")
 FILES_DIR = jztools_data.get_data_root_dir("plugins", "knowledge-base", "data", "files")
 API_PREFIX = "/api/knowledge-base"
@@ -152,6 +162,90 @@ def _categories_file():
 
 def _files_file():
     return os.path.join(DATA_DIR, "files.json")
+
+
+# ---- 全文检索索引（L4-4）----
+_SEARCH_LOCK = threading.Lock()
+_search_index = None
+
+
+def _search_index_file():
+    return os.path.join(DATA_DIR, "search_index.json")
+
+
+def _get_search_index():
+    """惰性单例。索引缓存落数据根（不是插件目录，规范 9.1 / U-3）。"""
+    global _search_index
+    if _text_index is None:
+        return None
+    with _SEARCH_LOCK:
+        if _search_index is None:
+            _search_index = _text_index.SearchIndex(_search_index_file())
+        return _search_index
+
+
+def _indexable_docs(fstore):
+    """把 files.json 的记录转成索引输入。渲染件优先（旧版格式抽的是转换后的 docx/xlsx）。"""
+    out = []
+    for rec in fstore.get("files", []):
+        ext = rec.get("ext") or ""
+        if _text_index is None or ext not in _text_index.INDEXABLE_EXTS:
+            continue
+        path = _file_path(rec.get("id") or "", ext)
+        if path:
+            out.append({"id": rec.get("id"), "ext": ext, "path": path})
+    return out
+
+
+def _search_snapshot_and_run(q, fstore, allowed_ids):
+    """**先取快照、放开存储锁再抽取**：抽取要读盘（docx 可达数十毫秒/篇），
+    在 _LOCK 里做会把上传与列表一起卡住（同 D1 的"锁内不做盘 IO"纪律）。
+
+    `all_files` 必须是**全库**（未经分类过滤）：SearchIndex.ensure() 把入参当作"存活文档全集"
+    并裁剪其中没有的 id——喂子集会把索引里其余文档全删掉（接线时踩过：带分类的查询一次就把
+    索引清成 1 篇）。分类作用域只在**结果**上做交集（allowed_ids）。
+    返回 {fid: 命中片段}。
+    """
+    idx = _get_search_index()
+    if idx is None:
+        return {}
+    docs = _indexable_docs({"files": fstore})
+    by_id = {d["id"]: d for d in docs}
+    idx.ensure(docs)
+    out = {}
+    for fid in idx.search(q):
+        if fid not in allowed_ids:
+            continue                       # 越分类的命中不外泄
+        d = by_id.get(fid)
+        if not d:
+            continue
+        out[fid] = idx.snippet(d["path"], d["ext"], q)
+    return out
+
+
+def _index_one(rec):
+    """上传后立刻把这一篇入索引（不等下次查询全量扫）。失败静默——索引是加速层。"""
+    if _text_index is None or not rec:
+        return
+    ext = rec.get("ext") or ""
+    if ext not in _text_index.INDEXABLE_EXTS:
+        return
+    path = _file_path(rec.get("id") or "", ext)
+    if not path:
+        return
+    try:
+        _get_search_index().ensure([{"id": rec.get("id"), "ext": ext, "path": path}])
+    except Exception:
+        pass
+
+
+def _unindex(fid):
+    if _text_index is None:
+        return
+    try:
+        _get_search_index().forget(fid)
+    except Exception:
+        pass
 
 
 def _load_store(path):
@@ -451,6 +545,20 @@ def register(app) -> None:
         user = _viewer()
         return jsonify({"ok": True, "can_manage": _can_manage(user)})
 
+    @app.get(f"{API_PREFIX}/search/status")
+    def kb_search_status():
+        """全文检索自检面（运维/排障用）：已索引/未索引/词表规模/是否触顶。
+
+        `enabled=false` 表示 text_index 模块不可用 → 搜索自动退回"仅文件名匹配"（B-4）。
+        `truncated=true` 表示词表撞到 MAX_TERMS，之后的新词不再收录（结果会偏少，需扩容或重建）。
+        """
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
+        idx = _get_search_index()
+        return jsonify({"ok": True, "enabled": idx is not None,
+                        **(idx.status() if idx is not None else {})})
+
     # ---------------- 分类 ----------------
 
     @app.get(f"{API_PREFIX}/categories")
@@ -586,18 +694,44 @@ def register(app) -> None:
             fstore = _load_store(_files_file())
             cstore = _load_store(_categories_file())
         files = fstore["files"]
+        all_files = list(files)
         if category and category != "all":
             # 选中分类 = 该分类及其全部子孙分类（浏览子分类时同步呈现父级归档内容）
             keep = _descendant_ids(cstore["categories"], category)
             keep.add(category)
             files = [f for f in files if f.get("category_id") in keep]
+        content_hits = {}
         if q:
-            files = [f for f in files
-                     if q in (f.get("name") or "").lower()
-                     or q in (f.get("original_name") or "").lower()]
-        items = sorted(files, key=lambda f: f.get("created_at", ""), reverse=True)
-        return jsonify({"ok": True, "count": len(items),
-                        "items": [_file_brief(f) for f in items]})
+            # 内容命中只在"已按分类过滤后的候选集"里给（越分类的命中不该出现）；
+            # 但索引维护要吃全库（见 _search_snapshot_and_run 的说明）。
+            # 检索层任何异常都退回"仅文件名匹配"，列表不能因为索引坏了而打不开。
+            try:
+                content_hits = _search_snapshot_and_run(
+                    q, all_files, {f.get("id") for f in files}) or {}
+            except Exception:
+                content_hits = {}
+        picked = []
+        for f in files:
+            if not q:
+                picked.append((f, True, False))
+                continue
+            by_name = (q in (f.get("name") or "").lower()
+                       or q in (f.get("original_name") or "").lower())
+            by_content = f.get("id") in content_hits
+            if by_name or by_content:
+                picked.append((f, by_name, by_content))
+        picked.sort(key=lambda t: t[0].get("created_at", ""), reverse=True)
+        items = []
+        for f, by_name, by_content in picked:
+            brief = _file_brief(f)
+            if q:
+                brief["match_in"] = ("both" if (by_name and by_content)
+                                     else ("content" if by_content else "name"))
+                brief["snippet"] = content_hits.get(f.get("id"), "") if by_content else ""
+            items.append(brief)
+        return jsonify({"ok": True, "count": len(items), "items": items,
+                        "fulltext": {"enabled": _text_index is not None,
+                                     "hits": len(content_hits)}})
 
     @app.post(f"{API_PREFIX}/files")
     def kb_file_upload():
@@ -727,6 +861,7 @@ def register(app) -> None:
                 rec["download_size"] = len(dl_blob)
             fstore["files"].append(rec)
             _save_store(_files_file(), fstore)
+        _index_one(rec)          # 锁外入索引（要读盘）：新上传的文档立刻可全文检索
         resp = {"ok": True, "id": fid, "item": _file_brief(rec)}
         if converted_from:
             resp["converted_from"] = converted_from   # 前端据此提示"已自动转换"
@@ -811,6 +946,7 @@ def register(app) -> None:
                         return jsonify({"ok": False, "error": "删除失败，请稍后重试"}), 500
             fstore["files"] = [f for f in fstore["files"] if f.get("id") != fid]
             _save_store(_files_file(), fstore)
+        _unindex(fid)            # 锁外摘索引，避免已删文档继续被检索命中
         return jsonify({"ok": True})
 
     @app.post(f"{API_PREFIX}/files/<fid>/view")

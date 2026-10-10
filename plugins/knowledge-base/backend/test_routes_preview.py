@@ -6,6 +6,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import time
 import types
 
@@ -13,6 +14,13 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")
 BACKEND = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 sys.path.insert(0, BACKEND)
+
+# ★ 必须在 import routes **之前**设数据根：routes 在模块加载时就把 DATA_DIR 定死了。
+#   本套件此前一直跑在**真实数据根**（%USERPROFILE%\.jztoolshub）上——每次运行都往用户的
+#   知识库里塞测试文档（2026-10-10 发现时已累积数十条，同名分类还会撞 409 让用例自相残杀）。
+#   口径与 info-transfer 各套件一致：临时目录隔离，跑完即弃。
+_TMP_ROOT = tempfile.mkdtemp(prefix="kb_test_")
+os.environ["JZTOOLS_DATA_ROOT"] = _TMP_ROOT
 
 # ---- 伪造 jztools_admin（routes 顶层 try-import）----
 admin = types.ModuleType("jztools_admin")
@@ -431,5 +439,97 @@ assert routes._migrate_files() is False, "迁移不幂等：第二次仍报有�
 store = routes._load_store(routes._files_file())
 assert all("views" in r and isinstance(r["views"], int) for r in store["files"]), "迁移未补齐 views"
 print("view count migration OK | 缺键补回 + 二次运行零改动")
+
+# ---------- 8) 全文检索（L4-4） ----------
+def _upload(name, blob):
+    r = client.post("/api/knowledge-base/files", data={
+        "file": (io.BytesIO(blob), name), "name": name.rsplit(".", 1)[0],
+    }, content_type="multipart/form-data")
+    assert r.status_code == 200, r.get_json()
+    return r.get_json()["id"]
+
+
+def _search(q, category=""):
+    url = "/api/knowledge-base/files?q=" + q
+    if category:
+        url += "&category=" + category
+    d = client.get(url).get_json()
+    return {i["id"]: i for i in d["items"]}, d
+
+fid_md = _upload("检索样本.md", "# 季度统计\n\n本文件含独特词饕餮纹样记录。\n".encode("utf-8"))
+got, head = _search("饕餮")
+assert fid_md in got, "内容命中未进结果（全文检索没生效）"
+assert got[fid_md]["match_in"] == "content", got[fid_md]
+assert "饕餮" in got[fid_md]["snippet"], got[fid_md]["snippet"]
+assert head["fulltext"]["enabled"] is True and head["fulltext"]["hits"] >= 1, head["fulltext"]
+# 精度断言：查询里的双字组必须在正文相邻出现——"饕纹"不相邻（原文是"饕餮纹"），不该命中
+got, _ = _search("饕纹")
+assert fid_md not in got, "CJK 双字组精度失效：不相邻的词也命中了（AND 语义被破坏）"
+print("fulltext content hit OK | match_in=content + snippet + 双字组相邻精度")
+
+got, _ = _search("检索样本")                     # 只在文件名里，正文没有
+assert got[fid_md]["match_in"] == "name", got[fid_md]
+got, _ = _search("季度统计")                      # 只在正文标题里，文件名没有
+assert got[fid_md]["match_in"] == "content", got[fid_md]
+# both 态要"文件名与正文都含该词"才成立，单独造一份这样的文件
+fid_both = _upload("值班表.txt", "值班表（2026 年春节）：一楼由张三负责。\n".encode("utf-8"))
+got, _ = _search("值班表")
+assert got[fid_both]["match_in"] == "both", got[fid_both]
+got, _ = _search("根本没有这个词组")
+assert fid_md not in got, "无意义查询不该命中"
+print("fulltext match_in OK | name / content / both 三态与无命中")
+
+# docx 通道（python-docx，含表格单元格）
+doc = docx.Document()
+doc.add_paragraph("会议纪要：涉及貔貅采购事项。")
+t = doc.add_table(rows=1, cols=1)
+t.rows[0].cells[0].text = "貔貅单价"
+buf = io.BytesIO(); doc.save(buf)
+fid_dx = _upload("采购.docx", buf.getvalue())
+got, _ = _search("貔貅")
+assert fid_dx in got and got[fid_dx]["match_in"] == "content", \
+    "docx 正文/表格抽取未覆盖（表格单元格是政务文档大头）"
+print("fulltext docx OK | 段落与表格单元格都进索引")
+
+# 分类作用域：内容命中不该跨分类出现
+r = client.post("/api/knowledge-base/categories", json={"name": "只放md的分类"})
+assert r.status_code == 200, (r.status_code, r.get_json())
+cid = r.get_json()["id"]
+client.put("/api/knowledge-base/files/" + fid_md, json={"category_id": cid})
+got, _ = _search("貔貅", category=cid)
+assert fid_dx not in got, "内容命中越了分类（越权可见面）"
+got, _ = _search("饕餮纹", category=cid)
+assert fid_md in got, "本分类内的内容命中不该被过滤掉"
+# 回归：带分类的查询**不得**把索引裁成只剩该分类（ensure 的入参必须是全库，见 routes 注释）
+st_after_cat = client.get("/api/knowledge-base/search/status").get_json()
+assert st_after_cat["indexed"] >= 4, \
+    "带分类的内容检索把索引裁掉了（indexed=%s）" % st_after_cat["indexed"]
+got, _ = _search("貔貅")                     # 不带分类时，另一分类下的命中必须还在
+assert fid_dx in got, "分类查询之后跨分类检索失效——索引被裁剪的实证"
+print("fulltext category scope OK | 命中不跨分类，且索引不被带分类查询裁剪")
+
+st = client.get("/api/knowledge-base/search/status").get_json()
+assert st["ok"] and st["enabled"] is True and st["indexed"] >= 2, st
+assert st["version"] == routes._text_index.INDEX_VERSION, st
+print("search status OK | indexed=%s terms=%s truncated=%s"
+      % (st["indexed"], st["terms"], st["truncated"]))
+
+# 删除后不得再被检索命中（索引与存储必须同步摘除）
+client.delete("/api/knowledge-base/files/" + fid_md)
+got, _ = _search("饕餮纹")
+assert fid_md not in got, "已删除文档仍可被全文检索命中"
+st = client.get("/api/knowledge-base/search/status").get_json()
+assert st["indexed"] >= 1, st
+print("fulltext delete OK | 删除后不再命中，索引规模同步下降")
+
+# 未登录：状态端点与列表都要 401（检索不得成为绕过鉴权的读取面）
+_jz = routes._get_session_user
+routes._get_session_user = lambda: None
+try:
+    assert client.get("/api/knowledge-base/search/status").status_code == 401
+    assert client.get("/api/knowledge-base/files?q=貔貅").status_code == 401
+finally:
+    routes._get_session_user = _jz
+print("fulltext auth OK | 未登录 401")
 
 print("ALL PHASE-8 ROUTE CHECKS DONE")

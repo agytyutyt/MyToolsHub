@@ -524,6 +524,11 @@ body {
 /* ==================== Markdown 目录（悬浮窗，卡片左侧留白处） ==================== */
 /* 挂在 .reader-frame 之外，是 fixed 浮层：不随卡片内容缩放，也不占正文宽度。
    宽度与显隐由 reader.js 按卡片左侧留白实测决定（放不下时加 .hidden）。 */
+/* 全文检索命中来源（L4-4）：正文命中时多一行片段，让用户自己判断是不是要找的那篇 */
+.hit-meta { margin-top: 4px; font-size: 12px; line-height: 1.5; }
+.hit-src { color: var(--accent-dark); font-weight: 600; margin-right: 6px; }
+.hit-snip { color: var(--text-2); }
+
 /* ---------- PDF 侧栏：目录 / 缩略图（L4-4） ----------
    面板挂 #view-reader（缩放目标 .reader-frame 之外），与 .md-toc 同一套浮动方式；
    展开时靠 #view-reader 的 padding 让位——padding 也在缩放目标之外，

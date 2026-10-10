@@ -320,7 +320,14 @@
         " · " + esc(fmtTime(f.created_at)) +
         // 阅读计数（L4-4）：0 次也显示，新上传的文档一眼能看出"还没人读过"
         ' · <span class="views-badge" title="打开阅读器的次数">阅读 ' + esc(String(f.views || 0)) + "</span>" +
-        "</div></div>" +
+        "</div>" +
+        // 全文检索命中来源（L4-4）：只按文件名搜时后端不给 match_in，不渲染任何附加行
+        (f.match_in && f.match_in !== "name"
+          ? '<div class="hit-meta"><span class="hit-src">' +
+            (f.match_in === "both" ? "文件名 + 正文命中" : "正文命中") + "</span>" +
+            (f.snippet ? '<span class="hit-snip">' + esc(f.snippet) + "</span>" : "") + "</div>"
+          : "") +
+        "</div>" +
         // 下载：全员可见（不属管理操作）；配置了异步下载源时下载的是下载源文档
         '<button type="button" class="card-dl" data-dl="' + esc(f.id) + '" title="' +
         (f.has_download_source ? "下载异步下载源文档（." + esc(f.download_ext || "") + "）" : "下载原始文档") +
