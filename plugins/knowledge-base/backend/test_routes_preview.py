@@ -532,4 +532,210 @@ finally:
     routes._get_session_user = _jz
 print("fulltext auth OK | 未登录 401")
 
+# ---------- 9) 分类可见范围隔离（L4-4 安全面：规范 §9.3，默认 all 可选收紧） ----------
+# 口径：all=全员（零行为变化）/ unit=本单位 / department=同单位且同部门 / private=仅创建者；
+# 读拒 404（不暴露存在性）；受限分类内管理动作仅创建者或超管（§9.3 写约束）。
+_jz9 = routes._get_session_user
+SUPER_U = {"username": "kb-super", "name": "超管", "super_admin": True,
+           "role_id": "role-admin", "unit_id": "U1", "department_id": "D1"}
+ADMIN_A = {"username": "kb-a", "name": "甲", "super_admin": False,
+           "role_id": "role-admin", "unit_id": "U1", "department_id": "D1"}
+ADMIN_B = {"username": "kb-b", "name": "乙", "super_admin": False,
+           "role_id": "role-admin", "unit_id": "U2", "department_id": "D9"}
+ADMIN_C = {"username": "kb-c", "name": "丙", "super_admin": False,
+           "role_id": "role-admin", "unit_id": "U1", "department_id": "D2"}
+USER_D = {"username": "kb-d", "name": "丁", "super_admin": False,
+          "role_id": "role-user", "unit_id": "U1", "department_id": "D1"}
+
+
+def _set_user(u):
+    routes._get_session_user = lambda: u
+
+
+def _mkcat(name, visibility=None, as_user=SUPER_U):
+    _set_user(as_user)
+    body = {"name": name}
+    if visibility is not None:
+        body["visibility"] = visibility
+    r = client.post("/api/knowledge-base/categories", json=body)
+    assert r.status_code == 200, (r.status_code, r.get_json())
+    return r.get_json()["id"]
+
+
+def _mkfile(name, blob, cat_id, as_user):
+    _set_user(as_user)
+    r = upload(name, blob, category_id=cat_id or "")
+    assert r.status_code == 200, (r.status_code, r.get_json())
+    return r.get_json()["id"]
+
+
+def _list_as(u):
+    _set_user(u)
+    r = client.get("/api/knowledge-base/files?category=all")
+    assert r.status_code == 200, r.status_code
+    return {f["id"]: f for f in r.get_json()["items"]}
+
+
+def _tree_as(u):
+    _set_user(u)
+    r = client.get("/api/knowledge-base/categories")
+    assert r.status_code == 200, r.status_code
+    return {c["id"]: c for c in r.get_json()["items"]}
+
+
+try:
+    # 9a) 幂等迁移：直接写入一条无 visibility 键的"存量"分类
+    with routes._LOCK:
+        _st = routes._load_store(routes._categories_file())
+        _st["categories"].append({
+            "id": "cat-legacy01", "name": "存量分类", "parent_id": None, "order": 99,
+            "created_by": "kb-super", "created_by_name": "超管",
+            "unit_id": "U1", "department_id": "D1", "created_at": "2026-01-01T00:00:00"})
+        routes._save_store(routes._categories_file(), _st)
+    assert routes._migrate_categories() is True, "缺 visibility 键的存量分类未被迁移"
+    assert routes._migrate_categories() is False, "迁移不幂等（二次运行仍有改动）"
+    _tb0 = _tree_as(ADMIN_B)
+    assert _tb0["cat-legacy01"]["visibility"] == "all", "存量分类应补为 all"
+    assert "cat-legacy01" in _tb0, "存量分类迁移后必须仍对跨单位用户可见（零行为变化）"
+    print("visibility migration OK | 缺键补 all + 幂等 + 存量零行为变化")
+
+    # 9b) 构造四类可见范围分类与文件（受限分类创建者=甲）
+    cat_all = _mkcat("范围-全员")
+    cat_unit = _mkcat("范围-单位", "unit", ADMIN_A)
+    cat_dept = _mkcat("范围-部门", "department", ADMIN_A)
+    cat_priv = _mkcat("范围-本人", "private", ADMIN_A)
+    fid_all = _mkfile("全员文档.txt", "公开内容 public0".encode("utf-8"), cat_all, ADMIN_B)
+    fid_unit = _mkfile("单位文档.txt", "单位内容 beta".encode("utf-8"), cat_unit, ADMIN_A)
+    fid_unit_dx = _mkfile("单位文档.docx", docx_bytes, cat_unit, ADMIN_A)
+    fid_dept = _mkfile("部门文档.txt", "部门内容 gamma".encode("utf-8"), cat_dept, ADMIN_A)
+    fid_priv = _mkfile("本人文档.txt", "私密内容 privonly".encode("utf-8"), cat_priv, ADMIN_A)
+    _set_user(SUPER_U)
+    assert client.post("/api/knowledge-base/categories", json={
+        "name": "范围-非法", "visibility": "weird"}).status_code == 400, "非法可见范围应拒绝"
+    assert client.put("/api/knowledge-base/categories/" + cat_all, json={
+        "visibility": "weird"}).status_code == 400, "更新非法可见范围应拒绝"
+
+    # 9c) 读过滤：跨单位管理员（乙）只看得到全员的；单条读取一律 404（不暴露存在性）
+    ids_b = _list_as(ADMIN_B)
+    assert fid_all in ids_b, "全员可见分类的文档对所有登录用户可见"
+    assert not any(x in ids_b for x in (fid_unit, fid_unit_dx, fid_dept, fid_priv)), \
+        "越权可见：乙（U2）不该看到受限分类文档"
+    for _fx in (fid_unit, fid_unit_dx, fid_dept, fid_priv):
+        assert client.get("/api/knowledge-base/files/" + _fx + "/raw").status_code == 404
+        assert client.get("/api/knowledge-base/files/" + _fx + "/download").status_code == 404
+        assert client.post("/api/knowledge-base/files/" + _fx + "/view").status_code == 404
+    assert client.get("/api/knowledge-base/files/" + fid_unit_dx + "/preview").status_code == 404, \
+        "不可见文档的 Office 预览必须 404（存在性不外泄）"
+    assert client.get("/api/knowledge-base/files/" + fid_all + "/raw").status_code == 200, \
+        "全员可见文档的读取不受影响（回归）"
+    print("visibility read gates OK | 列表过滤 + raw/download/view/preview 404 + 可见者回归")
+
+    # 9d) 单位 / 部门 / 私人语义（含普通用户同口径；预览正向对照）
+    ids_a = _list_as(ADMIN_A)         # 创建者 U1/D1
+    assert all(x in ids_a for x in (fid_unit, fid_unit_dx, fid_dept, fid_priv))
+    ids_c = _list_as(ADMIN_C)         # 同单位、异部门
+    assert fid_unit in ids_c and fid_unit_dx in ids_c, "单位级：同单位可见"
+    assert fid_dept not in ids_c, "部门级：同单位不同部门不可见"
+    assert fid_priv not in ids_c, "私人级：非创建者不可见"
+    ids_d = _list_as(USER_D)          # 普通用户 U1/D1
+    assert fid_unit in ids_d and fid_dept in ids_d and fid_priv not in ids_d, \
+        "可见范围判定与角色无关（普通用户同口径）"
+    _set_user(ADMIN_A)
+    assert client.get("/api/knowledge-base/files/" + fid_unit_dx + "/preview").status_code == 200, \
+        "可见文档的 Office 预览正常（正向对照）"
+    print("visibility scopes OK | unit/dept/private 语义 + 普通用户同口径 + 预览正对照")
+
+    # 9e) 分类树过滤：不可见分类整节点不下发
+    _tb = _tree_as(ADMIN_B)
+    assert cat_all in _tb and not any(x in _tb for x in (cat_unit, cat_dept, cat_priv))
+    _tc = _tree_as(ADMIN_C)
+    assert cat_unit in _tc and cat_dept not in _tc and cat_priv not in _tc
+    print("visibility tree OK | 不可见分类不下发")
+
+    # 9f) 全文检索不越可见范围（正文/文件名命中同受过滤）
+    _set_user(ADMIN_B)
+    hit_b, _raw_b = _search("privonly")
+    assert not hit_b, "越权：乙的检索命中了私密文档（privonly 只存在于该文档）"
+    hit_b2, _raw_b2 = _search("beta")
+    assert not hit_b2, "越权：内容命中越了单位级可见范围（beta 只存在于该文档）"
+    _set_user(ADMIN_A)
+    hit_a, _raw_a = _search("privonly")
+    assert fid_priv in hit_a and hit_a[fid_priv]["match_in"] == "content", "可见者应能检索命中"
+    print("visibility search OK | 越范围的正文/文件名命中都被过滤")
+
+    # 9g) 写约束三分流：不可见可 404 / 可见非创建者 403 / 创建者与超管 200；全员口径回归
+    _set_user(ADMIN_B)
+    assert client.put("/api/knowledge-base/files/" + fid_unit,
+                      json={"name": "乙改名尝试"}).status_code == 404, \
+        "不可见文档的写操作同样 404（与读口径一致）"
+    assert client.delete("/api/knowledge-base/files/" + fid_unit).status_code == 404
+    assert client.put("/api/knowledge-base/categories/" + cat_unit,
+                      json={"name": "乙改名尝试"}).status_code == 404
+    assert client.put("/api/knowledge-base/files/" + fid_all,
+                      json={"name": "全员文档-乙改名"}).status_code == 200, \
+        "全员可见分类沿用旧口径：任何管理员可管理"
+    assert client.put("/api/knowledge-base/files/" + fid_all,
+                      json={"category_id": cat_unit}).status_code == 404, \
+        "不可见分类不得作为移动目标（404 不暴露存在性）"
+    assert client.put("/api/knowledge-base/files/" + fid_all,
+                      json={"category_id": cat_all}).status_code == 200
+    assert upload("越权投递.txt", b"x", category_id=cat_unit).status_code == 404, \
+        "不可见分类不得作为上传目标"
+    assert client.post("/api/knowledge-base/categories",
+                       json={"name": "越权子分类", "parent_id": cat_unit}).status_code == 404, \
+        "不可见分类不得作为新建子分类的上级"
+    _set_user(ADMIN_C)
+    assert client.put("/api/knowledge-base/files/" + fid_unit,
+                      json={"name": "丙改名尝试"}).status_code == 403, \
+        "可见但非创建者的管理员：受限分类内写操作 403（§9.3）"
+    assert client.delete("/api/knowledge-base/files/" + fid_unit).status_code == 403
+    assert client.put("/api/knowledge-base/categories/" + cat_unit,
+                      json={"name": "丙改名尝试"}).status_code == 403
+    _set_user(ADMIN_A)
+    assert client.put("/api/knowledge-base/files/" + fid_unit,
+                      json={"name": "单位文档"}).status_code == 200, "创建者可管理"
+    assert client.put("/api/knowledge-base/categories/" + cat_unit,
+                      json={"visibility": "unit"}).status_code == 200, "创建者可改可见范围"
+    _set_user(SUPER_U)
+    assert client.put("/api/knowledge-base/files/" + fid_unit,
+                      json={"name": "单位文档"}).status_code == 200, "超管可管理"
+    print("visibility write gates OK | 404/403/200 三分流 + 全员口径回归 + 超管兜底")
+
+    # 9h) 可见范围可切换：all→unit 后按各记录 unit_id 过滤（同一分类下混单位数据）
+    cat_sw = _mkcat("范围-可切换", None, ADMIN_A)
+    fid_sw_a = _mkfile("切换-甲.txt", "切换甲".encode("utf-8"), cat_sw, ADMIN_A)
+    fid_sw_b = _mkfile("切换-乙.txt", "切换乙".encode("utf-8"), cat_sw, ADMIN_B)
+    _set_user(ADMIN_A)
+    assert client.put("/api/knowledge-base/categories/" + cat_sw,
+                      json={"visibility": "unit"}).status_code == 200
+    _ia = _list_as(ADMIN_A)
+    _ib = _list_as(ADMIN_B)
+    assert fid_sw_a in _ia and fid_sw_b not in _ia, "收紧为单位级后：甲只该看到本单位记录"
+    assert fid_sw_b in _ib and fid_sw_a not in _ib, "单位级按**记录** unit_id 判定（乙看到的相反）"
+    _ta = _tree_as(ADMIN_A)
+    _tb2 = _tree_as(ADMIN_B)
+    assert _ta[cat_sw]["visibility"] == "unit", "可见范围应随分类数据回显"
+    assert cat_sw in _ta and cat_sw not in _tb2, \
+        "分类本体的可见性按分类记录自身 unit_id 判定（甲 U1 可见、乙 U2 不可见）"
+    print("visibility switch OK | all→unit 生效 + 记录级 unit_id 语义 + 分类本体独立判定")
+
+    # 9i) 计数与 /config 镜子：不可见者的 view 不计数；/config 返回身份字段
+    _set_user(SUPER_U)
+    _v0 = next(f for f in client.get("/api/knowledge-base/files?category=all").get_json()["items"]
+               if f["id"] == fid_priv)["views"]
+    _set_user(ADMIN_B)
+    client.post("/api/knowledge-base/files/" + fid_priv + "/view")
+    _set_user(SUPER_U)
+    _v1 = next(f for f in client.get("/api/knowledge-base/files?category=all").get_json()["items"]
+               if f["id"] == fid_priv)["views"]
+    assert _v0 == _v1, "不可见用户的 view 请求不应计数"
+    _set_user(ADMIN_B)
+    _cfg = client.get("/api/knowledge-base/config").get_json()
+    assert _cfg["username"] == "kb-b" and _cfg["super_admin"] is False \
+        and _cfg["can_manage"] is True, _cfg
+    print("visibility views/config OK | view 不越权计数 + /config 身份镜子字段")
+    print("ALL VISIBILITY CHECKS DONE")
+finally:
+    routes._get_session_user = _jz9
+
 print("ALL PHASE-8 ROUTE CHECKS DONE")

@@ -771,7 +771,7 @@ curl -X POST http://localhost:5000/api/file-filter/apply \
 
 | 插件 | 关键接口 |
 | --- | --- |
-| knowledge-base | `/status` `/config` `/categories`(CRUD) `/files`(CRUD) `/files/<id>/raw` `/files/<id>/preview` `/files/<id>/download` `/files/<id>/view`(POST，阅读计数) `/search/status`(全文检索自检面) |
+| knowledge-base | `/status` `/config` `/categories`(CRUD，含可见范围 visibility) `/files`(CRUD) `/files/<id>/raw` `/files/<id>/preview` `/files/<id>/download` `/files/<id>/view`(POST，阅读计数) `/search/status`(全文检索自检面) |
 | file-filter | `/status` `/config` `/config/test` `/preview` `/filter` `/result/<task>` `/download/<task>` `/apply`（程序化接口） |
 | trajectory-sketch | `/status` `/config` `/upload` `/analyze` `/result/<task>` `/download/<task>` |
 | shared-docs | `/status` `/documents`(CRUD) `/documents/<id>/content` `/presence` `/rename` `/scope` `/export` `/import` |

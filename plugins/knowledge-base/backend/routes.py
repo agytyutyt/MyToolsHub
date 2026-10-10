@@ -33,7 +33,12 @@
 - data/files/<id>.preview.json    Office 预览缓存（阶段 8 起，按需生成）
 - 分类与文件记录均含 created_by / created_by_name / unit_id / department_id
   四个归属字段，一律取自服务端会话、禁止从请求体接收（铁律一）；
-  阅读为全站公共资源，列表不做单位/部门过滤（《知识库插件-设计文档》§3.3）。
+- **分类可见范围（L4-4 安全面）**：分类可设 `visibility` = all（缺省，全员可见，
+  与旧行为一致）/ unit（本单位）/ department（本部门：同单位且同部门）/ private
+  （仅创建者）。读取一律按可见性过滤（不可见 = 404，不暴露存在性）；单条记录的
+  管理动作（改名/移动/删除）对受限分类收紧为「创建者或超管」，all 分类沿用原
+  管理员口径；存量数据经 `_migrate_categories` 幂等补 `all`（零行为变化）。
+  判定语义按《插件设计规范》§9.3（超管恒可见；空 unit/department 不算匹配）。
 
 接口前缀：/api/knowledge-base
 """
@@ -152,6 +157,82 @@ def _can_manage(user):
         return True
     return (user.get("role_id") in MANAGE_ROLE_IDS
             or user.get("role") in MANAGE_ROLE_NAMES)
+
+
+# ===================== 分类可见范围（L4-4 安全面） =====================
+# all=全员（缺省，零行为变化）/ unit=本单位 / department=本部门 / private=仅创建者。
+# 判定按《插件设计规范》§9.3；管理动作对受限分类收紧为「创建者或超管」。
+VISIBILITY_VALUES = ("all", "unit", "department", "private")
+
+
+def _cat_visibility(cat):
+    """分类可见范围取值：缺失/未知一律按 all（兼容存量 + 前向兼容）。"""
+    v = (cat or {}).get("visibility") or "all"
+    return v if v in VISIBILITY_VALUES else "all"
+
+
+def _visible_record(rec, visibility, user):
+    """规范 §9.3 可见性判定（U=user，X=rec）：
+
+    - 超管恒可见；`all` 全体登录用户可见（「全站公共」是缺省形态）；
+    - unit / department：记录侧的空值**不算匹配**（"空对空"不是同单位/同部门的
+      证据——口径同 D5 无主任务「仅超管」）；department 还要求单位相同
+      （X.department_id == d(U) 且 X.unit_id == u(U)）；
+    - private：X.created_by == 当前用户名。
+    """
+    if not user:
+        return False
+    if user.get("super_admin"):
+        return True
+    if visibility == "all":
+        return True
+    if visibility == "unit":
+        uid = rec.get("unit_id")
+        return bool(uid) and uid == user.get("unit_id")
+    if visibility == "department":
+        uid, did = rec.get("unit_id"), rec.get("department_id")
+        return (bool(uid) and uid == user.get("unit_id")
+                and bool(did) and did == user.get("department_id"))
+    if visibility == "private":
+        created = rec.get("created_by")
+        return bool(created) and created == user.get("username")
+    return True
+
+
+def _can_write_record(rec, cat, user):
+    """单条记录的管理动作权限（改名 / 移动 / 删除 / 改可见范围）：
+
+    - 记录不受限（所在分类 all / 无分类）→ 沿用原口径：管理员角色或超管；
+    - 记录受限 → §9.3 写约束：仅创建者或超管（仍要求管理角色，保持
+      "知识库管理仅对管理员开放"的既有边界）。
+    """
+    if not _can_manage(user):
+        return False
+    if _cat_visibility(cat) == "all":
+        return True
+    if user.get("super_admin"):
+        return True
+    created = rec.get("created_by")
+    return bool(created) and created == user.get("username")
+
+
+def _cat_map(cats):
+    return {c.get("id"): c for c in (cats or [])}
+
+
+def _find_visible_file(fstore, cstore, fid, user):
+    """定位文件记录并按可见性过滤：不存在 / ID 非法 / 不可见一律 None。
+
+    调用方统一回 404「文件不存在或已被删除」——不暴露"存在但无权"的差异。
+    """
+    rec = next((f for f in fstore["files"]
+                if f.get("id") == fid and ID_RE.match(fid or "")), None)
+    if not rec:
+        return None
+    cat = _find_cat(cstore["categories"], rec.get("category_id"))
+    if not _visible_record(rec, _cat_visibility(cat), user):
+        return None
+    return rec
 
 
 # ===================== 存储（单库 JSON + 原子写） =====================
@@ -393,6 +474,25 @@ def _migrate_files():
         return changed
 
 
+def _migrate_categories():
+    """categories.json 字段补齐（幂等，启动时执行一次）：可见范围缺省补 "all"。
+
+    沿用 _migrate_files 的「按键是否存在判定」纪律（不能用取值判定）：显式落
+    `visibility: "all"` 让管理界面直接回显当前值；语义上缺失与 "all" 等价，
+    存量数据零行为变化。
+    """
+    with _LOCK:
+        store = _load_store(_categories_file())
+        changed = False
+        for cat in store.get("categories", []):
+            if "visibility" not in cat:
+                cat["visibility"] = "all"
+                changed = True
+        if changed:
+            _save_store(_categories_file(), store)
+        return changed
+
+
 # ===================== Office 预览（阶段 8：vendor 双引擎按需渲染 + 磁盘缓存） =====================
 # 原 pdf_status / html_status 异步状态机（线程池/轮询/重试端点）废弃：
 # xhr/dhr 引擎亚秒级完成渲染（50 页 Word 实测约 0.25s），首次请求 /preview 时
@@ -511,6 +611,10 @@ def register(app) -> None:
         _migrate_files()   # 幂等补齐元数据字段（旧数据升级）
     except Exception:
         pass               # 迁移失败不影响插件主体可用（下一轮启动继续尝试）
+    try:
+        _migrate_categories()   # 幂等补齐分类可见范围（旧数据补 all，零行为变化）
+    except Exception:
+        pass
 
     @app.get(f"{API_PREFIX}/status")
     def kb_status():
@@ -541,9 +645,15 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/config")
     def kb_config():
-        """前端渲染开关：当前用户是否可管理（上传/分类维护）。"""
+        """前端渲染开关：当前用户是否可管理（上传/分类维护）。
+
+        username / super_admin 供前端隐藏"受限分类内不可管理"的按钮
+        （服务端仍是唯一权威校验，前端仅减少无效点击）。
+        """
         user = _viewer()
-        return jsonify({"ok": True, "can_manage": _can_manage(user)})
+        return jsonify({"ok": True, "can_manage": _can_manage(user),
+                        "username": (user or {}).get("username", ""),
+                        "super_admin": bool((user or {}).get("super_admin"))})
 
     @app.get(f"{API_PREFIX}/search/status")
     def kb_search_status():
@@ -569,7 +679,20 @@ def register(app) -> None:
         with _LOCK:
             store = _load_store(_categories_file())
         cats = sorted(store["categories"], key=lambda c: (c.get("order", 0), c.get("created_at", "")))
-        return jsonify({"ok": True, "count": len(cats), "items": cats})
+        # 可见性过滤（§9.3）：不可见的分类整节点不下发；可见但其父不可见的节点
+        # 提升为顶层（保持子树可达，避免"树上悬空丢失"）
+        vis = {c.get("id"): _visible_record(c, _cat_visibility(c), user) for c in cats}
+        ids = {c.get("id") for c in cats}
+        items = []
+        for c in cats:
+            if not vis.get(c.get("id")):
+                continue
+            pid = c.get("parent_id")
+            if pid and pid in ids and not vis.get(pid):
+                c = dict(c)
+                c["parent_id"] = None
+            items.append(c)
+        return jsonify({"ok": True, "count": len(items), "items": items})
 
     @app.post(f"{API_PREFIX}/categories")
     def kb_category_create():
@@ -582,17 +705,23 @@ def register(app) -> None:
         body = request.get_json(silent=True) or {}
         name = str(body.get("name") or "").strip()
         parent_id = str(body.get("parent_id") or "").strip() or None
+        visibility = str(body.get("visibility") or "all").strip()
         if not name:
             return jsonify({"ok": False, "error": "请输入分类名称"}), 400
         if len(name) > 40:
             return jsonify({"ok": False, "error": "分类名称不能超过 40 字"}), 400
+        if visibility not in VISIBILITY_VALUES:
+            return jsonify({"ok": False, "error": "可见范围取值不合法"}), 400
         with _LOCK:
             store = _load_store(_categories_file())
             cats = store["categories"]
             if len(cats) >= MAX_CATEGORIES:
                 return jsonify({"ok": False, "error": "分类数量已达上限"}), 409
-            if parent_id and not _find_cat(cats, parent_id):
-                return jsonify({"ok": False, "error": "上级分类不存在"}), 404
+            if parent_id:
+                parent = _find_cat(cats, parent_id)
+                # 父分类不存在或不可见：同回 404（不暴露"存在但无权"的差异）
+                if not parent or not _visible_record(parent, _cat_visibility(parent), user):
+                    return jsonify({"ok": False, "error": "上级分类不存在"}), 404
             if _sibling_name_taken(cats, name, parent_id):
                 return jsonify({"ok": False, "error": "同级下已存在同名分类"}), 409
             order = 1
@@ -604,6 +733,7 @@ def register(app) -> None:
                 "name": name,
                 "parent_id": parent_id,
                 "order": order,
+                "visibility": visibility,   # 可见范围（L4-4 安全面）；缺省 all
                 # 归属四字段：来源为会话（规范 9.2 铁律一）
                 "created_by": user.get("username", ""),
                 "created_by_name": user.get("name", ""),
@@ -627,12 +757,20 @@ def register(app) -> None:
         name = body.get("name")
         parent_id = body.get("parent_id")
         order = body.get("order")
+        visibility = body.get("visibility")
         with _LOCK:
             store = _load_store(_categories_file())
             cats = store["categories"]
             cat = _find_cat(cats, cid)
             if not cat or not ID_RE.match(cid or ""):
                 return jsonify({"ok": False, "error": "分类不存在或已被删除"}), 404
+            # 不可见分类对当前用户等同不存在（读拒 404，不暴露存在性）
+            if not _visible_record(cat, _cat_visibility(cat), user):
+                return jsonify({"ok": False, "error": "分类不存在或已被删除"}), 404
+            # 受限分类：§9.3 写约束（仅创建者或超管；all 分类沿用管理员口径）
+            if not _can_write_record(cat, cat, user):
+                return jsonify({"ok": False, "error": "该分类已设可见范围，"
+                                                      "仅创建者或超级管理员可修改"}), 403
             if name is not None:
                 name = str(name).strip()
                 if not name:
@@ -642,12 +780,20 @@ def register(app) -> None:
                 if _sibling_name_taken(cats, name, cat.get("parent_id"), exclude_id=cid):
                     return jsonify({"ok": False, "error": "同级下已存在同名分类"}), 409
                 cat["name"] = name
+            if visibility is not None:
+                visibility = str(visibility).strip()
+                if visibility not in VISIBILITY_VALUES:
+                    return jsonify({"ok": False, "error": "可见范围取值不合法"}), 400
+                cat["visibility"] = visibility
             if parent_id is not None:
                 parent_id = str(parent_id).strip() or None
                 if parent_id == cid:
                     return jsonify({"ok": False, "error": "上级分类不能是自身"}), 400
-                if parent_id and not _find_cat(cats, parent_id):
-                    return jsonify({"ok": False, "error": "上级分类不存在"}), 404
+                if parent_id:
+                    parent = _find_cat(cats, parent_id)
+                    # 父分类不存在或不可见：同回 404（不暴露"存在但无权"的差异）
+                    if not parent or not _visible_record(parent, _cat_visibility(parent), user):
+                        return jsonify({"ok": False, "error": "上级分类不存在"}), 404
                 if parent_id and parent_id in _descendant_ids(cats, cid):
                     return jsonify({"ok": False, "error": "上级分类不能是自身的子分类"}), 400
                 cat["parent_id"] = parent_id
@@ -670,8 +816,15 @@ def register(app) -> None:
         with _LOCK:
             store = _load_store(_categories_file())
             cats = store["categories"]
-            if not ID_RE.match(cid or "") or not _find_cat(cats, cid):
+            cat = _find_cat(cats, cid)
+            if not cat or not ID_RE.match(cid or ""):
                 return jsonify({"ok": False, "error": "分类不存在或已被删除"}), 404
+            # 不可见分类等同不存在（读拒 404）；受限分类仅创建者或超管可删（§9.3 写约束）
+            if not _visible_record(cat, _cat_visibility(cat), user):
+                return jsonify({"ok": False, "error": "分类不存在或已被删除"}), 404
+            if not _can_write_record(cat, cat, user):
+                return jsonify({"ok": False, "error": "该分类已设可见范围，"
+                                                      "仅创建者或超级管理员可删除"}), 403
             if any(c.get("parent_id") == cid for c in cats):
                 return jsonify({"ok": False, "error": "该分类下存在子分类，请先删除子分类"}), 409
             fstore = _load_store(_files_file())
@@ -700,6 +853,11 @@ def register(app) -> None:
             keep = _descendant_ids(cstore["categories"], category)
             keep.add(category)
             files = [f for f in files if f.get("category_id") in keep]
+        # 可见性过滤（§9.3）：先于检索执行——allowed_ids 由本集合派生，
+        # 越可见范围的命中不外泄（索引本身仍吃全库，见 _search_snapshot_and_run）
+        catmap = _cat_map(cstore["categories"])
+        files = [f for f in files
+                 if _visible_record(f, _cat_visibility(catmap.get(f.get("category_id"))), user)]
         content_hits = {}
         if q:
             # 内容命中只在"已按分类过滤后的候选集"里给（越分类的命中不该出现）；
@@ -803,7 +961,11 @@ def register(app) -> None:
             fstore = _load_store(_files_file())
             cstore = _load_store(_categories_file())
             if category_id:
-                if not ID_RE.match(category_id) or not _find_cat(cstore["categories"], category_id):
+                target = (_find_cat(cstore["categories"], category_id)
+                          if ID_RE.match(category_id) else None)
+                # 目标分类不存在或对当前用户不可见：同回 404（不暴露存在性）；
+                # 不可见分类也不得作为投放目标（防"向看不到的分类塞文件"）
+                if not target or not _visible_record(target, _cat_visibility(target), user):
                     return jsonify({"ok": False, "error": "目标分类不存在"}), 404
             if len(fstore["files"]) >= MAX_FILES:
                 return jsonify({"ok": False, "error": "文件数量已达上限"}), 409
@@ -887,6 +1049,13 @@ def register(app) -> None:
             rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
             if not rec:
                 return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+            cat = _find_cat(cstore["categories"], rec.get("category_id"))
+            # 不可见文件等同不存在（读拒 404）；受限分类内仅创建者或超管可管理（§9.3 写约束）
+            if not _visible_record(rec, _cat_visibility(cat), user):
+                return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+            if not _can_write_record(rec, cat, user):
+                return jsonify({"ok": False, "error": "该文件所在分类已设可见范围，"
+                                                      "仅上传者或超级管理员可修改"}), 403
             if name is not None:
                 name = str(name).strip()
                 if not name:
@@ -901,9 +1070,12 @@ def register(app) -> None:
                 rec["summary"] = summary
             if category_id is not None:
                 category_id = str(category_id).strip()
-                if category_id and (not ID_RE.match(category_id)
-                                    or not _find_cat(cstore["categories"], category_id)):
-                    return jsonify({"ok": False, "error": "目标分类不存在"}), 404
+                if category_id:
+                    target = (_find_cat(cstore["categories"], category_id)
+                              if ID_RE.match(category_id) else None)
+                    # 目标分类不存在或对当前用户不可见：同回 404（不可见分类不得作为投放目标）
+                    if not target or not _visible_record(target, _cat_visibility(target), user):
+                        return jsonify({"ok": False, "error": "目标分类不存在"}), 404
                 rec["category_id"] = category_id or None
             rec["updated_at"] = _now()
             _save_store(_files_file(), fstore)
@@ -919,9 +1091,17 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "仅管理员可管理知识库文件"}), 403
         with _LOCK:
             fstore = _load_store(_files_file())
+            cstore = _load_store(_categories_file())
             rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
             if not rec:
                 return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+            cat = _find_cat(cstore["categories"], rec.get("category_id"))
+            # 不可见文件等同不存在（读拒 404）；受限分类内仅创建者或超管可删（§9.3 写约束）
+            if not _visible_record(rec, _cat_visibility(cat), user):
+                return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+            if not _can_write_record(rec, cat, user):
+                return jsonify({"ok": False, "error": "该文件所在分类已设可见范围，"
+                                                      "仅上传者或超级管理员可删除"}), 403
             # 清理：原件 + 渲染件 + 异步下载源 + 预览缓存 + 历史 PDF 残留（按绝对路径去重）
             seen, paths = set(), []
 
@@ -956,17 +1136,16 @@ def register(app) -> None:
         为什么是显式端点而不是在 /raw 或 /preview 里顺手 +1：那两个是渲染器的**资源拉取**
         通道，打开一份 PDF 会因断点续读/缓存重取打出多个请求，计数会虚高且不可解释。
         这里语义就是"用户把这份文档打开了"，一次打开记一次。
-        阅读是全站公共资源（§3.3），任何登录用户打开都算一次，故不做"本人或超管"写限制
-        （它不改内容，只累计一个统计量）。
+        计数的前提是**读得到**：不可见文件在前面统一 404（读拒 404，不暴露存在性），
+        计数本身不改内容、不属管理动作，故对可见者一律放行（含普通用户）。
         """
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
-        if not ID_RE.match(fid or ""):
-            return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
         with _LOCK:
             fstore = _load_store(_files_file())
-            rec = next((f for f in fstore["files"] if f.get("id") == fid), None)
+            cstore = _load_store(_categories_file())
+            rec = _find_visible_file(fstore, cstore, fid, user)
             if rec is None:
                 return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
             rec["views"] = int(rec.get("views", 0) or 0) + 1
@@ -980,14 +1159,16 @@ def register(app) -> None:
 
         - 不设置 attachment 头 → 浏览器不触发"另存为"，仅内联读取（只读定位）；
         - conditional=True → 支持 Range / ETag / 304（pdf.js 断点续读）；
-        - ID 白名单正则 + 扩展名二次校验（SEC-1），不可读一律 404（不暴露存在性）。
+        - ID 白名单正则 + 扩展名二次校验（SEC-1），不可读一律 404（不暴露存在性；
+          含"存在但超出分类可见范围"——读拒 404）。
         """
         user = _viewer()
         if user is None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
         with _LOCK:
             fstore = _load_store(_files_file())
-            rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
+            cstore = _load_store(_categories_file())
+            rec = _find_visible_file(fstore, cstore, fid, user)
         if not rec:
             return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
         path = _file_path(fid, rec.get("ext", ""))
@@ -1008,7 +1189,8 @@ def register(app) -> None:
         - 下载源字段存在但文件已丢失（人为删除/迁移残留）→ **回落原件**，不 404：
           下载是基础能力，不因可选增强件缺失而失效（B-4 优雅降级）；
         - `download_name` 交给 Flask 处理 RFC 5987 编码（中文文件名老浏览器也可用）；
-        - ID 白名单正则 + 扩展名二次校验（SEC-1），缺失/不可读一律 404（SEC-5）。
+        - ID 白名单正则 + 扩展名二次校验（SEC-1），缺失/不可读一律 404（SEC-5；
+          含"存在但超出分类可见范围"——读拒 404）。
         """
         _set_operation("下载知识库文件")
         user = _viewer()
@@ -1016,7 +1198,8 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
         with _LOCK:
             fstore = _load_store(_files_file())
-            rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
+            cstore = _load_store(_categories_file())
+            rec = _find_visible_file(fstore, cstore, fid, user)
         if not rec:
             return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
         # 优先异步下载源；缺失则回落原件
@@ -1044,7 +1227,8 @@ def register(app) -> None:
         - 首次请求渲染并原子落盘缓存 `<id>.preview.json`（文件按 id 不可变，缓存无失效问题）；
           后续请求直接读缓存；
         - 渲染失败 / 引擎未加载 / 非 Office 类 / 不存在 → 一律 404 + 用户可读 error
-          （前端收到 404 自动回退 mammoth / SheetJS 降级渲染，SEC-5 不暴露内部差异）；
+          （前端收到 404 自动回退 mammoth / SheetJS 降级渲染，SEC-5 不暴露内部差异；
+          含"存在但超出分类可见范围"——读拒 404）；
         - html 由引擎生成（全部文本转义 + URL 协议/字体白名单），前端注入前仍过
           DOMPurify 纵深防御；只读预览，不提供下载（原件走 /download）。
         """
@@ -1053,7 +1237,8 @@ def register(app) -> None:
             return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
         with _LOCK:
             fstore = _load_store(_files_file())
-            rec = next((f for f in fstore["files"] if f.get("id") == fid and ID_RE.match(fid or "")), None)
+            cstore = _load_store(_categories_file())
+            rec = _find_visible_file(fstore, cstore, fid, user)
         if not rec or not _needs_office_preview(rec):
             return jsonify({"ok": False, "error": "文件不存在或不支持预览"}), 404
         cache = _preview_cache_path(fid)

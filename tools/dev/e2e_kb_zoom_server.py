@@ -22,15 +22,29 @@ os.environ["XHR_SOFFICE"] = SOFFICE
 sys.path.insert(0, REPO)
 
 # ---- 伪造 jztools_admin（routes 顶层 try-import）----
+# E2E_KB_USER=b 时切换为「另一单位管理员 kb-b」（分类可见范围 E2E 用：
+# 非 super、U2/D9；对 tester 建的 unit/dept/private 分类均不可见）；
+# 默认仍是超管 tester（缩放验证等既有用法不受影响）。
+if os.environ.get("E2E_KB_USER") == "b":
+    _SESSION = {"username": "kb-b", "name": "乙管理员", "super_admin": False,
+                "role_id": "role-admin", "unit_id": "U2", "department_id": "D9"}
+else:
+    _SESSION = {"username": "tester", "name": "测试管理员", "super_admin": True,
+                "role_id": "role-admin", "unit_id": "U1", "department_id": "D1"}
 admin = types.ModuleType("jztools_admin")
 admin_routes = types.ModuleType("jztools_admin.routes")
-admin_routes.get_session_user = lambda: {
-    "username": "tester", "name": "测试管理员", "super_admin": True,
-    "role_id": "role-admin", "unit_id": "", "department_id": ""}
+admin_routes.get_session_user = lambda: dict(_SESSION)
 admin_routes.set_operation = lambda op: None
 admin.routes = admin_routes
 sys.modules["jztools_admin"] = admin
 sys.modules["jztools_admin.routes"] = admin_routes
+
+# routes 从框架门面取身份（jz_api.get_session_user）——必须按真实注册路径补 provider，
+# 否则一切需登录接口 401（口径同 test_routes_preview.py 的修法）。
+import jz_api  # noqa: E402
+
+jz_api.register_providers(get_session_user=admin_routes.get_session_user,
+                          set_operation=admin_routes.set_operation)
 
 pkg = types.ModuleType("kb_backend_e2e")
 pkg.__path__ = [os.path.join(REPO, "plugins", "knowledge-base", "backend")]

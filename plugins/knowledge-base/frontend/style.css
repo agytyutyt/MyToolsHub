@@ -147,6 +147,12 @@ body {
 .cat-row .arrow.leaf { visibility: hidden; }
 .cat-row .cat-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 4px; }
 .cat-row .cat-count { font-size: 12px; opacity: .7; }
+/* 可见范围角标（L4-4 安全面）：只对收紧过的分类显示，默认「全员可见」不出角标 */
+.cat-row .cat-vis {
+  font-size: 11px; padding: 0 5px; border-radius: 8px; white-space: nowrap;
+  background: rgba(92, 107, 192, .12); color: #5C6BC0; flex: none;
+}
+.cat-row.active .cat-vis { background: rgba(255, 255, 255, .25); color: #fff; }
 .cat-children { margin-left: 14px; border-left: 1px dashed var(--border); padding-left: 4px; }
 .cat-children.folded { display: none; }
 

@@ -113,6 +113,8 @@
   // ==================== 全局状态 ====================
   var state = {
     canManage: false,
+    username: "",          // 当前登录用户名（/config；前端"能否管理受限分类内容"的镜子用）
+    superAdmin: false,     // 是否超管（/config；同上）
     categories: [],        // 后端原始列表
     catCount: {},          // 分类id -> 递归文件数（渲染树时统计）
     currentCat: "all",     // all | root | 分类id
@@ -140,10 +142,43 @@
   function loadConfig() {
     return api("GET", "/config").then(function (data) {
       state.canManage = !!data.can_manage;
+      state.username = data.username || "";
+      state.superAdmin = !!data.super_admin;
       $("btn-upload").className = state.canManage ? "btn btn-primary" : "btn btn-primary hidden";
       $("btn-cat-add").className = state.canManage ? "icon-btn" : "icon-btn hidden";
       $("fab-upload").className = state.canManage ? "fab" : "fab hidden";
     });
+  }
+
+  // ==================== 分类可见范围（L4-4 安全面） ====================
+  // 前端是服务端 §9.3 判定的"镜子"，只用于隐藏必然被 403/404 的按钮；
+  // 真正校验在服务端（前端可被绕过，不作为安全边界）。
+  var VIS_LABEL = { all: "全员可见", unit: "仅本单位", department: "仅本部门", private: "仅本人" };
+  var VIS_ORDER = ["all", "unit", "department", "private"];
+
+  function visOptions(selected) {
+    var opts = "";
+    VIS_ORDER.forEach(function (v) {
+      opts += '<option value="' + v + '"' + (v === selected ? " selected" : "") + ">" +
+        VIS_LABEL[v] + "</option>";
+    });
+    return opts;
+  }
+
+  function visOfCategory(catId) {
+    var c = catId ? catById(catId) : null;
+    return (c && c.visibility) || "all";
+  }
+
+  function catEditable(c) {
+    if (!state.canManage || !c) return false;
+    return visOfCategory(c.id) === "all" || state.superAdmin || c.created_by === state.username;
+  }
+
+  function fileEditable(f) {
+    if (!state.canManage || !f) return false;
+    return visOfCategory(f.category_id) === "all" || state.superAdmin ||
+      f.created_by === state.username;
   }
 
   // ==================== 分类树 ====================
@@ -188,6 +223,11 @@
         '<div class="cat-row' + (state.currentCat === c.id ? " active" : "") + '" data-id="' + esc(c.id) + '">' +
         '<span class="' + arrowCls + '" data-toggle="' + esc(c.id) + '">▼</span>' +
         '<span class="cat-name" title="' + esc(c.name) + '">' + esc(c.name) + "</span>" +
+        // 可见范围角标（L4-4 安全面）：只对收紧过的分类显示（默认 all 不出角标）
+        (c.visibility && c.visibility !== "all" && VIS_LABEL[c.visibility]
+          ? '<span class="cat-vis" title="可见范围：' + esc(VIS_LABEL[c.visibility]) + '">' +
+            esc(VIS_LABEL[c.visibility]) + "</span>"
+          : "") +
         '<span class="cat-count">' + n + "</span></div>";
       if (children.length && !isFolded) {
         h += '<div class="cat-children">';
@@ -234,7 +274,9 @@
 
   function renderCatActions() {
     var isNode = state.currentCat !== "all" && catById(state.currentCat);
-    $("cat-actions").className = (state.canManage && isNode) ? "cat-actions" : "cat-actions hidden";
+    // 受限分类的改名/删除/改可见范围仅创建者或超管可操作（服务端 §9.3 强校验）
+    $("cat-actions").className = (state.canManage && isNode && catEditable(catById(state.currentCat)))
+      ? "cat-actions" : "cat-actions hidden";
   }
 
   // ==================== 文件列表 ====================
@@ -332,7 +374,7 @@
         '<button type="button" class="card-dl" data-dl="' + esc(f.id) + '" title="' +
         (f.has_download_source ? "下载异步下载源文档（." + esc(f.download_ext || "") + "）" : "下载原始文档") +
         '">' + DL_SVG + "</button>" +
-        (state.canManage
+        (fileEditable(f)
           ? '<button type="button" class="card-edit" data-edit="' + esc(f.id) + '" title="编辑">' +
             '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>'
           : "") + "</div>" +
@@ -458,13 +500,18 @@
         '<div class="form-row"><label class="form-label">分类名称</label>' +
         '<input id="m-name" class="input" maxlength="40" placeholder="不超过 40 字"></div>' +
         '<div class="form-row"><label class="form-label">上级分类</label>' +
-        '<select id="m-parent" class="select">' + catOptions(pid, true) + "</select></div>",
+        '<select id="m-parent" class="select">' + catOptions(pid, true) + "</select></div>" +
+        '<div class="form-row"><label class="form-label">可见范围</label>' +
+        '<select id="m-vis" class="select">' + visOptions("all") + "</select></div>" +
+        '<div class="form-hint">默认「全员可见」（现有行为不变）。收紧后：仅范围内用户可见该分类及其文档；' +
+        '受限分类内的文档仅上传者与超级管理员可改名 / 移动 / 删除（超管始终可见全部）。</div>',
         function () {
           var name = $("m-name").value.trim();
           if (!name) throw new Error("请输入分类名称");
           return api("POST", "/categories", {
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: name, parent_id: $("m-parent").value || null })
+            body: JSON.stringify({ name: name, parent_id: $("m-parent").value || null,
+                                   visibility: $("m-vis").value || "all" })
           }).then(function () {
             closeModal();
             toast("分类已创建");
@@ -474,22 +521,25 @@
       if (parentName) $("m-name").focus();
     };
 
-    // 重命名分类
+    // 编辑分类（改名 + 可见范围）
     $("btn-cat-rename").onclick = function () {
       var c = catById(state.currentCat);
       if (!c) return;
-      openModal("重命名分类",
+      openModal("编辑分类",
         '<div class="form-row"><label class="form-label">分类名称</label>' +
-        '<input id="m-name" class="input" maxlength="40" value="' + esc(c.name) + '"></div>',
+        '<input id="m-name" class="input" maxlength="40" value="' + esc(c.name) + '"></div>' +
+        '<div class="form-row"><label class="form-label">可见范围</label>' +
+        '<select id="m-vis" class="select">' + visOptions(c.visibility || "all") + "</select></div>" +
+        '<div class="form-hint">收紧后仅范围内用户可见；受限分类内的文档仅上传者与超级管理员可管理。</div>',
         function () {
           var name = $("m-name").value.trim();
           if (!name) throw new Error("请输入分类名称");
           return api("PUT", "/categories/" + encodeURIComponent(c.id), {
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: name })
+            body: JSON.stringify({ name: name, visibility: $("m-vis").value || "all" })
           }).then(function () {
             closeModal();
-            toast("已重命名");
+            toast("已保存");
             return loadCats(false);
           });
         });
