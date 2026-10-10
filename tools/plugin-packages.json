@@ -569,51 +569,6 @@
                                         "frontend_sha256":  "1af8d37a7bfe4d4fb532bc3e5019438d895ef0c859d702d9b00e5b9def103f59",
                                         "frontend_size":  71634
                                     },
-                     "file-filter":  {
-                                         "version":  "1.6.3",
-                                         "api_version":  1,
-                                         "file":  "JZToolsHub-file-filter-后端-v1.6.3.zip",
-                                         "sha256":  "65b0daedfb7fc08d5f43c0e37b3cfdc535e993a7ef123bd215a320a0f0256777",
-                                         "size":  105123,
-                                         "built_at":  "2026-10-11T01:42:03+08:00",
-                                         "code_sha256":  "a33a491f59ffac3102529aad8cac1ea2944e055b0948a1e3604a527ed7dc7c72",
-                                         "file_count":  17,
-                                         "requires_restart":  false,
-                                         "file_hashes":  {
-                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
-                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
-                                                             "plugins/file-filter/backend/config.template.json":  "680664cd3733de4f",
-                                                             "plugins/file-filter/backend/core.py":  "85428560fd387c56",
-                                                             "plugins/file-filter/backend/llm_client.py":  "7128463c4687e665",
-                                                             "plugins/file-filter/backend/mapping_store.py":  "b3fb56a5b6f61f7b",
-                                                             "plugins/file-filter/backend/requirements.txt":  "a3aa74f8009365c1",
-                                                             "plugins/file-filter/backend/routes.py":  "953948bd549202f0",
-                                                             "plugins/file-filter/frontend/.pytest_cache/.gitignore":  "ae07caff09568018",
-                                                             "plugins/file-filter/frontend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
-                                                             "plugins/file-filter/frontend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
-                                                             "plugins/file-filter/frontend/.pytest_cache/v/cache/nodeids":  "d751713988987e93",
-                                                             "plugins/file-filter/frontend/app.js":  "eead2d572387af8f",
-                                                             "plugins/file-filter/frontend/index.html":  "96d122756a078aa9",
-                                                             "plugins/file-filter/frontend/style.css":  "56dde377e540fa4c",
-                                                             "plugins/file-filter/manifest.json":  "941bba71b6e23a99",
-                                                             "plugins/file-filter/README.md":  "c38dd3a24acc23ba"
-                                                         },
-                                         "assets":  {
-                                                        "frontend/app.js":  {
-                                                                                "h":  "eead2d572387af8f",
-                                                                                "v":  9,
-                                                                                "referenced":  true
-                                                                            },
-                                                        "frontend/style.css":  {
-                                                                                   "h":  "56dde377e540fa4c",
-                                                                                   "v":  9,
-                                                                                   "referenced":  true
-                                                                               }
-                                                    },
-                                         "frontend_file":  "JZToolsHub-file-filter-前端-v1.6.3.zip",
-                                         "frontend_sha256":  "c7585545c9431eb0dd59cea7fa32c623b40f2e40c5087e88804f9b57945d165a",
-                                         "frontend_size":  27514
-                                     },
                      "admin":  {
                                    "version":  "1.4.9",
                                    "api_version":  1,
@@ -820,6 +775,51 @@
                                              "frontend_file":  "JZToolsHub-character-graph-前端-v1.2.3.zip",
                                              "frontend_sha256":  "da917f940cfda96c3c0516799586fd71150bb988fe44d828198ed5da128a0366",
                                              "frontend_size":  278140
-                                         }
+                                         },
+                     "file-filter":  {
+                                         "version":  "1.6.4",
+                                         "api_version":  1,
+                                         "file":  "JZToolsHub-file-filter-后端-v1.6.4.zip",
+                                         "sha256":  "6900715a90e8e0a622a2686bdd0aaef8c27cd0c6632337260f05afdae80332cb",
+                                         "size":  105387,
+                                         "built_at":  "2026-10-11T01:52:59+08:00",
+                                         "code_sha256":  "bb653568614560c0c1ad67b017174d4fbc6e3e4f9f18ae7cd4ec045ecad1a600",
+                                         "file_count":  17,
+                                         "requires_restart":  true,
+                                         "file_hashes":  {
+                                                             "plugins/file-filter/backend/__init__.py":  "d41d8cd98f00b204",
+                                                             "plugins/file-filter/backend/bg_image.py":  "57aac66b175892dd",
+                                                             "plugins/file-filter/backend/config.template.json":  "680664cd3733de4f",
+                                                             "plugins/file-filter/backend/core.py":  "85428560fd387c56",
+                                                             "plugins/file-filter/backend/llm_client.py":  "7128463c4687e665",
+                                                             "plugins/file-filter/backend/mapping_store.py":  "b3fb56a5b6f61f7b",
+                                                             "plugins/file-filter/backend/requirements.txt":  "a3aa74f8009365c1",
+                                                             "plugins/file-filter/backend/routes.py":  "480474b205efa974",
+                                                             "plugins/file-filter/frontend/.pytest_cache/.gitignore":  "ae07caff09568018",
+                                                             "plugins/file-filter/frontend/.pytest_cache/CACHEDIR.TAG":  "f552fcc7d0ecdb66",
+                                                             "plugins/file-filter/frontend/.pytest_cache/README.md":  "7cc7f8d7cb2f2f6e",
+                                                             "plugins/file-filter/frontend/.pytest_cache/v/cache/nodeids":  "d751713988987e93",
+                                                             "plugins/file-filter/frontend/app.js":  "eead2d572387af8f",
+                                                             "plugins/file-filter/frontend/index.html":  "96d122756a078aa9",
+                                                             "plugins/file-filter/frontend/style.css":  "56dde377e540fa4c",
+                                                             "plugins/file-filter/manifest.json":  "8f6c9ba13a5c99a7",
+                                                             "plugins/file-filter/README.md":  "c38dd3a24acc23ba"
+                                                         },
+                                         "assets":  {
+                                                        "frontend/app.js":  {
+                                                                                "h":  "eead2d572387af8f",
+                                                                                "v":  9,
+                                                                                "referenced":  true
+                                                                            },
+                                                        "frontend/style.css":  {
+                                                                                   "h":  "56dde377e540fa4c",
+                                                                                   "v":  9,
+                                                                                   "referenced":  true
+                                                                               }
+                                                    },
+                                         "frontend_file":  "JZToolsHub-file-filter-前端-v1.6.4.zip",
+                                         "frontend_sha256":  "f668c4df6f7990d1390cd03101743fa07a5bf3323938283237234d7d3148040e",
+                                         "frontend_size":  27515
+                                     }
                  }
 }
