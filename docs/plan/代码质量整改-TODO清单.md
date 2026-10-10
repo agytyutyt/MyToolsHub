@@ -64,7 +64,7 @@
 | # | 范围（报告 §） | 要点摘要 | 状态 |
 | --- | --- | --- | --- |
 | P3-1 | §5.1 复杂结构 | admin `routes.py` god file 拆分 + `get_session_user` 请求级缓存；三大 `register()`/`run_filter`/`build_timeline` 拆分；前端长函数拆分 | 未开始 |
-| P3-2 | §5.3 健壮性与卫生 | 约 50 处吞异常补日志（优先 admin 与托盘）；knowledge-base 锁内磁盘 I/O 移出；`os._exit`/死代码清理；开发产物移出发布目录；人肉版本戳构建期注入；vendor 补丁脚本化；`main.js` 渲染统一 `esc()` | 未开始 |
+| P3-2 | §5.3 健壮性与卫生 | 约 50 处吞异常补日志（优先 admin 与托盘）；knowledge-base 锁内磁盘 I/O 移出；`os._exit`/死代码清理；开发产物移出发布目录；人肉版本戳构建期注入；vendor 补丁脚本化；`main.js` 渲染统一 `esc()` | ✅ 已完成（2026-10-10 P3-2，commit `e5bbda0` 代码 / `be7d648` 包登记；详见承接手册 §B-31）：①吞异常点名站点补日志（tray 启动/KB 迁移/admin 部署标记）②KB 上传/删除改「两段式进锁」重 I/O 出锁 ③清理 admin `_protect_admin_ops` 死代码（`os._exit` 审计后保留）④发布目录开发产物经 payload-rules 已剔除 + 前端静态路由加 `.py` 守卫 ⑤qr `APP_VER` 改单源派生（F-2 门禁拦手同步）⑥vendor 七条补丁加核验脚本 `tools/e2e/kb-vendor-patch-check.py`（**检出半件**；自动重放需上游源，登记待办）⑦`main.js` 分类名与错误串补 `esc()` |
 
 ## 4. 纪律与联动
 
