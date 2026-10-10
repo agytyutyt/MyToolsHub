@@ -271,6 +271,20 @@ ZXING_NOTE = ("缺少 zxingcpp：v2 码解析（图片/视频）必需。请管�
 # 视频编码器候选（cv2 内置 FFmpeg 的 libopenh264 在部分机器缺 DLL 时，
 # 依次尝试 MPEG-4 Part 2 回退；mp4v 浏览器可能无法直接播放但解码端不受影响）
 VIDEO_FOURCC_CANDIDATES = ("avc1", "mp4v")
+# T35（§T35 体积漂移）：显式设定编码档位 + 把「实际用了哪个编码器」变成产物自身信息。
+#   卡片记的「源码 vs 冻结 同批帧体积差 ≤7×」经实测复现并定位——**不是码控档位漂移，
+#   而是编码器候选回退**：同一批 v15/850px 帧、同 cv2 二进制，avc1（H.264/openh264）
+#   174KB（1.8KB/帧）vs mp4v（MPEG-4 Part 2）1804KB（19.0KB/帧），比值 10.4×；
+#   生产链路 3146 码 ×5 帧实测 6823KB vs 46929KB，比值 6.9×，正落在卡片记的 7× 上。
+#   两侧全帧回读都是 3146/3146 码、还原逐字节一致（verified=True），即"哪个编码器"
+#   只影响体积、不影响可解性，所以可复现性的正确抓手是**固定并透出编码器**，而不是猜档位。
+#   档位面：本机 OpenCV 5.0.0（venv 与冻结包内 ffmpeg500 同一构建）对质量参数是
+#   **完全不接受**——构造 params（6/7 参）与 open(...,params) 均报 "takes at most 5 arguments"，
+#   writer.set(VIDEOWRITER_PROP_QUALITY, q) 返回 False 且产物逐字节不变（8 档逐一验证）。
+#   因此这里只做能力内的显式尝试，并如实记录有没有设进去（quality_pinned），不假装成功；
+#   取 100 而不是"能解的最低档"：卡片要求「全帧解码成功率不降」是硬门槛，而档位在本构建
+#   无法实测出梯度，任何低于满档的取值都是没有证据的赌博。
+VIDEO_QUALITY = 100
 
 # 支持的文档格式
 # - text / markdown / word / excel / csv：精简传输（只传数据，不保留格式/宏）
@@ -2000,13 +2014,30 @@ def _qrformat_encode(share_list, k, m):
 def _open_video_writer(out_path, size):
     _load_cv2()
     _load_numpy()
-    """依次尝试编码器候选，返回 (writer, fourcc)；全部失败抛 RuntimeError。"""
+    """依次尝试编码器候选，返回 (writer, fourcc, quality_pinned)；全部失败抛 RuntimeError。
+
+    T35：fourcc 与"档位有没有设进去"必须交回调用方记录——同一段帧在 avc1 / mp4v 下
+    体积差近 7×（见 VIDEO_QUALITY 注释），不让产物自带这两个信息，两侧差异就永远只能靠猜。
+    档位尝试只做 `writer.set(VIDEOWRITER_PROP_QUALITY, VIDEO_QUALITY)` 这一种能力内形态：
+    返回 True 才算设进去（本机 OpenCV 5.0 返回 False，属预期，不是失败）。
+    """
     for fourcc in VIDEO_FOURCC_CANDIDATES:
         writer = cv2.VideoWriter(out_path, cv2.VideoWriter_fourcc(*fourcc),
                                  FRAMERATE, size)
-        if writer.isOpened():
-            return writer, fourcc
-        writer.release()
+        if not writer.isOpened():
+            writer.release()
+            continue
+        pinned = False
+        qparam = getattr(cv2, "VIDEOWRITER_PROP_QUALITY", None)
+        if qparam is not None:
+            try:
+                pinned = bool(writer.set(qparam, VIDEO_QUALITY))
+            except Exception:
+                pinned = False
+        if fourcc != VIDEO_FOURCC_CANDIDATES[0]:
+            log.warning("视频编码器回退：%s（首选 %s 不可用，通常缺 OpenH264 运行库），"
+                        "同批帧体积约为 H.264 的 7 倍", fourcc, VIDEO_FOURCC_CANDIDATES[0])
+        return writer, fourcc, pinned
     raise RuntimeError(
         "视频编码器不可用（缺少 OpenH264 运行库）。"
         "请下载 openh264 DLL 放入 cv2 目录后重试，或改用「静态二维码」模式。"
@@ -2014,7 +2045,8 @@ def _open_video_writer(out_path, size):
 
 
 def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat=1,
-                    frames_dir=None, cancel_check=None, selfcheck_out=None):
+                    frames_dir=None, cancel_check=None, selfcheck_out=None,
+                    codec_out=None):
     _load_cv2()
     _load_numpy()
     """把字节数据按 QR-transfer 编码为二维码帧序列 / 视频文件。返回 (nframes, k, m)。
@@ -2034,6 +2066,8 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
     字典序 == 播放序），供前端相机传输模式做 JS 定时轮播——绕开浏览器视频管线，
     避免其丢帧"追赶"破坏每码停留时长的一致性。
     cancel_check：可选。无参函数，返回真值时抛 TaskCanceled（用户停止封装）。
+    codec_out（T35）：可选字典，回填本次视频实际使用的编码器与档位落地情况
+    `{"fourcc": str, "quality": int, "quality_pinned": bool}`；只产帧不产视频时不回填。
     """
     if not (QRCODE_AVAILABLE and ZFEC_AVAILABLE and CV2_AVAILABLE and NUMPY_AVAILABLE):
         missing = [
@@ -2108,7 +2142,11 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
                 img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)  # FFMPEG 要求 3 通道
                 if writer is None:
                     h, w = img.shape[:2]
-                    writer, _ = _open_video_writer(out_path, (w, h))
+                    writer, used_fourcc, pinned = _open_video_writer(out_path, (w, h))
+                    if codec_out is not None:
+                        codec_out.update({"fourcc": used_fourcc,
+                                          "quality": VIDEO_QUALITY,
+                                          "quality_pinned": pinned})
                 for _ in range(max(1, frame_repeat)):
                     writer.write(img)
             if progress_cb and (i % 4 == 0 or i == total - 1):
@@ -2127,7 +2165,7 @@ def encode_to_video(raw_bytes, version, out_path, progress_cb=None, frame_repeat
 
 
 def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
-                            progress_cb=None, cancel_check=None):
+                            progress_cb=None, cancel_check=None, codec_out=None):
     _load_cv2()
     _load_numpy()
     """把已落盘的帧 PNG 序列编码为 mp4（按需生成视频文件用），返回写入的帧数。
@@ -2135,6 +2173,7 @@ def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
     与 encode_to_video 的视频口径逐项一致（同帧图、同重复帧数、同帧率与编码器），
     差别只在于像素来自磁盘上的既有帧文件：不重新渲染、不走 mask 回读自检，
     因此耗时 ≈ 11 ms/帧（v25/1250px 实测），远低于重新封装一遍。
+    codec_out：同 encode_to_video（T35，回填实际编码器与档位落地情况）。
     """
     if not (CV2_AVAILABLE and NUMPY_AVAILABLE):
         raise RuntimeError("后端缺少视频编码依赖（opencv-python / numpy）")
@@ -2151,7 +2190,11 @@ def build_video_from_frames(frames_dir, out_path, count, frame_repeat=1,
             img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
             if writer is None:
                 h, w = img.shape[:2]
-                writer, _ = _open_video_writer(out_path, (w, h))
+                writer, used_fourcc, pinned = _open_video_writer(out_path, (w, h))
+                if codec_out is not None:
+                    codec_out.update({"fourcc": used_fourcc,
+                                      "quality": VIDEO_QUALITY,
+                                      "quality_pinned": pinned})
             for _ in range(max(1, frame_repeat)):
                 writer.write(img)
                 written += 1
@@ -3103,11 +3146,12 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
         out_path = _task_file(task_id, ".mp4") if want_video else None
         fdir = _frames_dir(task_id)
         selfcheck = {}
+        codec = {}
         nframes, k, m = encode_to_video(env_bytes, qr_version, out_path,
                                         progress_cb=progress, frame_repeat=frame_repeat,
                                         frames_dir=fdir,
                                         cancel_check=lambda: _canceled(task_id),
-                                        selfcheck_out=selfcheck)
+                                        selfcheck_out=selfcheck, codec_out=codec)
         verified = bool(selfcheck.get("verified", True))
         if not verified:
             note = _unverified_note(env_bytes)
@@ -3122,6 +3166,8 @@ def _run_encode(task_id, mode, filename, file_bytes, text_input, qr_version,
                  display=round(frame_repeat / FRAMERATE, 3),  # 实际每码显示秒数（前端轮播节奏用）
                  video_name=f"{base_name}二维码流.mp4", note=note,
                  verified=verified,
+                 video_fourcc=codec.get("fourcc") or "",
+                 video_quality_pinned=bool(codec.get("quality_pinned", False)),
                  rebuilt=rebuilt)
     except TaskCanceled:
         # 用户停止：清理已写入的部分产物，任务标记为 canceled
@@ -3172,11 +3218,15 @@ def _run_build_video(task_id):
     try:
         if not count or not os.path.isdir(frames_dir):
             raise RuntimeError("帧序列不存在或已被清理，请重新封装")
+        codec = {}
         build_video_from_frames(frames_dir, out_path, count, frame_repeat=repeat,
                                 progress_cb=progress,
-                                cancel_check=lambda: _canceled(task_id))
+                                cancel_check=lambda: _canceled(task_id),
+                                codec_out=codec)
         size = os.path.getsize(out_path) if os.path.exists(out_path) else 0
-        set_task(task_id, video_status="done", video_progress=1.0, video_size=size)
+        set_task(task_id, video_status="done", video_progress=1.0, video_size=size,
+                 video_fourcc=codec.get("fourcc") or "",
+                 video_quality_pinned=bool(codec.get("quality_pinned", False)))
     except TaskCanceled:
         _remove_video_file(task_id)
         set_task(task_id, video_status="canceled", video_progress=0.0,
@@ -3442,6 +3492,10 @@ def register(app) -> None:
                                     or ("done" if task.get("video_size") else "none"),
                     "video_progress": task.get("video_progress", 0.0),
                     "video_detail": task.get("video_detail", "") or "",
+                    # T35：视频由哪个编码器产出、档位有没有设进去（体积差近 7× 归因用）
+                    "video_fourcc": task.get("video_fourcc", ""),
+                    "video_quality": (VIDEO_QUALITY if task.get("video_fourcc") else None),
+                    "video_quality_pinned": task.get("video_quality_pinned", False),
                     "display": task.get("display", round(CAMERA_FRAME_REPEAT / FRAMERATE, 3)),
                 })
         if task.get("status") == "error":

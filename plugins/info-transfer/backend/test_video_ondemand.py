@@ -8,7 +8,8 @@
   4. 直出视频（video_file=1）与按需生成两条路径的帧数口径一致；
   5. 帧序列缺失时的失败路径（不静默产出坏视频）；
   6. T21 帧回读自检抽样口径；
-  7. T24 视频解析早停/跳帧与漂移回退（结果须与全量扫描逐字节一致）。
+  7. T24 视频解析早停/跳帧与漂移回退（结果须与全量扫描逐字节一致）；
+  8. T35 编码器/质量档位透出（同任务体积确定性、回退可归因、/task 可见）。
 
 运行：python test_video_ondemand.py
 依赖：qrcode / zfec / opencv-python / numpy / zxing-cpp（venv 齐备）。
@@ -228,6 +229,43 @@ def main():
         got, _, _ = reparse(vp, True)
         want, _, _ = reparse(vp, False)
         check(f"{tag}：结果仍与全量扫描一致", got == want)
+
+    print("\n[8] T35 编码器与质量档位透出")
+    ca, cb = {}, {}
+    pa = os.path.join(TMP_ROOT, "t35_a.mp4")
+    pb = os.path.join(TMP_ROOT, "t35_b.mp4")
+    it.build_video_from_frames(fd7, pa, 12, frame_repeat=2, codec_out=ca)
+    it.build_video_from_frames(fd7, pb, 12, frame_repeat=2, codec_out=cb)
+    sa, sb = os.path.getsize(pa), os.path.getsize(pb)
+    check("编码器/档位回填进产物元信息（fourcc + quality + quality_pinned）",
+          ca.get("fourcc") in it.VIDEO_FOURCC_CANDIDATES
+          and ca.get("quality") == it.VIDEO_QUALITY
+          and isinstance(ca.get("quality_pinned"), bool), str(ca))
+    check("同任务两次出视频体积差 ≤10%（源码形态确定性）",
+          abs(sa - sb) <= sa * 0.10, f"{sa}B vs {sb}B")
+    # 不断言"两个 mp4 文件逐字节相同"：mp4 的 moov box 里带 muxer 写入的创建/修改时间戳，
+    # 那是容器层的东西、不由本插件决定。可复现性的正确口径是「体积一致 + 解出来的码一致」。
+    check("两次出视频体积完全一致（漂移不再不可预估）", sa == sb, f"{sa}B vs {sb}B")
+    check("两次出视频解出的码序列一致",
+          it.decode_video_frames(pa, early_stop=False)
+          == it.decode_video_frames(pb, early_stop=False))
+    check("全帧回读成功率不降（12 码全活）",
+          len(it.decode_video_frames(pa, early_stop=False)) == 12)
+    saved_fc = it.VIDEO_FOURCC_CANDIDATES
+    try:
+        it.VIDEO_FOURCC_CANDIDATES = ("mp4v",)
+        pf = os.path.join(TMP_ROOT, "t35_fb.mp4")
+        cf = {}
+        it.build_video_from_frames(fd7, pf, 6, frame_repeat=2, codec_out=cf)
+        check("编码器回退被如实记录（mp4v 时 fourcc 透出，7× 体积差可归因）",
+              cf.get("fourcc") == "mp4v", str(cf))
+    finally:
+        it.VIDEO_FOURCC_CANDIDATES = saved_fc
+    st = client.get(f"{API}/task/{task_id}").get_json()
+    check("/task 透出 video_fourcc / video_quality / video_quality_pinned",
+          st.get("video_fourcc") in it.VIDEO_FOURCC_CANDIDATES
+          and st.get("video_quality") == it.VIDEO_QUALITY
+          and isinstance(st.get("video_quality_pinned"), bool), str(st)[:160])
 
     print(f"\n结果：PASS {PASSES[0]} / FAIL {len(FAILS)}")
     if FAILS:
