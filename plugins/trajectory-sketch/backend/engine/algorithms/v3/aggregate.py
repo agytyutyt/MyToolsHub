@@ -24,20 +24,11 @@ from ...geo import haversine
 from ...stats import mode_str
 
 
-def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]]],
-                   states: Dict[int, int], noise_m: float, width_s: int,
-                   stay_min_s: float, high_m: float) -> Dict[str, Any]:
-    """单号码聚合。返回::
-
-        {"events":  [条目序列：{"kind": "stay"/"void", "w0","w1","pos",
-                                "first_ts","last_ts","addrs","n_points","void_windows"}],
-         "trips":   [{"w0","w1","net_m","cum_m","straightness","start_ts","end_ts",
-                      "minutes","speed_kmh","kind","confidence","void_minutes",
-                      "from_pos","to_pos"}],
-         "state_runs":  [(状态, w0, w1)],          # 连续同态区间（报告附录）
-         "bridge_count": int, "state_counter": {状态: 窗数}}
-    """
-    # ---- 位移锚定切分 ----
+def _segment_by_displacement(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]]],
+                             states: Dict[int, int], noise_m: float) -> List[list]:
+    """位移锚定切分：非失联窗按顺序扫描，开段记锚点（首个非空窗位置）；后续窗口位置
+    偏离锚点 ≤ 噪声 → 延续；> 噪声 → 闭段开新段。桥接空窗（有态无位置）延续当前段并
+    计入时长；失联窗（000）闭段并累计无数据段。返回 raw 段列表。"""
     raw: List[list] = []                           # ['seg', w0, w1, positions, anchor, first_ne, last_ne]
     cur: Optional[list] = None
     for w in range(wmin, wmax + 1):
@@ -70,8 +61,12 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
             cur = ["seg", w, w, [pos], pos, w, w]
     if cur:
         raw.append(cur)
+    return raw
 
-    # ---- 段 → 事件（停留 / 短段 / 无数据）----
+
+def _segments_to_events(raw: List[list], info: Dict[int, Optional[Dict[str, Any]]],
+                        width_s: int, stay_min_s: float) -> List[Dict[str, Any]]:
+    """段 → 事件（停留 / 短段 / 无数据），含实际首末点时刻。"""
     events: List[Dict[str, Any]] = []
     for r in raw:
         if r[0] == "void":
@@ -98,8 +93,11 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
             continue
         e["first_ts"] = info[e["first_ne"]]["ts_first"]
         e["last_ts"] = info[e["last_ne"]]["ts_last"]
+    return events
 
-    # ---- 短段并入相邻停留（两停留位置差 ≤ 噪声）----
+
+def _absorb_short_into_stays(events: List[Dict[str, Any]], noise_m: float) -> None:
+    """短段并入相邻停留（两停留位置差 ≤ 噪声）；**原地修改** events（现有实现语义）。"""
     i = 0
     while i < len(events):
         e = events[i]
@@ -118,7 +116,10 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
             continue
         i += 1
 
-    # ---- 跨无数据段/短段的相邻停留：位置差 ≤ 噪声 → 合并 ----
+
+def _merge_stays_across_voids(events: List[Dict[str, Any]], noise_m: float) -> None:
+    """跨无数据段/短段的相邻停留：位置差 ≤ 噪声 → 合并（段内断档窗数累计注记）；
+    **原地修改** events（现有实现语义）。"""
     i = 0
     while i < len(events):
         if events[i]["kind"] != "stay":
@@ -144,9 +145,12 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
             continue
         i = j if j > i else i + 1
 
-    # ---- 出行段：相邻停留之间（跨过其间短段与未桥接空窗），含首尾移动段 ----
+
+def _build_trips(events: List[Dict[str, Any]], stay_idx: List[int],
+                 info: Dict[int, Optional[Dict[str, Any]]], states: Dict[int, int],
+                 width_s: int, high_m: float) -> List[Dict[str, Any]]:
+    """出行段：相邻停留之间（跨过其间短段与未桥接空窗），含首尾移动段。"""
     trips: List[Dict[str, Any]] = []
-    stay_idx = [k for k, e in enumerate(events) if e["kind"] == "stay" and e["pos"]]
 
     def _emit_trip(a: Dict[str, Any], b: Dict[str, Any]) -> None:
         """a、b 为两个停留事件：生成其间的一段出行（含注记）。"""
@@ -195,19 +199,15 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
                            "w0": tail[0]["w0"], "pos": tail_pos,
                            "addrs": [a for e in tail for a in (e.get("addrs") or [])]}
             _emit_trip(last, pseudo_tail)
+    return trips
 
-    # ---- 连续同态区间（报告附录）与统计 ----
-    state_runs: List[List[int]] = []
-    counter: Dict[int, int] = {}
-    for w in range(wmin, wmax + 1):
-        st = states[w]
-        counter[st] = counter.get(st, 0) + 1
-        if state_runs and state_runs[-1][0] == st and state_runs[-1][2] == w - 1:
-            state_runs[-1][2] = w
-        else:
-            state_runs.append([st, w, w])
 
-    # ---- 报告叙述：按窗口状态聚合（同态连续区间；跨断档合并的停留作单条静默）----
+def _build_report_items(events: List[Dict[str, Any]], stay_idx: List[int],
+                        info: Dict[int, Optional[Dict[str, Any]]], states: Dict[int, int],
+                        wmin: int, wmax: int, width_s: int) -> List[Dict[str, Any]]:
+    """报告叙述：按窗口状态聚合（同态连续区间；跨断档合并的停留作单条静默）；
+    含相邻同态移动条目合并。"""
+
     def _runs_in_span(w0: int, w1: int) -> List[List[int]]:
         runs: List[List[int]] = []
         for w in range(w0, w1 + 1):
@@ -297,7 +297,44 @@ def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]
                               ) if m["last_ts"] > m["first_ts"] else 0.0
             continue
         merged.append(it)
-    report_items = merged
+    return merged
+
+
+def build_timeline(wmin: int, wmax: int, info: Dict[int, Optional[Dict[str, Any]]],
+                   states: Dict[int, int], noise_m: float, width_s: int,
+                   stay_min_s: float, high_m: float) -> Dict[str, Any]:
+    """单号码聚合。返回::
+
+        {"events":  [条目序列：{"kind": "stay"/"void", "w0","w1","pos",
+                                "first_ts","last_ts","addrs","n_points","void_windows"}],
+         "trips":   [{"w0","w1","net_m","cum_m","straightness","start_ts","end_ts",
+                      "minutes","speed_kmh","kind","confidence","void_minutes",
+                      "from_pos","to_pos"}],
+         "state_runs":  [(状态, w0, w1)],          # 连续同态区间（报告附录）
+         "bridge_count": int, "state_counter": {状态: 窗数}}
+    """
+    raw = _segment_by_displacement(wmin, wmax, info, states, noise_m)
+    events = _segments_to_events(raw, info, width_s, stay_min_s)
+    _absorb_short_into_stays(events, noise_m)      # 原地修改（现有实现语义）
+    _merge_stays_across_voids(events, noise_m)     # 原地修改（现有实现语义）
+
+    # ---- 出行段：相邻停留之间（跨过其间短段与未桥接空窗），含首尾移动段 ----
+    stay_idx = [k for k, e in enumerate(events) if e["kind"] == "stay" and e["pos"]]
+    trips = _build_trips(events, stay_idx, info, states, width_s, high_m)
+
+    # ---- 连续同态区间（报告附录）与统计 ----
+    state_runs: List[List[int]] = []
+    counter: Dict[int, int] = {}
+    for w in range(wmin, wmax + 1):
+        st = states[w]
+        counter[st] = counter.get(st, 0) + 1
+        if state_runs and state_runs[-1][0] == st and state_runs[-1][2] == w - 1:
+            state_runs[-1][2] = w
+        else:
+            state_runs.append([st, w, w])
+
+    # ---- 报告叙述：按窗口状态聚合 ----
+    report_items = _build_report_items(events, stay_idx, info, states, wmin, wmax, width_s)
 
     return {"events": events, "trips": trips, "state_runs": state_runs,
             "report_items": report_items, "state_counter": counter}

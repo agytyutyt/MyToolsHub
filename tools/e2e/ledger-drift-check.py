@@ -97,6 +97,17 @@ ENTRIES = [
                ("client-plugins/local-file-filter/backend/bg_image.py", "tail3"),
                ("client-plugins/local-trajectory-sketch/backend/bg_image.py", "tail3")]},
 
+    # §2.8 aggregate.py v3 聚合（trajectory-sketch 服务器 ↔ C 类工件，同步修；P3-1 D3 建档）：
+    # 工件带 2 行登记头，full 各异；同源判定 = 真源 norm ↔ 工件 tail3（逐份 full 另行比对）。
+    {"sec": "2.8", "kind": "md5", "path": "plugins/trajectory-sketch/backend/engine/algorithms/v3/aggregate.py",
+     "metric": "full", "base": "6800d19577daf6949fb43db2c76daa62"},
+    {"sec": "2.8", "kind": "md5", "path": "client-plugins/local-trajectory-sketch/backend/engine/algorithms/v3/aggregate.py",
+     "metric": "full", "base": "c8799da4136249bf667b09c2d0d2fa5b"},
+    {"sec": "2.8", "kind": "md5", "path": "plugins/trajectory-sketch/backend/engine/algorithms/v3/aggregate.py",
+     "metric": "norm", "base": "6800d19577daf6949fb43db2c76daa62"},
+    {"sec": "2.8", "kind": "md5", "path": "client-plugins/local-trajectory-sketch/backend/engine/algorithms/v3/aggregate.py",
+     "metric": "tail3", "base": "6800d19577daf6949fb43db2c76daa62"},
+
     # §2.3 jsqr.min.js ×2（vendor，同步换版）：full 与 norm 都应逐字节相同。
     {"sec": "2.3", "kind": "group", "base": "7c3c379dd1277bce95a35014e6f39b65",
      "files": [("plugins/map-marker/frontend/jsqr.min.js", "full"),
