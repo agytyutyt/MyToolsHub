@@ -37,11 +37,11 @@
 
 | # | 现状证据（报告 §） | 修法摘要 | 状态 |
 | --- | --- | --- | --- |
-| D1 | `plugins/admin/backend/routes.py:134-146`（load/save 无锁）；`batch_io.py:273/284` 同 | admin.json 加模块级 `threading.RLock` 包住 load→mutate→save 全程 | ◐ 部分完成（commit 本次）：`ADMIN_CFG_LOCK`（RLock）+ `save_admin_config` 唯一临时名已落，`batch_io` 经注入的同一对函数自动受益；**跨处理器的 load→mutate→save 全程锁未做**（23 处写点、涉鉴权面，结构改动交人工），丢失更新窗口仍在（**2026-10-09 拍板：①全量收口（update_admin_config 全程锁 + 24 处替换 + tools.json 同类收敛），待实施**） |
-| D2 | `app.py:525-530`（固定 `.tmp` 名）；`:1073-1116`/`:1148-1184` 无锁读改写 | tools.json 加模块级锁；tmp 改 `tempfile.mkstemp(dir=…)` | ◐ 部分完成（commit 本次）：`save_registry` 固定 `.tmp` 改 `tempfile.mkstemp` 唯一名 + 失败清理；tools.json 的跨处理器读改写锁随 D1 一并 ① 全量收口（2026-10-09 拍板，待实施） |
+| D1 | `plugins/admin/backend/routes.py:134-146`（load/save 无锁）；`batch_io.py:273/284` 同 | admin.json 加模块级 `threading.RLock` 包住 load→mutate→save 全程 | ✅ 已完成（L1-3：`902500a` 22 处整段包锁 + `6d83eab` 停卡处两次进锁，23/23 全闭合；并发台架 10/10） |
+| D2 | `app.py:525-530`（固定 `.tmp` 名）；`:1073-1116`/`:1148-1184` 无锁读改写 | tools.json 加模块级锁；tmp 改 `tempfile.mkstemp(dir=…)` | ✅ 已完成（tools.json 已随 D1 收口） |
 | D3 | `plugins/admin/backend/plugin_admin.py:1365` 传 `None`，函数（`:883-892`）对非 dict 恒返回 `{}` | 修 `plugin_names(None)`——**一行可修** | ✅ 已完成（commit 本次）：`scan_packages` 改为按 `data_root/config/tools.json` 取展示名（`plugin_names(None)` 恒空的缺陷修掉），`data_root=None` 时安全回落 |
 | D4 | `app.py:515`（读 tools.json）用普通 utf-8；`jz_deps.py:125…334`、`app.py:122`、`jz_llm.py:811` 用 utf-8-sig | 外部可手工编辑的 JSON 统一 `utf-8-sig`（BOM → 整站空注册表） | ✅ 已完成（commit 本次）：`app.py` 的 tools.json / manifest.json 读取统一 `utf-8-sig`（与 `jz_deps`/`jz_llm` 同口径，容忍记事本 BOM） |
-| D5 | 放行版：`character-graph:157-169`、`qr-video-decode:106-118`、`info-transfer:367-376`；收紧版：`trajectory-convert:192-205`、`file-filter:225-236` | 拍板从严（旧任务仅超管可见），三个放行版插件**各自本地**统一；不沉淀公共模块 | 未开始（**需拍板**：放行版与收紧版口径相反，属产品判定，不在自动整改范围） |
+| D5 | 放行版：`character-graph:157-169`、`qr-video-decode:106-118`、`info-transfer:367-376`；收紧版：`trajectory-convert:192-205`、`file-filter:225-236` | 拍板从严（旧任务仅超管可见），三个放行版插件**各自本地**统一；不沉淀公共模块 | ✅ 已完成（L1-2：`f796190`，三处对齐收紧仅超管；test_security 43 通过含 TestTaskOwnership） |
 | D6 | v2 出「无。』」（`v2/report.py:222-231`）vs v3 只遍历有窗口数据的用户（`v3/__init__.py:145`） | 核对产品预期后在插件内统一 v2/v3 报告口径 | ✅ 已完成（2026-10-09，commit 8105ae9：v3 按 `dataset.all_usernums` 全集枚举（含被清洗空的号码），无数据号码出「无。」；针对性验证 PASS + test_filter_llm 31/31） |
 | D7 | 聚合接口用 manifest.id（`app.py:687`）vs visibility 用 registry.id（`:1142`），无加载期校验 | `register_plugin_backends` 加载时校验一致，不一致记入 `_manifest_errors` | ✅ 已完成（commit 本次）：`load_manifests` 加载期校验 `manifest.id` 与目录名一致（不一致记入 `_manifest_errors` 并跳过该插件，与既有「单插件坏不连坐」口径同）；17 插件实测全过 |
 | D8 | 未处理 401：`notice-board`（app.js:35-40）、`file-filter`（:1683-1697）、`trajectory-sketch`；已处理：case-report、shared-docs | 各插件本地补 401 跳转（不引公共 JS 模块） | ✅ 已完成（2026-10-09，commit 8105ae9：notice-board / file-filter / trajectory-sketch 按 knowledge-base 模式补 401（ff 含传文件链路），缓存戳 ts ?v=5 / ff ?v=8 / nb ?v=7） |
