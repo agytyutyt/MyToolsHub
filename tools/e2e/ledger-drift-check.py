@@ -45,6 +45,15 @@ import os
 import re
 import sys
 
+# 输出流按 UTF-8 走：正文/帮助里有「↔」这类非 GBK 字符，Windows 控制台默认代码页
+# 直接 print 会抛 UnicodeEncodeError（--sync-check / --help 命中）——被出包脚本
+# （$ErrorActionPreference=Stop）接走时会把一次本该通过的检查误判成红灯。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:      # 非标准流（被重定向/捕获）时静默跳过
+        pass
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LEDGER = os.path.join(REPO, "docs", "design", "同源副本台账.md")
 

@@ -49,6 +49,14 @@ import sys
 import tempfile
 import zipfile
 
+# 输出流按 UTF-8 走：进度/校验行里有「✓」这类非 GBK 字符，Windows 控制台默认代码页
+# 直接 print 会抛 UnicodeEncodeError（"提前结束"极易误读成绿）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:      # 非标准流（被重定向/捕获）时静默跳过
+        pass
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_INFO_FILES = {"METADATA", "WHEEL", "top_level.txt", "entry_points.txt"}
 # 这些是"安装记录"，不属于 wheel 内容
