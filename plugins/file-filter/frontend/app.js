@@ -1454,7 +1454,15 @@
 
   function buildMapRow(m) {
     var tr = document.createElement("tr");
+    _appendMapRowKeyCell(m, tr);
+    _appendMapRowStatusCell(m, tr);
+    _appendMapRowStatCells(m, tr);
+    _appendMapRowActionCell(m, tr);
+    return tr;
+  }
 
+  // 表头样本列 + 目标列
+  function _appendMapRowKeyCell(m, tr) {
     var tdH = document.createElement("td");
     tdH.textContent = m.sample || m.key;
     if (m.sample && m.sample !== m.key) tdH.title = "归一化键：" + m.key;
@@ -1463,7 +1471,10 @@
     var tdT = document.createElement("td");
     tdT.textContent = m.target || "（删除）";
     tr.appendChild(tdT);
+  }
 
+  // 状态徽标列：主徽标（失配/待重映射/已确认/模型建议）+ 附加徽标
+  function _appendMapRowStatusCell(m, tr) {
     var tdS = document.createElement("td");
     var badge = document.createElement("span");
     if (m.orphan) {
@@ -1505,7 +1516,10 @@
       tdS.appendChild(ik);
     }
     tr.appendChild(tdS);
+  }
 
+  // 票数 / 命中数 / 确认人三列
+  function _appendMapRowStatCells(m, tr) {
     var tdV = document.createElement("td");
     tdV.textContent = (m.keep_votes || 0) + "/" + (m.drop_votes || 0);
     tdV.title = "保留票/删除票；同向 ≥5 票且零翻转自动转正";
@@ -1519,7 +1533,10 @@
     tdU.textContent = m.confirmed_by || "—";
     if (m.confirmed_at) tdU.title = "确认于 " + m.confirmed_at;
     tr.appendChild(tdU);
+  }
 
+  // 操作列：改指（含冲突重试）与删除
+  function _appendMapRowActionCell(m, tr) {
     var tdA = document.createElement("td");
     tdA.appendChild(buildTargetSelect());
     tdA.appendChild(mkAction("应用", function () {
@@ -1546,7 +1563,6 @@
         .catch(function (err) { setStatus("删除失败：" + err.message, true); });
     }));
     tr.appendChild(tdA);
-    return tr;
   }
 
   // ---------- 匹配修正（P3b）：AI 复核建议级条目，diff 供采纳 ----------
