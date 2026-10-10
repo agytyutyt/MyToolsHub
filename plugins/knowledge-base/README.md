@@ -61,7 +61,8 @@
 - 后端：核心功能纯 Python 标准库；**旧版格式转换**依赖
   openpyxl / xlrd / python-docx / olefile（见 `backend/doc_convert.py`）；
   **Office 预览**用 vendor 双引擎 `backend/vendor/{xhr,dhr}`（拷贝自
-  TestWorkSpace/xlsx-html-preview 项目，含 vendor/README.md 登记的 5 条编号补丁，
+  TestWorkSpace/xlsx-html-preview 项目，含 vendor/README.md 登记的 7 条编号改动
+  ——5 条上游缺陷补丁 + 2 条本地适配接缝（P2-21 profile 提供者），
   升级引擎时需整目录替换后逐条重打；纯标准库零第三方依赖，来源见其 README.md），
   适配层 `backend/office_render.py`。引擎缺失时预览回退前端降级渲染；
   `.xls` 高保真通道与 `.doc` 归一化**可选**依赖外部 LibreOffice（缺失自动走
@@ -185,11 +186,14 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
   变化（**任何会改变预览产物的改动**：vendor 补丁/升级、`office_render.py` 的后处理与渲染参数）都必须递增该常量**，旧缓存会在下次打开阅读页时自动重渲染，
   无需手工清缓存、无需重启服务。排查渲染问题时也可手工删除受影响文件的缓存
   （`data/files/<id>.preview.json`，或整批 `*.preview.json`）。删除文档时缓存自动清理。
-- **vendor 引擎升级流程**：① 整目录替换 `backend/vendor/{xhr,dhr}`；② **重打补丁**——按
-  `vendor/README.md` 的补丁清单逐条恢复（现有 5 条：xhr 缺格样式、xhr `Optional` 导入、
-  dhr numId=0 语义、dhr 字符缩进/形态覆盖、dhr `.doc` 警告按模式分流）；③ 递增
+- **vendor 引擎升级流程**：① 整目录替换 `backend/vendor/{xhr,dhr}`；② **重打改动**——按
+  `vendor/README.md` 的清单逐条恢复（现有 7 条 = 5 条上游缺陷补丁：xhr 缺格样式、xhr
+  `Optional` 导入、dhr numId=0 语义、dhr 字符缩进/形态覆盖、dhr `.doc` 警告按模式分流；
+  + 2 条本地适配接缝（P2-21 profile 提供者，xhr/dhr 各一，见清单第 6/7 条「上游同步时
+  如何保留」）；③ 递增
   `routes.py` 的 `PREVIEW_CACHE_VERSION`；
-  ④ 重跑 `backend/test_routes_preview.py` 与 `backend/test_dhr_indent_numid.py` 回归；
+  ④ 重跑 `backend/test_routes_preview.py`、`backend/test_dhr_indent_numid.py` 与
+  `backend/test_office_profile_pool.py` 回归；
   ⑤ `python backend/_build_phase8.py` 重建目检页人工核对样式。
 - **前端注入约定**：reader.js 对引擎 HTML 的处理是「摘取全部 `<style>` 块 → 正文过
   DOMPurify → CSS 原样挂回」。原因：DOMPurify 会整块丢弃 `<style>` 元素（engine 的 class
@@ -204,6 +208,13 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 - **soffice 配置**：`config.json` 键 `office.soffice_path`（兼容旧键 `pdf.soffice_path`），
   经环境变量 `XHR_SOFFICE` 下发给引擎，改配置免重启；仅影响 `.xls` 高保真与 `.doc` 归一化
   两条窄路径（见上文「LibreOffice（可选）」）。
+- **LibreOffice profile 池（P2-21）**：`.xls`/`.doc` 归一化复用**持久 profile**（冷启动
+  37~40s → 热启动 15~18s，实测见 `bench_office_profile_pool.py` 与设计文档 §19）。
+  机制：vendor 侧「提供者」接缝（默认行为与上游一致）+ 上层槽位池
+  （`office_render._LoProfilePool`，池大小 = 引擎并发闸门数 2，一槽一 profile）；
+  profile 落在 `<数据根>/plugins/knowledge-base/data/lo_profiles/`，固定槽位名 + TTL
+  30 天清扫（数量与体积有界）；**取不到槽位/池异常自动降级回「临时 profile 新建即删」**，
+  转换失败仍擦除槽位（失败清理铁律不回退）。回归 `backend/test_office_profile_pool.py`。
 - **打包 / 依赖**：引擎零 pip 依赖（纯标准库），`JZToolsHub.spec` 的 PACKAGES **无需**
   为 xhr/dhr 加条目；`backend/vendor/` 由 build-deploy.ps1 随 plugins 整树自动进部署包；
   开发机 `backend/config.json` 不会入包（目标机在数据根配置 soffice 路径，升级持久）；

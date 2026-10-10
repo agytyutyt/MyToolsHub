@@ -66,6 +66,7 @@ EXEMPTIONS = [
     ("L-14", "plugins/", "test_*.py 与台架夹具不参与出包，模块级 import 重依赖属预期（构建期剔除）"),
     ("F-1", "plugins/admin/frontend/", "占位符文案里的示例路径（`D:\\…`）是给用户看的说明文字，非代码取径"),
     ("F-1", "plugins/knowledge-base/backend/office_render.py", "模块文档串里记录上游项目来源路径（`D:\\TestWorkSpace\\…`），是留痕不是取径"),
+    ("F-1", "plugins/knowledge-base/backend/bench_office_profile_pool.py:5", "实测脚本用法示例里的本机 soffice 路径，是说明文字非代码取径（同 admin 占位符口径）；bench 脚本不出包"),
     # ---- L2 批 1（2026-10-10 F-3 逐处分诊）：admin 前端 39 处，全部判「安全/误报」----
     # 判据基线：`plugins/admin/frontend/js/admin-common.js:5` 的 `esc()` 真替换 & < > " '，
     # 各页经 `window.AdminCommon.esc` 解构使用；启发式只认 escapeHtml/sanitize/DOMPurify/

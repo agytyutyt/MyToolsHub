@@ -550,3 +550,28 @@ def _pdf_task(fid):
 - 修法：`app.js` `showUpload()` 把整行 `.switch-row` 改为 `<label>` 直接包住 `<input type="checkbox">` 与 `.slider`；`style.css` `.switch-row{cursor:pointer}`；资源戳（F-2）`style.css?v=29→30`、`app.js?v=19→20`（现值以 `frontend/index.html` 为准）。
 - 验证 / 回归锁：真实指针点击四态通过；`test_routes_preview.py` 第 6 节断言开关行必须是 `<label class="form-row switch-row">` 且禁旧写法 `for="m-dl-switch"`。
 - 踩坑：浏览器验证不能只用程序化 `.click()`（修复前也「看似」走通），须真实指针点击；agent-browser 会话不跨命令（链式 `open→click→eval→screenshot`）；隔离 E2E 须伪造 `get_session_user` 为管理员，否则一律 401 跳登录页。
+
+---
+
+## 19. 阶段 12：LibreOffice 持久 profile 池（P2-21，2026-10-10）
+
+- 背景：`.xls`/`.doc` 归一化走 LibreOffice，**每次转换新建 UserInstallation profile**（冷启动，本机实测每次 39~77s）；方案《20261009 决策落地方案》§B-21 裁定「vendor 加默认保持现行为的最小接缝 + 上层持久 profile 池」（历史目标机实测冷 37~40s → 热 15~18s，2.2× 收益）。
+- 落点（vendor **两份同改**，默认行为不变；登记 `vendor/README.md` 清单第 6、7 条）：
+  - `xhr/normalize/libreoffice.py`：模块级 `set_profile_provider(provider)` 钩子 + `_acquire_profile()`；`convert_to_xlsx` 优先租槽，取不到回退「`mkdtemp` 新建即删」；
+  - `dhr/normalize.py`：同构接缝（`normalize_doc_to_docx`）；
+  - 不注册时与上游逐字节等价（回归第 1~4 组钉死）；provider 抛异常/返回畸形 → 回退临时路径（由接缝兜住、不外泄）；三条铁律（唯一 profile / 输出存在性校验 / 杀进程树）全部保留。
+- 池（`office_render._LoProfilePool`）：两池（`xhr-slot`/`dhr-slot`）各 2 槽 = 引擎并发闸门数（两处 `_SEMA=2`）；**LIFO（后进先出）**租出——串行场景第 2 次转换起即复用热槽位（这是 LIFO 而非轮转的目的：串行不为第二槽白付一次冷启动），并发场景两租约自然分属不同槽；位置 `<数据根>/plugins/knowledge-base/data/lo_profiles/`；固定槽位名 + TTL 30 天清扫 → 数量与体积有界；转换失败 → 释放时擦除该槽（失败清理铁律不回退）；取不到/池异常 → `None` → 引擎降级临时 profile（渲染不失败，B-4）。
+- 实测（`backend/bench_office_profile_pool.py`，本机 D:\LibreOffice，N=3，秒）：
+
+  | 轮次 | 改动前（每次新建，全冷） | 改动后（持久池，LIFO） |
+  | --- | --- | --- |
+  | .xls run1/2/3 | 39.3 / 48.6 / 46.3 | 46.1 / **16.2 / 18.0** |
+  | .doc run1/2/3 | 45.6 / 46.4 / 49.9 | 44.0 / **14.5 / 16.9** |
+
+  - 槽位体积：`xhr-slot-1` 0.9MB、`dhr-slot-1` 1.0MB（串行只占用一槽，另一槽未建——固定槽位数使上限 ≈4MB）；热态 14.5~18.0s 与历史目标机 15~18s 同量级。
+  - 并发 2 路（验收②）：预热轮含一次性「第二槽冷启动」41.3s；两槽皆热后串行基线 16.6/15.8s、并发 16.0/16.0s（墙钟 16.0 ≈ max，真并行；并发/串行 = 0.97x/1.01x ≤ 1.5x 判定阈值）；产物 HTML 逐字一致（不串扰）。
+  - 判定口径：不退化按「病态退化」定义阈值（两路撞同一 profile 的锁等待/共享锁序列化会到 ≥2×），正常 CPU 竞争波动（本机复测 ±1~3s）不判退化；另加「墙钟 ≈ max(A,B) 而非 A+B」的真并行检查。
+- 已知边界（留痕，未改口径）：
+  - 生产默认转换超时 60s（xhr `soffice_timeout_ms`）：本机全冷首跑 39.3~76.8s（跨多次运行波动），慢机冷路径可能 TIMEOUT → 前端自动回退降级渲染（B-4），profile 预热后正常；**未改默认超时（超出裁定范围，留观察）**。
+  - 池状态为进程内单例（与「单 Flask 进程」部署形态一致）；同机多进程共指同一数据根时，最坏为槽位复用冲突 → 输出存在性校验兜底 → B-4 降级，不静默。
+- 回归锁：`backend/test_office_profile_pool.py`（9 组 51 断言：接缝默认/租用/降级、dhr 接缝、池 LIFO/清扫/失败降级/并发/接线；不依赖真实 LibreOffice——假 soffice + 注入 runner）；`backend/bench_office_profile_pool.py`（本表数据来源：改动前/后两臂 + 并发对照 + 槽位体积）。两脚本按 payload 规则（`test_*.py`/`bench_*.py`）剔除，不入插件包。

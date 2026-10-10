@@ -10,6 +10,10 @@
 
 ⚠️ 归一化后的 docx 没有 `w:lastRenderedPageBreak` → paged 模式分页不准，
    `.doc` 建议默认 flow 模式（设计文档 6.2 / R-2）。
+
+【本地适配 · P2-21】本文件相对上游有一处**非上游 bugfix** 的接缝改动
+（profile 提供者钩子，与 xhr 版同构），登记于 vendor/README.md 补丁清单第 7 条；
+上游整目录同步时需按该条重打，默认行为（不注册钩子）与上游完全一致。
 """
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from xhr.core import XhrError
 from xhr.ingest import unzip_guarded
@@ -62,6 +66,38 @@ def _run_soffice(soffice: str, args: list, timeout_ms: int) -> None:
         raise XhrError("CORRUPTED", f"LibreOffice 退出码 {proc.returncode}")
 
 
+# ===================== 【本地适配 · P2-21】profile 提供者接缝 =====================
+# 与 xhr/normalize/libreoffice.py 同构：不注册时行为与上游完全一致（每次新建即删）；
+# 注册后由上层提供持久 profile 槽位（热启动），失败仍由提供方清理该槽位。
+_profile_provider: Optional[Callable] = None
+
+
+def set_profile_provider(provider: Optional[Callable]) -> None:
+    """注册/清除 profile 提供者（None = 恢复上游默认行为）。"""
+    global _profile_provider
+    _profile_provider = provider
+
+
+def _acquire_profile() -> Optional[tuple]:
+    prov = _profile_provider
+    if prov is None:
+        return None
+    try:
+        lease = prov()
+    except Exception:  # noqa: BLE001 —— 提供者异常不得影响转换（降级临时 profile）
+        return None
+    if not lease:
+        return None
+    try:
+        path, release = lease
+    except Exception:  # noqa: BLE001
+        return None
+    if not path or not callable(release):
+        return None
+    return (str(path), release)
+# ===================== 接缝结束 =====================
+
+
 def normalize_doc_to_docx(data: bytes, soffice_path: Optional[str] = None, timeout_ms: int = 60_000) -> bytes:
     """.doc 字节 → .docx 字节。失败抛 XhrError（TIMEOUT/CORRUPTED/UNSUPPORTED_FORMAT）。"""
     soffice = find_soffice(soffice_path)
@@ -69,7 +105,15 @@ def normalize_doc_to_docx(data: bytes, soffice_path: Optional[str] = None, timeo
         raise XhrError("UNSUPPORTED_FORMAT", "未找到 LibreOffice（soffice），无法归一化 .doc；请安装 LibreOffice 或另存为 .docx")
 
     work_dir = tempfile.mkdtemp(prefix="dhr-doc-")
-    profile = tempfile.mkdtemp(prefix="dhr-lo-")
+    # 【P2-21 接缝】优先租用持久 profile；取不到则回退上游「新建即删」
+    lease = _acquire_profile()
+    owned = lease is None
+    if owned:
+        profile = tempfile.mkdtemp(prefix="dhr-lo-")
+        release = None
+    else:
+        profile, release = lease
+    ok = False
     try:
         in_file = os.path.join(work_dir, "input.doc")
         with open(in_file, "wb") as f:
@@ -93,10 +137,19 @@ def normalize_doc_to_docx(data: bytes, soffice_path: Optional[str] = None, timeo
         if not os.path.isfile(out_path):
             raise XhrError("CORRUPTED", "LibreOffice 未产出输出文件")
         with open(out_path, "rb") as f:
-            return f.read()
+            docx_bytes = f.read()
+        ok = True
+        return docx_bytes
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
-        shutil.rmtree(profile, ignore_errors=True)
+        if owned:
+            shutil.rmtree(profile, ignore_errors=True)
+        else:
+            # 持久槽位：交还提供方；失败（ok=False）由提供方清理该槽位
+            try:
+                release(ok)
+            except Exception:  # noqa: BLE001 —— 提供方异常不得掩盖转换结果
+                pass
 
 
 def docx_files_of(data: bytes) -> dict:

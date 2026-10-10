@@ -8,7 +8,8 @@ r"""知识库 —— Office(docx/doc/xlsx/xls) → 只读 HTML 预览渲染（xh
 
 现改为上游 `D:\TestWorkSpace\xlsx-html-preview` 的**双引擎**（vendor 在 `vendor/`
 下，拷贝自 TestWorkSpace/xlsx-html-preview 项目，含 vendor/README.md 登记的
-5 条编号补丁，升级引擎时需整目录替换后逐条重打；核心链路纯标准库、零第三方依赖）：
+7 条编号改动——5 条上游缺陷补丁 + 2 条本地适配接缝（P2-21），升级引擎时需
+整目录替换后逐条重打；核心链路纯标准库、零第三方依赖）：
 - `xhr`：.xlsx/.xlsm 直读；.xls 自动选通道（LibreOffice 归一化 → xlrd 兜底，
   内容 100% 保留、样式降级并在 warnings 提示）；
 - `dhr`：.docx/.docm 直读；.doc 经 LibreOffice 归一化（不可用时明确报错）。
@@ -26,6 +27,9 @@ r"""知识库 —— Office(docx/doc/xlsx/xls) → 只读 HTML 预览渲染（xh
   第三档使离线部署包**无需目标机安装 LibreOffice、无需改配置**即可启用高保真通道；
 - 渲染亚秒级（50 页 Word 实测约 0.25s），**按需同步渲染**，不再走
   pdf_status/html_status 异步状态机；模块级锁串行防大文件并发挤内存；
+- LibreOffice 归一化（.xls/.doc）启用**持久 profile 池**（P2-21）：本模块向两
+  引擎注册「profile 提供者」，profile 复用让冷启动 37~40s 降为热启动 15~18s；
+  取不到槽位/池异常自动降级回引擎默认的「临时 profile 新建即删」，失败仍清理；
 - 失败抛 `OfficeRenderError`（文案可直接展示给用户），调用方（routes.py）
   让前端回退 mammoth / SheetJS 降级渲染，上传/阅读/下载不受影响（B-4）。
 """
@@ -34,8 +38,10 @@ import glob
 import json
 import os
 import re
+import shutil
 import sys
 import threading
+import time
 
 # ---- vendor 引擎导入（必须在 import xhr/dhr 之前完成 sys.path 注入）----
 _VENDOR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vendor")
@@ -56,6 +62,17 @@ try:
     from xhr.normalize.libreoffice import find_soffice as _find_soffice  # noqa: E402
 except Exception:  # pragma: no cover
     _find_soffice = None
+
+# 【P2-21】两引擎的「profile 提供者」接缝（vendor 侧新增的最小钩子；不注册即上游默认行为）
+try:
+    from xhr.normalize.libreoffice import set_profile_provider as _xl_set_profile_provider  # noqa: E402
+except Exception:  # pragma: no cover
+    _xl_set_profile_provider = None
+
+try:
+    from dhr.normalize import set_profile_provider as _doc_set_profile_provider  # noqa: E402
+except Exception:  # pragma: no cover
+    _doc_set_profile_provider = None
 
 
 class OfficeRenderError(Exception):
@@ -194,6 +211,161 @@ def availability():
     return {"available": True, "soffice": soffice_available() or None, "error": None}
 
 
+# ===================== LibreOffice 持久 profile 池（P2-21） =====================
+#
+# 背景：xhr/dhr 两引擎的 .xls/.doc 归一化每次转换都新建 LibreOffice
+# UserInstallation profile（冷启动）；历史实测冷启动 37~40s → 复用 15~18s。
+# 方案（20261009 决策落地方案 §B-21 裁定）：
+#   - vendor 侧只加「profile 提供者」最小接缝，**默认行为（不注册）与上游一致**；
+#   - kb 适配层（本模块）注册持久 profile 池：
+#       · 池大小 = 各引擎现有并发闸门数（xhr _SEMA=2；dhr 同为 2），一槽一 profile；
+#       · 槽位**后进先出**租用（复用最近释放的热槽位：串行场景第 2 次转换起即热；
+#         并发场景两个槽位各得其槽）；**取不到（并发已满）或池异常 → 返回 None →
+#         引擎降级回「新建即删」**（改动前的行为，不会因池故障而渲染失败）；
+#       · 转换失败 → 释放时擦除该槽 profile（铁律不回退：失败仍清理）；
+#       · 槽位数固定（最多 size 个目录）+ TTL 30 天清扫，体积天然有界。
+# 位置：<数据根>/plugins/knowledge-base/data/lo_profiles/（随数据迁移，
+# 不随插件包分发——payload 规则已剔除 data/）。
+# 口径：池状态为**进程内单例**，与插件「单 Flask 进程」部署形态一致；若同机另起
+# 进程共指同一数据根，最坏是槽位复用冲突→本次转换失败（输出存在性校验兜底）→
+# 前端回退降级渲染（B-4），不会静默。
+
+_LO_PROFILE_TTL_SECONDS = 30 * 86400
+_LO_PROFILE_SUBDIR = "lo_profiles"
+
+
+def _latest_mtime(path):
+    """目录树内最新文件 mtime（空目录回退目录自身）；不可读返回 None。"""
+    try:
+        latest = os.path.getmtime(path)
+    except OSError:
+        return None
+    for root_dir, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                latest = max(latest, os.path.getmtime(os.path.join(root_dir, name)))
+            except OSError:
+                continue
+    return latest
+
+
+class _LoProfilePool:
+    """固定槽位数的持久 profile 池（非阻塞；租不到返回 None，调用方降级）。"""
+
+    def __init__(self, name, size):
+        self._name = name
+        self._size = max(1, int(size))
+        self._lock = threading.Lock()
+        self._free = list(range(self._size))
+        self._ready = False
+
+    def _base_dir(self):
+        # 懒解析：导入本模块时不触碰数据根（测试可在导入前设置 JZTOOLS_DATA_ROOT）
+        import jztools_data
+        return jztools_data.get_data_root_dir(
+            "plugins", "knowledge-base", "data", _LO_PROFILE_SUBDIR)
+
+    def _slot_dir(self, idx):
+        return os.path.join(self._base_dir(), "%s-%d" % (self._name, idx))
+
+    def _sweep_ttl(self, base):
+        """清扫长期未使用的槽位；只认本池前缀，防误删同目录他物。"""
+        now = time.time()
+        prefix = self._name + "-"
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            return
+        for name in entries:
+            if not name.startswith(prefix):
+                continue
+            path = os.path.join(base, name)
+            if not os.path.isdir(path):
+                continue
+            try:
+                idx = int(name[len(prefix):])
+            except ValueError:
+                idx = -1
+            stale = idx < 0 or idx >= self._size          # 越界/畸形名：不是本池槽位
+            if not stale:
+                latest = _latest_mtime(path)
+                stale = latest is None or (now - latest) > _LO_PROFILE_TTL_SECONDS
+            if stale:
+                shutil.rmtree(path, ignore_errors=True)
+
+    def _ensure_ready(self):
+        if self._ready:
+            return True
+        with self._lock:            # 并发首调时只允许一次 makedirs+清扫
+            if self._ready:
+                return True
+            try:
+                base = self._base_dir()
+                os.makedirs(base, exist_ok=True)
+                self._sweep_ttl(base)
+            except Exception:
+                return False
+            self._ready = True
+            return True
+
+    def provider(self):
+        """供 vendor 接缝调用：取到 → (slot_path, release(ok))，取不到 → None。
+
+        路径与 profile 目录名对用户可见（日志/运维排查），故语义钉死为**后进先出**：
+        串行场景每次租到最近释放的热槽位（第 2 次转换起即热启动）；并发场景因
+        先租者未归还，后租者自然拿到另一空槽，两路各得其槽、不共享。
+        """
+        try:
+            if not self._ensure_ready():
+                return None
+            with self._lock:
+                if not self._free:
+                    return None
+                idx = self._free.pop()      # LIFO：_free 末尾 = 最近归还的槽位
+        except Exception:
+            return None
+        try:
+            path = self._slot_dir(idx)
+            # 与旧行为一致：租出时目录已存在（空目录），LibreOffice 首次会填充并
+            # 在后续转换中复用
+            os.makedirs(path, exist_ok=True)
+        except Exception:
+            # 槽位未能交付：立即归还，池不缩水（本次渲染由调用方降级临时 profile）
+            with self._lock:
+                self._free.append(idx)
+            return None
+
+        def _release(ok):
+            # 失败清理（铁律不回退）在「归还槽位之前」完成，避免擦除与再租重叠
+            if not ok:
+                shutil.rmtree(path, ignore_errors=True)
+            with self._lock:
+                self._free.append(idx)
+
+        return (path, _release)
+
+
+_POOL_XLS = _LoProfilePool("xhr-slot", 2)   # 与 xhr.normalize.libreoffice._SEMA=2 对齐
+_POOL_DOC = _LoProfilePool("dhr-slot", 2)   # 与 dhr.normalize._SEMA=2 对齐
+
+
+def _wire_profile_pools():
+    """把持久 profile 池注册进两引擎接缝（引擎缺失/注册失败则保持上游默认行为）。"""
+    if _xl_set_profile_provider is not None:
+        try:
+            _xl_set_profile_provider(_POOL_XLS.provider)
+        except Exception:  # pragma: no cover
+            pass
+    if _doc_set_profile_provider is not None:
+        try:
+            _doc_set_profile_provider(_POOL_DOC.provider)
+        except Exception:  # pragma: no cover
+            pass
+
+
+_wire_profile_pools()
+
+
 # ===================== 渲染 =====================
 
 def _raise_from_xhr(e):
@@ -222,7 +394,8 @@ def _meta_warnings(result):
 # 背景（2026-09-12/09-18 排查，详见 docs/eval/知识库Word预览三问题排查报告.md）
 # ------------------------------------------------------------------------------
 # 三处显示缺陷全部源自 vendor/dhr 的输出，但 vendor 目录除 vendor/README.md
-# 登记的 5 条编号补丁外不改引擎源码（升级时整目录替换后逐条重打；相关约束见
+# 登记的编号改动（5 条上游缺陷补丁 + 2 条本地适配接缝）外不改引擎源码
+# （升级时整目录替换后逐条重打；相关约束见
 # 插件设计规范 S-9/U-2/U-7，勿引 B-7——B-7 是禁止跨插件 import 条款），
 # 故不在 vendor 内打补丁，而是对 **渲染产物 HTML** 做后处理：
 #
@@ -380,7 +553,7 @@ def render_word(data):
     - 图片内联 base64（离线内网无外链可图床）；
     - 产物经 `_polish_word_html` 修正三处已知显示缺陷（字体回退/表格穿模），
       全部在 HTML 后处理层完成，不改 vendor 引擎源码（除 vendor/README.md 登记的
-      5 条编号补丁外；约束见插件设计规范 S-9/U-2/U-7，勿引 B-7）。
+      编号改动外；约束见插件设计规范 S-9/U-2/U-7，勿引 B-7）。
     """
     if _dhr is None:
         raise OfficeRenderError("服务器渲染引擎未加载，无法生成 Word 预览")

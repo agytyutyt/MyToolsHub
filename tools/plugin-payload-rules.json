@@ -19,6 +19,8 @@
     "  目标机不需要；此前它们随整包与插件包一起分发（20260914 评估报告 P1-3 遗留项）。",
     "  _generate.py＝trajectory-sketch/frontend/icons/ 下**生成 SVG 图标的开发脚本**（图标产物才是要",
     "  交付的，生成器不是）——HANDOFF §4 P1-9 的最后一项，2026-10-10 L4-5 收口。",
+    "  bench_*.py 同理（2026-10-10 P2-21 新增）：实测脚本只在本机跑（依赖真实 LibreOffice /",
+    "  测试素材），随包毫无意义，见 knowledge-base 的 bench_office_profile_pool.py。",
     "",
     "★ exclude_dirs 里的 \"dev\" 是**保留名**：用于放只服务开发的验证服务（现为 tools/dev/ 下",
     "  的 pdf_research_server.py / e2e_kb_zoom_server.py —— 它们会伪造 admin 会话以隔离测试，",
@@ -40,7 +42,7 @@
     "_build_phase8.py",
     "_generate.py"
   ],
-  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old", "test_*.py", "*_test.py", "conftest.py",
+  "exclude_globs": ["*.pyc", "*.pyo", "*.log", "*.tmp", "*.orig", "*.bak", "*.bak-*", "*.bak-old", "test_*.py", "*_test.py", "conftest.py", "bench_*.py",
                     "*.mp4", "yunfu*", "simulate_*.py", "generate_qr_stream.py"],
   "required": ["manifest.json", "README.md"],
   "max_files": 5000,

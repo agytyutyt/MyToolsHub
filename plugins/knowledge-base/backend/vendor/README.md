@@ -59,6 +59,25 @@
      补丁：`normalize_doc` 增加 `mode` 参数，flow 模式改用
      "…个别复杂版式（分栏/文本框等）可能与原件存在细微差异"，非 flow 保留原文案；
      `convert()` 透传 `opts.mode`。上游待同步。
+
+  6. `xhr/normalize/libreoffice.py` **profile 提供者接缝**（本地适配 · P2-21，
+     **非上游缺陷**）：新增模块级钩子 `set_profile_provider(provider)` +
+     `_profile_provider` + `_acquire_profile()`。不注册时行为与上游**完全一致**
+     （每次转换 `mkdtemp` 新建 profile、`finally` 即删）；注册后由提供方返回
+     `(profile_dir, release(ok))` 租用**持久 profile** 复用（历史实测冷启动
+     37~40s → 热启动 15~18s），取不到或提供方异常自动回退临时路径，转换失败时
+     仍由提供方擦除槽位——三条铁律（唯一 profile/输出存在性校验/杀进程树）全部
+     保留。使用方：`../office_render.py` 的持久 profile 池（§19）。
+     上游同步时如何保留：整目录替换后，按本文件顶部【本地适配 · P2-21】注释 +
+     三个新符号（`_profile_provider`/`set_profile_provider`/`_acquire_profile`）+
+     `convert_to_xlsx` 内 `lease/owned/release(ok)` 分支**重打本接缝**；
+     回归：`backend/test_office_profile_pool.py`，实测：`backend/bench_office_profile_pool.py`。
+
+  7. `dhr/normalize.py` **profile 提供者接缝**（本地适配 · P2-21，**非上游缺陷**）：
+     与第 6 条同构（`set_profile_provider` / `_acquire_profile` / lease 分支），
+     用于 `.doc → .docx` 归一化复用持久 profile。本文件五条铁律核对：唯一性由
+     槽位池保证（池大小=并发闸门数=2，一槽一 profile）、输出存在性校验未动、
+     超时杀进程树未动、临时 `work_dir` 清理未动。上游同步时同第 6 条方式重打。
 - **接入方式**：`../office_render.py` 在 import 前把本目录插入 `sys.path`
   （dhr 依赖顶层 `xhr` 包，两包必须同为顶层可导入）
 - 上游文档：设计文档/API 参考/known-issues 见上游 `docs/`；格式层踩坑见上游
