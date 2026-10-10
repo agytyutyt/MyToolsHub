@@ -288,6 +288,12 @@ def _migrate_files():
             if "original_size" not in rec:
                 rec["original_size"] = rec.get("size", 0)
                 changed = True
+            if "views" not in rec:                 # 阅读计数（L4-4）：历史记录从 0 起算
+                rec["views"] = 0
+                changed = True
+            if "last_viewed_at" not in rec:
+                rec["last_viewed_at"] = ""
+                changed = True
         if changed:
             _save_store(_files_file(), store)
         return changed
@@ -396,6 +402,10 @@ def _file_brief(rec):
         "created_by_name": rec.get("created_by_name", ""),
         "created_at": rec.get("created_at", ""),
         "updated_at": rec.get("updated_at") or "",
+        # 阅读计数（L4-4）：只在用户"打开阅读器"时 +1（见 kb_file_view），
+        # 不统计渲染器内部对 /raw、/preview 的资源拉取，否则一次阅读会被计成好几次。
+        "views": int(rec.get("views", 0) or 0),
+        "last_viewed_at": rec.get("last_viewed_at", "") or "",
     }
 
 
@@ -802,6 +812,31 @@ def register(app) -> None:
             fstore["files"] = [f for f in fstore["files"] if f.get("id") != fid]
             _save_store(_files_file(), fstore)
         return jsonify({"ok": True})
+
+    @app.post(f"{API_PREFIX}/files/<fid>/view")
+    def kb_file_view(fid):
+        """记一次「打开阅读器」的阅读计数（L4-4 阅读计数统计）。
+
+        为什么是显式端点而不是在 /raw 或 /preview 里顺手 +1：那两个是渲染器的**资源拉取**
+        通道，打开一份 PDF 会因断点续读/缓存重取打出多个请求，计数会虚高且不可解释。
+        这里语义就是"用户把这份文档打开了"，一次打开记一次。
+        阅读是全站公共资源（§3.3），任何登录用户打开都算一次，故不做"本人或超管"写限制
+        （它不改内容，只累计一个统计量）。
+        """
+        user = _viewer()
+        if user is None:
+            return jsonify({"ok": False, "error": "未登录或登录已过期"}), 401
+        if not ID_RE.match(fid or ""):
+            return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+        with _LOCK:
+            fstore = _load_store(_files_file())
+            rec = next((f for f in fstore["files"] if f.get("id") == fid), None)
+            if rec is None:
+                return jsonify({"ok": False, "error": "文件不存在或已被删除"}), 404
+            rec["views"] = int(rec.get("views", 0) or 0) + 1
+            rec["last_viewed_at"] = _now()
+            _save_store(_files_file(), fstore)
+        return jsonify({"ok": True, "views": rec["views"]})
 
     @app.get(f"{API_PREFIX}/files/<fid>/raw")
     def kb_file_raw(fid):

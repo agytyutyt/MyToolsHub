@@ -192,6 +192,10 @@ docx/doc/xlsx/xls 的在线阅读由 vendor 双引擎**按需渲染**（阶段 8
 `/files/<id>/download`（attachment 下载：有异步下载源则下下载源、否则下原件，
 全体登录用户）。`POST /files` 的 multipart 字段：`file`（必填）+ `name` +
 `category_id` + `download_file`（可选，异步下载源）+ `summary`（可选，≤200 字；上传对话框当前不填报）。
+`POST /files/<id>/view`（**阅读计数**，L4-4）：用户打开阅读器时记一次，返回 `{ok, views}`；
+未登录 401、未知或非法 id 一律 404。刻意做成显式端点而不在 `/raw`、`/preview` 里顺手累加——
+那两个是渲染器的资源拉取通道（pdf.js 断点续读、预览缓存重取会打出多个请求），
+计数会虚高且不可解释。列表项随之回显 `views` / `last_viewed_at`。
 旧版 `/pdf`、`/pdf-retry`、`/preview-retry` 端点已随状态机一并移除。
 
 ## 已知限制

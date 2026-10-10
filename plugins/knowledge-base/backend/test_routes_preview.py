@@ -378,4 +378,58 @@ assert ".switch-row {" in _css and "cursor: pointer" in _css, "switch-row 缺少
 assert ".switch input:checked + .slider" in _css, "缺少 checked 态视觉规则"
 print("switch css OK | cursor:pointer + checked 态规则在位")
 
+# ---------- 7) 阅读计数（L4-4） ----------
+r = client.post("/api/knowledge-base/files", data={
+    "file": (io.BytesIO("# 计数\n正文".encode("utf-8")), "count.md"), "name": "计数",
+}, content_type="multipart/form-data")
+fid_v = r.get_json()["id"]
+
+items = {f["id"]: f for f in client.get("/api/knowledge-base/files").get_json()["items"]}
+assert items[fid_v]["views"] == 0 and items[fid_v]["last_viewed_at"] == "", \
+    "新上传记录应从 0 起算（迁移/默认值没生效？）"
+
+for expect in (1, 2, 3):
+    rv = client.post(f"/api/knowledge-base/files/{fid_v}/view")
+    assert rv.status_code == 200, rv.get_json()
+    assert rv.get_json()["views"] == expect, f"第 {expect} 次应回 {expect}，实得 {rv.get_json()}"
+items = {f["id"]: f for f in client.get("/api/knowledge-base/files").get_json()["items"]}
+assert items[fid_v]["views"] == 3, "列表未回显累计值"
+assert items[fid_v]["last_viewed_at"], "last_viewed_at 未落盘"
+print("view count OK | 三次打开计到 3，列表回显一致")
+
+# 7b) 计数**不随资源拉取增长**：/raw 与 /preview 不得顺手 +1（这是选显式端点的理由）
+before = client.get("/api/knowledge-base/files").get_json()["items"]
+before = {f["id"]: f["views"] for f in before}
+client.get(f"/api/knowledge-base/files/{fid_v}/raw")
+client.get(f"/api/knowledge-base/files/{fid_v}/preview")
+after = {f["id"]: f["views"] for f in client.get("/api/knowledge-base/files").get_json()["items"]}
+assert after[fid_v] == before[fid_v], f"资源拉取把计数抬了：{before[fid_v]} → {after[fid_v]}"
+print("view count no-inflate OK | /raw + /preview 不计数")
+
+# 7c) 语义：未知 ID / 非法 ID 一律 404（不 500、不暴露存在性）；未登录 401
+assert client.post("/api/knowledge-base/files/nope123/view").status_code == 404
+assert client.post("/api/knowledge-base/files/..%2Fetc/view").status_code == 404
+_orig_user = admin_routes.get_session_user
+jz_api.register_providers(get_session_user=lambda: None, set_operation=admin_routes.set_operation)
+try:
+    assert client.post(f"/api/knowledge-base/files/{fid_v}/view").status_code == 401, "无会话应 401"
+finally:
+    jz_api.register_providers(get_session_user=_orig_user, set_operation=admin_routes.set_operation)
+# 401 那次不得留下痕迹 —— 用**只读**的列表核对（不能用 POST /view 去查，它自己会 +1）
+after_401 = {f["id"]: f["views"] for f in client.get("/api/knowledge-base/files").get_json()["items"]}
+assert after_401[fid_v] == 3, f"无会话的那次请求被计了：3 → {after_401[fid_v]}"
+print("view count guards OK | 404（未知/非法 ID）+ 401（无会话且不留痕）")
+
+# 7d) 迁移幂等：删掉两条记录的 views 键 → 补回；再跑一次不得判定为"需迁移"
+store = routes._load_store(routes._files_file())
+for rec in store["files"][:2]:
+    rec.pop("views", None)
+    rec.pop("last_viewed_at", None)
+routes._save_store(routes._files_file(), store)
+assert routes._migrate_files() is True, "缺键应触发一次迁移"
+assert routes._migrate_files() is False, "迁移不幂等：第二次仍报有改动（会每次启动重写全库）"
+store = routes._load_store(routes._files_file())
+assert all("views" in r and isinstance(r["views"], int) for r in store["files"]), "迁移未补齐 views"
+print("view count migration OK | 缺键补回 + 二次运行零改动")
+
 print("ALL PHASE-8 ROUTE CHECKS DONE")

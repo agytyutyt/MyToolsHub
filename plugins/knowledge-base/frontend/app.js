@@ -317,7 +317,10 @@
         '<div class="file-main"><div class="file-name" title="' + esc(f.name) + '">' + esc(f.name) +
         convBadge + dlBadge + "</div>" +
         '<div class="file-meta">' + esc(fmtSize(f.size)) + " · " + esc(f.created_by_name || f.created_by || "-") +
-        " · " + esc(fmtTime(f.created_at)) + "</div></div>" +
+        " · " + esc(fmtTime(f.created_at)) +
+        // 阅读计数（L4-4）：0 次也显示，新上传的文档一眼能看出"还没人读过"
+        ' · <span class="views-badge" title="打开阅读器的次数">阅读 ' + esc(String(f.views || 0)) + "</span>" +
+        "</div></div>" +
         // 下载：全员可见（不属管理操作）；配置了异步下载源时下载的是下载源文档
         '<button type="button" class="card-dl" data-dl="' + esc(f.id) + '" title="' +
         (f.has_download_source ? "下载异步下载源文档（." + esc(f.download_ext || "") + "）" : "下载原始文档") +
@@ -731,6 +734,21 @@
     };
   }
 
+  // 同步一处阅读数：既改内存条目（下次重渲染用），也就地改已渲染卡片的角标。
+  // 就地改是必要的——closeReader 只切视图不重渲染列表，否则"读完返回"会看到旧值，
+  // 而整表刷新又会丢掉用户返回列表时的滚动位置（浏览器实测踩到）。
+  // 不用 data-id 拼选择器：遍历比对，避免任何 id 取值参与 CSS 解析。
+  function setViews(fileId, views) {
+    var f = fileById(fileId);
+    if (f) f.views = views;
+    var cards = document.querySelectorAll(".file-card");
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute("data-id") !== fileId) continue;
+      var badge = cards[i].querySelector(".views-badge");
+      if (badge) badge.textContent = "阅读 " + (views || 0);
+    }
+  }
+
   function openReader(fileId) {
     var f = fileById(fileId);
     if (!f) return;
@@ -753,6 +771,14 @@
     $("reader-pager").className = "pager hidden";
     $("zoom-input").value = "100%";   // 每次打开重置内容缩放（PDF 就绪后回调会刷新为实际比例）
     window.KBReader.render(f, readerCbs());
+    // 阅读计数（L4-4）：一次"打开"记一次，走显式端点而不是在 /raw、/preview 里累加
+    // （那两个是渲染器的资源拉取通道，一次打开会打多个请求，计数会虚高）。
+    // 先本地 +1 立即反映到卡片，再用服务端回包对账（并发打开时以服务端为准）；
+    // 上报失败静默——统计量不该打断阅读。
+    setViews(fileId, (f.views || 0) + 1);
+    api("POST", "/files/" + encodeURIComponent(fileId) + "/view").then(function (d) {
+      if (d && typeof d.views === "number") setViews(fileId, d.views);
+    }).catch(function () { /* 计数失败不影响阅读 */ });
     // 打开即渲染（预览为按需同步渲染，无轮询等待；/pdf 与"就绪后重渲染切 PDF 视图"已移除）
     window.scrollTo(0, 0);
   }
