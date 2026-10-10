@@ -484,59 +484,52 @@ def _messages(system, user, messages):
     return out
 
 
-def _build_request(provider, system, user, messages, timeout):
-    """按格式构造请求，返回 (method, url, headers, body, text_paths, error_path)。"""
-    fmt = provider.get("format") or DEFAULT_FORMAT
-    url = (provider.get("url") or "").strip()
-    key = (provider.get("api_key") or "").strip()
-    model = (provider.get("model") or "").strip()
-    temperature = provider.get("temperature")
-    if temperature is None:
-        temperature = DEFAULT_TEMPERATURE
-    max_tokens = provider.get("max_tokens")
-    msgs = _messages(system, user, messages)
+def _build_openai_request(url, headers_key, model, msgs, temperature, max_tokens):
+    """OpenAI 兼容格式（默认）：Bearer 鉴权 + /chat/completions 语义。"""
+    headers = {"Content-Type": "application/json"}
+    if headers_key:
+        headers["Authorization"] = "Bearer " + headers_key
+    body = {"model": model, "messages": msgs, "temperature": temperature, "stream": False}
+    if max_tokens:
+        body["max_tokens"] = max_tokens
+    return "POST", url, headers, body, [("choices", 0, "message", "content")], ""
 
-    if fmt == "openai":
-        headers = {"Content-Type": "application/json"}
-        if key:
-            headers["Authorization"] = "Bearer " + key
-        body = {"model": model, "messages": msgs, "temperature": temperature, "stream": False}
-        if max_tokens:
-            body["max_tokens"] = max_tokens
-        return "POST", url, headers, body, [("choices", 0, "message", "content")], ""
 
-    if fmt == "anthropic":
-        headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
-        if key:
-            headers["x-api-key"] = key
-        # Anthropic 的 system 是顶层字段，不能放进 messages
-        body = {
-            "model": model,
-            "messages": [m for m in msgs if m.get("role") != "system"],
-            "max_tokens": max_tokens or DEFAULT_ANTHROPIC_MAX_TOKENS,
-        }
-        if system:
-            body["system"] = system
-        if temperature is not None:
-            body["temperature"] = temperature
-        return "POST", url, headers, body, [("content", 0, "text")], ""
+def _build_anthropic_request(url, key, model, system, msgs, temperature, max_tokens):
+    """Anthropic 格式：x-api-key 鉴权；system 是顶层字段，不能放进 messages。"""
+    headers = {"Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+    if key:
+        headers["x-api-key"] = key
+    body = {
+        "model": model,
+        "messages": [m for m in msgs if m.get("role") != "system"],
+        "max_tokens": max_tokens or DEFAULT_ANTHROPIC_MAX_TOKENS,
+    }
+    if system:
+        body["system"] = system
+    if temperature is not None:
+        body["temperature"] = temperature
+    return "POST", url, headers, body, [("content", 0, "text")], ""
 
-    if fmt == "ollama":
-        headers = {"Content-Type": "application/json"}
-        if key:
-            headers["Authorization"] = "Bearer " + key
-        body = {
-            "model": model,
-            "messages": msgs,
-            "stream": False,
-            "options": {"temperature": temperature},
-        }
-        if max_tokens:
-            body["options"]["num_predict"] = max_tokens
-        # /api/chat 取 message.content；/api/generate 取 response —— 两种都认
-        return "POST", url, headers, body, [("message", "content"), ("response",)], ""
 
-    # custom：请求头 / 请求体全部来自用户模板
+def _build_ollama_request(url, key, model, msgs, temperature, max_tokens):
+    """Ollama 格式：/api/chat 取 message.content；/api/generate 取 response——两种都认。"""
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    body = {
+        "model": model,
+        "messages": msgs,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    if max_tokens:
+        body["options"]["num_predict"] = max_tokens
+    return "POST", url, headers, body, [("message", "content"), ("response",)], ""
+
+
+def _build_custom_request(provider, model, system, user, key, temperature, max_tokens, msgs):
+    """custom 格式：请求头 / 请求体全部来自用户模板（占位符渲染后按 JSON 解析）。"""
     values = {
         "model": model,
         "system": system or "",
@@ -559,8 +552,30 @@ def _build_request(provider, system, user, messages, timeout):
         raise LLMError(f"自定义请求体模板不是合法 JSON（{e.msg}，位置 {e.pos}）；"
                        "字符串占位符请写在引号内，如 \"model\": \"{{model}}\"") from e
     text_path = _split_path(provider.get("text_path"))
-    return "POST", url, headers, body, [tuple(text_path)] if text_path else [], \
-        (provider.get("error_path") or "").strip()
+    return "POST", (provider.get("url") or "").strip(), headers, body, \
+        [tuple(text_path)] if text_path else [], (provider.get("error_path") or "").strip()
+
+
+def _build_request(provider, system, user, messages, timeout):
+    """按格式构造请求，返回 (method, url, headers, body, text_paths, error_path)。"""
+    fmt = provider.get("format") or DEFAULT_FORMAT
+    url = (provider.get("url") or "").strip()
+    key = (provider.get("api_key") or "").strip()
+    model = (provider.get("model") or "").strip()
+    temperature = provider.get("temperature")
+    if temperature is None:
+        temperature = DEFAULT_TEMPERATURE
+    max_tokens = provider.get("max_tokens")
+    msgs = _messages(system, user, messages)
+
+    if fmt == "openai":
+        return _build_openai_request(url, key, model, msgs, temperature, max_tokens)
+    if fmt == "anthropic":
+        return _build_anthropic_request(url, key, model, system, msgs, temperature, max_tokens)
+    if fmt == "ollama":
+        return _build_ollama_request(url, key, model, msgs, temperature, max_tokens)
+    return _build_custom_request(provider, model, system, user, key,
+                                 temperature, max_tokens, msgs)
 
 
 def _split_path(path):

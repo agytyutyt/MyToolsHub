@@ -27,10 +27,12 @@
 import glob
 import importlib
 import json
+import shutil
 import types
 import logging
 import os
 import re
+import time
 
 log = logging.getLogger("jztools.deps")
 
@@ -241,64 +243,89 @@ def pending_components(app_dir):
         return []
 
 
+def _clear_component_files(pylibs, rels):
+    """删除组件升级要替换掉的旧文件/目录（rels 为暂存 entry.json 的 remove 列表）。"""
+    for rel in rels:
+        rel = str(rel).lstrip("\\/")
+        if not rel or rel == "manifest.json":
+            continue
+        p = os.path.join(pylibs, rel)
+        if os.path.isdir(p):
+            shutil.rmtree(p, ignore_errors=True)
+        elif os.path.exists(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def _copy_component_payload(payload, pylibs):
+    """把暂存 payload 里的全部文件覆盖到 pylibs（父目录按需创建）。"""
+    for root, _dirs, files in os.walk(payload):
+        for fn in files:
+            src = os.path.join(root, fn)
+            dst = os.path.join(pylibs, os.path.relpath(src, payload))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+
+
+def _merge_component_manifest(pylibs, entry, cid):
+    """把组件条目并入 pylibs/manifest.json（同 id 旧条目被替换；原子写）。"""
+    import jztools_data    # 调用期导入：本模块长驻而 jztools_data 可能被测试沙箱整副本替换
+    m_path = os.path.join(pylibs, "manifest.json")
+    comps = []
+    if os.path.isfile(m_path):
+        try:
+            with open(m_path, "r", encoding="utf-8-sig") as f:
+                comps = (json.load(f) or {}).get("components") or []
+        except Exception:
+            comps = []
+    keep = [c for c in comps if isinstance(c, dict) and str(c.get("id")) != str(entry.get("id") or cid)]
+    merged = {"schema": 1, "kind": "dep-components", "updated_at": "",
+              "components": keep + [entry]}
+    jztools_data.atomic_write_json(m_path, merged, newline="\n")
+
+
+def _apply_one_pending(pylibs, pend, cid):
+    """应用单个暂存组件；成功返回 True。
+
+    失败保留暂存（下次启动再试）并记录日志，绝不抛出——调用方继续处理下一个。
+    暂存目录缺 entry.json/payload 视为无效残骸，跳过（不删，留人工排查）。
+    """
+    stage = os.path.join(pend, cid)
+    info_path = os.path.join(stage, "entry.json")
+    payload = os.path.join(stage, "payload")
+    if not (os.path.isfile(info_path) and os.path.isdir(payload)):
+        return False
+    try:
+        with open(info_path, "r", encoding="utf-8-sig") as f:
+            info = json.load(f)
+        entry = info.get("entry") or {}
+        _clear_component_files(pylibs, info.get("remove") or [])
+        _copy_component_payload(payload, pylibs)
+        _merge_component_manifest(pylibs, entry, cid)
+        shutil.rmtree(stage, ignore_errors=True)
+        log.info("已应用暂存的依赖组件：%s v%s", cid, entry.get("version"))
+        return True
+    except Exception:
+        log.exception("应用暂存组件失败（保留暂存，下次启动再试）：%s", cid)
+        return False
+
+
 def apply_pending_components(app_dir):
     """应用暂存中的依赖组件；返回已应用的 id 列表。
 
     由主体在**启动时**调用（早于任何组件 DLL 被加载）：删旧文件 → 就位 payload → 合并清单 →
     删除暂存目录。失败时保留暂存（下次启动再试）并记录日志，绝不阻塞启动。
     """
-    import shutil
-    import jztools_data                          # 框架模块；原子写清单（本模块此前不用）
     pylibs = os.path.join(app_dir, "runtime", "pylibs")
     pend = os.path.join(pylibs, PENDING_DIR)
     if not os.path.isdir(pend):
         return []
     applied = []
     for cid in sorted(os.listdir(pend)):
-        stage = os.path.join(pend, cid)
-        info_path = os.path.join(stage, "entry.json")
-        payload = os.path.join(stage, "payload")
-        if not (os.path.isfile(info_path) and os.path.isdir(payload)):
-            continue
-        try:
-            with open(info_path, "r", encoding="utf-8-sig") as f:
-                info = json.load(f)
-            entry = info.get("entry") or {}
-            for rel in info.get("remove") or []:
-                rel = str(rel).lstrip("\\/")
-                if not rel or rel == "manifest.json":
-                    continue
-                p = os.path.join(pylibs, rel)
-                if os.path.isdir(p):
-                    shutil.rmtree(p, ignore_errors=True)
-                elif os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
-            for root, _dirs, files in os.walk(payload):
-                for fn in files:
-                    src = os.path.join(root, fn)
-                    dst = os.path.join(pylibs, os.path.relpath(src, payload))
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copyfile(src, dst)
-            m_path = os.path.join(pylibs, "manifest.json")
-            comps = []
-            if os.path.isfile(m_path):
-                try:
-                    with open(m_path, "r", encoding="utf-8-sig") as f:
-                        comps = (json.load(f) or {}).get("components") or []
-                except Exception:
-                    comps = []
-            keep = [c for c in comps if isinstance(c, dict) and str(c.get("id")) != str(entry.get("id") or cid)]
-            merged = {"schema": 1, "kind": "dep-components", "updated_at": "",
-                      "components": keep + [entry]}
-            jztools_data.atomic_write_json(m_path, merged, newline="\n")
-            shutil.rmtree(stage, ignore_errors=True)
+        if _apply_one_pending(pylibs, pend, cid):
             applied.append(cid)
-            log.info("已应用暂存的依赖组件：%s v%s", cid, entry.get("version"))
-        except Exception:
-            log.exception("应用暂存组件失败（保留暂存，下次启动再试）：%s", cid)
     try:
         if os.path.isdir(pend) and not os.listdir(pend):
             os.rmdir(pend)
@@ -473,22 +500,13 @@ def _check_vendored(dep, plugin_dir):
 # 判定入口
 # --------------------------------------------------------------------------- #
 
-def evaluate(plugin_id, plugin_dir, manifest, app_dir=None, app_version=None, plugin_api=None):
-    """对单个插件求值：版本门控 + 三类依赖 → 三态结论。
+def _version_gate_rows(req, app_version, plugin_api):
+    """版本门控（§5.2）的明细行与阻塞原因：不满足即 blocked，与依赖缺失同一结论出口。
 
-    返回 dict：
-        {"id", "status": "ok|degraded|blocked", "missing": [名称…], "detail": [行…], "reason"}
-    detail 行：{"name","kind","require","actual","state","required","note"}
-    state 取值：ok / missing / mismatch / unknown。
+    返回 (detail 行列表, blocked_reason)；无阻塞时 blocked_reason 为空串。
     """
-    app_dir = app_dir or os.path.dirname(os.path.abspath(__file__))
-    req = read_requires(manifest)
-    installed = load_installed_deps(app_dir)
-
     detail = []
     blocked_reason = ""
-
-    # ---- 版本门控（§5.2）：不满足即 blocked，与依赖缺失同一结论出口 ----
     min_app = req.get("min_app_version")
     if min_app and app_version and not version_satisfies(app_version, ">=%s" % min_app):
         detail.append({"name": "app", "kind": "framework", "require": ">=%s" % min_app,
@@ -505,8 +523,12 @@ def evaluate(plugin_id, plugin_dir, manifest, app_dir=None, app_version=None, pl
                 blocked_reason = "插件要求 plugin_api ≤ %s（主体 %s）" % (api_req, plugin_api)
         except (TypeError, ValueError):
             pass
+    return detail, blocked_reason
 
-    # ---- 三类依赖 ----
+
+def _dep_detail_rows(req, installed, plugin_dir, app_dir, plugin_id):
+    """三类依赖（python_packages / vendored / external）的明细行。"""
+    detail = []
     for dep in req["python_packages"]:
         state, actual, note = _check_python_package(dep, installed)
         detail.append({"name": dep.get("name", ""), "kind": "python_package",
@@ -524,8 +546,14 @@ def evaluate(plugin_id, plugin_dir, manifest, app_dir=None, app_version=None, pl
         detail.append({"name": dep.get("id", ""), "kind": "external",
                        "require": dep.get("version"), "actual": actual, "state": state,
                        "required": bool(dep.get("required", True)), "note": note})
+    return detail
 
-    # ---- 汇总三态 ----
+
+def _summarize_deps(detail):
+    """明细行汇总为 (missing, degraded)：required 未满足进 missing，可选未满足进 degraded。
+
+    state=ok/unknown 不计（unknown 表示"测得的信息不足以判断"，不阻断也不降级）。
+    """
     missing, degraded = [], []
     for row in detail:
         if row["state"] == "ok" or row["state"] == "unknown":
@@ -534,6 +562,29 @@ def evaluate(plugin_id, plugin_dir, manifest, app_dir=None, app_version=None, pl
             missing.append(row["name"])
         else:
             degraded.append(row["name"])
+    return missing, degraded
+
+
+def evaluate(plugin_id, plugin_dir, manifest, app_dir=None, app_version=None, plugin_api=None):
+    """对单个插件求值：版本门控 + 三类依赖 → 三态结论。
+
+    返回 dict：
+        {"id", "status": "ok|degraded|blocked", "missing": [名称…], "detail": [行…], "reason"}
+    detail 行：{"name","kind","require","actual","state","required","note"}
+    state 取值：ok / missing / mismatch / unknown。
+    """
+    app_dir = app_dir or os.path.dirname(os.path.abspath(__file__))
+    req = read_requires(manifest)
+    installed = load_installed_deps(app_dir)
+
+    # ---- 版本门控（§5.2）：不满足即 blocked，与依赖缺失同一结论出口 ----
+    detail, blocked_reason = _version_gate_rows(req, app_version, plugin_api)
+
+    # ---- 三类依赖 ----
+    detail += _dep_detail_rows(req, installed, plugin_dir, app_dir, plugin_id)
+
+    # ---- 汇总三态 ----
+    missing, degraded = _summarize_deps(detail)
     if blocked_reason or missing:
         status = "blocked"
     elif degraded:
@@ -566,7 +617,7 @@ def evaluate_all(plugin_dirs, manifests=None, app_dir=None, app_version=None, pl
 # （`try: import openpyxl / except: = False`），而模块只在服务启动时导入一次。
 # 于是"服务运行中装依赖组件"后，插件页面横幅与 /status 仍报"未安装"，必须重启才刷新
 # ——用户看到的就是"装了却说没装"。这里提供请求期重算：sys.path 里已经有
-# `runtime/pylibs`（app.py:_setup_dep_components 启动时注入），所以新装的组件当场可导入。
+# `runtime/pylibs`（jz_host.dep_bootstrap.setup_dep_components 启动时注入），所以新装的组件当场可导入。
 #
 # 纪律：仅标准库；探测失败不抛异常（依赖缺失是正常状态，由调用方按标记分支）。
 
@@ -604,14 +655,33 @@ def rescan_components():
     return None
 
 
+# 失败探测的短 TTL 退避窗口（秒）。为什么需要（P2-4 / 报告 §4.4 每请求开销）：
+# refresh_flags 每请求重算未就绪标记，而"缺 requests"这类常态缺失会让每请求都真实
+# import 失败一次且不缓存——失败路径要完整遍历 sys.path（挂网盘时开销可观）。
+# TTL 取 3 秒：人的"刷新页面"动作必然慢于它，"装完组件 → 刷新页面即可用"语义不变。
+_PROBE_FAIL_TTL = 3.0
+_probe_fail_at = {}          # {import 名: 上次失败时间戳}
+
+
 def probe_module(name):
-    """实时探测模块能否导入（成功走 sys.modules 缓存；失败不缓存，故装上后即可变 True）。"""
+    """实时探测模块能否导入（成功走 sys.modules 缓存；失败带短 TTL 退避）。
+
+    成功不记录时间戳（import 走到 sys.modules 缓存，装上后转 True 立即生效）；
+    失败按 _PROBE_FAIL_TTL 退避，避免未装组件时每请求重扫 sys.path；一旦成功即清失败记录。
+    """
     if not name:
         return False
+    name = str(name)
+    now = time.time()
+    failed_at = _probe_fail_at.get(name)
+    if failed_at is not None and now - failed_at < _PROBE_FAIL_TTL:
+        return False
     try:
-        importlib.import_module(str(name))
+        importlib.import_module(name)
+        _probe_fail_at.pop(name, None)
         return True
     except Exception:
+        _probe_fail_at[name] = now
         return False
 
 

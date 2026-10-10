@@ -352,7 +352,13 @@ powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id admi
 
 ```
 JZToolsHub/
-├── app.py                     # ★ 框架入口：数据根初始化、日志、插件加载、核心路由、压缩/缓存中间件
+├── app.py                     # ★ 框架入口（装配与路由）：Flask 实例、jz_host 接线、核心路由、启动流程、专用 CLI
+├── jz_host/                   # ★ 宿主内部模块包（P2-4 从 app.py 拆出；非插件接口，接口见 jz_api/jz_deps/jz_llm）
+│   ├── dep_bootstrap.py       #   依赖组件注入、数据根初始化、插件历史大模型配置清理
+│   ├── access_log.py          #   请求/响应外壳：异步访问日志 + gzip + 安全头 + 静态缓存
+│   ├── plugin_loader.py       #   tools.json 注册表、manifest 扫描、依赖门控、插件后端动态注册
+│   ├── llm_routes.py          #   统一大模型框架级接口（/api/llm/*，Blueprint）
+│   └── tray.py                #   系统托盘与启动通知（仅打包运行）
 ├── jz_llm.py                  # ★ 统一大模型：两级配置、四种调用格式、插件只拟定提示词
 ├── jztools_data.py            # ★ 数据根目录管理：双指针解析、旧数据迁移、配置模板同步
 ├── jz_api.py                  # ★ 框架 API 门面：会话用户 / 操作标签 / 组织树 / 用户级大模型配置（插件只调它）
@@ -474,19 +480,24 @@ JZToolsHub/
 
 ## 5. 核心模块解析
 
-### 5.1 app.py —— 框架入口
+### 5.1 app.py + jz_host/ —— 框架入口
+
+app.py 只做**装配与路由**（Flask 实例、jz_host 接线、核心路由、启动流程、专用 CLI）；
+实现按职责拆在 `jz_host/` 包（2026-10-10 P2-4 从 app.py 拆出，模块清单见 §4.1）：
 
 | 职责 | 关键实现 |
 | --- | --- |
-| 路径常量 | `BASE_DIR`（frozen 时为 exe 目录）、`DATA_ROOT`、`CONFIG_PATH`、`LOG_DIR`、`PLUGINS_DIR` |
-| 数据根初始化 | `init_data_root()`：迁移旧数据 → 解析数据根 → `sync_templates()` 模板同步 |
-| 访问日志 | `setup_access_logging()`：内存队列（容量 2000）+ 后台 `QueueListener` 异步落盘 |
-| 插件加载 | `register_plugin_backends()`：先无条件加载 `admin`，再按 `tools.json` 的 `enabled` 逐个加载 |
-| 核心路由 | `/`、`/tool/<id>`、`/plugin/<id>/<path>`、`/api/tools*`（reorder / visibility） |
-| 中间件 | `_compress_response`（gzip，>256B 且可压缩类型）、`_static_cache`（静态 1 天 / HTML no-cache）、`_log_response`（写访问日志） |
-| 工具聚合 | `get_aggregated_tools()`：manifest + tools.json + `home_card()` 钩子三级合并 |
-| 权限过滤 | `_filter_visible_tools()`：非超管只看到权限点内的工具 |
-| 容错 | `WindowsSafeTimedRotatingFileHandler`：Windows 文件占用导致 rename 失败时退化为「复制 + 截断」，跨天零丢日志 |
+| 路径常量 | app.py 的 `BASE_DIR`（frozen 时为 exe 目录）、`DATA_ROOT`、`CONFIG_PATH`、`LOG_DIR`、`LOG_FILE`（装配期经 `set_paths` / `set_log_paths` 注入 jz_host 各模块，模块不自行推导） |
+| 数据根初始化 | `jz_host/dep_bootstrap.py::resolve_paths()`：迁移旧数据 → 解析数据根 → `sync_templates()` 模板同步 |
+| 依赖组件 | `jz_host/dep_bootstrap.py::boot_components()`：应用暂存组件 → 注入 pylibs → 注册重扫回调 |
+| 访问日志 | `jz_host/access_log.py`：内存队列（容量 2000）+ 后台 `QueueListener` 异步落盘 |
+| 插件加载 | `jz_host/plugin_loader.py::register_plugin_backends()`：先无条件加载 `admin`，再按 `tools.json` 的 `enabled` 逐个加载（含版本/依赖门控三态） |
+| 核心路由 | app.py：`/`、`/tool/<id>`、`/plugin/<id>/<path>`、`/api/site`、`/api/tools*`（reorder / visibility）；`/api/llm/*` 在 `jz_host/llm_routes.py`（Blueprint） |
+| 中间件 | `jz_host/access_log.py`：`_compress_response`（gzip，>256B 且可压缩类型）、`_static_cache`（静态 1 天 / HTML no-cache）、`_log_response`（写访问日志）、安全响应头（`install()` 一次注册，顺序敏感） |
+| 工具聚合 | `jz_host/plugin_loader.py::get_aggregated_tools()`：manifest + tools.json + `home_card()` 钩子三级合并 |
+| 权限过滤 | app.py `_filter_visible_tools()`：非超管只看到权限点内的工具 |
+| 托盘 | `jz_host/tray.py`：打包运行常驻托盘 + 启动气泡通知 |
+| 容错 | `jz_host/access_log.py::WindowsSafeTimedRotatingFileHandler`：Windows 文件占用导致 rename 失败时退化为「复制 + 截断」，跨天零丢日志 |
 
 ### 5.2 jztools_data.py —— 数据根目录
 
@@ -556,7 +567,7 @@ JZToolsHub/
 ### 5.6 插件后端加载机制
 
 ```python
-# app.py::_load_backend_module
+# jz_host/plugin_loader.py::_load_backend_module
 module_name = "jztools_" + re.sub(r"\W", "_", plugin_id)     # 如 jztools_knowledge_base
 spec = importlib.util.spec_from_file_location(module_name, backend/__init__.py,
                                               submodule_search_locations=[backend_dir])

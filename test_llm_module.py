@@ -523,7 +523,8 @@ class TestPrompts(unittest.TestCase):
 # 为什么不直接用 app.py 里那个模块级 app：Flask 的 app 是单例，一旦处理过请求就不能再
 # 注册 before_request（插件 register() 与 register_plugin_backends 都要注册）。在同进程里
 # 复用它会让**其它测试文件**后续装配时炸掉（test_admin_plugin_manager 就要再装配一次），
-# 属于测试之间的相互污染。这里只从 app.py 取框架级视图函数重新挂载，并在 tearDown 里
+# 属于测试之间的相互污染。框架级视图函数从 jz_host.llm_routes 取（P2-4 拆模块后 LLM 路由
+# 的家；视图函数对象与 app.py 装配的是同一批）重新挂载，并在 tearDown 里
 # 清掉本组载入的插件模块，保证互不影响。
 FRAMEWORK_LLM_ROUTES = (
     ("/api/llm/settings", "api_llm_settings", ("GET",)),
@@ -544,11 +545,12 @@ class TestRoutesAndPlugins(unittest.TestCase):
         from flask import Flask
         cls.tmp, cls._restore = temp_data_root("jz-llm-routes-")
         import app as A
+        from jz_host import llm_routes as _llm_routes
         cls.A = A
         A.init_data_root()                       # 把 tools.json 模板铺进临时数据根
         cls.app = Flask("jz-llm-routes-test")
         for rule, view_name, methods in FRAMEWORK_LLM_ROUTES:
-            cls.app.add_url_rule(rule, view_func=getattr(A, view_name),
+            cls.app.add_url_rule(rule, view_func=getattr(_llm_routes, view_name),
                                  methods=list(methods))
         cls.routes = {}
         for pid in PLUGINS_UNDER_TEST:

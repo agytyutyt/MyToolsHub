@@ -135,9 +135,14 @@ python app.py
 
 | 位置 | 内容 |
 | --- | --- |
-| `app.py` | `DATA_ROOT` / `CONFIG_PATH` / `LOG_DIR` / `LOG_FILE`（`init_data_root()` 后指向数据根目录）、`_plugin_home_card_hooks`（首页卡片钩子表）、`_tool_meta_cache`（日志用，2s TTL） |
+| `app.py` | `BASE_DIR` / `DATA_ROOT` / `CONFIG_PATH` / `LOG_DIR` / `LOG_FILE`（`init_data_root()` 后指向数据根目录；装配期经 `set_paths` / `set_log_paths` 注入 jz_host 各模块） |
+| `jz_host/plugin_loader.py`（P2-4 自 app.py 拆出） | `_plugin_home_card_hooks`（首页卡片钩子表）、`_tool_meta_cache`（日志用，2s TTL）、`REGISTRY_LOCK`、`_plugin_states` / `_plugin_load_errors` / `_manifest_errors`（门控与失败记录） |
+| `jz_host/access_log.py` | `access_logger` / 日志队列单例；`LOG_DIR` / `LOG_FILE` 经 `set_log_paths` 注入 |
 | `jztools_data.py` | `get_data_root()` 双指针解析、`_TEMPLATE_SYNC` 模板同步清单、`_LEGACY_MAP` 旧数据迁移映射 |
 | `plugins/admin/backend/routes.py` | `ADMIN_CONFIG_PATH`（数据根 `config/admin.json`）、`_fernet`（懒加载）、`_registered_tool_ids()` / `_grant_all_tool_ids()` |
+
+> 注（台架契约）：`admin-config-lock-tests.py` 等会在进程内对 app 模块的 `REGISTRY_LOCK` /
+> `load_registry` 打桩——app.py 对这两者必须是 from-import 的裸名字调用，勿改成模块限定调用。
 
 ### 1.5 环境变量
 

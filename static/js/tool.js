@@ -11,13 +11,21 @@ async function loadTool() {
   const stage = document.getElementById('tool-stage');
   const frame = document.getElementById('tool-frame');
 
-  // 站点名称来自 /api/tools 的 site.title（配置化），用于 logo 与浏览器标签
+  // 站点名称来自轻量端点 /api/site 的 site.title（配置化；不为一行标题拉全量工具清单）。
+  // 旧主包与桌面客户端离线态没有该端点（客户端本地直出的是 /api/tools）→ 回退取一次；
+  // 两条路都失败时用默认值。
   let siteName = 'JZ 工具箱';
   try {
-    const siteRes = await fetch('/api/tools');
+    const siteRes = await fetch('/api/site');
     if (siteRes.ok) {
       const siteData = await siteRes.json();
       siteName = (siteData.site && siteData.site.title) || siteName;
+    } else {
+      const res = await fetch('/api/tools');
+      if (res.ok) {
+        const d = await res.json();
+        siteName = (d.site && d.site.title) || siteName;
+      }
     }
   } catch (e) { /* 忽略，使用默认值 */ }
   const titleEl = document.getElementById('site-title');

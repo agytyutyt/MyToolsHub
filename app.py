@@ -1,32 +1,39 @@
-import importlib
-import importlib.util
-import gzip
-import io
-import json
-import functools
-import logging
-import logging.handlers
+"""JZToolsHub 框架入口（宿主外壳）。
+
+做三件事（实现按职责拆在 ``jz_host/`` 包，本文件只做装配与路由——2026-10-10
+P2-4 / 报告 §4.4）：
+  · 应用装配：Flask 实例与内核配置、jz_host 五模块接线、核心路由（首页 / 工具壳页 /
+    插件资源 / 工具与站点接口 / 可见性与排序）；
+  · 启动流程：数据根初始化 → 访问日志 → 插件历史大模型配置清理 → 插件后端注册 →
+    E 架构反代桥 → 生产服务器（waitress）/ 托盘；
+  · 专用 CLI：--check-deps / --wait-restart / --worker（冻结运行由安装器与自动重启使用）。
+
+插件面向的稳定接口是 jz_api / jz_deps / jz_llm / jztools_data，不是本文件的内部结构。
+"""
 import os
-import queue
-import re
-import shutil
 import sys
 import threading
-import time
-from datetime import datetime, timedelta
 
-from flask import Flask, g, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, request, send_from_directory
 
 import jz_api
-import jz_deps
-import jz_llm
-import jz_plugin_host
 import jztools_data
-from jztools_data import get_data_root, get_data_root_dir
+from jz_host import access_log, dep_bootstrap, llm_routes, plugin_loader, tray
 
-# 框架日志（插件门控 / 注册表与 manifest 读取失败 / 依赖组件注入的告警）。
-# ★ 必须定义在模块顶部：_setup_dep_components() 在模块加载时就会调用它。
-log = logging.getLogger("jztools.app")
+# ★ 以下名字经 from-import 进入本模块命名空间（**勿改为 plugin_loader.xxx 模块限定调用**）：
+#   台架（admin-config-lock 等）在进程内对 app 模块的同名属性打桩（如 load_registry、
+#   REGISTRY_LOCK）来放大竞态，模块限定调用会绕过打桩。
+from jz_host.dep_bootstrap import dep_components_status, migrate_plugin_legacy_llm
+from jz_host.plugin_loader import (
+    REGISTRY_LOCK,
+    _refresh_plugin_states,
+    get_aggregated_tools,
+    get_plugin_dir,
+    load_registry,
+    load_state_snapshot,
+    register_plugin_backends,
+    save_registry,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, "frozen", False):
@@ -40,205 +47,29 @@ if getattr(sys, "frozen", False):
 # init_data_root() 中按数据根目录重算。
 DATA_ROOT = None
 CONFIG_PATH = os.path.join(BASE_DIR, "config", "tools.json")
-PLUGINS_DIR = os.path.join(BASE_DIR, "plugins")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "access.log")
 
+# 装配：把程序目录 / 路径注入插件注册表与访问日志模块（init_data_root 时再按数据根更新）
+plugin_loader.set_paths(BASE_DIR, CONFIG_PATH)
+access_log.set_log_paths(LOG_DIR, LOG_FILE)
 
-def _setup_dep_components():
-    """依赖组件包注入（GD8 档2：实现已抽取至 jz_plugin_host，行为保持）。"""
-    return jz_plugin_host.setup_dep_components(BASE_DIR, log)
-
-
-def dep_components_status():
-    """依赖组件摘要（GD8 档2：实现已抽取至 jz_plugin_host，行为保持）。"""
-    return jz_plugin_host.dep_components_status(BASE_DIR)
-
-
-# 启动时先应用"暂存中的依赖组件"（服务运行时装组件时文件被占用 → 暂存到 pylibs\.pending\，
-# 此刻进程还没加载任何组件 DLL，覆盖必然成功）。必须在 _setup_dep_components 之前。
-try:
-    _applied_pending = jz_deps.apply_pending_components(BASE_DIR)
-    if _applied_pending:
-        log.info("已应用暂存的依赖组件：%s", "、".join(_applied_pending))
-except Exception:
-    log.exception("应用暂存依赖组件失败（不影响启动，下次再试）")
-
-_setup_dep_components()
-# 把"重新注入依赖组件路径"注册给判定引擎：jz_deps.refresh_flags 在重算插件标记前会先调用它，
-# 于是"服务运行中装依赖组件 → 刷新页面即可用"（此前必须重启服务才生效）。
-jz_deps.register_component_rescanner(_setup_dep_components)
+# 依赖组件启动件（应用暂存组件 → 注入 pylibs 路径 → 注册重扫回调）——
+# 原模块级副作用块，实现与注释见 jz_host/dep_bootstrap.py。
+dep_bootstrap.boot_components(BASE_DIR)
 
 
 def init_data_root():
     """启动时初始化数据根目录：先迁移旧版程序目录中的用户数据，再重算关键路径。"""
     global DATA_ROOT, CONFIG_PATH, LOG_DIR, LOG_FILE
-    jztools_data.migrate_legacy_app_data()
-    DATA_ROOT = get_data_root()
-    CONFIG_PATH = os.path.join(DATA_ROOT, "config", "tools.json")
-    LOG_DIR = os.path.join(DATA_ROOT, "logs")
-    LOG_FILE = os.path.join(LOG_DIR, "access.log")
-    # 版本升级时把程序目录中的配置模板（prompt.json / tools.json 等）同步进数据根目录，
-    # 保证大模型提示词等「随版本迭代」的配置在更新后立即生效（幂等：仅版本变化时执行一次）。
-    jztools_data.sync_templates()
+    paths = dep_bootstrap.resolve_paths()
+    DATA_ROOT = paths["data_root"]
+    CONFIG_PATH = paths["config_path"]
+    LOG_DIR = paths["log_dir"]
+    LOG_FILE = paths["log_file"]
+    plugin_loader.set_paths(BASE_DIR, CONFIG_PATH)
+    access_log.set_log_paths(LOG_DIR, LOG_FILE)
 
-
-def _write_llm_migration_flag(flag_path):
-    """写「插件历史大模型配置已清理」退场标记（C1 步骤②）。
-
-    标记存在即代表该数据根已完整通过一次清理（扫描完成且无失败），后续启动跳过扫描。
-    写失败不致命：这里吞掉异常、不改变调用方行为，下次启动重扫（清理本身幂等）即可。
-    内容只有时间戳，供 flag 覆盖率统计/排障（删除窗口判定见 migrate_plugin_legacy_llm）。
-    """
-    try:
-        os.makedirs(os.path.dirname(flag_path), exist_ok=True)
-        with open(flag_path, "w", encoding="utf-8") as f:
-            f.write("plugin legacy llm migration completed at %s\n"
-                    % datetime.now().isoformat(timespec="seconds"))
-    except OSError:
-        pass
-
-
-def migrate_plugin_legacy_llm():
-    """把插件历史 config.json 里的大模型配置**收编进统一配置，并清除插件侧副本**。
-
-    归属：本函数原在 admin 插件 register() 中常驻执行（每次启动改写**其他插件**的数据
-    文件，属未声明、未退场的插件间数据耦合——2026-09-29 代码质量分析报告 C1）。
-    2026-10-09 决策 7（方案 A）上移为主体启动流程的一次性清理（主体管理插件数据根是
-    sanctioned 方向），并加退场标记：完整通过一次后写 ``<数据根>/config/llm_migrated.flag``，
-    之后启动先查标记、存在即跳过扫描（C1 步骤①/②）。与插件注册无关——
-    调用点在 __main__ 的 init_data_root() 之后、register_plugin_backends() 之前。
-
-    背景：统一大模型落地前，case-report / character-graph / file-filter 各自在
-    ``<数据根>/plugins/<id>/config.json`` 存了一份 ``llm{base_url,api_key,model}``，
-    Key 是**明文**。统一后这份副本已无读取方（兼容桥本轮一并移除），留着既是明文泄漏面，
-    也会让"Key 到底存在哪"说不清。
-
-    做法（**先收编、再清除**，避免"清掉副本 = 大模型功能直接失效"）：
-      ① 统一配置还没有可用接入信息时，把插件那份搬进 ``<数据根>/config/llm.json``
-         （经 jz_llm.save_global 加密落盘；历史语义就是 OpenAI 兼容）；
-      ② 无论是否收编，都把插件 config.json 里的 ``llm`` 段删除（原子写）；
-      ③ 完整通过（扫描完成且 failed 为空，含没有历史 llm 段的空跑）后写退场标记。
-    幂等：有退场标记即跳过；没有 llm 段的文件不动，重复执行无副作用。
-    返回可读的处理摘要（供调用方写日志）；无处理动作或已有标记时返回 None。
-
-    ★ 删除窗口（C1 步骤③，后续任务）：这是**一次性迁移**，不该永驻。判定依据：
-    凡可能产出历史 llm 段的存量数据根，都已启动过带本函数的版本——
-    即所有目标数据根都存在 ``<数据根>/config/llm_migrated.flag``（flag 覆盖率 100%）；
-    且新安装、新插件版本均不再向插件 config.json 写 llm 段。满足后本函数、
-    _write_llm_migration_flag 与 __main__ 中的调用点可整段删除（标记文件可留可删，无害）。
-    """
-    root = jztools_data.get_data_root()
-    flag_path = os.path.join(root, "config", "llm_migrated.flag")
-    if os.path.isfile(flag_path):
-        return None                      # 退场标记：清理已完成，跳过扫描
-    plugins_dir = os.path.join(root, "plugins")
-    if not os.path.isdir(plugins_dir):
-        return None
-
-    candidates = []          # [(pid, llm_dict)]
-    targets = []             # [(path, data)]  含 llm 段、待清除
-    for pid in sorted(os.listdir(plugins_dir)):
-        if not re.match(r"^[A-Za-z0-9_-]+$", pid):
-            continue
-        path = os.path.join(plugins_dir, pid, "config.json")
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except Exception:
-            continue
-        llm = (data or {}).get("llm") if isinstance(data, dict) else None
-        if not isinstance(llm, dict):
-            continue
-        targets.append((path, data))
-        if (llm.get("api_key") or "").strip():
-            candidates.append((pid, llm))
-
-    if not targets:
-        _write_llm_migration_flag(flag_path)   # 存量数据根无历史 llm 段：同样视为已完整过一遍
-        return None
-
-    adopted = ""
-    cfg = jz_llm.load_global()
-    if candidates and not jz_llm.provider_usable(cfg["provider"]):
-        pid, llm = candidates[0]
-        url = str(llm.get("url") or llm.get("base_url") or "").strip()
-        if url and not url.endswith("/chat/completions"):
-            url = url.rstrip("/") + "/chat/completions"     # 历史允许省写，补全为完整接口地址
-        provider = jz_llm.normalize_provider({
-            "format": "openai", "url": url,
-            "api_key": llm.get("api_key"), "model": llm.get("model"),
-        })
-        if jz_llm.provider_usable(provider):
-            jz_llm.save_global({"mode": cfg["mode"], "fallback": cfg["fallback"],
-                                "provider": provider})
-            adopted = pid
-
-    cleared = []
-    failed = []
-    for path, data in targets:
-        data.pop("llm", None)
-        try:
-            jztools_data.atomic_write_json(path, data)
-            cleared.append(os.path.basename(os.path.dirname(path)))
-        except OSError as e:
-            failed.append("%s（%s）" % (path, e.strerror or e))
-
-    if not failed:
-        _write_llm_migration_flag(flag_path)   # 完整通过 → 退场标记（写失败下次重扫，幂等）
-
-    return {"adopted_from": adopted, "cleared": cleared, "failed": failed,
-            "dropped_duplicates": [p for p, _ in candidates if p != adopted]}
-
-
-# 插件 ID 只允许出现在目录名中，防止目录穿越
-PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-
-# 可压缩的内容类型（gzip 白名单）
-COMPRESSIBLE_TYPES = (
-    "text/plain", "text/html", "text/css", "text/javascript",
-    "application/javascript", "application/json", "application/xml",
-    "image/svg+xml", "application/x-javascript",
-)
-# 静态资源缓存策略（按扩展名）
-CACHE_LONG_EXT = {".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".gif",
-                  ".svg", ".webp", ".woff", ".woff2", ".ttf", ".ico", ".map"}
-CACHE_NOCACHE_EXT = {".html"}
-
-# 访问日志记录器（模块级单例，register_access_logging 时初始化）
-access_logger = logging.getLogger("jztools.access")
-
-# load_tool_meta 的短 TTL 缓存（仅服务日志解析，避免每请求读文件）
-_TOOL_META_TTL = 2.0  # 秒
-_tool_meta_cache = None
-_tool_meta_cache_ts = 0.0
-
-# 插件主动声明的首页卡片内容钩子 {插件id: home_card 可调用对象}
-# 由 register_plugin_backends() 在启动时收集；每次请求（如首页 /api/tools）时
-# 于请求上下文内调用，使插件能按当前登录用户权限动态声明卡片内容。
-# 优先级高于 config/tools.json：声明了则用之，未声明则回退读取 tools.json。
-_plugin_home_card_hooks = {}
-
-# 插件后端加载失败记录 {插件id: "异常类型: 摘要"}。
-# 单个插件加载失败只影响它自己，绝不允许拖垮整站启动（规范 B-4 的同一精神）：
-# 典型场景是两个插件各写了 def status()，Flask 的 endpoint 重名会在注册阶段抛
-# AssertionError。任何异常都在 register_plugin_backends() 内被隔离并记录于此，
-# 供启动日志与故障排查使用；每次 register_plugin_backends() 执行时清空。
-_plugin_load_errors = {}
-
-# 单个插件 manifest.json 损坏的记录 {插件id: "异常类型: 摘要"}（load_manifests 填充）。
-# 解耦后插件目录由外部介质写入，坏文件概率上升：只跳过该插件，不拖垮整站。
-_manifest_errors = {}
-# tools.json 读取/解析失败的记录（空串表示正常）。
-_registry_error = ""
-
-# 插件运行状态 {插件id: {"status": "ok|degraded|blocked", "missing": […], "reason": "…"}}。
-# 由 register_plugin_backends() 在加载前求值（jz_deps.evaluate）：版本门控 + 三类依赖，
-# 三态结论——blocked 不加载、degraded 加载但标注；供 /api/tools 与后台展示
-# （见 docs/design/主体与插件解耦-设计文档.md §5.2 / §5.3）。
-_plugin_states = {}
 
 # 打包运行（PyInstaller）时 Flask 内置 /static 默认指向 _internal/static，
 # 前端源码保留在 exe 同层，故显式指定 static_folder 指向部署根目录下的 static。
@@ -261,670 +92,9 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # 未设自身限额的上传路径（如 trajectory-convert 的 f.read()）一个无界读硬边界。
 app.config["MAX_CONTENT_LENGTH"] = 640 * 1024 * 1024
 
-
-class WindowsSafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
-    """兼容 Windows 的按天滚动日志 handler。
-
-    Windows 下当服务进程长期占用日志文件时，TimedRotatingFileHandler 的
-    os.rename 会抛 PermissionError（WinError 32），导致该时段所有日志静默丢失。
-    本类在 rename 失败时退回「复制原文件 + 截断」策略（copytruncate）：
-    先把当前内容复制为归档文件，再清空原文件继续写入 —— 永不因文件锁丢日志。
-    """
-
-    def doRollover(self):
-        if self.stream:
-            self.stream.close()
-            self.stream = None
-        current_time = int(time.time())
-        dfn = self.rotation_filename(
-            self.baseFilename + "." + time.strftime(self.suffix, time.localtime(current_time))
-        )
-        if os.path.exists(self.baseFilename):
-            try:
-                os.rename(self.baseFilename, dfn)  # 常规路径：直接改名
-            except OSError:
-                # Windows 文件占用：复制 + 截断
-                try:
-                    shutil.copyfile(self.baseFilename, dfn)
-                    with open(self.baseFilename, "w", encoding="utf-8") as f:
-                        f.truncate()
-                except OSError:
-                    pass  # 复制也失败则放弃本次归档，继续写原文件
-        if not self.encoding:
-            self.stream = open(self.baseFilename, "w")
-        else:
-            self.stream = open(self.baseFilename, "w", encoding=self.encoding)
-        self.rolloverAt = self.computeRollover(current_time)
-        return dfn
-
-
-# ===================== 访问日志（异步） =====================
-
-# 后台日志监听器（模块级单例）
-_log_queue = None
-_log_listener = None
-
-
-def setup_access_logging(app):
-    """初始化异步访问日志：按天滚动写入 logs/access.log，保留最近 30 天。
-
-    记录通过内存队列 + 后台 QueueListener 异步落盘，HTTP 线程只入队不阻塞 I/O。
-    记录字段：时间 / 客户端 IP / HTTP 方法 / 功能（工具或插件）/ 路径 / 状态码 / 耗时 / UA。
-    """
-    global access_logger, _log_queue, _log_listener
-    if config_logging_enabled() is False:
-        return  # 配置中显式关闭日志
-
-    os.makedirs(LOG_DIR, exist_ok=True)
-    access_logger.setLevel(logging.INFO)
-    access_logger.propagate = False
-
-    # 已挂 handler 则跳过，避免 debug 模式下重复注册
-    if access_logger.handlers:
-        return
-
-    handler = WindowsSafeTimedRotatingFileHandler(
-        LOG_FILE, when="midnight", interval=1, backupCount=30, encoding="utf-8"
-    )
-    handler.setFormatter(logging.Formatter(
-        "%(asctime)s\t%(levelname)s\t%(message)s"
-    ))
-
-    # 内存队列 1（容量 ~2000 条），超出时丢弃旧日志，保证写盘永不阻塞请求线程
-    _log_queue = queue.Queue(maxsize=2000)
-    _log_listener = logging.handlers.QueueListener(_log_queue, handler)
-    access_logger.addHandler(logging.handlers.QueueHandler(_log_queue))
-    _log_listener.start()
-    app.logger.info("异步访问日志已启动：%s", LOG_FILE)
-
-
-def shutdown_access_logging():
-    """优雅停止后台日志监听器（flush 剩余日志）。"""
-    global _log_listener
-    if _log_listener is not None:
-        _log_listener.stop()
-        _log_listener = None
-
-
-def config_logging_enabled():
-    """从 config/tools.json 读取日志开关（site.logging，默认开启）。"""
-    try:
-        registry = load_registry()
-        return registry.get("site", {}).get("logging", True)
-    except Exception:
-        return True
-
-
-def get_client_ip():
-    """获取客户端真实 IP，兼容反向代理（X-Forwarded-For）与直连。"""
-    fwd = request.headers.get("X-Forwarded-For", "")
-    if fwd:
-        first = fwd.split(",")[0].strip()
-        if first:
-            return first
-    return request.remote_addr or "-"
-
-
-def parse_feature():
-    """根据请求路径解析「功能」标签，映射到具体工具名/接口名。
-
-    工具展示名以 config/tools.json 为准（与首页一致），manifest 仅兜底。
-    """
-    path = request.path
-    meta = load_tool_meta()
-
-    if path == "/":
-        return "首页"
-    if path == "/api/tools":
-        return "API: 工具列表"
-    if path.startswith("/api/tools/"):
-        tool_id = path[len("/api/tools/"):].strip("/")
-        name = meta.get(tool_id, {}).get("name") or tool_id
-        return f"API: 工具详情({name})"
-    if path.startswith("/plugin/"):
-        parts = path.strip("/").split("/")
-        if len(parts) >= 2:
-            tool_id = parts[1]
-            name = meta.get(tool_id, {}).get("name") or tool_id
-            sub = "/".join(parts[2:]) or "入口页面"
-            return f"插件({name})/frontend/{sub}"
-    if path.startswith("/tool/"):
-        tool_id = path[len("/tool/"):].strip("/")
-        name = meta.get(tool_id, {}).get("name") or tool_id
-        return f"工具壳页({name})"
-    if path.startswith("/api/"):
-        return f"后端接口: {path}"
-    return f"静态资源: {path}"
-
-
-# 核心路由 → 具体操作 兜底映射（插件可显式 set_operation 覆盖）
-_OPERATION_MAP = {
-    ("GET", "/"): "访问首页",
-    ("GET", "/api/tools"): "获取工具列表",
-    ("POST", "/api/tools/reorder"): "调整首页工具排序",
-    ("GET", "/api/tools/visibility"): "查询工具可见性",
-    ("POST", "/api/tools/visibility"): "切换工具/分类可见性",
-}
-
-
-def parse_operation():
-    """解析「具体操作」标签：优先取插件显式标记（g._current_operation），
-    其次核心路由映射，最后基于路径/方法兜底。"""
-    try:
-        op = getattr(g, "_current_operation", None)
-        if op:
-            return op
-    except Exception:
-        pass
-    key = (request.method, request.path)
-    if key in _OPERATION_MAP:
-        return _OPERATION_MAP[key]
-    path = request.path
-    if path.startswith("/plugin/"):
-        return "打开插件功能页"
-    if path.startswith("/tool/"):
-        return "打开工具"
-    if path.startswith("/api/"):
-        return f"接口调用: {request.method} {path}"
-    if path.startswith("/static/"):
-        return "加载静态资源"
-    return "访问页面"
-
-
-def get_current_user():
-    """当前登录用户信息（经框架 API 门面 jz_api 取自 admin 插件）；匿名返回 None。
-
-    供日志记录 username 使用；admin 插件未加载时返回 None，不阻断请求。
-    静态资源请求不解析用户，减少不必要的文件 I/O。
-    """
-    if request.path.startswith("/static/"):
-        return None
-    return jz_api.get_session_user()
-
-
-@app.before_request
-def _log_start():
-    request.environ["_req_start"] = time.perf_counter()
-
-
-def _should_compress(response):
-    """判断响应是否适合 gzip 压缩。"""
-    if response.status_code < 200 or response.status_code == 204 or response.status_code == 304:
-        return False
-    if response.headers.get("Content-Encoding"):
-        return False  # 已压缩过
-    if response.direct_passthrough:
-        return False  # 流式响应（如 send_file 大文件）不压缩，避免序列化错误
-    if len(response.get_data()) < 256:
-        return False  # 小响应不压缩
-    ct = response.content_type or ""
-    if not any(ct.startswith(t) for t in COMPRESSIBLE_TYPES):
-        return False
-    ae = (request.headers.get("Accept-Encoding", "") or "").lower()
-    return "gzip" in ae
-
-
-@app.after_request
-def _compress_response(response):
-    """gzip 压缩：仅当客户端声明支持 gzip 且响应为可压缩文本。"""
-    if not _should_compress(response):
-        return response
-
-    data = response.get_data()
-    buf = io.BytesIO()
-    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
-        gz.write(data)
-    response.set_data(buf.getvalue())
-    response.headers["Content-Encoding"] = "gzip"
-    response.headers["Vary"] = "Accept-Encoding"
-    return response
-
-
-# T30 框架级安全响应头（批次 8）。取值说明：
-# - X-Frame-Options 必须 SAMEORIGIN：插件页由主页面以**同源 iframe** 嵌入
-#   （见 /plugin/<id>/ 路由），DENY 会把所有插件页一并挡掉；
-# - CSP 保守处理：只禁 object/embed（object-src 'none'）与 <base> 劫持
-#   （base-uri 'self'）。**不设** script-src/style-src——既有页面大量使用
-#   内联 <script>/onclick 与动态 style，收紧会直接白屏（上 nonce/hash 需先
-#   改造全部前端，另立批次）；
-# - 用 setdefault 而非覆盖：允许具体响应（如 send_file 的缓存/下载语义）自行
-#   设置同名头，但插件与页面不做特殊处理时一律有这三项基础防护。
-SECURITY_HEADERS = {
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "SAMEORIGIN",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Content-Security-Policy": "object-src 'none'; base-uri 'self'",
-}
-
-
-@app.after_request
-def _security_headers(response):
-    """给所有响应补齐基础安全头（含错误响应：Flask 对 413/404 同样过 after_request）。"""
-    for name, value in SECURITY_HEADERS.items():
-        response.headers.setdefault(name, value)
-    return response
-
-
-@app.after_request
-def _static_cache(response):
-    """静态资源缓存策略：长缓存静态资产、HTML 协商缓存。
-
-    Flask debug 模式下 send_file 会自动加 no-cache，这里强制覆盖为统一策略。
-    """
-    path = request.path
-    if not (path.startswith("/static/") or path.startswith("/plugin/")):
-        return response
-    ext = os.path.splitext(path)[1].lower()
-    if ext in CACHE_LONG_EXT:
-        response.headers["Cache-Control"] = "public, max-age=86400"
-    elif ext in CACHE_NOCACHE_EXT or not ext:
-        response.headers["Cache-Control"] = "no-cache"
-    return response
-
-
-@app.after_request
-def _log_response(response):
-    """记录本次请求：用户名 / IP / 方法 / 功能 / 具体操作 / 路径 / 状态 / 耗时 / UA。
-
-    注意：after_request 按注册逆序执行，本函数最后注册，会先于 gzip/缓存中间件
-    被调用，因此日志记录的是压缩前的原始耗时与状态，不影响正确性。
-    """
-    if config_logging_enabled() is False:
-        return response
-    # 日志队列尚未初始化（例如关闭日志时）则跳过
-    if not access_logger.handlers:
-        return response
-
-    start = request.environ.pop("_req_start", None)
-    cost_ms = round((time.perf_counter() - start) * 1000) if start else -1
-
-    user = get_current_user()
-    username = user.get("username") if user else "-"
-
-    access_logger.info(
-        "ip=%s\tuser=%s\tmethod=%s\tfunc=%s\top=%s\tpath=%s\tstatus=%s\tcost_ms=%s\tua=%s",
-        get_client_ip(),
-        username,
-        request.method,
-        parse_feature(),
-        parse_operation(),
-        request.path,
-        response.status_code,
-        cost_ms,
-        (request.headers.get("User-Agent", "") or "")[:120],
-    )
-    return response
-
-
-REGISTRY_LOCK = threading.RLock()   # D2：config/tools.json 读改写全程锁（RLock 便于同线程复入）
-
-
-def load_registry():
-    """加载后台配置(config/tools.json)，这是工具的注册清单。
-
-    健壮性（解耦后插件目录由外部介质写入，坏文件概率上升）：读取/解析失败时
-    返回空注册表并告警，绝不让单个坏文件把整站打挂（见设计文档 §2 健壮性缺口）。
-
-    D2：本函数与 `save_registry` 单步都是安全的（读一次全量、写用唯一临时名 +
-    replace 原子落盘）；跨步的 `load → 改 → save` 丢失更新由调用方用模块级
-    `REGISTRY_LOCK` 整段包住（见 `/api/tools/reorder`、`/api/tools/visibility`）。
-    """
-    try:
-        # utf-8-sig（D4 口径统一）：与 jz_deps / jz_llm 一致，容忍人工编辑留下的 BOM。
-        with open(CONFIG_PATH, "r", encoding="utf-8-sig") as f:
-            obj = json.load(f)
-        return obj if isinstance(obj, dict) else {"site": {}, "categories": [], "tools": []}
-    except Exception as exc:
-        global _registry_error
-        _registry_error = f"{type(exc).__name__}: {exc}"
-        log.warning("tools.json 不可读/不可解析，已按空注册表继续：%s", _registry_error)
-        return {"site": {}, "categories": [], "tools": []}
-
-
-def save_registry(registry):
-    """原子写入 config/tools.json（统一走 ``jztools_data.atomic_write_json``：唯一临时名 + rename）。
-
-    固定名 `tools.json.tmp` 在同进程并发写（请求线程 + 后台线程）或上次写入被强杀留残file时，
-    会出现两个写者往同一个临时文件落笔、后者 `os.replace` 把前者的半成品提升为正式文件。
-    唯一临时名（`tempfile.mkstemp` 同目录）消除该冲突面；失败清理临时文件不留残骸。
-    """
-    jztools_data.atomic_write_json(CONFIG_PATH, registry)
-
-
-def load_manifests():
-    """扫描 plugins/ 下所有插件目录，读取各自 manifest.json。
-
-    健壮性：单个插件 manifest 缺失/损坏只跳过该插件并记入 `_manifest_errors`，
-    其余插件与整站启动不受影响（设计文档 §2 健壮性缺口 / AC-6）。
-    """
-    manifests = {}
-    _manifest_errors.clear()
-    if not os.path.isdir(PLUGINS_DIR):
-        return manifests
-    for name in os.listdir(PLUGINS_DIR):
-        manifest_path = os.path.join(PLUGINS_DIR, name, "manifest.json")
-        if not os.path.isfile(manifest_path):
-            continue
-        try:
-            # utf-8-sig：manifest.json 是人工可编辑文件，记事本"UTF-8"另存会带 BOM，
-            # 普通 utf-8 读到 BOM 直接 JSONDecodeError（本函数按「跳过该插件」降级，难排查）。
-            with open(manifest_path, "r", encoding="utf-8-sig") as f:
-                obj = json.load(f)
-            if not isinstance(obj, dict):
-                raise ValueError("manifest 不是 JSON 对象")
-            # 加载期一致性校验（D7）：manifest.id 必须等于目录名。聚合接口按 manifest.id
-            # 取展示元信息、可见性判定按 registry/目录名 id，两者不一致会静默错位。
-            mid = str(obj.get("id") or "").strip()
-            if mid != name:
-                raise ValueError("manifest.id=%r 与目录名 %r 不一致" % (obj.get("id"), name))
-            manifests[name] = obj
-        except Exception as exc:
-            _manifest_errors[name] = f"{type(exc).__name__}: {exc}"
-            log.warning("插件 %s 的 manifest.json 不可解析，已跳过：%s", name, exc)
-    return manifests
-
-
-def load_tool_meta():
-    """聚合「名称 / 描述」等展示元信息，生成 {插件id: {name, description}} 映射。
-
-    配置驱动原则：config/tools.json 中注册的 name / description 为权威取值，
-    插件目录的 manifest.json 仅作为缺省回退（便于插件目录跨项目迁移时自解释）。
-
-    带短 TTL 缓存：本函数被请求日志解析逐请求调用，加缓存避免每次请求都读文件；
-    缓存仅用于日志展示，不影响 /api/tools 等实时读取的接口。
-    """
-    global _tool_meta_cache, _tool_meta_cache_ts
-    now = time.time()
-    if _tool_meta_cache is not None and now - _tool_meta_cache_ts < _TOOL_META_TTL:
-        return _tool_meta_cache
-
-    meta = {}
-    try:
-        registry = load_registry()
-        for item in registry.get("tools", []):
-            # 配置文件优先；manifest 兜底
-            meta[item["id"]] = {
-                "name": item.get("name") or "",
-                "description": item.get("description") or "",
-            }
-    except Exception:
-        pass
-    for pid, manifest in load_manifests().items():
-        entry = meta.setdefault(pid, {"name": "", "description": ""})
-        if not entry["name"]:
-            entry["name"] = manifest.get("name", "") or pid
-        if not entry["description"]:
-            entry["description"] = manifest.get("description", "") or ""
-
-    _tool_meta_cache = meta
-    _tool_meta_cache_ts = now
-    return meta
-
-
-def get_plugin_dir(plugin_id):
-    """校验插件 ID 并返回其绝对目录，非法 ID 返回 None。"""
-    if not PLUGIN_ID_RE.match(plugin_id or ""):
-        return None
-    return os.path.join(PLUGINS_DIR, plugin_id)
-
-
-def _resolve_home_card(plugin_id):
-    """按当前请求上下文解析插件主动声明的首页卡片内容。
-
-    钩子 home_card() 在每次请求（如首页 /api/tools）时实时求值，使插件
-    能依据当前登录用户的权限返回动态卡片内容；未提供钩子、返回值非 dict
-    或求值异常时返回空 dict，由调用方回退读取 tools.json / manifest。
-    """
-    hook = _plugin_home_card_hooks.get(plugin_id)
-    if hook is None:
-        return {}
-    try:
-        result = hook()  # 在请求上下文内调用，插件可用 flask.request / get_session_user()
-        return result if isinstance(result, dict) else {}
-    except Exception:
-        return {}
-
-
-def _gate_state_of(verdict):
-    """门控结论（jz_deps.evaluate）→ _plugin_states 记录。
-
-    启动加载与请求期刷新两处组装点共用同一映射，避免字段集在两边悄悄漂移。
-    """
-    return {
-        "status": verdict["status"],
-        "missing": verdict["missing"],
-        "degraded": verdict.get("degraded", []),
-        "reason": verdict.get("reason", ""),
-    }
-
-
-def _refresh_plugin_states():
-    """请求期重算**已加载**插件的依赖状态（只重算当前非 ok 的那些）。
-
-    为什么需要：`_plugin_states` 在启动时算一次；服务运行中装了「依赖组件包」后，
-    插件页面横幅会立刻变好（jz_deps.refresh_flags 实时刷新），但首页卡片/工具列表
-    若继续用启动时的结论，就会一边显示"功能降级"一边功能可用——自相矛盾。
-    blocked 的插件仍以启动结论为准（它们**没被加载**，装依赖后必须重启才能加载路由）。
-    """
-    manifests = None
-    for pid, st in list(_plugin_states.items()):
-        if not st or st.get("status") == "ok" or st.get("status") == "blocked":
-            continue
-        # 注：blocked 的插件在启动时就**没有加载路由**（上面已跳过），装依赖后必须重启
-        # 才能让路由生效，故不在这里重算。
-        if manifests is None:
-            manifests = load_manifests()
-        manifest = manifests.get(pid) or {}
-        plugin_dir = get_plugin_dir(pid)
-        if not plugin_dir or not manifest:
-            continue
-        _vj = jz_deps.read_version_json(BASE_DIR)
-        verdict = jz_deps.evaluate(pid, plugin_dir, manifest, app_dir=BASE_DIR,
-                                   app_version=_vj.get("app"), plugin_api=_vj.get("plugin_api"))
-        if verdict["status"] != st.get("status"):
-            log.info("插件 %s 依赖状态刷新：%s → %s", pid, st.get("status"), verdict["status"])
-            _plugin_states[pid] = _gate_state_of(verdict)
-
-
-def get_aggregated_tools():
-    """聚合后台配置与插件清单，生成前端可用的工具列表。
-
-    首页卡片内容采用两级读取：
-    1. 插件主动声明（方式一）：插件后端提供可选钩子 home_card()，启动时登记、
-       首页请求时于请求上下文内实时求值（可按当前登录用户权限返回动态内容），
-       结果作为卡片展示字段的最高优先级来源；
-    2. tools.json 兜底（方式二）：插件未提供钩子时，name / description 取
-       config/tools.json（权威），icon / accent / features 取 manifest.json。
-
-    健康状态（解耦后新增）：门控结论为 blocked 的插件**不出现在卡片里**
-    （避免"能打开但一用就报错"）；degraded 的照常展示并带 health 字段供前端标角标。
-    """
-    registry = load_registry()
-    manifests = load_manifests()
-    hidden_cats = {c["id"] for c in registry.get("categories", []) if not c.get("enabled", True)}
-    category_map = {c["id"]: c["name"] for c in registry.get("categories", [])}
-    meta = load_tool_meta()
-
-    tools = []
-    for item in registry.get("tools", []):
-        if not item.get("enabled", True):
-            continue
-        if item.get("hidden"):  # 隐藏（如管理后台插件）不展示为工具卡片
-            continue
-        if item.get("category") in hidden_cats:
-            continue
-        manifest = manifests.get(item["id"])
-        if manifest is None:
-            continue
-        state = _plugin_states.get(item["id"]) or {}
-        if state.get("status") == "blocked":
-            continue  # 不可运行：不出现卡片（缺失清单在后台可见）
-        m = meta.get(item["id"], {})
-        # 方式一：插件主动声明的卡片内容优先（未声明则为空 dict，走 tools.json 兜底）
-        card = _resolve_home_card(item["id"])
-        icon = card.get("icon") or manifest.get("icon", "🧩")
-        tools.append({
-            "id": manifest.get("id", item["id"]),
-            "name": card.get("name") or m.get("name") or manifest.get("name", item["id"]),
-            "description": card.get("description")
-                if card.get("description") is not None
-                else (m.get("description") or manifest.get("description", "")),
-            "icon": icon,
-            # emoji 图标的 SVG 回退只在**前端一处**维护：static/js/jz-icon.js
-            # （旧方案在此再维护一份 emoji→文件名硬编码表并把 icon_file 塞进 /api/tools，
-            #  实测前端从不消费，等于两处映射表要同步维护——已删，见 20260914 评估报告 D-3）。
-            "accent": card.get("accent") or manifest.get("accent", "#4285F4"),
-            "entry": manifest.get("entry", "index.html"),
-            "features": card.get("features")
-                if card.get("features") is not None
-                else manifest.get("features", []),
-            "category": category_map.get(item.get("category"), "未分类"),
-            "category_id": item.get("category", ""),
-            "order": item.get("order", 0),
-            # 健康状态：ok / degraded（可选依赖缺失，前端可标"功能降级"角标）
-            "health": state.get("status", "ok"),
-            "health_degraded": state.get("degraded", []),
-        })
-    tools.sort(key=lambda t: t["order"])
-    return tools
-
-
-def _load_backend_module(plugin_id):
-    """载入插件后端模块（GD8 档2：实现已抽取至 jz_plugin_host，插件目录参数化）。"""
-    return jz_plugin_host.load_backend_module(PLUGINS_DIR, plugin_id)
-
-
-def register_plugin_backends(app):
-    """动态注册插件后端。
-
-    每个插件在 plugins/<插件id>/backend/ 下提供 __init__.py 与 routes.py，
-    后端代码随插件整体打包、随 enabled 配置启停 —— 一切皆插件。
-
-    插件若提供可选钩子 home_card()，则启动时登记该钩子；首页 /api/tools
-    请求时于请求上下文内实时调用（可依据当前登录用户权限动态声明卡片内容）。
-    未提供钩子的插件，其卡片内容回退读取 config/tools.json（见
-    get_aggregated_tools 的合并逻辑）。
-
-    admin（管理后台）为核心基础设施插件：不随 enabled 启停，始终加载，
-    保证登录鉴权 / 后台接口 / 工具访问控制一直可用。
-
-    加载失败隔离：每个插件的后端加载（模块导入 + register(app)）整体包在
-    try/except 内。任一插件因 endpoint 冲突、依赖缺失、语法错误等原因失败时，
-    只记录到 _plugin_load_errors 并打日志告警，其余插件与整站启动不受影响。
-
-    版本与依赖门控（解耦后新增，设计文档 §5.2 / §5.3）：加载前逐插件求值
-    「版本门控 + 三类依赖」三态结论——blocked 不加载并记录缺失清单，
-    degraded 照常加载但标注；结论存于 _plugin_states，供 /api/tools 与后台展示。
-    """
-    global _plugin_home_card_hooks
-    _plugin_home_card_hooks = {}  # 每次启动重新收集，避免跨重启残留旧钩子
-    _plugin_load_errors.clear()
-    _plugin_states.clear()
-
-    # 统一大模型模块的依赖标记（REQUESTS_AVAILABLE）也按请求刷新：
-    # 服务运行中装「依赖组件包 requests」后，无需重启即可用上大模型功能
-    # （与各插件 register() 里的 jz_deps.install_refresher 同一机制）。
-    jz_deps.install_refresher(app, jz_llm)
-
-    registry = load_registry()
-    tools = list(registry.get("tools", []))
-
-    def load_routes(plugin_id):
-        """加载单个插件后端；任何异常都被隔离，不影响其他插件与整站启动。
-
-        注意两个已知边界（不要在排查时误判为"万无一失"）：
-        1. register(app) 中途抛错时，它之前已注册的路由会残留在 Flask 上（无法
-           回滚）。隔离保证的是「整站能起来 + 错误可诊断」，不是「失败插件不留
-           半个后端」——根治仍靠路由函数命名纪律（带插件前缀）。
-        2. _load_backend_module 用 importlib.import_module 取 `.routes`，已缓存
-           的模块不会刷新；同进程内重复调用会拿到旧代码。插件后端改动必须重启
-           进程才生效。
-        """
-        try:
-            routes = _load_backend_module(plugin_id)
-            if routes is None:
-                return False
-            register = getattr(routes, "register", None)
-            if not callable(register):
-                _plugin_load_errors[plugin_id] = "未导出可调用的 register(app)"
-                app.logger.error(
-                    "插件 %s 的后端未导出 register(app)，已跳过", plugin_id
-                )
-                return False
-            register(app)
-        except Exception as exc:
-            _plugin_load_errors[plugin_id] = f"{type(exc).__name__}: {exc}"
-            app.logger.exception(
-                "插件 %s 的后端加载失败，已隔离：其他插件与整站启动不受影响",
-                plugin_id,
-            )
-            return False
-
-        app.logger.info(f"已注册后端插件：{plugin_id}")
-        # 进程内插件 id 集（E 架构统一 errorhandler 判定用，见 supervisor/mainapp_bridge）
-        app.config.setdefault("_PLUGIN_IDS", set()).add(plugin_id)
-        # 方式一：登记插件首页卡片内容声明钩子（每次请求实时求值，失败不阻断加载）
-        hook = getattr(routes, "home_card", None)
-        if callable(hook):
-            _plugin_home_card_hooks[plugin_id] = hook
-            app.logger.info(
-                f"插件 {plugin_id} 提供 home_card() 首页卡片内容声明钩子"
-            )
-        return True
-
-    # 管理后台：始终加载（即使 tools.json 中未注册或 enabled=false）
-    if not load_routes("admin"):
-        app.logger.warning("核心插件 admin 未加载，登录鉴权 / 工具访问控制将不可用")
-
-    # 版本与依赖门控（设计文档 §5.2 / §5.3）：加载前逐插件求值，三态结论——
-    #   ok       正常加载
-    #   degraded 仅可选依赖缺失 → 加载，列表/卡片标注"功能降级"
-    #   blocked  必需依赖缺失或版本门控不满足 → **不加载**并记录原因
-    # 与既有"加载失败隔离"同一条纪律：任何单插件问题都不拖垮整站。
-    manifests = load_manifests()
-    app_dir = BASE_DIR
-    _vj = jz_deps.read_version_json(app_dir)
-    app_version, plugin_api = _vj.get("app"), _vj.get("plugin_api")
-
-    # E 架构（需求⑩）：supervisor 注册表里有单元的插件 = worker 化 → 跳过进程内
-    # 加载，/api/<id>/* 由反代桥转发到 worker（supervisor/mainapp_bridge）。迁移期
-    # 两种形态并存：未 worker 化的插件走既有进程内链，一条一条切。
-    try:
-        from supervisor.mainapp_bridge import worker_units_snapshot
-        _worker_units = worker_units_snapshot(get_data_root())
-    except Exception:
-        _worker_units = {}
-
-    for item in tools:
-        plugin_id = item["id"]
-        if plugin_id == "admin" or not item.get("enabled", True):
-            continue
-        if plugin_id in _worker_units:
-            _plugin_states[plugin_id] = {"status": "ok", "mode": "worker",
-                                         "missing": [], "degraded": [],
-                                         "reason": "supervisor 托管（E 架构）"}
-            app.logger.info("插件 %s 已 worker 化（supervisor 托管），跳过进程内加载", plugin_id)
-            continue
-        manifest = manifests.get(plugin_id) or {}
-        plugin_dir = get_plugin_dir(plugin_id)
-        if not plugin_dir or not manifest:
-            # manifest 损坏/缺失：load_manifests 已记录，这里只标注状态
-            if plugin_id in _manifest_errors:
-                _plugin_states[plugin_id] = {"status": "blocked",
-                                             "missing": ["manifest.json"],
-                                             "reason": "manifest.json 不可解析"}
-            continue
-        verdict = jz_deps.evaluate(plugin_id, plugin_dir, manifest, app_dir=app_dir,
-                                   app_version=app_version, plugin_api=plugin_api)
-        _plugin_states[plugin_id] = _gate_state_of(verdict)
-        if verdict["status"] == "blocked":
-            why = verdict.get("reason") or ("缺少必需依赖：" + "、".join(verdict["missing"]))
-            app.logger.warning("插件 %s 不可运行，已跳过加载（%s）", plugin_id, why)
-            continue
-        if verdict["status"] == "degraded":
-            app.logger.warning("插件 %s 功能降级（可选依赖缺失：%s）",
-                               plugin_id, "、".join(verdict.get("degraded", [])))
-        load_routes(plugin_id)
+# 请求/响应外壳（访问日志 / gzip / 安全头 / 静态缓存）与 LLM 蓝图装配
+access_log.install(app)
+llm_routes.install(app)
 
 
 @app.route("/")
@@ -958,11 +128,19 @@ def api_tools():
         # 插件健康状况（解耦后新增）：加载失败原因 + 版本/依赖门控三态结论。
         # 首页据此对"不可运行"的插件不显示卡片、对"降级"的插件显示角标
         # （见 docs/design/主体与插件解耦-设计文档.md §5.3 展示面）。
-        "plugin_errors": dict(_plugin_load_errors),
-        "plugin_states": dict(_plugin_states),
-        "registry_error": _registry_error,
-        "manifest_errors": dict(_manifest_errors),
+        **load_state_snapshot(),
     })
+
+
+@app.route("/api/site")
+def api_site():
+    """轻量站点信息（site 段：title / subtitle 等）。
+
+    工具壳页等只要站点名的前端走这里，不再为一行标题拉全量 /api/tools
+    （后者含 manifest 扫描 + 门控状态合并，见 2026-09-29 代码质量分析报告 §4.4）。
+    """
+    registry = load_registry()
+    return jsonify({"site": registry.get("site", {})})
 
 
 @app.route("/api/tools/<tool_id>")
@@ -988,114 +166,6 @@ def api_org_tree():
         return jsonify({"error": "组织架构数据不可用（核心插件未加载）"}), 503
     jz_api.set_operation("查询组织架构树")
     return jsonify({"ok": True, "tree": tree})
-
-
-# ===================== 统一大模型：框架级设置接口 =====================
-# 主体对插件的稳定契约（FC-5，见 jz_llm.py）。三条接口都在**框架层**（不是某个插件），
-# 因为设置入口在首页右下角 ⋯，属于外壳而非任何插件；账号数据经 jz_api 的 provider
-# 向 admin 插件取用（依赖倒置，插件之间零依赖）。
-# 登录拦截由 admin 的 _enforce_login 兜底（/api/llm/* 不在白名单）；
-# 权限拦截不适用——该前缀不是已注册工具 ID，_enforce_tool_access 会放行。
-
-def require_login(fn):
-    """框架级路由的登录门：未登录/会话不可读独立返回 401（不依赖 admin 兜底）。
-
-    登录用户放进取 flask.g.current_user，视图函数直接取用（避免重复调用 provider）。
-    """
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        info = jz_api.get_session_user()
-        if info is None:
-            return jsonify({"error": "未登录或登录已过期"}), 401
-        g.current_user = info
-        return fn(*args, **kwargs)
-    return wrapper
-
-
-@app.get("/api/llm/settings")
-@require_login
-def api_llm_settings():
-    """返回当前生效的大模型设置：模式、格式清单、本人配置（脱敏）与生效来源。
-
-    悬浮卡片据此决定是否显示入口（user_mode 为假时整条入口不出现）、
-    回显表单、并提示"当前实际生效的是哪一份配置"。
-    """
-    info = g.current_user
-    user_mode = jz_llm.user_mode()
-    username = info.get("username")
-    own = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
-    session = jz_llm.resolve()
-    jz_api.set_operation("查询大模型设置")
-    return jsonify({
-        "ok": True,
-        "mode": jz_llm.mode(),
-        "user_mode": user_mode,
-        "can_self_config": user_mode,
-        "fallback": jz_llm.load_global()["fallback"],
-        "formats": jz_llm.formats_public(),
-        "mine": {
-            "format": own["format"],
-            "url": own["url"],
-            "api_key": jz_llm.mask_key(own["api_key"]),
-            "api_key_set": bool(own["api_key"]),
-            "model": own["model"],
-            "configured": jz_llm.provider_usable(own),
-            "problem": jz_llm.provider_problem(own),
-        },
-        "effective": session.public(),
-    })
-
-
-@app.post("/api/llm/settings")
-@require_login
-def api_llm_settings_save():
-    """保存**本人**的大模型接入配置（仅"用户各自设置"模式开放）。
-
-    请求体：{format, url, api_key, model}；api_key 留空或回传掩码表示不修改已保存的 Key。
-    管理员统一配置模式下直接 403——避免用户以为自己的设置生效了（实际被忽略）。
-    """
-    info = g.current_user
-    if not jz_llm.user_mode():
-        return jsonify({"error": "当前由管理员统一配置大模型，个人设置未开放"}), 403
-    data = request.get_json(silent=True) or {}
-    username = info.get("username")
-    current = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
-    provider = jz_llm.normalize_provider(data)
-    if jz_llm.is_mask(provider["api_key"]):
-        provider["api_key"] = current["api_key"]  # 掩码/留空 = 保留原 Key
-    if not jz_api.save_user_llm(username, provider):
-        return jsonify({"error": "保存失败：账号数据不可写（核心插件未加载）"}), 503
-    jz_api.set_operation("保存个人大模型设置")
-    return jsonify({
-        "ok": True,
-        "configured": jz_llm.provider_usable(provider),
-        "problem": jz_llm.provider_problem(provider),
-    })
-
-
-@app.post("/api/llm/test")
-@require_login
-def api_llm_test():
-    """连通性测试：优先测请求体里的这套（表单里刚填、还没保存的），否则测当前生效的。
-
-    请求体：{format, url, api_key, model}（可缺省）；api_key 为掩码/留空时用已保存的。
-    """
-    info = g.current_user
-    data = request.get_json(silent=True) or {}
-    username = info.get("username")
-    own = jz_llm.normalize_provider(jz_api.get_user_llm(username) or {})
-
-    draft = None
-    if any(str(data.get(k) or "").strip() for k in ("url", "model", "format")):
-        draft = jz_llm.normalize_provider(data)
-        if jz_llm.is_mask(draft["api_key"]):
-            # 掩码/留空 = 沿用已保存的 Key：用户模式取本人配置，管理员模式取全局配置
-            draft["api_key"] = own["api_key"] if jz_llm.user_mode() \
-                else jz_llm.load_global()["provider"]["api_key"]
-
-    jz_api.set_operation("测试大模型连通性")
-    ok, detail = jz_llm.test_connection(provider=draft)
-    return jsonify({"ok": ok, "detail": detail})
 
 
 def _current_user_allowlist():
@@ -1124,6 +194,47 @@ def _filter_visible_tools(tools):
     return [t for t in tools if t["id"] in allowed]
 
 
+def _validate_reorder(registry, categories_order, tools_order):
+    """校验排序载荷（类别 / 工具 ID 均须存在）；有问题返回错误响应，否则 None。
+
+    调用方已持 REGISTRY_LOCK（与 _apply_reorder 同在一次读改写事务内）。
+    """
+    cat_ids = {c["id"] for c in registry.get("categories", [])}
+    tool_map = {t["id"]: t for t in registry.get("tools", [])}
+
+    for cid in categories_order:
+        if cid not in cat_ids:
+            return jsonify({"error": f"unknown category: {cid}"}), 400
+    for cid, tool_ids in tools_order.items():
+        if cid not in cat_ids:
+            return jsonify({"error": f"unknown category: {cid}"}), 400
+        if not isinstance(tool_ids, list):
+            return jsonify({"error": "tools must be a list"}), 400
+        for tid in tool_ids:
+            if tid not in tool_map:
+                return jsonify({"error": f"unknown tool: {tid}"}), 400
+    return None
+
+
+def _apply_reorder(registry, categories_order, tools_order):
+    """把拖拽排序写进注册表（类别顺序 + 各分类下工具的顺序 / 归属）。
+
+    调用方已持 REGISTRY_LOCK；调用前须先过 _validate_reorder。
+    """
+    tool_map = {t["id"]: t for t in registry.get("tools", [])}
+    cat_map = {c["id"]: c for c in registry["categories"]}
+    new_cats = [cat_map[cid] for cid in categories_order]
+    for c in registry["categories"]:
+        if c["id"] not in {x["id"] for x in new_cats}:
+            new_cats.append(c)
+    registry["categories"] = new_cats
+
+    for cid, tool_ids in tools_order.items():
+        for pos, tid in enumerate(tool_ids):
+            tool_map[tid]["category"] = cid
+            tool_map[tid]["order"] = pos + 1
+
+
 @app.post("/api/tools/reorder")
 def api_tools_reorder():
     """接收前端拖拽排序后的布局，写回 config/tools.json。
@@ -1140,33 +251,10 @@ def api_tools_reorder():
 
     with REGISTRY_LOCK:                       # D2 全程锁
         registry = load_registry()
-        cat_ids = {c["id"] for c in registry.get("categories", [])}
-        tool_map = {t["id"]: t for t in registry.get("tools", [])}
-
-        for cid in categories_order:
-            if cid not in cat_ids:
-                return jsonify({"error": f"unknown category: {cid}"}), 400
-        for cid, tool_ids in tools_order.items():
-            if cid not in cat_ids:
-                return jsonify({"error": f"unknown category: {cid}"}), 400
-            if not isinstance(tool_ids, list):
-                return jsonify({"error": "tools must be a list"}), 400
-            for tid in tool_ids:
-                if tid not in tool_map:
-                    return jsonify({"error": f"unknown tool: {tid}"}), 400
-
-        cat_map = {c["id"]: c for c in registry["categories"]}
-        new_cats = [cat_map[cid] for cid in categories_order]
-        for c in registry["categories"]:
-            if c["id"] not in {x["id"] for x in new_cats}:
-                new_cats.append(c)
-        registry["categories"] = new_cats
-
-        for cid, tool_ids in tools_order.items():
-            for pos, tid in enumerate(tool_ids):
-                tool_map[tid]["category"] = cid
-                tool_map[tid]["order"] = pos + 1
-
+        err = _validate_reorder(registry, categories_order, tools_order)
+        if err is not None:
+            return err
+        _apply_reorder(registry, categories_order, tools_order)
         save_registry(registry)
     return jsonify({"ok": True})
 
@@ -1200,6 +288,33 @@ def api_tools_visibility():
     })
 
 
+def _set_tool_enabled(registry, tid, enabled, allowed):
+    """[锁内] 切换单个工具的 enabled；返回 Flask 响应。调用方已持 REGISTRY_LOCK。"""
+    for t in registry.get("tools", []):
+        if t["id"] == tid:
+            if allowed is not None and tid not in allowed:
+                return jsonify({"error": "无该工具的操作权限"}), 403
+            t["enabled"] = enabled
+            save_registry(registry)
+            return jsonify({"ok": True})
+    return jsonify({"error": "tool not found"}), 404
+
+
+def _set_category_enabled(registry, tid, enabled, allowed):
+    """[锁内] 切换单个分类的 enabled；返回 Flask 响应。调用方已持 REGISTRY_LOCK。"""
+    for c in registry.get("categories", []):
+        if c["id"] == tid:
+            if allowed is not None and not any(
+                t.get("category") == tid and t["id"] in allowed
+                for t in registry.get("tools", [])
+            ):
+                return jsonify({"error": "无该分类的操作权限"}), 403
+            c["enabled"] = enabled
+            save_registry(registry)
+            return jsonify({"ok": True})
+    return jsonify({"error": "category not found"}), 404
+
+
 @app.post("/api/tools/visibility")
 def api_tools_visibility_save():
     """切换分类 / 工具是否启用：{type: 'tool'|'category', id, enabled}。
@@ -1218,109 +333,8 @@ def api_tools_visibility_save():
     with REGISTRY_LOCK:                   # D2 全程锁
         registry = load_registry()
         if typ == "tool":
-            for t in registry.get("tools", []):
-                if t["id"] == tid:
-                    if allowed is not None and tid not in allowed:
-                        return jsonify({"error": "无该工具的操作权限"}), 403
-                    t["enabled"] = enabled
-                    save_registry(registry)
-                    return jsonify({"ok": True})
-            return jsonify({"error": "tool not found"}), 404
-        else:
-            for c in registry.get("categories", []):
-                if c["id"] == tid:
-                    if allowed is not None and not any(
-                        t.get("category") == tid and t["id"] in allowed
-                        for t in registry.get("tools", [])
-                    ):
-                        return jsonify({"error": "无该分类的操作权限"}), 403
-                    c["enabled"] = enabled
-                    save_registry(registry)
-                    return jsonify({"ok": True})
-            return jsonify({"error": "category not found"}), 404
-
-
-# ===================== 系统托盘（仅打包运行） =====================
-
-def _tray_icon_image():
-    """生成托盘图标位图：64x64 主题蓝底 + 白色「JZ」。"""
-    from PIL import Image, ImageDraw
-    img = Image.new("RGB", (64, 64), "#4285F4")
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((2, 2, 62, 62), radius=14, fill="#4285F4")
-    draw.rectangle((0, 0, 63, 63), outline="#3367D6", width=2)
-    draw.text((14, 12), "JZ", fill="white", font=None)
-    return img
-
-
-# 托盘图标对象引用：notify_service_started 需跨线程经它弹系统气泡通知
-_tray_icon = None
-
-
-def run_tray_icon(host, port):
-    """在后台线程运行系统托盘图标（仅打包运行，PyInstaller console=False）。
-
-    - 左键双击：打开默认浏览器访问本站；
-    - 右键菜单：打开浏览器 / 退出服务（退出即结束进程）。
-    """
-    import webbrowser
-    import pystray
-
-    def _open_browser():
-        url = "http://127.0.0.1:%d" % port if host in ("0.0.0.0", "::") else "http://%s:%d" % (host, port)
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
-
-    def _quit():
-        # 打包运行的 GUI 程序：直接结束进程即可（waitress 由 OS 回收）
-        os._exit(0)
-
-    try:
-        menu = pystray.Menu(
-            pystray.MenuItem("打开浏览器", lambda icon, item: _open_browser()),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem("退出服务", lambda icon, item: _quit()),
-        )
-        icon = pystray.Icon("JZToolsHub", _tray_icon_image(), "JZ 工具箱", menu)
-        global _tray_icon
-        _tray_icon = icon
-        icon.run()
-    except Exception:
-        pass  # 托盘启动失败不阻断服务（后台静默运行）
-
-
-def notify_service_started(host, port):
-    """服务真正开始监听后，经托盘图标弹系统级通知（气泡；Win10/11 渲染为 toast）。
-
-    在后台线程运行：轮询本机端口直到可连接，再 notify()。服务每次启动（含
-    插件升级「自动重启」拉起的新实例）都会触发，管理员可据此确认重启成功。
-    仅打包运行有效——源码模式没有托盘图标，本函数也不会被调用。
-    """
-    import socket
-    import time
-
-    url = ("http://127.0.0.1:%d" % port) if host in ("0.0.0.0", "::") \
-        else "http://%s:%d" % (host, port)
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                break
-        except OSError:
-            time.sleep(0.3)
-    else:
-        return  # 15 秒内端口未就绪（如启动失败），不发通知
-    icon = _tray_icon
-    if icon is None:
-        return  # 托盘未起来（如 pystray 初始化失败），静默放弃
-    for _ in range(5):
-        try:
-            icon.notify("服务已启动：%s" % url, "JZ 工具箱")
-            return
-        except Exception:
-            time.sleep(1.0)  # 托盘窗口可能尚未就绪，短暂重试
+            return _set_tool_enabled(registry, tid, enabled, allowed)
+        return _set_category_enabled(registry, tid, enabled, allowed)
 
 
 def _run_restart_helper(wait_pid):
@@ -1359,50 +373,119 @@ def _run_restart_helper(wait_pid):
     return 0
 
 
+def _handle_dep_check(argv):
+    """`--check-deps`：依赖组件自检（安装器在目标机上用它做"装完能不能真的 import"的验证，T25 第 1 步）。
+
+    ★ 冻结 exe 是 GUI 子系统（console=False），print 无处可去 —— 结果写文件，
+      由安装器读取（见 tools/dep-component/install-dep-component.ps1）。
+      用法：JZToolsHub.exe --check-deps [<输出json路径>]
+    命中返回进程退出码；未命中返回 None。
+    """
+    if "--check-deps" not in argv:
+        return None
+    import json as _json
+    st = dep_components_status(BASE_DIR)
+    try:
+        i = argv.index("--check-deps")
+        out = argv[i + 1] if len(argv) > i + 1 else os.path.join(
+            BASE_DIR, "runtime", "pylibs", ".check-deps.json")
+    except (ValueError, IndexError):
+        out = os.path.join(BASE_DIR, "runtime", "pylibs", ".check-deps.json")
+    ok = all(v == "ok" for v in st["imports"].values()) and bool(st["installed"])
+    st["ok"] = ok
+    try:
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            _json.dump(st, f, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
+    return 0 if ok else 1
+
+
+def _handle_wait_restart(argv):
+    """`--wait-restart <旧PID>`：自重启助手入口（必须早于任何初始化处理）。
+
+    助手实例自身不对外服务，处理完即退出；参数非法也直接退出（返回 2），
+    绝不落回正常启动（防止与旧实例形成双实例）。未命中返回 None。
+    """
+    if not (getattr(sys, "frozen", False) and "--wait-restart" in argv):
+        return None
+    try:
+        _wait_pid = int(argv[argv.index("--wait-restart") + 1])
+    except (IndexError, ValueError):
+        return 2
+    return _run_restart_helper(_wait_pid)
+
+
+def _handle_worker(argv):
+    """`--worker <插件id>`：E 架构（需求⑩）worker 入口。
+
+    supervisor 拉起，端口 / 数据根 / 主应用地址经环境变量注入——见 jz_worker.py。
+    命中返回进程退出码；未命中返回 None。
+    """
+    if "--worker" not in argv:
+        return None
+    try:
+        _worker_id = argv[argv.index("--worker") + 1]
+    except (IndexError, ValueError):
+        return 2
+    from jz_worker import run_worker
+    return run_worker(_worker_id) or 0
+
+
+def _resolve_server_addr():
+    """监听地址：JZTOOLS_HOST（默认 0.0.0.0）/ JZTOOLS_PORT（默认 5000，解析失败回落）。"""
+    host = os.environ.get("JZTOOLS_HOST", "0.0.0.0")
+    try:
+        port = int(os.environ.get("JZTOOLS_PORT", "5000"))
+    except ValueError:
+        port = 5000
+    return host, port
+
+
+def _serve(app, host, port):
+    """启动 HTTP 服务（冻结运行：waitress + 托盘；源码开发：Flask 内置服务器）。"""
+    if getattr(sys, "frozen", False):
+        # 打包运行（可上线）：waitress 多线程生产级 WSGI 服务器，禁用 debug/reloader
+        try:
+            from waitress import serve
+        except ImportError:
+            serve = None
+    else:
+        serve = None
+    if getattr(sys, "frozen", False):
+        # 打包运行：无控制台窗口，以系统托盘图标常驻后台（pystray 自带消息循环线程）
+        threading.Thread(
+            target=tray.run_tray_icon, args=(host, port),
+            daemon=True, name="tray-icon",
+        ).start()
+        # 服务就绪后的系统级通知（托盘气泡；自动重启拉起的新实例同样触发）
+        threading.Thread(
+            target=tray.notify_service_started, args=(host, port),
+            daemon=True, name="startup-notify",
+        ).start()
+    try:
+        if getattr(sys, "frozen", False) and serve is not None:
+            serve(app, host=host, port=port, threads=8)
+        elif getattr(sys, "frozen", False):
+            app.run(host=host, port=port, debug=False)
+        else:
+            # 源码开发模式：Flask 内置服务器（自动重载 + 调试）
+            app.run(host=host, port=port, debug=True)
+    finally:
+        access_log.shutdown_access_logging()
+
+
 if __name__ == "__main__":
-    # 冻结模式自重启助手：由管理后台 _spawn_self_restart 以 `exe --wait-restart <旧PID>`
-    # 派出，等待旧进程退出后原位拉起新实例。必须在任何初始化（数据目录 / 端口 / 插件
-    # 加载）之前处理——助手实例自身不对外服务，处理完即退出；参数非法也直接退出，
-    # 绝不落回正常启动（防止与旧实例形成双实例）。
-    # 依赖组件自检：安装器在目标机上用它做"装完能不能真的 import"的验证（T25 第 1 步）
-    if "--check-deps" in sys.argv:
-        # ★ 冻结 exe 是 GUI 子系统（console=False），print 无处可去 —— 结果写文件，
-        #   由安装器读取（见 tools/dep-component/install-dep-component.ps1）。
-        #   用法：JZToolsHub.exe --check-deps [<输出json路径>]
-        import json as _json
-        st = dep_components_status()
-        try:
-            i = sys.argv.index("--check-deps")
-            out = sys.argv[i + 1] if len(sys.argv) > i + 1 else os.path.join(
-                BASE_DIR, "runtime", "pylibs", ".check-deps.json")
-        except (ValueError, IndexError):
-            out = os.path.join(BASE_DIR, "runtime", "pylibs", ".check-deps.json")
-        ok = all(v == "ok" for v in st["imports"].values()) and bool(st["installed"])
-        st["ok"] = ok
-        try:
-            os.makedirs(os.path.dirname(out), exist_ok=True)
-            with open(out, "w", encoding="utf-8") as f:
-                _json.dump(st, f, ensure_ascii=False, indent=2)
-        except OSError:
-            pass
-        sys.exit(0 if ok else 1)
-    if getattr(sys, "frozen", False) and "--wait-restart" in sys.argv:
-        try:
-            _wait_pid = int(sys.argv[sys.argv.index("--wait-restart") + 1])
-        except (IndexError, ValueError):
-            sys.exit(2)
-        sys.exit(_run_restart_helper(_wait_pid))
-    if "--worker" in sys.argv:
-        # E 架构（需求⑩）worker 入口：JZToolsHub.exe --worker <插件id>
-        # （supervisor 拉起，端口/数据根/主应用地址经环境变量注入——见 jz_worker.py）
-        try:
-            _worker_id = sys.argv[sys.argv.index("--worker") + 1]
-        except (IndexError, ValueError):
-            sys.exit(2)
-        from jz_worker import run_worker
-        sys.exit(run_worker(_worker_id) or 0)
+    # 专用 CLI 先行（冻结运行由安装器与自动重启使用）：命中即退出——助手类参数
+    # 尤其不能落回正常启动（会与旧实例形成双实例，见 _handle_wait_restart）。
+    for _cli in (_handle_dep_check, _handle_wait_restart, _handle_worker):
+        _code = _cli(sys.argv)
+        if _code is not None:
+            sys.exit(_code)
+
     init_data_root()  # 迁移旧版程序目录数据 + 解析数据根目录（决定日志/配置位置）
-    setup_access_logging(app)
+    access_log.setup_access_logging(app)
     # 插件历史大模型配置清理（C1 归属上移，2026-10-09 决策 7）：主体在插件加载前对插件
     # 数据根做一次性清理——先收编历史明文 Key（加密落盘）、再清除插件侧副本、最后写退场
     # 标记（llm_migrated.flag，存在即跳过扫描）。不依赖任何插件注册；删除窗口见函数注释。
@@ -1425,7 +508,7 @@ if __name__ == "__main__":
     # ——必须在 register_plugin_backends 之后注册（before_request 排在 admin 鉴权门
     # 之后执行，鉴权管线先行；见 supervisor/mainapp_bridge.py 模块头）。
     try:
-        from supervisor.mainapp_bridge import install_worker_proxy
+        from supervisor.mainapp_bridge import install_worker_proxy, worker_units_snapshot
         install_worker_proxy(app, BASE_DIR)
         app.logger.info("E 架构反代桥已安装（worker 化插件 %d 个）",
                         len(worker_units_snapshot(jztools_data.get_data_root())))
@@ -1439,38 +522,5 @@ if __name__ == "__main__":
             app.logger.info("已清除 %d 个插件的待重启标记（插件后端已按当前代码加载）", _cleared)
     except Exception as _e:
         app.logger.warning("清除插件待重启标记失败：%s", _e)
-    host = os.environ.get("JZTOOLS_HOST", "0.0.0.0")
-    try:
-        port = int(os.environ.get("JZTOOLS_PORT", "5000"))
-    except ValueError:
-        port = 5000
-    if getattr(sys, "frozen", False):
-        # 打包运行（可上线）：waitress 多线程生产级 WSGI 服务器，禁用 debug/reloader
-        try:
-            from waitress import serve
-        except ImportError:
-            serve = None
-    else:
-        serve = None
-    if getattr(sys, "frozen", False):
-        # 打包运行：无控制台窗口，以系统托盘图标常驻后台（pystray 自带消息循环线程）
-        import threading
-        threading.Thread(
-            target=run_tray_icon, args=(host, port),
-            daemon=True, name="tray-icon",
-        ).start()
-        # 服务就绪后的系统级通知（托盘气泡；自动重启拉起的新实例同样触发）
-        threading.Thread(
-            target=notify_service_started, args=(host, port),
-            daemon=True, name="startup-notify",
-        ).start()
-    try:
-        if getattr(sys, "frozen", False) and serve is not None:
-            serve(app, host=host, port=port, threads=8)
-        elif getattr(sys, "frozen", False):
-            app.run(host=host, port=port, debug=False)
-        else:
-            # 源码开发模式：Flask 内置服务器（自动重载 + 调试）
-            app.run(host=host, port=port, debug=True)
-    finally:
-        shutdown_access_logging()
+    _host, _port = _resolve_server_addr()
+    _serve(app, _host, _port)
