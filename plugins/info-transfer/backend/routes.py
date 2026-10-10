@@ -1057,23 +1057,37 @@ def _extract_ppt_text(file_bytes):
         data = ole.openstream("PowerPoint Document").read()
         parts = []
         i, n = 0, len(data)
-        while i + 8 <= n:
-            rec_type = struct.unpack_from("<H", data, i + 2)[0]
-            rec_len = struct.unpack_from("<I", data, i + 4)[0]
-            if rec_type in (0x0FA0, 0x0FA8) and i + 8 + rec_len <= n and rec_len <= 0x100000:
-                body = data[i + 8:i + 8 + rec_len]
+        # T23：逐字节滑描换成 C 级 bytes.find 定位候选文本记录头（type 字段位于记录起始 +2）。
+        # 命中后仍按原口径校验 recLen 才消费，不合法只前进 1 字节——判定顺序与旧滑描等价，
+        # 但省掉了 20MB 流上 ≈2×10^7 次 struct.unpack_from（实测 15s 量级的主因）。
+        while True:
+            pos = -1
+            for pat in (b"\xa0\x0f", b"\xa8\x0f"):        # 0x0FA0 / 0x0FA8 的小端前两字节
+                p = data.find(pat, i + 2)
+                if p >= 0 and (pos < 0 or p < pos):
+                    pos = p
+            if pos < 2 or pos + 6 > n:
+                if pos < 0:
+                    break
+                i = pos + 1                               # 头部越界/贴边：从候选之后继续找
+                continue
+            start = pos - 2
+            rec_type = struct.unpack_from("<H", data, pos)[0]
+            rec_len = struct.unpack_from("<I", data, pos + 2)[0]
+            if start + 8 + rec_len > n or rec_len > 0x100000:
+                i = start + 1                             # 假头（recLen 越界）：前进 1 字节再找
+                continue
+            body = data[start + 8:start + 8 + rec_len]
+            try:
+                txt = body.decode("utf-16-le") if rec_type == 0x0FA0 else body.decode("gbk")
+            except Exception:
                 try:
-                    txt = body.decode("utf-16-le") if rec_type == 0x0FA0 else body.decode("gbk")
+                    txt = body.decode("cp1252")
                 except Exception:
-                    try:
-                        txt = body.decode("cp1252")
-                    except Exception:
-                        txt = ""
-                if txt:
-                    parts.append(txt)
-                i += 8 + rec_len
-            else:
-                i += 1
+                    txt = ""
+            if txt:
+                parts.append(txt)
+            i = start + 8 + rec_len
         text = _clean_doc_text("".join(parts)).strip()
         if not text:
             raise LeanUnsupported("ppt 无可提取文本（加密/纯图版），已按原件传输")
