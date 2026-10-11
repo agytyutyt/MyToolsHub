@@ -248,19 +248,8 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=""):
         def on_open(icon, item):
             window.show()
 
-        def on_admin(icon, item):
-            # 打开管理后台（G2-5）：业务面已对浏览器关闭（服务器壳身份门），
-            # 浏览器只保留管理后台入口；地址现读客户端配置（连接设置可改）
-            try:
-                from client_config import resolve_address, load_client_config
-                addr = resolve_address(build_cfg, load_client_config(build_cfg))
-                if not addr:
-                    log("tray -> admin：未配置服务器地址，取消打开")
-                    return
-                webbrowser.open(addr + "/admin")
-                log("tray -> admin: %s" % addr)
-            except Exception:
-                log("tray admin failed:\n" + traceback.format_exc())
+        # 管理后台入口不对用户展示（2026-10-11 二次调整）：托盘不放后台入口，
+        # 服务器端文档标注入口即可（README / 打包部署手册 §5.1）。
 
         def on_local_admin(icon, item):
             # 本地插件管理（原主界面悬浮入口迁入托盘，2026-10-08）：主窗口导航到本页
@@ -283,7 +272,6 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=""):
                 pystray.MenuItem("刷新页面", on_refresh),
                 pystray.MenuItem("打开窗口", on_open, default=True),
                 pystray.MenuItem("本地插件管理", on_local_admin),
-                pystray.MenuItem("打开管理后台", on_admin),
                 pystray.MenuItem("退出", on_exit),
             ),
         )

@@ -81,9 +81,9 @@
     });
   }
   function humanRuntime(rt) {
-    // 2026-10-11 需求②：server 条目用户装的是前端包 → 徽标「前端」（原「服务器」）；
-    // local（B 类与 C 类客户端工件）→「本地」；dep-slot →「依赖」。
-    return rt === 'server' ? '前端' : rt === 'dep-slot' ? '依赖' : '本地';
+    // 2026-10-11 需求②（二次调整）：server 条目=装前端副本、后端在服务器运行 →「在线」；
+    // local（B 类纯本地与 C 类客户端工件）→「离线降级」；dep-slot →「依赖」。
+    return rt === 'server' ? '在线' : rt === 'dep-slot' ? '依赖' : '离线降级';
   }
   function runtimeClass(rt) {
     return rt === 'server' ? 'server' : rt === 'dep-slot' ? 'dep' : 'local';

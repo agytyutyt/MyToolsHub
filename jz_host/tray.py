@@ -25,19 +25,11 @@ def _tray_icon_image():
 def run_tray_icon(host, port):
     """在后台线程运行系统托盘图标（仅打包运行，PyInstaller console=False）。
 
-    - 左键双击：打开默认浏览器进入管理后台（业务面对浏览器已关闭，2026-10-11 需求①）；
-    - 右键菜单：打开管理后台 / 退出服务（退出即结束进程）。
+    - 右键菜单：退出服务（退出即结束进程）。
+    - 管理后台入口不对用户展示（2026-10-11 二次调整）：浏览器入口已移除，
+      后台地址只标注在服务器端文档（README / 打包部署手册 §5.1）。
     """
-    import webbrowser
     import pystray
-
-    def _open_browser():
-        # 壳身份门（jz_host/shell_gate.py）后业务面对浏览器 403——托盘只开管理后台。
-        base = "http://127.0.0.1:%d" % port if host in ("0.0.0.0", "::") else "http://%s:%d" % (host, port)
-        try:
-            webbrowser.open(base + "/admin")
-        except Exception:
-            log.debug("托盘「打开管理后台」失败（不阻断）", exc_info=True)
 
     def _quit():
         # 打包运行的 GUI 程序：直接结束进程即可（waitress 由 OS 回收）
@@ -45,8 +37,6 @@ def run_tray_icon(host, port):
 
     try:
         menu = pystray.Menu(
-            pystray.MenuItem("打开管理后台", lambda icon, item: _open_browser()),
-            pystray.Menu.SEPARATOR,
             pystray.MenuItem("退出服务", lambda icon, item: _quit()),
         )
         icon = pystray.Icon("JZToolsHub", _tray_icon_image(), "JZ 工具箱", menu)
@@ -69,8 +59,6 @@ def notify_service_started(host, port):
     import socket
     import time
 
-    url = ("http://127.0.0.1:%d" % port) if host in ("0.0.0.0", "::") \
-        else "http://%s:%d" % (host, port)
     deadline = time.time() + 15
     while time.time() < deadline:
         try:
@@ -85,7 +73,7 @@ def notify_service_started(host, port):
         return  # 托盘未起来（如 pystray 初始化失败），静默放弃
     for _ in range(5):
         try:
-            icon.notify("服务已启动，管理后台：%s/admin" % url, "JZ 工具箱")
+            icon.notify("JZ 工具箱服务已启动", "JZ 工具箱")
             return
         except Exception:
             time.sleep(1.0)  # 托盘窗口可能尚未就绪，短暂重试

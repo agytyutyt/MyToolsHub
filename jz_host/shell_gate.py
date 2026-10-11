@@ -209,8 +209,9 @@ def _deny():
     普通权限 403 区分开（给接入密钥提示，不进会话失效分支）。"""
     gate_headers = {"X-JZ-Gate": "shell_required"}
     if request.path.startswith("/api/"):
+        # 管理后台入口不对用户面暴露（2026-10-11 二次调整）——只给"用桌面客户端"的指引
         return jsonify({"error": "shell_required",
-                        "hint": "业务功能仅限桌面客户端访问；管理后台请访问 /admin"}), 403, gate_headers
+                        "hint": "业务功能仅限桌面客户端访问（接入密钥请联系管理员）"}), 403, gate_headers
     global _html_cache
     if _html_cache is None and _static_dir:
         try:
