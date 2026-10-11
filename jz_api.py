@@ -148,3 +148,20 @@ def save_user_llm(username, config):
         return bool(fn(username, config or {}))
     except Exception:
         return False
+
+
+# ---- 壳身份门（2026-10-11 需求①浏览器退役）----
+# 接入密钥真源在框架模块 jz_host/shell_gate.py（数据根 config/shell-token.json，
+# 单一写方=shell_gate）。admin 管理面经本门面取用（懒 import，避免导入环），
+# 只做展示/复制/重置的「界面与鉴权」——重置后所有已分发旧密钥立即失效。
+
+def shell_token_info():
+    """壳门接入密钥信息（token 明文/enforce/allowed_ips/token 文件路径等 dict）。"""
+    from jz_host import shell_gate
+    return shell_gate.token_info()
+
+
+def shell_token_reset():
+    """重置壳门接入密钥（保留 enforce/allowed_ips），返回新密钥信息。"""
+    from jz_host import shell_gate
+    return shell_gate.reset_token()

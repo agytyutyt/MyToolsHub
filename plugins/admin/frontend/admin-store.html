@@ -127,7 +127,9 @@
       <ul>
         <li>上架 = 包上传 + 机器校验 → <b>待审核</b>；审核通过即发布，对客户端可见。</li>
         <li><code>server</code> 条目发布时自动部署后端包（含备份，可回滚）；桌面端「安装」= 仅装前端包。</li>
-        <li>下架最新版 = 客户端可见性自动回落旧版（已装新版客户端不降级）。</li>
+        <li><b>C 类配对</b>（2026-10-11）：server 条目可附「客户端工件包」（local-&lt;id&gt;，同版本号）——
+            一次审核发布两条目（商店只出客户端工件卡，后端包发布即部署、不出卡）。</li>
+        <li>下架最新版 = 客户端可见性自动回落旧版（已装新版客户端不降级）；配对条目同进同出。</li>
         <li>同 id 同版本号（含已驳回/已下架记录）拒绝重提——版本占号，问题包须升版重来。</li>
         <li>审核纪律：<b>装机冒烟为必做项</b>（白名单外取数等运行期问题在此暴露）；四眼为软约定。</li>
         <li>权限（2026-10-08 修订）：<b>提交上架全员可用</b>；<b>审核 / 驳回 / 下架 / 重新部署仅管理员与超级管理员</b>（内网信任模型 + 会话鉴权 + 机器校验兜底）。</li>
@@ -170,6 +172,10 @@
         <div class="form-row st-span2" id="row-frontend" hidden>
           <label for="up-frontend">前端包（与后端包同版本号成对）</label>
           <input type="file" id="up-frontend" class="admin-input" accept=".zip">
+        </div>
+        <div class="form-row st-span2" id="row-client" hidden>
+          <label for="up-client">客户端工件包（C 类配对，可选：local-&lt;id&gt; 包，与后端包同版本号——一次审核发布即部署）</label>
+          <input type="file" id="up-client" class="admin-input" accept=".zip">
         </div>
         <div class="form-row">
           <label for="up-name">显示名</label>
@@ -214,10 +220,10 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/plugin/admin/js/admin-common.js?v=10"></script>
+  <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=11"></script>
+<script src="/plugin/admin/js/admin-store.js?v=12"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>

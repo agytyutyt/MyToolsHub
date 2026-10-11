@@ -65,7 +65,7 @@ def make_plugin_zip(path, pid, requires_names):
 def main():
     work = tempfile.mkdtemp(prefix="dep-gate-")
     try:
-        app_dir = os.path.abspath(os.path.join(ROOT, "deploy", "服务端", "JZToolsHub-v2.3.23"))
+        app_dir = os.path.abspath(os.path.join(ROOT, "deploy", "服务端", "JZToolsHub"))
         env = dict(os.environ, JZTOOLS_DATA_ROOT=os.path.join(work, "d"),
                    JZTOOLS_PORT=str(SERVER_PORT), JZTOOLS_HOST="127.0.0.1")
         srv = subprocess.Popen([os.path.join(app_dir, "JZToolsHub.exe")], cwd=app_dir,

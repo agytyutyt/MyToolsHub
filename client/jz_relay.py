@@ -46,11 +46,12 @@ class _OwnRelay:
 
 
 class JzRelay:
-    def __init__(self, upstream, address_getter, mirror, whitelist, log=None):
+    def __init__(self, upstream, address_getter, mirror, whitelist, log=None, token_getter=None):
         self._upstream = upstream
         self._addr = address_getter
         self._mirror = mirror
         self._whitelist = whitelist or {}
+        self._token = token_getter or (lambda: "")
         self._log = log or (lambda m: None)
 
     def own(self, local_id):
@@ -88,6 +89,10 @@ class JzRelay:
         cookie = self._mirror.header()
         if cookie:
             headers["Cookie"] = cookie
+        # 壳标识（2026-10-11 需求① G2-2）：服务器壳门按此放行业务面（/api/... 属业务面）
+        token = self._token()
+        if token:
+            headers["X-JZ-Shell"] = token
         r = self._upstream.request(method, addr + path, headers=headers,
                                    timeout=kw.pop("timeout", (5, 120)), **kw)
         if r.status_code == 401:

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!-- 壳身份门拒绝页（2026-10-11 需求①浏览器退役）：浏览器直连业务面时由 jz_host/shell_gate 返回。
+     自包含样式（不依赖 /static/css，保证任何拒绝场景都能渲染）。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JZ 工具箱</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #f1f3f4; color: #202124;
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(60,64,67,.2);
+            padding: 48px 56px; max-width: 520px; text-align: center; }
+    .logo { width: 64px; height: 64px; border-radius: 16px; background: #4285F4; color: #fff;
+            font-size: 34px; font-weight: 700; line-height: 64px; margin: 0 auto 20px; }
+    h1 { font-size: 20px; margin-bottom: 12px; }
+    p { font-size: 14px; color: #5f6368; line-height: 1.8; }
+    a { color: #4285F4; text-decoration: none; font-weight: 600; }
+    a:hover { text-decoration: underline; }
+    .hint { margin-top: 18px; padding-top: 16px; border-top: 1px solid #e8eaed; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">JZ</div>
+    <h1>业务功能仅限桌面客户端访问</h1>
+    <p>请使用桌面客户端（JZClient）打开工具箱。<br>管理员可以在浏览器中进入<a href="/admin">管理后台</a>。</p>
+    <p class="hint">浏览器访问被拒绝（壳身份门）· 如有疑问请联系管理员</p>
+  </div>
+</body>
+</html>

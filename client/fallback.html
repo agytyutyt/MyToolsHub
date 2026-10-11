@@ -3,16 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>无法连接服务器</title>
+<title>连接设置</title>
 <style>
   body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#f1f3f4;margin:0;
        display:flex;align-items:center;justify-content:center;min-height:100vh}
   .card{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.12);
         padding:32px 40px;max-width:520px;width:92%}
-  h1{font-size:20px;margin:0 0 8px;color:#d93025}
-  p{color:#5f6368;margin:6px 0;line-height:1.6}
+  h1{font-size:20px;margin:0 0 8px;color:#202124}
+  p{color:#5f6368;margin:6px 0;line-height:1.6;font-size:14px}
   label{display:block;margin:16px 0 4px;color:#202124;font-size:13px}
   input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #dadce0;border-radius:6px;font-size:14px}
+  input.warn{border-color:#f9ab00}
   .row{margin-top:20px;display:flex;gap:12px}
   button{flex:1;padding:10px 0;border:0;border-radius:6px;font-size:14px;cursor:pointer}
   .retry{background:#1a73e8;color:#fff}
@@ -23,13 +24,16 @@
 </head>
 <body>
 <div class="card">
-  <h1>无法连接服务器</h1>
-  <p>客户端已启动，但远程服务器不可达。本地插件不受影响，<a href="/local-admin">打开本地插件管理</a>（批次 4 上线）。</p>
+  <h1 id="title">连接设置</h1>
+  <p id="lead">填写服务器地址与接入密钥（接入密钥请向管理员索取——服务器已启用壳身份门，
+  业务功能仅限桌面客户端访问）。<a href="/local-admin">打开本地插件管理</a>（离线可用）。</p>
   <p id="err"></p>
   <label for="addr">服务器地址</label>
   <input id="addr" placeholder="例如 192.168.1.10:5000">
+  <label for="token">接入密钥</label>
+  <input id="token" placeholder="管理员在管理后台「系统设置」页查看/重置">
   <div class="row">
-    <button class="save" onclick="save()">保存地址</button>
+    <button class="save" onclick="save()">保存</button>
     <button class="retry" onclick="retry()">重试</button>
   </div>
   <div id="msg"></div>
@@ -41,15 +45,31 @@ fetch("/local-api/config").then(r=>r.json()).then(c=>{
   document.getElementById("addr").value = c.address || "";
   if (c.health && c.health.last_error)
     document.getElementById("err").textContent = "最近错误：" + esc(c.health.last_error);
+  // 页面语义按状态调整：未配地址=连不上；配了地址但被壳门拒=缺密钥
+  if (c.gate_blocked) {
+    document.getElementById("title").textContent = "需要接入密钥";
+    document.getElementById("lead").innerHTML =
+      '服务器已启用壳身份门，当前接入密钥未配置或不正确。' +
+      '请向管理员索取后填入下方"接入密钥"并保存，再点「重试」。';
+    document.getElementById("token").classList.add("warn");
+  } else if (!c.address) {
+    document.getElementById("title").textContent = "无法连接服务器";
+  }
+  if (c.token_set) document.getElementById("token").placeholder = "已配置（留空=保持不变）";
 }).catch(()=>{});
 function save(){
   const addr = document.getElementById("addr").value.trim();
+  const body = {address: addr};
+  const token = document.getElementById("token").value.trim();
+  // 密钥留空且已配置 = 保持不变（占位符语义）；填了值才提交改动
+  if (token) body.token = token;
   fetch("/local-api/config/address", {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({address: addr})})
+    body: JSON.stringify(body)})
     .then(r=>r.json()).then(r=>{
       document.getElementById("msg").textContent =
-        "已保存" + (r.address ? "：" + esc(r.address) : "（已清空）") + "，点「重试」生效。";
+        "已保存" + (r.address ? "：" + esc(r.address) : "（已清空）") +
+        (r.token_set ? "（接入密钥已配置）" : "（未配置接入密钥）") + "，点「重试」生效。";
     }).catch(()=>{ document.getElementById("msg").textContent = "保存失败"; });
 }
 function retry(){ location.href = "/"; }

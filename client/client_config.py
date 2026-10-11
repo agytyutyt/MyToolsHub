@@ -123,6 +123,31 @@ def resolve_address(build_cfg, client_cfg):
             or normalize_address((build_cfg.get("server") or {}).get("default_address")))
 
 
+# 壳标识头（2026-10-11 需求①浏览器退役）：服务器壳身份门（jz_host/shell_gate.py）凭它
+# 放行业务面。旧版服务器不识别该头 → 无副作用，因此客户端可先于服务端发版。
+SHELL_HEADER = "X-JZ-Shell"
+
+
+def resolve_token(build_cfg, client_cfg):
+    """壳门接入密钥解析顺序：客户端配置 remote_token → 构建配置 server.default_token → 空。
+
+    空值=未配置（服务器壳门会以 403 shell_required 拒绝业务面，管理面不受影响）。
+    每次现读客户端配置——连接设置保存密钥后免重启生效。
+    """
+    tok = ""
+    if isinstance(client_cfg, dict):
+        tok = str(client_cfg.get("remote_token") or "").strip()
+    if not tok:
+        tok = str(((build_cfg.get("server") or {}).get("default_token")) or "").strip()
+    return tok
+
+
+def shell_headers(build_cfg, client_cfg):
+    """指向服务器的请求统一附加壳标识头；未配置密钥返回 {}（不带，服务端 403 给提示）。"""
+    tok = resolve_token(build_cfg, client_cfg)
+    return {SHELL_HEADER: tok} if tok else {}
+
+
 def static_dir():
     """主界面 static 副本：客户端自带一份（随包发版）。"""
     candidates = [

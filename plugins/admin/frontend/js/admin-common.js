@@ -63,10 +63,11 @@
     return window[SESSION];
   }
 
-  // 加载站点名称到 logo 标题（.logo-title，来自 /api/tools 的 site.title）
+  // 加载站点名称到 logo 标题（.logo-title，来自 /api/site 的 site.title）。
+  // 2026-10-11 需求①：/api/tools 已是壳门后的业务面（浏览器 403），管理面只取轻量站点信息。
   async function loadSiteTitle() {
     try {
-      const res = await fetch('/api/tools');
+      const res = await fetch('/api/site');
       const data = await res.json().catch(() => ({}));
       const siteName = (data.site && data.site.title) || '';
       if (!siteName) return;

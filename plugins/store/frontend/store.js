@@ -1,17 +1,16 @@
 /* 插件商店页逻辑（零构建原生 JS；?v=1 起版，改动须递增引用处）。
  *
- * 数据：GET /plugin/store/api/catalog?all=1（服务器会话鉴权，浏览器与桌面端同页）。
+ * 数据：GET /plugin/store/api/catalog?all=1（服务器会话鉴权）。
+ * 2026-10-11 需求①②：浏览器业务面已退役（壳身份门），本页只在桌面端壳内出现——
  * 桌面端（html.jz-shell）：本地状态经 /local-api/plugins 取得，安装/生命周期操作走
- * /local-api/store/* 与 /local-api/plugins/*（同源，永不中继）；浏览器路径只有浏览与
- * 下载（安装类按钮由 CSS 门控隐藏，红线 2）。
+ * /local-api/store/* 与 /local-api/plugins/*（同源，永不中继）；浏览器下载分支已删除。
+ * 每插件一张卡：C 类的配对服务器工件条目由商店投影去重（不出卡，管理面可见）。
  */
 (function () {
   'use strict';
 
   // 壳内自判（批次 10）：本页经工具壳 iframe 内嵌 = 桌面端 → 给 <html> 打 jz-shell，
-  // 激活 .jz-only 操作列（安装/下载包）。中继透传不注入该类（A 类页面框架 chrome 由壳页承载），
-  // 不自判则桌面端永远只有浏览器路径按钮——而 iframe 内的下载会静默失败（2026-10-07 真机报告）。
-  // 浏览器路径下本页是顶层窗口 → 不打类 → 只显示浏览器下载按钮（红线 2 不变）。
+  // 激活 .jz-only 操作列（安装/下载包）。保留自判兜底（防误部署到未启门的环境时按钮全灭）。
   try {
     if (window.self !== window.top) {
       document.documentElement.classList.add('jz-shell');
@@ -82,7 +81,9 @@
     });
   }
   function humanRuntime(rt) {
-    return rt === 'server' ? '服务器' : rt === 'dep-slot' ? '依赖' : '本地';
+    // 2026-10-11 需求②：server 条目用户装的是前端包 → 徽标「前端」（原「服务器」）；
+    // local（B 类与 C 类客户端工件）→「本地」；dep-slot →「依赖」。
+    return rt === 'server' ? '前端' : rt === 'dep-slot' ? '依赖' : '本地';
   }
   function runtimeClass(rt) {
     return rt === 'server' ? 'server' : rt === 'dep-slot' ? 'dep' : 'local';
@@ -215,10 +216,8 @@
     }
     // 下载（2026-10-08 需求：**全部插件**都提供「安装」「下载」两个按钮，按钮上不写说明）——
     // 桌面端「下载」= 仅下载不安装（能力层落数据目录 downloads\）；server 条目取**客户端工件
-    // （前端包）**，后端包不对用户暴露；浏览器路径 server 条目走 ?artifact=frontend，其余下载自身包。
+    // （前端包）**，后端包不对用户暴露。浏览器下载分支已删除（2026-10-11 需求①）。
     html += dlButtonHtml(e, '下载');
-    html += '<button class="st-btn-ghost st-browser-dl" data-act="download" data-id="' + esc(e.id)
-      + '" data-ver="' + esc(e.version) + '">下载</button>';
     return html;
   }
 
@@ -410,6 +409,12 @@
         if (e.runtime === 'server') {
           setHiddenTool(e.id, false);        // 安装即恢复本机显示（2026-10-08）
         }
+        if (e.runtime === 'local' && e.server_data) {
+          // C 类客户端工件安装成功（2026-10-11 需求② G3-10）：本机隐藏配对服务器工件卡片
+          // （网格只出本地卡，避免"本地引擎/服务器处理"双卡混淆）；卸载时恢复显示。
+          // 服务器工件照常在服务器运行（部署/撤下只在商店管理·超管）。
+          setHiddenTool(String(e.id).replace(/^local-/, ''), true);
+        }
         var note = [];
         var needRestart = !!d.restart_required
           || !!(d.pending_components && d.pending_components.length);
@@ -447,13 +452,7 @@
     var ver = btn.getAttribute('data-ver');
     var e = findEntry(id);
     if (!e) { msg('条目不存在', true); return; }
-    if (act === 'download') {                       // 浏览器路径：普通文件下载（server 条目取前端包工件）
-      var q = '?via=browser' + (e.runtime === 'server' ? '&artifact=frontend' : '');
-      window.location = '/plugin/store/api/download/' + encodeURIComponent(id)
-        + '/' + encodeURIComponent(ver) + q;
-      return;
-    }
-        if (act === 'download-local') {                 // 桌面端：校验 → 进度条下载（批次 10 状态机）
+    if (act === 'download-local') {                 // 桌面端：校验 → 进度条下载（批次 10 状态机）
       if (btn.dataset.busy) return;
       btn.dataset.busy = '1';
       var dlLabel = btn.querySelector('.st-dl-label') || btn;
@@ -556,6 +555,10 @@
         html: '清除该插件的数据（数据根 plugins 下的插件目录：配置 / 缓存 / 本地业务数据）？<br>'
           + '选择「保留数据」可稍后再装回。' });
       post('/local-api/plugins/uninstall', { id: id, purge_data: purge }).then(function (d) {
+        if (ent && ent.server_data) {
+          // 卸载 C 类客户端工件 → 恢复配对服务器工件的本机显示（回退中继直出 UI，G3-10）
+          setHiddenTool(String(id).replace(/^local-/, ''), false);
+        }
         msg(d.ok ? ('已卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留在数据目录）'))
                  : ('卸载失败：' + (d.error || '')), !d.ok);
         loadLocalState().then(render);

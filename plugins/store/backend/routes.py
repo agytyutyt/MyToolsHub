@@ -110,7 +110,42 @@ def flat_item(entry, ver):
     # dep-slot 条目：provides 供客户端预检把缺依赖映射到可装依赖包（O1 会合点）
     if entry.get("provides"):
         item["provides"] = list(entry["provides"])
+    # 类别透出（2026-10-11 需求②）：kind（B/C 之分，安装后 /local-api/plugins 亦有）
+    # 与 server_data（V5 数据出机明示）——未安装条目也要能显示「数据出机」徽标
+    if entry.get("kind"):
+        item["kind"] = entry.get("kind")
+    if entry.get("server_data"):
+        item["server_data"] = True
     return item
+
+
+def paired_server_ids(catalog):
+    """应从商店列表隐去的「配对服务器工件」条目 id 集合（2026-10-11 需求②）。
+
+    C 类双工件在目录里是两条目：客户端工件（local-<id>，出卡）+ 服务器工件（<id>，
+    发布即部署、管理面可见）。「插件」页签每插件只出一张卡：
+    - 显式配对：server 版本记录带 client_entry（配对上架写入）→ 隐去该 server 条目；
+    - 历史条目自动识别：存在 local-<id> 条目且 server_data=true → 隐去 <id>。
+    仅影响商店读面投影；管理面 /plugin/admin/store/list 不受影响（部署/回滚/撤包照旧）。
+    """
+    entries = catalog.get("packages") or []
+    auto = set()
+    for entry in entries:
+        eid = str(entry.get("id") or "")
+        if eid.startswith("local-") and entry.get("server_data"):
+            auto.add(eid[len("local-"):])
+    hidden = set()
+    for entry in entries:
+        if entry.get("runtime") != "server":
+            continue
+        if str(entry.get("id") or "") in auto:
+            hidden.add(str(entry.get("id")))
+            continue
+        for ver in entry.get("versions") or []:
+            if str(ver.get("client_entry") or ""):
+                hidden.add(str(entry.get("id")))
+                break
+    return hidden
 
 
 # ===================== 统计（唯一写点） =====================
@@ -158,13 +193,18 @@ def register(app) -> None:
 
     @app.get(f"{API_PREFIX}/catalog")
     def st_catalog():
-        """flat 投影（每 id 最新 published 版）；?all=1 附版本历史（详情页用）。"""
+        """flat 投影（每 id 最新 published 版）；?all=1 附版本历史（详情页用）。
+
+        配对服务器工件不出商店卡（2026-10-11 需求②，paired_server_ids）。"""
         user = _viewer()
         if user is None:
             return jsonify({"error": "未登录或登录已过期"}), 401
         catalog = load_catalog()
+        skip = paired_server_ids(catalog)
         packages = []
         for entry in catalog["packages"]:
+            if str(entry.get("id") or "") in skip:
+                continue
             ver = latest_published(entry)
             if ver is None:
                 continue

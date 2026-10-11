@@ -18,7 +18,7 @@ from flask import Flask, jsonify, request, send_from_directory
 
 import jz_api
 import jztools_data
-from jz_host import access_log, dep_bootstrap, llm_routes, plugin_loader, tray
+from jz_host import access_log, dep_bootstrap, llm_routes, plugin_loader, shell_gate, tray
 
 # ★ 以下名字经 from-import 进入本模块命名空间（**勿改为 plugin_loader.xxx 模块限定调用**）：
 #   台架（admin-config-lock 等）在进程内对 app 模块的同名属性打桩（如 load_registry、
@@ -94,6 +94,10 @@ app.config["MAX_CONTENT_LENGTH"] = 640 * 1024 * 1024
 
 # 请求/响应外壳（访问日志 / gzip / 安全头 / 静态缓存）与 LLM 蓝图装配
 access_log.install(app)
+# 壳身份门（2026-10-11 需求①浏览器退役）：业务面仅桌面客户端可达（X-JZ-Shell 接入密钥），
+# 管理面白名单照常浏览器访问。必须先于插件注册安装——before_request 按注册序执行，
+# 运行序 = 本门 → admin 登录门 → worker 反代桥（见 jz_host/shell_gate.py 模块头）。
+shell_gate.install(app, static_dir=app.static_folder)
 llm_routes.install(app)
 
 

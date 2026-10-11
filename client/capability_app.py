@@ -17,6 +17,7 @@ REST 无 WS（方案 §2.1 已核实）。
 import json
 import os
 import re
+import secrets
 import shutil
 import sys as _sys
 import tempfile
@@ -43,6 +44,29 @@ _HOP_HEADERS = {
 }
 _DROP_RESP = {"content-length", "transfer-encoding", "connection", "keep-alive", "content-encoding"}
 
+# 本地端口壳自证（2026-10-11 需求① G2-6）：壳（WebView2）启动经 /shell-boot 种持久
+# Cookie，之后本端口的业务路由（含 /local-api/*）一律要求该 Cookie——浏览器直开
+# 本地端口（托盘旧「用浏览器打开」那类路径）拿不到壳身份代理。Cookie 值=进程内
+# 随机 run token（JZCLIENT_SHELL_TOKEN 环境变量仅供台架/验收覆盖）。
+SHELL_COOKIE = "jz_shell"
+_LOCAL_EXEMPT_EXACT = frozenset({"/favicon.ico", "/shell-boot"})
+
+_GATE_BLOCK_HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>需要接入密钥</title><style>
+body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#f1f3f4;margin:0;
+display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.12);
+padding:32px 40px;max-width:520px;width:92%;text-align:center}
+h1{font-size:19px;margin:0 0 8px;color:#b06000}p{color:#5f6368;line-height:1.7;font-size:14px}
+a{display:inline-block;margin-top:14px;padding:9px 28px;background:#1a73e8;color:#fff;
+border-radius:6px;text-decoration:none;font-size:14px}
+</style></head><body><div class="card">
+<h1>服务器要求接入密钥</h1>
+<p>服务器已启用壳身份门：业务功能仅限桌面客户端访问。<br>
+当前客户端的接入密钥未配置或不正确，请向管理员索取后填写。</p>
+<a href="/connection" target="_top">打开连接设置</a>
+</div></body></html>"""
+
 
 class RemoteHealth:
     """远程健康状态（T09 探针口径：GET /login 匿名可达即认为服务在）。"""
@@ -65,8 +89,11 @@ class RemoteHealth:
 
 def create_capability_app(build_cfg, client_cfg, address, static_dir,
                           local_plugins_dir, fallback_file, on_address_change=None,
-                          data_dir=None, executor=None, log=None):
-    """装配能力层 Flask 应用。address=None 时所有页面请求走本地兜底页。"""
+                          data_dir=None, executor=None, log=None, shell_token=None):
+    """装配能力层 Flask 应用。address=None 时所有页面请求走本地兜底页。
+
+    shell_token：本地端口壳自证的 run token（client_main 生成并同步传给壳窗口造
+    boot URL；缺省进程内随机）。"""
     _log = log or (lambda m: None)
     app = Flask(
         __name__,
@@ -77,9 +104,12 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     health = RemoteHealth()
     upstream = requests.Session()
     state = {"address": address}
+    # 壳自证 run token + 服务器壳门状态（G2-4：403 shell_required 的提示面）
+    shell_run_token = shell_token or secrets.token_urlsafe(24)
+    gate = {"blocked": False, "ts": 0.0, "message": ""}
 
     # ---- 会话镜像 / 本地插件注册表 / jz_relay 门面（批次 3 T14/T16/T17） ----
-    from client_config import data_dir as _cfg_data_dir, whitelist_path
+    from client_config import data_dir as _cfg_data_dir, whitelist_path, resolve_token, load_client_config
     _data_dir = data_dir or _cfg_data_dir(build_cfg)
     mirror = SessionMirror(os.path.join(_data_dir, "session.bin"), _log)
     local_manifests = local_registry.scan_local_plugins(local_plugins_dir, _log)
@@ -89,7 +119,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     except Exception:
         whitelist = {"allow": []}
         _log("relay_whitelist.json 加载失败，jz_relay 全拒绝")
-    relay = JzRelay(upstream, lambda: state["address"], mirror, whitelist, _log)
+    relay = JzRelay(upstream, lambda: state["address"], mirror, whitelist, _log,
+                    token_getter=lambda: resolve_token(build_cfg, load_client_config(build_cfg)))
     _sys.modules["jz_relay"] = relay          # 插件后端 import jz_relay 即用
 
     # ---- 本地插件身份注入（批次 9 T-O9-4 / F1，Q4 拍板）----
@@ -234,12 +265,53 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         resp.status_code = 503
         return resp
 
+    # ---------------- 本地端口壳自证（G2-6，永不中继） ----------------
+
+    @app.before_request
+    def _shell_self_guard():
+        """本端口的业务路由一律要求壳自证 Cookie；/static、favicon、boot 本身放行。"""
+        path = request.path
+        if path in _LOCAL_EXEMPT_EXACT or path.startswith("/static/"):
+            return None
+        if request.cookies.get(SHELL_COOKIE) == shell_run_token:
+            return None
+        _log("本地端口壳自证拦截：%s %s（无壳 Cookie，疑似浏览器直开）" % (request.method, path))
+        return Response(_GATE_BLOCK_HTML, status=403, content_type="text/html; charset=utf-8")
+
+    @app.get("/shell-boot")
+    def shell_boot():
+        """壳窗口的启动引导：校验 run token → 种持久 Cookie → 302 到干净 URL。
+
+        Cookie 带一年 Max-Age（WebView2 持久 profile 存得下）；每次启动壳都会重新
+        走 boot，即使 Cookie 被 profile 清理也能自愈。next 仅接受本站相对路径。
+        """
+        if request.args.get("_shell", "") != shell_run_token:
+            _log("shell-boot 校验失败（run token 不符）")
+            return Response(_GATE_BLOCK_HTML, status=403, content_type="text/html; charset=utf-8")
+        nxt = request.args.get("next") or "/"
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = "/"
+        resp = Response(status=302)
+        resp.headers["Location"] = nxt
+        resp.set_cookie(SHELL_COOKIE, shell_run_token, max_age=365 * 24 * 3600,
+                        httponly=True, samesite="Lax", path="/")
+        return resp
+
+    @app.get("/connection")
+    def connection_page():
+        """连接设置页（fallback.html 复用）：地址 + 接入密钥；壳内导航/提示页跳转用。"""
+        return send_from_directory(fallback_dir_or(app), "fallback.html")
+
     # ---------------- 本地接口（永不中继） ----------------
 
     @app.get("/local-api/config")
     def local_config():
+        from client_config import resolve_token, load_client_config
         return jsonify({
             "address": state["address"] or "",
+            "token_set": bool(resolve_token(build_cfg, load_client_config(build_cfg))),
+            "gate_blocked": gate["blocked"],
+            "gate_message": gate["message"],
             "product": build_cfg.get("product"),
             "webview2": build_cfg.get("webview2"),
             "health": health.snapshot(),
@@ -252,14 +324,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         addr = normalize_address(data.get("address"))
         cfg = dict(client_cfg)
         cfg["remote_address"] = addr or ""
+        # 接入密钥（G2-3）：随地址同一表单保存；显式传 token 才改（旧前端只传 address 不受影响）
+        if "token" in data:
+            cfg["remote_token"] = str(data.get("token") or "").strip()
         save_client_config(build_cfg, cfg)
         state["address"] = addr
+        gate["blocked"] = False          # 配置已变，门状态重判（下一次请求见分晓）
+        gate["message"] = ""
         if on_address_change:
             try:
                 on_address_change(addr)
             except Exception:
                 pass
-        return jsonify({"ok": True, "address": addr or ""})
+        from client_config import resolve_token, load_client_config
+        return jsonify({"ok": True, "address": addr or "",
+                        "token_set": bool(resolve_token(build_cfg, load_client_config(build_cfg)))})
 
     @app.get("/local-api/health")
     def local_health():
@@ -531,8 +610,11 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             argv = [_sys.executable, script, "--await-pid", str(my_pid)]
             cwd = os.path.dirname(script)
         flags = getattr(_sp, "DETACHED_PROCESS", 0) | getattr(_sp, "CREATE_NEW_PROCESS_GROUP", 0)
+        # 壳自证 run token 随环境传给新实例（G2-6）：否则重启后新 token 与壳里已种的
+        # Cookie 不匹配，自动重启后整个 UI 会被本地壳门挡在门外。
+        child_env = dict(os.environ, JZCLIENT_SHELL_TOKEN=shell_run_token)
         try:
-            proc = _sp.Popen(argv, cwd=cwd, creationflags=flags, close_fds=True)
+            proc = _sp.Popen(argv, cwd=cwd, creationflags=flags, close_fds=True, env=child_env)
         except Exception as exc:
             _log("restart：拉起新实例失败：%r（argv=%r）" % (exc, argv))
             return jsonify({"ok": False, "error": "拉起新实例失败：%s" % exc}), 500
@@ -1087,6 +1169,9 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 parts.append(mc)
             if parts:
                 h["Cookie"] = "; ".join(parts)
+        # 壳标识（需求① G2-2）：服务器壳门凭此放行业务面；未配置密钥=不带（服务端 403 给提示）
+        from client_config import shell_headers, load_client_config
+        h.update(shell_headers(build_cfg, load_client_config(build_cfg)))
         return h
 
     def forward(path):
@@ -1111,11 +1196,27 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             health.mark(False, "%s: %s" % (type(exc).__name__, exc))
             return _fallback_response(upstream_error=str(exc))
         health.mark(True)
+        # 服务器壳门拒绝（G2-4）：接入密钥缺失/不正确——专用提示面，**不进**会话失效
+        # 分支（不清会话镜像，登录态与门状态无关）；页面给本地提示页，API 透传 JSON 契约。
+        if r.status_code == 403 and r.headers.get("X-JZ-Gate") == "shell_required":
+            gate["blocked"] = True
+            gate["ts"] = time.time()
+            gate["message"] = "接入密钥未配置或不正确，请向管理员索取并在连接设置中填写"
+            _log("服务器壳门拒绝（%s %s）：接入密钥缺失或不正确" % (request.method, path))
+            if _wants_page():
+                return Response(_GATE_BLOCK_HTML, status=403,
+                                content_type="text/html; charset=utf-8")
+            return jsonify({"error": "shell_required", "hint": gate["message"],
+                            "gate_blocked": True}), 403
         sc = r.headers.get("Set-Cookie")          # 滑动续期/登录都会重发
         if sc:
             mirror.update_from_set_cookie(sc)
         if r.status_code == 401:                  # 会话失效统一信号
             mirror.clear()
+        if r.status_code != 403:                  # 门已放行一次即视为密钥正常（状态复位）
+            if gate["blocked"]:
+                gate["blocked"] = False
+                gate["message"] = ""
         out = [(k, v) for k, v in r.headers.items() if k.lower() not in _DROP_RESP]
         return Response(r.iter_content(chunk_size=64 * 1024),
                         status=r.status_code, headers=out)
@@ -1138,14 +1239,22 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     # ---------------- 清单合并与本地工具元数据（T16） ----------------
 
-    def _local_only_tools_response():
+    def _local_only_payload(gate_blocked=False):
         # F5（批次 9 T-O9-5，Q3 配套）：远程不可达/未配置时降级为仅本地条目——
         # 本地条目（local-plugins）是离线网格的唯一载体，A 类离线显兜底页（既有口径）
         enabled = [m for m in local_manifests
                    if local_states.get(m.get("id"), {}).get("status") != "disabled"]
-        return jsonify({"tools": local_registry.tool_items(enabled, 1000),
-                        "categories": [dict(local_registry.LOCAL_CATEGORY)],
-                        "degraded": True})
+        payload = {"tools": local_registry.tool_items(enabled, 1000),
+                   "categories": [dict(local_registry.LOCAL_CATEGORY)],
+                   "degraded": True}
+        if gate_blocked:
+            # 服务器壳门拒绝（G2-4）：带标记让主界面给可执行指引（main.js 渲染横幅）
+            payload["gate_blocked"] = True
+            payload["gate_message"] = gate["message"]
+        return payload
+
+    def _local_only_tools_response():
+        return jsonify(_local_only_payload())
 
     @app.get("/api/tools")
     def api_tools_merged():
@@ -1161,6 +1270,13 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             health.mark(False, "%s: %s" % (type(exc).__name__, exc))
             return _local_only_tools_response()
         health.mark(True)
+        # 服务器壳门拒绝（G2-4）：降级仅本地清单 + gate_blocked 标记（主界面渲染指引横幅）
+        if r.status_code == 403 and r.headers.get("X-JZ-Gate") == "shell_required":
+            gate["blocked"] = True
+            gate["ts"] = time.time()
+            gate["message"] = "接入密钥未配置或不正确，请向管理员索取并在连接设置中填写"
+            _log("服务器壳门拒绝 /api/tools：接入密钥缺失或不正确（降级仅本地清单）")
+            return jsonify(_local_only_payload(gate_blocked=True))
         sc = r.headers.get("Set-Cookie")
         if sc:
             mirror.update_from_set_cookie(sc)

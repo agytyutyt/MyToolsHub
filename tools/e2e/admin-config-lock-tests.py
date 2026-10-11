@@ -190,6 +190,12 @@ def seed_admin(mod):
 
 # ===================== B. tools.json（REGISTRY_LOCK） =====================
 
+def _shell_token():
+    """壳门密钥（门在首个请求时生成 token 文件，读之即可；B1 反证轮同样需要）。"""
+    import jz_host.shell_gate as _sg
+    return _sg.token_info()["token"]
+
+
 def run_tools(A, locked):
     """两线程并发切换两个不同工具的 enabled，返回出现丢失更新的轮号列表。"""
     real_lock, real_load = A.REGISTRY_LOCK, A.load_registry
@@ -201,16 +207,19 @@ def run_tools(A, locked):
         for r in range(ROUNDS):
             e1, e2 = tool_round_values(r)
 
+            # 壳身份门（2026-10-11 需求①）：/api/tools/visibility 属业务面，台架以壳身份带密钥
+            hdr = {"X-JZ-Shell": _shell_token()}
+
             def w1():
                 try:
-                    A.app.test_client().post("/api/tools/visibility",
+                    A.app.test_client().post("/api/tools/visibility", headers=hdr,
                                              json={"type": "tool", "id": "lock-t1", "enabled": e1})
                 except Exception:
                     pass
 
             def w2():
                 try:
-                    A.app.test_client().post("/api/tools/visibility",
+                    A.app.test_client().post("/api/tools/visibility", headers=hdr,
                                              json={"type": "tool", "id": "lock-t2", "enabled": e2})
                 except Exception:
                     pass

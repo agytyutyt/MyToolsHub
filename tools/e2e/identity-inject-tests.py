@@ -131,8 +131,11 @@ def main():
             os.path.join(work, "static"), lp_dir,
             os.path.join(ROOT, "client", "fallback.html"),
             data_dir=os.path.join(work, "data"), executor=executor,
-            log=lambda m: print("    [cap] %s" % m))
+            log=lambda m: print("    [cap] %s" % m),
+            shell_token="bench-shell-1")
         c = app.test_client()
+        # 壳自证（2026-10-11 需求① G2-6）：台架模拟壳——先 boot 种 Cookie 再探测
+        c.get("/shell-boot?_shell=bench-shell-1&next=/")
 
         def ping(pid):
             r = c.get("/api/local/%s/ping" % pid)
@@ -171,8 +174,10 @@ def main():
             os.path.join(work, "static"), lp_dir,
             os.path.join(ROOT, "client", "fallback.html"),
             data_dir=os.path.join(work, "data"), executor=executor,
-            log=lambda m: None)
+            log=lambda m: None,
+            shell_token="bench-shell-2")
         c2 = app2.test_client()
+        c2.get("/shell-boot?_shell=bench-shell-2&next=/")
         r = c2.get("/api/tools")
         d = r.get_json()
         check("5a 上游死端口清单仍 200", r.status_code == 200 and d.get("degraded") is True,

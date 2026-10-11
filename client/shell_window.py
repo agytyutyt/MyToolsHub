@@ -25,6 +25,12 @@ MIN_SIZE = (720, 560)
 INIT_SIZE = (1024, 700)
 
 
+def webview_escape_param(value):
+    """URL 查询参数转义（仅 run token 场景；标准库 urllib.parse，零新依赖）。"""
+    from urllib.parse import quote
+    return quote(str(value), safe="")
+
+
 class GeometryStore:
     """resize/move 300ms 防抖落盘（T01 spike 已验证钳制与恢复口径）。"""
 
@@ -126,13 +132,19 @@ def _tray_image():
     return img
 
 
-def run_shell(build_cfg, client_cfg, port, data_dir, log):
-    """开窗并阻塞主线程（webview.start 占主线程；能力层 waitress 已在后台线程）。"""
+def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=""):
+    """开窗并阻塞主线程（webview.start 占主线程；能力层 waitress 已在后台线程）。
+
+    shell_token：本地端口壳自证 run token（client_main 同值传能力层，G2-6）——
+    首导航经 /shell-boot?_shell=<token> 种 Cookie 后再 302 进主页面。
+    """
     from client_config import webview2_runtime_dir, geometry_path, webview2_profile_dir
 
     product = build_cfg.get("product") or {}
     display = product.get("display_name", "JZ 工具箱")
     origin = "http://127.0.0.1:%d" % port
+    # 启动引导 URL（G2-6）：先种壳自证 Cookie 再进主页；Cookie 持久化后刷新/iframe 均自带
+    boot_url = origin + "/shell-boot?_shell=" + webview_escape_param(shell_token) + "&next=/"
     geo = GeometryStore(geometry_path(build_cfg), log)
     bridge = ShellBridge(build_cfg, log)
 
@@ -150,7 +162,7 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
 
     first_close = {"shown": bool(client_cfg.get("tray_hint_shown"))}
     window = webview.create_window(
-        display, origin,
+        display, boot_url,
         js_api=bridge,
         min_size=MIN_SIZE,
         confirm_close=False,
@@ -236,8 +248,19 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
         def on_open(icon, item):
             window.show()
 
-        def on_browser(icon, item):
-            webbrowser.open(origin)       # 用浏览器打开（HTML 版/多屏场景）
+        def on_admin(icon, item):
+            # 打开管理后台（G2-5）：业务面已对浏览器关闭（服务器壳身份门），
+            # 浏览器只保留管理后台入口；地址现读客户端配置（连接设置可改）
+            try:
+                from client_config import resolve_address, load_client_config
+                addr = resolve_address(build_cfg, load_client_config(build_cfg))
+                if not addr:
+                    log("tray -> admin：未配置服务器地址，取消打开")
+                    return
+                webbrowser.open(addr + "/admin")
+                log("tray -> admin: %s" % addr)
+            except Exception:
+                log("tray admin failed:\n" + traceback.format_exc())
 
         def on_local_admin(icon, item):
             # 本地插件管理（原主界面悬浮入口迁入托盘，2026-10-08）：主窗口导航到本页
@@ -260,7 +283,7 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
                 pystray.MenuItem("刷新页面", on_refresh),
                 pystray.MenuItem("打开窗口", on_open, default=True),
                 pystray.MenuItem("本地插件管理", on_local_admin),
-                pystray.MenuItem("用浏览器打开", on_browser),
+                pystray.MenuItem("打开管理后台", on_admin),
                 pystray.MenuItem("退出", on_exit),
             ),
         )

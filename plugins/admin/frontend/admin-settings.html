@@ -50,13 +50,32 @@
         <p class="settings-hint">新目录不存在将自动创建；已存在同名文件/目录不会覆盖。</p>
       </div>
     </div>
+
+    <div class="settings-card">
+      <h3>桌面端接入密钥</h3>
+      <p class="settings-desc">
+        业务功能仅限桌面客户端访问（壳身份门）。桌面端需同时配置<strong>服务器地址</strong>与本<strong>接入密钥</strong>
+        （客户端「连接设置」中填写，或写入客户端 config.json 的 remote_token）。
+        重置后所有已分发的旧密钥立即失效，需逐台更新客户端。
+      </p>
+      <div class="settings-form">
+        <label for="shell-token-value">接入密钥</label>
+        <div class="form-row">
+          <input type="text" id="shell-token-value" class="admin-input" readonly placeholder="加载中…" />
+          <button type="button" class="admin-btn" id="btn-toggle-token">显示</button>
+          <button type="button" class="admin-btn" id="btn-copy-token">复制</button>
+          <button type="button" class="admin-btn danger" id="btn-reset-token">重置</button>
+        </div>
+        <p class="settings-hint" id="shell-token-meta"></p>
+      </div>
+    </div>
   </main>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="/plugin/admin/js/admin-common.js?v=10"></script>
+  <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
-  <script src="/plugin/admin/js/admin-settings.js?v=1"></script>
+  <script src="/plugin/admin/js/admin-settings.js?v=2"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>

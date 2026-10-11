@@ -56,7 +56,12 @@ def register(app, deps):
     @app.post("/plugin/admin/store/upload")
     @_deps["login_required"]
     def admin_store_upload():
-        """上架第 1 步：包上传 + 机器校验 + 元数据落库（pending）。"""
+        """上架第 1 步：包上传 + 机器校验 + 元数据落库（pending）。
+
+        C 类配对（2026-10-11 需求②③）：runtime=server 且附带 client_artifact（客户端
+        工件包）时，同一请求完成双工件上架——先核配对一致性（id 映射 local-<id>↔<id>、
+        同版本号），再先后落库（服务器工件写 client_entry → 客户端工件）；一次审核
+        发布即部署后端包（G3-7）。上传/待审核阶段绝不部署（保审核闸门）。"""
         _deps["set_operation"]("商店上架")
         user = _deps["get_session_user"]() or {}
         runtime = request.form.get("runtime") or ""
@@ -65,6 +70,7 @@ def register(app, deps):
                  "requires_json")}
         pkg = request.files.get("file")
         frontend = request.files.get("frontend_file")
+        client_zip = request.files.get("client_artifact")
         if pkg is None or not pkg.filename:
             return jsonify({"ok": False, "errors": ["未选择包文件"]}), 400
         root = _deps["store_root"]()
@@ -77,12 +83,54 @@ def register(app, deps):
         if frontend is not None and frontend.filename:
             frontend_path = os.path.join(staging, "%s-fe-%s" % (stamp, os.path.basename(frontend.filename)))
             frontend.save(frontend_path)
+        client_path = ""
+        if client_zip is not None and client_zip.filename:
+            client_path = os.path.join(staging, "%s-cli-%s" % (stamp, os.path.basename(client_zip.filename)))
+            client_zip.save(client_path)
+        by = str(user.get("username") or "")
         try:
-            report = store_admin.submit(root, runtime, pkg_path, form,
-                                        str(user.get("username") or ""),
+            client_warnings = []
+            if client_path:
+                # 配对预检：两条目落库**之前**核一致性，避免半提交状态
+                cr = store_admin.check_local_plugin_zip(client_path)
+                if not cr.get("ok"):
+                    return jsonify({"ok": False,
+                                    "errors": ["客户端工件校验失败："] + list(cr.get("errors") or [])}), 400
+                client_id = str((cr.get("manifest") or {}).get("id") or "")
+                client_version = str((cr.get("manifest") or {}).get("version") or "")
+                if not client_id.startswith("local-"):
+                    return jsonify({"ok": False, "errors": [
+                        "客户端工件 id 须 local- 前缀（收到 %s）" % client_id]}), 400
+                if not (cr.get("manifest") or {}).get("server_data"):
+                    client_warnings.append("客户端工件 manifest 未声明 server_data=true（C 类应有）")
+                sr = store_admin.check_server_backend_zip(pkg_path)
+                if sr.get("ok"):
+                    sid = str((sr.get("meta") or {}).get("id") or "")
+                    sver = str((sr.get("meta") or {}).get("version") or "")
+                    if sid != client_id[len("local-"):]:
+                        return jsonify({"ok": False, "errors": [
+                            "配对 id 不一致：服务器工件 %s ↔ 客户端工件 %s" % (sid, client_id)]}), 400
+                    if sver != client_version:
+                        return jsonify({"ok": False, "errors": [
+                            "配对版本不一致：服务器 v%s ↔ 客户端 v%s（须同版本号成对）" % (sver, client_version)]}), 400
+                form["client_entry"] = client_id
+            report = store_admin.submit(root, runtime, pkg_path, form, by,
                                         frontend_zip_path=frontend_path or None)
+            if report.get("ok") and client_path:
+                cform = dict(form)
+                cform.pop("client_entry", None)
+                creport = store_admin.submit(root, "local", client_path, cform, by)
+                if not creport.get("ok"):
+                    report = {"ok": False,
+                              "errors": ["服务器工件已落库待审核（%s v%s），但客户端工件上架失败：%s"
+                                         % (report.get("id"), report.get("version"),
+                                            "；".join(creport.get("errors") or ["未知错误"]))],
+                              "warnings": client_warnings}
+                else:
+                    report["client"] = {"id": creport.get("id"), "version": creport.get("version")}
+                    report["warnings"] = list(report.get("warnings") or []) + client_warnings
         finally:
-            for p in (pkg_path, frontend_path):
+            for p in (pkg_path, frontend_path, client_path):
                 if p and os.path.isfile(p):
                     try:
                         os.remove(p)
@@ -125,25 +173,56 @@ def register(app, deps):
                 return jsonify({"ok": False,
                                 "error": "依赖不满足，审核不通过：%s——请先在「依赖」类目上架对应组件包"
                                          % "、".join(unsat)}), 409
+            # 配对定位（2026-10-11 需求③ G3-7/G3-8）：approve 对 C 类双工件同进同出，
+            # 服务器工件发布即部署（上传/待审核阶段绝不部署）。
+            partner = store_admin.pair_target(catalog, pid, version)
+            partner_runtime = ""
+            if partner:
+                pe = store_admin.find_entry(catalog, partner[0])
+                partner_runtime = (pe or {}).get("runtime") or ""
+            srv_id, srv_ver = ("", "")
             if entry.get("runtime") == "server":
-                # 需求⑧：审核通过即发布，发布即自动部署后端包（当前形态=进程内 inspect/apply；
-                # E 架构落地后此处换 supervisor 编排）。上传/待审核阶段绝不部署。
-                dep = store_admin.deploy_backend_package(_deps["project_dir"], root, pid, version)
+                srv_id, srv_ver = pid, version
+            elif partner and partner_runtime == "server":
+                srv_id, srv_ver = partner
+            if srv_id:
+                # 需求⑧③：审核通过即发布，发布即自动部署后端包（失败=发布回退待审核）
+                dep = store_admin.deploy_backend_package(_deps["project_dir"], root, srv_id, srv_ver)
                 if not dep.get("ok"):
-                    store_admin.mark_deploy_result(root, pid, version, False,
+                    store_admin.mark_deploy_result(root, srv_id, srv_ver, False,
                                                    dep.get("error", ""), by)
                     return jsonify({"ok": False,
                                     "error": "后端包部署失败，发布已回退待审核：%s" % dep.get("error"),
                                     "deploy": dep}), 500
                 res = store_admin.review(root, pid, version, "approve", by, note)
                 if res.get("ok"):
-                    store_admin.mark_deploy_result(root, pid, version, True,
-                                                   "v%s 自动部署成功" % version, by)
+                    store_admin.mark_deploy_result(root, srv_id, srv_ver, True,
+                                                   "v%s 自动部署成功" % srv_ver, by)
+                    if partner and partner[0] != pid:
+                        pres = store_admin.review(root, partner[0], partner[1], "approve", by,
+                                                  "配对发布（随 %s v%s）" % (pid, version))
+                        res["pair"] = {"id": partner[0], "version": partner[1],
+                                       "ok": bool(pres.get("ok")),
+                                       "error": str(pres.get("error") or "")}
                     res["dep_deploy"] = _deploy_required_components(root, catalog, entry)
                 return jsonify(res)
         res = store_admin.review(root, pid, version, action, by, note)
         if not res.get("ok"):
             return jsonify(res), 400
+        if action in ("reject", "republish"):
+            # 配对一致性（G3-8）：驳回/重新上架对 C 类双工件同进同出
+            catalog2 = store_admin.load_catalog(root)
+            partner = store_admin.pair_target(catalog2, pid, version)
+            if partner:
+                precord = store_admin.find_version_record(
+                    store_admin.find_entry(catalog2, partner[0]), partner[1])
+                want = "pending" if action == "reject" else "delisted"
+                if precord is not None and precord.get("status") == want:
+                    pres = store_admin.review(root, partner[0], partner[1], action, by,
+                                              "配对%s（随 %s v%s）"
+                                              % ("驳回" if action == "reject" else "重新上架", pid, version))
+                    res["pair"] = {"id": partner[0], "ok": bool(pres.get("ok")),
+                                   "error": str(pres.get("error") or "")}
         if action == "approve":
             # 依赖条目（2026-10-08）：已上架 server 插件需要它 → 发布即部署到服务器
             catalog2 = store_admin.load_catalog(root)
@@ -274,10 +353,20 @@ def register(app, deps):
         if not _deps["can_review_store"](_deps["get_session_user"]()):
             return jsonify({"ok": False, "error": "仅管理员或超级管理员可下架"}), 403
         data = request.get_json(silent=True) or {}
+        by = str((_deps["get_session_user"]() or {}).get("username") or "")
         res = store_admin.delist(_deps["store_root"](), str(data.get("id") or ""),
-                                 str(data.get("version") or ""),
-                                 str((_deps["get_session_user"]() or {}).get("username") or ""),
+                                 str(data.get("version") or ""), by,
                                  str(data.get("note") or ""))
+        if res.get("ok"):
+            # 配对一致性（G3-8）：下架对 C 类双工件同进同出（服务器工件本就不出商店卡，
+            # 一起下架保证重新上架流程从同一起点走审核）
+            catalog = store_admin.load_catalog(_deps["store_root"]())
+            partner = store_admin.pair_target(catalog, str(data.get("id") or ""),
+                                              str(res.get("version") or ""))
+            if partner:
+                pres = store_admin.delist(_deps["store_root"](), partner[0], partner[1], by,
+                                          "配对下架（随 %s v%s）" % (res.get("id"), res.get("version")))
+                res["pair_delisted"] = bool(pres.get("ok"))
         return jsonify(res) if res.get("ok") else (jsonify(res), 400)
 
     @app.post("/plugin/admin/store/meta")

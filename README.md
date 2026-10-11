@@ -176,10 +176,11 @@ pip install --find-links wheels -r plugins/info-transfer/backend/requirements.tx
 python app.py
 ```
 
-浏览器访问 <http://localhost:5000>。
+浏览器仅可访问**管理后台** <http://localhost:5000/admin>；业务功能（工具箱/商店等）仅限桌面客户端访问（壳身份门，2026-10-11）。
 
 - 默认管理员：`admin` / `admin123`（首次启动自动生成于数据根目录 `config/admin.json`，**登录后请尽快改密**）。
-- 管理后台：`/admin`；数据目录设置：`/admin/settings`（仅超级管理员）。
+- 管理后台：`/admin`；数据目录设置：`/admin/settings`（仅超级管理员）；桌面端接入密钥：`/admin/settings`「桌面端接入密钥」卡片（查看/复制/重置）。
+- 浏览器直连业务面（`/`、`/tool/*`、插件页面、业务 API、商店）返回 403 提示页；桌面客户端在「连接设置」填入接入密钥后正常使用（机制见 `docs/plan/20261011浏览器退役与商店分发口径改造-TODO（面向执行模型）.md` §2.1）。
 - 环境变量：`JZTOOLS_HOST`（默认 `0.0.0.0`）、`JZTOOLS_PORT`（默认 `5000`，解析失败回落 5000）、`JZTOOLS_DATA_ROOT`（显式指定数据根；指定时**不读写**指针文件，见 `jztools_data.py:138-152`）、`XHR_SOFFICE`（覆盖 LibreOffice `soffice` 路径，见 `jz_deps.py:359`）。
 
 > 源码模式使用 Flask 内置服务器（`debug=True`，自动重载），仅供开发。生产请用打包产物（内置 waitress 8 线程）。

@@ -62,6 +62,7 @@ RULES = {
 #   - 目录/文件前缀（如 `plugins/admin/frontend/`）：整片命中都降级；
 #   - `文件:行`（如 `plugins/store/frontend/store.js:600`）：**只豁免那一行**——
 #     逐处分诊（F-3 存量清诊）用它，避免把整个文件的将来命中一起吞掉。
+# 2026-10-11 平移：admin-common.js +1（壳门站点名改 /api/site）、admin-store.js（C 配对表单/配对徽标）、store.js（浏览器分支删除/配对安装联动）——行号随本轮改动平移，豁免理由不变
 EXEMPTIONS = [
     ("L-14", "plugins/", "test_*.py 与台架夹具不参与出包，模块级 import 重依赖属预期（构建期剔除）"),
     ("F-1", "plugins/admin/frontend/", "占位符文案里的示例路径（`D:\\…`）是给用户看的说明文字，非代码取径"),
@@ -71,10 +72,10 @@ EXEMPTIONS = [
     # 判据基线：`plugins/admin/frontend/js/admin-common.js:5` 的 `esc()` 真替换 & < > " '，
     # 各页经 `window.AdminCommon.esc` 解构使用；启发式只认 escapeHtml/sanitize/DOMPurify/
     # textContent，不认本地 `esc(` 简写，故「同行已 esc()」成片误报；封装函数已逐一体内核对。
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:226", "右值＝openModal 形参 bodyHtml；14 个调用点的模板体对外链数据一律 esc()"),
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:389", "右值＝本文件 pickerHtml()：只有 encodeURIComponent(静态 module 名) 与 :281 esc(label)"),
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:462", "右值＝previewHtml(p)（L9 插入绑定点后 +8 移行）：label/message/ignored_columns/sheet/notes/模式名+文件名逐条 esc()（:329-349），未 esc 仅数值"),
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:483", "右值＝doneHtml(p)（L9 插入绑定点后 +8 移行）：只拼 summaryHtml(p.summary)（纯数字）与静态文案"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:227", "右值＝openModal 形参 bodyHtml；14 个调用点的模板体对外链数据一律 esc()"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:390", "右值＝本文件 pickerHtml()：只有 encodeURIComponent(静态 module 名) 与 :281 esc(label)"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:463", "右值＝previewHtml(p)（L9 插入绑定点后 +8 移行）：label/message/ignored_columns/sheet/notes/模式名+文件名逐条 esc()（:329-349），未 esc 仅数值"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:484", "右值＝doneHtml(p)（L9 插入绑定点后 +8 移行）：只拼 summaryHtml(p.summary)（纯数字）与静态文案"),
     ("F-3", "plugins/admin/frontend/js/admin-dept.js:16", "同行已 esc(err.message)"),
     ("F-3", "plugins/admin/frontend/js/admin-dept.js:25", "departments.map 模板体内 d.id/name/unit_name/description 全部 esc()（:26-33），users_count 为数值"),
     ("F-3", "plugins/admin/frontend/js/admin-llm.js:66", "rows 构造于 :51-64：模式名/problem/url/label/format/model 均 esc()；okClass、keyText 取本文件枚举，user_count 数值"),
@@ -102,7 +103,7 @@ EXEMPTIONS = [
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:823", "lines(:819-821) 逐条 esc(展示名/id/from/to/error) ＋ :824 esc(res.restart_message)"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:830", "同 :823（失败分支复用 lines ＋ esc(restart_message)）"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:837", "同行已 esc(err.message)"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:101", "同行已 esc(f.name)（本文件 :15 本地 esc）；fmtSize 数值，note 由静态 runtimeLabel 拼"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:102", "同行已 esc(f.name)（本文件 :15 本地 esc）；fmtSize 数值，note 由静态 runtimeLabel 拼"),
     ("F-3", "plugins/admin/frontend/js/admin-unit.js:14", "同行已 esc(err.message)"),
     ("F-3", "plugins/admin/frontend/js/admin-unit.js:23", "units.map 体 :24-30 id/name/description 全 esc；departments_count/users_count 数值"),
     ("F-3", "plugins/admin/frontend/js/admin-user.js:37", "同行已 esc(err.message)"),
@@ -142,10 +143,10 @@ EXEMPTIONS = [
     ("F-3", "plugins/notice-board/frontend/app.js:298", "同 :120；兄弟节点 :302/:306 走 textContent"),
     ("F-3", "plugins/notice-board/frontend/app.js:350", "nl2br＝先 esc 再把换行转 <br>（:21-24），item.content 已全量转义"),
     ("F-3", "plugins/notice-board/frontend/app.js:395", "同 :350（详情窗复用同一 nl2br）"),
-    ("F-3", "plugins/store/frontend/store.js:271", "rows 由详情渲染函数(:236 起)产出：icon/name/version/published_at/id/frontend_file/changelog 与版本历史 v.* 逐个 esc(:29)；requiresText(:124-130) 对 d.name/d.version 各 esc；humanRuntime/fmtSize 为常量与数值"),
-    ("F-3", "plugins/store/frontend/store.js:594", "html 为 :592-593 循环拼出的固定骨架串，零外部插值"),
-    ("F-3", "plugins/store/frontend/store.js:600", "同行 esc(d.error)"),
-    ("F-3", "plugins/store/frontend/store.js:604", "同行 esc(err)（Error 对象先 String() 再转义）"),
+    ("F-3", "plugins/store/frontend/store.js:270", "rows 由详情渲染函数(:236 起)产出：icon/name/version/published_at/id/frontend_file/changelog 与版本历史 v.* 逐个 esc(:29)；requiresText(:124-130) 对 d.name/d.version 各 esc；humanRuntime/fmtSize 为常量与数值"),
+    ("F-3", "plugins/store/frontend/store.js:597", "html 为 :592-593 循环拼出的固定骨架串，零外部插值"),
+    ("F-3", "plugins/store/frontend/store.js:603", "同行 esc(d.error)"),
+    ("F-3", "plugins/store/frontend/store.js:607", "同行 esc(err)（Error 对象先 String() 再转义）"),
     ("F-3", "plugins/json-formatter/frontend/index.html:115", "全静态串＋JZIcon.html('✅')（字面量）；含用户输入的 e.message 分支走 :121 textContent＋appendChild"),
     ("F-3", "plugins/json-formatter/frontend/index.html:134", "同 :115（另一处成功态渲染，错误分支 :139 走 textContent）"),
     ("F-3", "plugins/color-picker/frontend/index.html:124", "items 为 ['HEX', hex.toUpperCase()] 等本行组合：hex 来自 <input type=color>（浏览器规范化 #rrggbb），hexToRgb(:82-85) 有正则白名单，rgbToHsl 返回整数，label 静态"),
@@ -155,9 +156,9 @@ EXEMPTIONS = [
     # ---- L2 批 4（2026-10-10）：trajectory-sketch ----
     ("F-3", "plugins/trajectory-sketch/frontend/app.js:32", "右值＝ICONS[name]，注入前已过本文件 sanitizeIconSvg()（:47-66）：只认根 <svg>、剥 on*/href/xlink:href，含 script/foreignObject 或解析失败整枚弃用并回落 <img>；name 受 ICON_NAMES(:11-12) 白名单约束（C 类按保守修复处置）"),
     # ---- 裁定 7 ①：F-3 补齐「对象字面量 { innerHTML: }」与「跨行拼接」两形态后的新增命中 ----
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:111", "跨行拼接的侧栏「登录」项：动态部分只有 encodeURIComponent(location.pathname)（属性上下文无法逃逸）与静态文案/本文件 sideIcon() 封装"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:112", "跨行拼接的侧栏「登录」项：动态部分只有 encodeURIComponent(location.pathname)（属性上下文无法逃逸）与静态文案/本文件 sideIcon() 封装"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:203", "右值在下一行，模板内插值只有 ${esc(err.message)}（本文件 esc 真替换 &<>\"'）"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:291", "跨行拼接的行模板：r.name/r.id 均 esc()，其余为静态标签与三元常量"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:314", "跨行拼接的行模板：r.name/r.id 均 esc()，其余为静态标签与三元常量"),
     ("F-3", "plugins/case-report/frontend/app.js:672", "units.map 体内两处均为 esc(u)，前段是静态 option 骨架"),
     ("F-3", "plugins/notice-board/frontend/app.js:356", "同行已 esc(created_by_name||created_by)（L2 批 3 修掉的真风险；本行是 { innerHTML: … } 对象字面量形态，旧口径漏检、现口径命中）"),
     ("F-3", "plugins/shared-docs/frontend/app.js:163", "跨行拼接的文档卡：卡片各动态字段（d.name/lv/scopeLabel/d.created_by_name/d.updated_by）均 esc()；meta 的 updated_at/version 原为裸插值，本批已补 esc（shared-docs 1.2.6）"),

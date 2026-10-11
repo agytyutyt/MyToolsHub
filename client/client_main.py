@@ -141,6 +141,10 @@ def main():
     log("插件 worker 运行时：%s" % worker_python)
 
     from capability_app import create_capability_app
+    # 本地端口壳自证 run token（G2-6）：进程内随机；JZCLIENT_SHELL_TOKEN 仅供台架/验收覆盖。
+    # 同一值传能力层（种 Cookie 校验）与壳窗口（造 boot URL）。
+    import secrets as _secrets
+    shell_token = os.environ.get("JZCLIENT_SHELL_TOKEN") or _secrets.token_urlsafe(24)
     app = create_capability_app(
         build_cfg=build_cfg,
         client_cfg=client_cfg,
@@ -151,6 +155,7 @@ def main():
         data_dir=data_dir,
         executor=executor,
         log=log,
+        shell_token=shell_token,
     )
 
     port = free_port()
@@ -175,7 +180,7 @@ def main():
 
     try:
         from shell_window import run_shell
-        run_shell(build_cfg, client_cfg, port, data_dir, log)
+        run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=shell_token)
     except Exception:
         log("UI 层异常退出：\n" + traceback.format_exc())
         return 1

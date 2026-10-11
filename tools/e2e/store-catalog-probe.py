@@ -2,7 +2,7 @@
 r"""商店 catalog 链路探针（复现桌面端「商店目录加载失败」）。
 
 链路 = 冻结主包(exe) ←能力层中继← 页面 fetch：
-  1) 起真服务（deploy/服务端/JZToolsHub-v2.3.23/JZToolsHub.exe，隔离数据根）；
+  1) 起真服务（deploy/服务端/JZToolsHub/JZToolsHub.exe，隔离数据根）；
   2) 起源码态能力层（create_capability_app，指向真服务）；
   3) 经能力层 /api/login 登录（镜像会话 + 浏览器 jar 双份）；
   4) GET /tool/store（壳页）与 GET /plugin/store/api/catalog（页面 fetch 同款）——
@@ -40,7 +40,7 @@ def main():
     work = tempfile.mkdtemp(prefix="store-probe-")
     try:
         # 1) 真服务
-        app_dir = os.path.join(ROOT, "deploy", "服务端", "JZToolsHub-v2.3.23")
+        app_dir = os.path.join(ROOT, "deploy", "服务端", "JZToolsHub")
         exe = os.path.join(app_dir, "JZToolsHub.exe")
         env = dict(os.environ, JZTOOLS_DATA_ROOT=os.path.join(work, "srv-data"),
                    JZTOOLS_PORT=str(SERVER_PORT), JZTOOLS_HOST="127.0.0.1")
@@ -60,8 +60,11 @@ def main():
             "http://127.0.0.1:%d" % SERVER_PORT,
             os.path.join(ROOT, "static"), os.path.join(work, "lp"),
             os.path.join(ROOT, "client", "fallback.html"),
-            data_dir=os.path.join(work, "cap-data"), log=lambda m: None)
+            data_dir=os.path.join(work, "cap-data"), log=lambda m: None,
+            shell_token="bench-shell-1")
         c = app.test_client()
+        # 壳自证（2026-10-11 需求① G2-6）：台架模拟壳——先 boot 种 Cookie 再探测
+        c.get("/shell-boot?_shell=bench-shell-1&next=/")
 
         # 3) 登录（经中继）
         r = c.post("/api/login", json={"username": "admin", "password": "admin123"})

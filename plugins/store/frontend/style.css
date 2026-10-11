@@ -155,11 +155,10 @@ body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);co
 .st-skel i:nth-child(5){width:46%;height:26px}
 @keyframes stShim{from{background-position:200% 0}to{background-position:-200% 0}}
 
-/* 桌面端专属操作：浏览器路径默认隐藏，壳内（html.jz-shell）才出现——红线 2 门控。
-   反向同理：浏览器下载按钮在壳内隐藏（走能力层落数据目录）。 */
+/* 桌面端专属操作：非壳路径默认隐藏，壳内（html.jz-shell）才出现。
+   2026-10-11 需求①②：浏览器业务面已退役（壳身份门），浏览器下载分支已删除。 */
 .jz-only{display:none !important}
 html.jz-shell .jz-only{display:inline-block !important}
-html.jz-shell .st-browser-dl{display:none !important}
 
 @media (max-width:480px){
   body{padding:12px 10px 32px}

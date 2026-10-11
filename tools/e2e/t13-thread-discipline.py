@@ -184,8 +184,12 @@ def boot(work, remote_addr):
         build_cfg, {"remote_address": remote_addr}, "http://127.0.0.1:1",
         os.path.join(work, "static"), lp_dir,
         os.path.join(ROOT, "client", "fallback.html"),
-        data_dir=os.path.join(work, "data"), executor=executor, log=lambda m: None)
-    return app.test_client(), executor
+        data_dir=os.path.join(work, "data"), executor=executor, log=lambda m: None,
+        shell_token="bench-shell-1")
+    c = app.test_client()
+    # 壳自证（2026-10-11 需求① G2-6）：台架模拟壳——先 boot 种 Cookie 再探测
+    c.get("/shell-boot?_shell=bench-shell-1&next=/")
+    return c, executor
 
 
 def section_bcd():

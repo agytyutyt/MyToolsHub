@@ -38,15 +38,21 @@ class ServerSource:
 
     type = "server"
 
-    def __init__(self, upstream, address_getter, mirror, log=None):
+    def __init__(self, upstream, address_getter, mirror, log=None, token_getter=None):
         self._upstream = upstream
         self._addr = address_getter
         self._mirror = mirror
+        self._token = token_getter or (lambda: "")
         self._log = log or (lambda m: None)
 
     def _headers(self):
         cookie = self._mirror.header()
-        return {"Cookie": cookie} if cookie else {}
+        h = {"Cookie": cookie} if cookie else {}
+        # 壳标识（2026-10-11 需求① G2-2）：商店 API 属业务面，服务器壳门按此放行
+        token = self._token()
+        if token:
+            h["X-JZ-Shell"] = token
+        return h
 
     def get_catalog(self):
         """→ (catalog dict, None) 或 (None, error)。catalog 为商店 flat 投影。"""
@@ -160,4 +166,7 @@ def make_source(build_cfg, client_cfg, upstream, address_getter, mirror, log=Non
     cfg = load_source_config(build_cfg, client_cfg)
     if cfg["type"] == "share":
         return ShareSource(cfg.get("index_path") or "", log)
-    return ServerSource(upstream, address_getter, mirror, log)
+    from client_config import resolve_token, load_client_config
+    # 壳标识密钥每次现读（连接设置保存后免重启生效，G2-2）
+    token_getter = lambda: resolve_token(build_cfg, load_client_config(build_cfg))  # noqa: E731
+    return ServerSource(upstream, address_getter, mirror, log, token_getter)

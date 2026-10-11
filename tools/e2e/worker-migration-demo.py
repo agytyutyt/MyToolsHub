@@ -116,6 +116,14 @@ def main():
 
     # ④ 真实登录 + 全链 API（迁移流程第 4 步）
     s = requests.Session()
+    # 壳身份门（2026-10-11 需求①）：业务面 API 现要求壳标识——台架以"壳"身份带密钥
+    # （密钥由主应用在隔离数据根首请求时生成；管理面不受影响）。
+    _tok_path = os.path.join(data_root, "config", "shell-token.json")
+    for _ in range(20):
+        if os.path.isfile(_tok_path):
+            break
+        time.sleep(0.5)
+    s.headers["X-JZ-Shell"] = json.loads(open(_tok_path, encoding="utf-8").read())["token"]
     r_login = s.post(base + "/api/login",
                      json={"username": "admin", "password": "admin123"}, timeout=10)
     check("S2 真实登录成功（默认 admin 账号）",

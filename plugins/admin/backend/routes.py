@@ -1376,6 +1376,32 @@ def register(app):
             return jsonify({"error": err}), 400
         return jsonify({"ok": True, "data_root": root, "migrated": moved})
 
+    # ---------------- 桌面端接入密钥（壳身份门；仅超级管理员） ----------------
+    # 机制与数据真源在框架模块 jz_host/shell_gate.py（数据根 config/shell-token.json，
+    # 单一写方=shell_gate），经 jz_api 门面取用——本插件只做「界面与鉴权」，
+    # 与 /admin/llm（配置真源在 jz_llm、界面在本插件）同一分工口径。
+    # 重置即让所有已分发旧密钥立即失效（桌面端需重新配置）。
+
+    @app.get("/api/admin/shell-token")
+    @login_required
+    def admin_api_shell_token():
+        """返回壳门接入密钥信息（明文 token 供复制分发；仅超级管理员）。"""
+        info = get_session_user()
+        if not info or not info.get("super_admin"):
+            return jsonify({"error": "仅超级管理员可查看桌面端接入密钥"}), 403
+        set_operation("查看桌面端接入密钥")
+        return jsonify({"ok": True, **jz_api.shell_token_info()})
+
+    @app.post("/api/admin/shell-token")
+    @login_required
+    def admin_api_shell_token_reset():
+        """重置壳门接入密钥（旧密钥立即失效，桌面端需逐台重新配置；仅超级管理员）。"""
+        info = get_session_user()
+        if not info or not info.get("super_admin"):
+            return jsonify({"error": "仅超级管理员可重置桌面端接入密钥"}), 403
+        set_operation("重置桌面端接入密钥")
+        return jsonify({"ok": True, **jz_api.shell_token_reset()})
+
     # ---------------- 统一大模型设置（管理员 / 超级管理员） ----------------
     # 配置真源在框架模块 jz_llm（<数据根>/config/llm.json），本插件只做**界面与鉴权**：
     # 模式（管理员统一配置 / 用户各自设置）、全局接入配置、连通测试。

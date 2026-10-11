@@ -494,11 +494,13 @@ def canonical_filename(runtime, pid, version, frontend=False):
     return NAME_TEMPLATES[key].format(id=pid, version=version)
 
 
-def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
+def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None, client_entry=None):
     """上架：机器校验 → 元数据落库（pending）→ 包文件落 packages\\（规范名）。
 
     form：{name, description, changelog, icon, deps_mode, provides(仅 dep-slot，可选)}
     frontend_zip_path：server 条目必传（双包模型，同版本号成对）。
+    client_entry：server 条目可选——C 类配对客户端工件 id（local-<id>，2026-10-11 需求②③），
+      写入版本记录；发布时随配对一起发布并部署（pair_target/review 链）。
     返回 {ok, errors?, warnings?, id?, version?, frontend?}
     """
     ensure_dirs(data_root)
@@ -576,6 +578,16 @@ def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
         report["errors"].append("无法从包中确定 id / 版本号")
         return report
 
+    # ---- C 类配对声明核验（2026-10-11 需求②③）：client_entry 必须是本插件 id 加 local- 前缀 ----
+    client_entry = str(client_entry or "").strip()
+    if client_entry:
+        if runtime != "server":
+            report["errors"].append("client_entry 仅 server 条目可声明（配对客户端工件）")
+        elif not client_entry.startswith("local-") or not ID_RE.match(client_entry[len("local-"):]):
+            report["errors"].append("client_entry 必须是 local-<插件id> 形态（收到 %r）" % client_entry)
+        elif client_entry[len("local-"):] != pid:
+            report["errors"].append("配对 id 不一致：服务器工件 %s ↔ 客户端工件 %s" % (pid, client_entry))
+
     # ---- 版本占号（§3.7：同 id 同版本号只要存在记录即拒绝重提） ----
     catalog = load_catalog(data_root)
     entry = find_entry(catalog, pid)
@@ -615,6 +627,8 @@ def submit(data_root, runtime, zip_path, form, by, frontend_zip_path=None):
         "published_at": "",
     }
     record.update(frontend_fields)
+    if client_entry:
+        record["client_entry"] = client_entry   # 配对契约（商店投影去重 / 配对发布链）
     _append_history(record, "submit", by,
                     "机器校验通过，等待审核（%s 条警告）" % len(report["warnings"]))
     # 上架声明字段（需求④）：runtime / 依赖版本（自动提取，表单可覆盖）/ deps_mode / provides
@@ -686,6 +700,25 @@ def unsatisfied_deps(catalog, entry, version, available_names):
 
 
 # ======================== 审核 / 发布 / 下架 ========================
+
+def pair_target(catalog, pid, version):
+    """C 类配对工件定位（2026-10-11 需求②③）。返回 (partner_id, partner_version) 或 None。
+
+    - server 条目（版本记录带 client_entry）→ 客户端工件（同版本成对）；
+    - 客户端工件（local-<id> + server_data）→ 服务器条目（<id>，同版本记录须已存在）。
+    配对发布/下架/驳回对两条目同进同出（G3-8 状态一致性）。"""
+    entry = find_entry(catalog, pid)
+    record = find_version_record(entry, version) if entry else None
+    if entry is None or record is None:
+        return None
+    if entry.get("runtime") == "server":
+        ce = str(record.get("client_entry") or "").strip()
+        return (ce, version) if ce else None
+    eid = str(entry.get("id") or "")
+    if entry.get("runtime") == "local" and eid.startswith("local-") and entry.get("server_data"):
+        return (eid[len("local-"):], version)
+    return None
+
 
 def review(data_root, pid, version, action, by, note=""):
     """审核动作：approve（发布）/ reject / republish（已下架重新上架）。

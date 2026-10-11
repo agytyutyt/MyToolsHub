@@ -68,6 +68,7 @@
   function syncFormByRuntime() {
     var rt = runtimeSel.value;
     document.getElementById('row-frontend').hidden = rt !== 'server';
+    document.getElementById('row-client').hidden = rt !== 'server';
     document.getElementById('row-deps-mode').hidden = rt === 'dep-slot';
   }
   runtimeSel.addEventListener('change', syncFormByRuntime);
@@ -129,6 +130,8 @@
     fd.append('deps_mode', document.getElementById('up-deps-mode').value);
     var fe = document.getElementById('up-frontend').files[0];
     if (fe) fd.append('frontend_file', fe);
+    var cli = document.getElementById('up-client').files[0];
+    if (cli) fd.append('client_artifact', cli);   // C 类配对客户端工件（可选，2026-10-11）
     var btn = this;
     btn.disabled = true;
     document.getElementById('upload-result').textContent = '上传并校验中…';
@@ -142,7 +145,8 @@
         } else {
           document.getElementById('upload-result').textContent =
             '已提交待审核：' + d.id + ' v' + d.version +
-            (d.frontend ? '（前端包 ' + d.frontend + '）' : '');
+            (d.frontend ? '（前端包 ' + d.frontend + '）' : '') +
+            (d.client ? '（客户端工件 ' + d.client.id + ' v' + d.client.version + '，配对发布）' : '');
           toast('上架成功，等待审核');
           load();
         }
@@ -153,6 +157,25 @@
   // ---------------- 目录管理 ----------------
   function versionsOf(entry) {
     return entry.versions || [];
+  }
+  // C 类配对（2026-10-11 需求② G3-11）：id → {partner, hidden}
+  // hidden=true = 服务器工件（不出商店卡，商店只出客户端工件卡）；false = 客户端工件（商店卡）
+  var pairInfo = {};
+  function computePairs() {
+    pairInfo = {};
+    var auto = {};                       // 服务器工件 id → 客户端工件 id（local-<id>+server_data 自动识别）
+    packages.forEach(function (p) {
+      if (String(p.id).indexOf('local-') === 0 && p.server_data) auto[p.id.slice(6)] = p.id;
+    });
+    packages.forEach(function (p) {
+      if (p.runtime !== 'server') return;
+      var ce = '';
+      (p.versions || []).forEach(function (v) { if (v.client_entry) ce = v.client_entry; });
+      var partner = ce || auto[p.id] || '';
+      if (!partner) return;
+      pairInfo[p.id] = { partner: partner, hidden: true };
+      pairInfo[partner] = { partner: p.id, hidden: false };
+    });
   }
   function flatRows() {
     // 目录 → 行（每版本一行，按状态过滤）
@@ -168,7 +191,7 @@
           srv_enabled: p.srv_enabled, backups: p.backups,
           srv_component_version: p.srv_component_version,
           frontend_file: v.frontend_file, deps_mode: p.deps_mode,
-          requires: p.requires,
+          requires: p.requires, server_data: !!p.server_data,
         });
       });
     });
@@ -290,7 +313,14 @@
       }
       tr.innerHTML =
         '<td class="st-cell-stack"><b>' + esc(r.name) + '</b>'
-        + '<span class="st-muted">' + esc(r.id) + (r.deps_mode === 'venv' ? ' · venv' : '') + '</span></td>'
+        + '<span class="st-muted">' + esc(r.id) + (r.deps_mode === 'venv' ? ' · venv' : '') + '</span>'
+        + (pairInfo[r.id]
+            ? (pairInfo[r.id].hidden
+                ? chip('配对 ' + pairInfo[r.id].partner + ' · 不出商店卡（发布即部署）', 'muted')
+                : chip('商店卡 · 配对服务器工件 ' + pairInfo[r.id].partner, 'info'))
+            : (r.runtime === 'local' && r.server_data
+                ? chip('C 类客户端工件 · 服务器工件未上架', 'warn') : ''))
+        + '</td>'
         + '<td class="st-cell-stack st-mono"><span>v' + esc(r.version) + '</span>'
         + (r.frontend_file ? chip('前端包成对', 'muted') : '') + '</td>'
         + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
@@ -350,11 +380,14 @@
     var dlgOpts = {
       approve: { title: '发布确认', okText: '发布',
         html: '确认发布 <b>' + esc(id) + ' v' + esc(v) + '</b>？<br>server 条目将自动部署后端包；'
+          + (pairInfo[id] ? '<b>C 类配对</b>：将同时发布 ' + esc(pairInfo[id].partner)
+            + '（商店只出客户端工件卡）。<br>' : '')
           + '<b>装机冒烟请确认已做</b>。' },
       reject: { title: '驳回', input: true, danger: true, okText: '驳回', placeholder: '填写驳回原因（记入台账）',
         html: '驳回 <b>' + esc(id) + ' v' + esc(v) + '</b>：' },
       delist: { title: '下架确认', danger: true, okText: '下架',
-        html: '下架 <b>' + esc(id) + ' v' + esc(v) + '</b>？<br>客户端可见性回落到旧版；已装客户端不降级。' },
+        html: '下架 <b>' + esc(id) + ' v' + esc(v) + '</b>？<br>客户端可见性回落到旧版；已装客户端不降级。'
+          + (pairInfo[id] ? '<br>配对条目 <b>' + esc(pairInfo[id].partner) + '</b> 将一并下架。' : '') },
       republish: { title: '重新上架', okText: '重新上架',
         html: '重新上架 <b>' + esc(id) + ' v' + esc(v) + '</b>？将回到待审核状态。' },
       redeploy: { title: '重新部署', okText: '重新部署',
@@ -414,6 +447,7 @@
       installedNames = d.installed_names || [];
       canReview = d.can_review !== false;
       canSrv = d.super_admin === true;
+      computePairs();
       depProvides = {};
       packages.forEach(function (p) {
         if (p.runtime !== 'dep-slot') return;

@@ -10,7 +10,8 @@
     "runtime_python_dir": "runtime/python"
   },
   "server": {
-    "default_address": ""
+    "default_address": "",
+    "default_token": ""
   },
   "webview2": {
     "fallback": "fixed",

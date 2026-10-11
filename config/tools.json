@@ -41,7 +41,7 @@
       "name": "轨迹转换",
       "description": "读取轨迹，封装，编码生成二维码视频流，支持EXCEL表格。",
       "category": "dev",
-      "enabled": true,
+      "enabled": false,
       "order": 1
     },
     {
@@ -66,7 +66,7 @@
       "name": "MD5 生成器",
       "description": "计算与校验 MD5 值，支持文本/文件与 HMAC-MD5，实时计算一键复制。",
       "category": "dev",
-      "enabled": true,
+      "enabled": false,
       "order": 2
     },
     {
@@ -107,7 +107,7 @@
       "name": "QR 视频流解码",
       "description": "解码动态二维码视频流，包含前向纠错(zfec)重组，恢复其中的原始数据。",
       "category": "dev",
-      "enabled": true,
+      "enabled": false,
       "order": 3
     },
     {
@@ -131,7 +131,7 @@
       "name": "信息传输",
       "description": "把文字、文档、表格、演示、PDF 等常见格式封装为二维码/视频传输；精简模式还原纯文本内容，原件模式（fmt=file）可原样还原文件（含样式与宏）。",
       "category": "office",
-      "enabled": true,
+      "enabled": false,
       "order": 5
     },
     {

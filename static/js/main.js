@@ -87,6 +87,19 @@ async function render() {
     document.getElementById('hero-subtitle').textContent = site.subtitle || '';
     document.getElementById('footer').textContent = site.footer || '';
 
+    // 壳门提示（2026-10-11 需求①）：接入密钥缺失/变更时服务器业务面 403，
+    // 能力层降级为仅本地清单并带 gate_blocked 标记——顶部给可执行指引（仅客户端会出现；
+    // 浏览器路径进不了本页）。注意兼容 Chrome 72（无可选链）。
+    if (data.gate_blocked) {
+      const banner = document.createElement('div');
+      banner.className = 'loading';
+      banner.style.cssText = 'margin:0 0 16px;color:#b06000;';
+      banner.innerHTML = '⚠ ' + esc(data.gate_message
+        || '服务器需要接入密钥：请向管理员索取，在客户端「连接设置」中填写后重试。')
+        + '　<a href="/connection">打开连接设置</a>';
+      content.insertBefore(banner, content.firstChild);
+    }
+
     const tools = data.tools || [];
     // 插件商店不在网格重复展示：侧栏已有常驻入口（2026-10-07）；
     // 元数据保留在 /api/tools 里，/tool/store 壳页仍需要它

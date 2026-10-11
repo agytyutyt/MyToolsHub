@@ -534,8 +534,11 @@ def part_d(work):
     app = capability_app.create_capability_app(
         build_cfg, client_cfg, addr, static_dir,
         lp_dir, os.path.join(ROOT, "client", "fallback.html"),
-        data_dir=data_root, log=lambda m: None)
+        data_dir=data_root, log=lambda m: None,
+        shell_token="bench-shell-1")
     c = app.test_client()
+    # 壳自证（2026-10-11 需求① G2-6）：台架模拟壳——先 boot 种 Cookie 再探测
+    c.get("/shell-boot?_shell=bench-shell-1&next=/")
 
     # D1 商店安装 local 插件 → 合并清单出现
     r = c.post("/local-api/store/install", json={"id": "local-foo", "version": "1.0.0"})

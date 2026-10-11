@@ -6,14 +6,17 @@
   / （未配地址 → 兜底页）与 /local-api/health → 退出码 0/1。
 """
 import base64
+import http.cookiejar
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -105,7 +108,9 @@ def smoke(out, cfg):
     name = cfg["product"]["name"]
     exe = os.path.join(out, name + ".exe")
     tmp = tempfile.mkdtemp(prefix="jzclient-smoke-")
-    env = dict(os.environ, JZCLIENT_DATA_DIR=tmp)
+    # 壳自证 run token（2026-10-11 需求① G2-6/G2-7）：台架固定注入，供 boot 断言
+    shell_token = "smoke-" + secrets.token_hex(12)
+    env = dict(os.environ, JZCLIENT_DATA_DIR=tmp, JZCLIENT_SHELL_TOKEN=shell_token)
     log_path = os.path.join(out, "client.log")
     for stale in ("client.log", "port.txt", "client.pid"):   # 硬杀残留会误导探针（陈旧端口）
         p = os.path.join(out, stale)
@@ -152,18 +157,49 @@ def smoke(out, cfg):
             fail("日志出现 UI 层异常退出")
 
         base = "http://127.0.0.1:%d" % port
-        status, body = http_get(base + "/")
+
+        # 本地端口壳自证（2026-10-11 需求① G2-6）：无 Cookie 直连必须被拒；
+        # 再走 /shell-boot（对/错 token 两例）种 Cookie，后续探针全部带 Cookie（与壳内同款）。
+        code, body = http_get(base + "/local-api/health")
+        if code != 403:
+            fail("本地端口壳自证未生效：无 Cookie 直连 /local-api/health 应 403（实际 %d）" % code)
+        code, body = http_get(base + "/shell-boot?_shell=wrong-token")
+        if code != 403:
+            fail("shell-boot 错误 token 应 403（实际 %d）" % code)
+        cj = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        try:
+            rb = opener.open(base + "/shell-boot?_shell="
+                             + urllib.parse.quote(shell_token) + "&next=/", timeout=10)
+            code, body = rb.status, rb.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:      # 兜底页语义就是 503（未配地址）
+            code, body = e.code, e.read().decode("utf-8", "replace")
+        if code != 503 or "JZCLIENT_FALLBACK" not in body:
+            fail("shell-boot 应种 Cookie 后落回主页（未配地址=503 兜底页），实际 %d" % code)
+        print("smoke：本地端口壳自证通过（无 Cookie 403 / 错 token 403 / boot 落回主页）")
+
+        status, body = http_get(base + "/")      # 无 Cookie 直连（旧口径探针应同样被拒）
+        if status != 403:
+            fail("无 Cookie 直连 / 应 403（实际 %d）" % status)
+        try:
+            rb = opener.open(base + "/", timeout=10)
+            status, body = rb.status, rb.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            status, body = e.code, e.read().decode("utf-8", "replace")
         if status != 503 or "JZCLIENT_FALLBACK" not in body:
-            fail("未配地址时 / 应返回 503+本地兜底页（实际 %d）" % status)
-        status, body = http_get(base + "/local-api/health")
-        h = json.loads(body)
+            fail("带壳 Cookie 访问 / 应返回 503+本地兜底页（实际 %d）" % status)
+        try:
+            r = opener.open(base + "/local-api/health", timeout=10)
+            h = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            fail("/local-api/health 返回异常：%d" % e.code)
         if "remote_ok" not in h:
             fail("/local-api/health 返回异常：%s" % h)
         req = urllib.request.Request(
             base + "/local-api/config/address",
             data=json.dumps({"address": "192.168.1.10:5000"}).encode(),
             headers={"Content-Type": "application/json"}, method="POST")
-        r = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        r = json.loads(opener.open(req, timeout=10).read())
         if not r.get("ok"):
             fail("写地址失败：%s" % r)
         cfgfile = os.path.join(tmp, "config.json")
@@ -231,11 +267,11 @@ def smoke(out, cfg):
                 base + "/local-api/plugins/hidden",
                 data=json.dumps({"id": "smoke-probe", "hidden": hidden}).encode(),
                 headers={"Content-Type": "application/json"}, method="POST")
-            return json.loads(urllib.request.urlopen(rq, timeout=10).read())
+            return json.loads(opener.open(rq, timeout=10).read())
         r = _post_hidden(True)
         if not r.get("ok") or "smoke-probe" not in (r.get("hidden_tools") or []):
             fail("本机显示状态写入失败：%s" % r)
-        d = json.loads(urllib.request.urlopen(base + "/local-api/plugins", timeout=10).read())
+        d = json.loads(opener.open(base + "/local-api/plugins", timeout=10).read())
         if "smoke-probe" not in (d.get("hidden_tools") or []):
             fail("/local-api/plugins 未回传 hidden_tools：%s" % d.get("hidden_tools"))
         r = _post_hidden(False)
@@ -249,7 +285,7 @@ def smoke(out, cfg):
         print("smoke：自重启链路断言（旧 pid=%s）…" % proc.pid)
         req = urllib.request.Request(base + "/local-api/restart", data=b"{}",
                                      headers={"Content-Type": "application/json"}, method="POST")
-        r = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        r = json.loads(opener.open(req, timeout=10).read())
         if not r.get("ok"):
             fail("重启端点拒绝：%s" % r)
 
