@@ -136,11 +136,16 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
     geo = GeometryStore(geometry_path(build_cfg), log)
     bridge = ShellBridge(build_cfg, log)
 
-    # T11：fixed 内核（目录存在才启用，否则回落系统常青）+ 用户数据目录进客户端数据目录
+    # T11：fixed 内核（目录存在才启用，否则回落系统常青）+ 用户数据目录进客户端数据目录。
+    # profile 按内核形态分离（2026-10-11 白屏修复）：Chromium 禁止低版本内核复用高版本
+    # profile（数据格式降级保护）——常青 154 写过的 webview2-profile 若被 fixed 100 复用，
+    # WebView2 环境创建失败 → 壳白屏（无 msedgewebview2 进程、日志无报错）。fixed 用独立
+    # profile 与常青互不污染；profile 目录里混入常青数据的既有机器，首次换回常青即自愈。
     rt = webview2_runtime_dir(build_cfg)
     webview.settings["WEBVIEW2_RUNTIME_PATH"] = rt or ""
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
-    os.makedirs(webview2_profile_dir(build_cfg), exist_ok=True)
+    profile_dir = webview2_profile_dir(build_cfg) + ("-fixed" if rt else "")
+    os.makedirs(profile_dir, exist_ok=True)
     log("webview2 runtime: %s" % (rt or "系统常青"))
 
     first_close = {"shown": bool(client_cfg.get("tray_hint_shown"))}
@@ -268,7 +273,7 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log):
     log("webview.start() entering")
     webview.start(
         private_mode=False,               # 会话/配置跨重启持久（WebView2 profile）
-        storage_path=webview2_profile_dir(build_cfg),
+        storage_path=profile_dir,         # 按内核形态分离（fixed 独立 profile，见上注释）
         gui="edgechromium",
         debug=False,
     )
