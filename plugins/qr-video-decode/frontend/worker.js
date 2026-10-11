@@ -41,14 +41,20 @@ function decodeFecInfo(b64) {
   return [(n >> 8) & 255, n & 255];
 }
 
+/* v1 帧头常量（契约文档 §2 同名归一，P3-1 L6；各端自持、不共享代码。
+   Python 端另有 SIZE_DATASIZE/BYTE_ORDER，JS 端 v1 路径不消费、不空挂）。 */
+const SIZE_INDEX = 3;              // 头字段字节数（序号/总帧数/FEC 参数各 3 字节）
+const SIZE_PREFIX = 4;             // 3 字节 → 4 base64 字符
+const V1_HEADER_CHARS = SIZE_PREFIX * 3;   // 帧头 12 字符
+
 function parseV1Frame(qrData) {
-  if (typeof qrData !== "string" || qrData.length < 12) return null;
+  if (typeof qrData !== "string" || qrData.length < V1_HEADER_CHARS) return null;
   return {
     proto: 1,
-    index: decodeIndex(qrData.slice(0, 4)),
-    n: decodeIndex(qrData.slice(4, 8)),
-    fec: decodeFecInfo(qrData.slice(8, 12)),
-    payload: qrData.slice(12),
+    index: decodeIndex(qrData.slice(0, SIZE_PREFIX)),
+    n: decodeIndex(qrData.slice(SIZE_PREFIX, SIZE_PREFIX * 2)),
+    fec: decodeFecInfo(qrData.slice(SIZE_PREFIX * 2, V1_HEADER_CHARS)),
+    payload: qrData.slice(V1_HEADER_CHARS),
   };
 }
 

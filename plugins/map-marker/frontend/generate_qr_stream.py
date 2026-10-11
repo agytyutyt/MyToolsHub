@@ -42,9 +42,16 @@ MAX_FEC_K = 170
 
 # ---------- 基础编码工具 ----------
 
+# v1 帧头常量（契约文档 §2 同名归一，P3-1 L6；各端自持、不共享代码）
+SIZE_INDEX = 3          # 头字段字节数（序号/总帧数/FEC 参数各 3 字节）
+SIZE_PREFIX = 4         # 3 字节 → 4 base64 字符
+SIZE_DATASIZE = 4       # 数据段前的 4 字节大端长度前缀
+BYTE_ORDER = "big"
+
+
 def encode_index(n: int) -> str:
     """将整数编码为 4 字符 base64（3 字节大端序）。"""
-    return base64.b64encode(n.to_bytes(3, "big")).decode("ascii")
+    return base64.b64encode(n.to_bytes(SIZE_INDEX, BYTE_ORDER)).decode("ascii")
 
 
 def encode_fecinfo(k: int, m: int) -> str:
@@ -157,9 +164,9 @@ def encode_to_video(input_path: str, output_path: str, version: int = 20,
 
     # 计算 QR 码容量
     capacity = qr_data_capacity(version, "L")
-    # 帧头固定开销: 4+4+4 = 12 字符 base64 = 9 字节
-    header_bytes = 9
-    max_payload_b64 = capacity - 12  # 帧头占 12 字符
+    # 帧头固定开销: 3 段 × SIZE_PREFIX = 12 字符 base64 = SIZE_INDEX*3 字节
+    header_bytes = SIZE_INDEX * 3
+    max_payload_b64 = capacity - SIZE_PREFIX * 3  # 帧头占 12 字符
     # base64 编码: chunk_size 字节 → chunk_size * 4/3 字符
     # 所以 chunk_size = max_payload_b64 * 3/4
     chunk_size = int(max_payload_b64 * 3 / 4) - 4  # 留一点余量

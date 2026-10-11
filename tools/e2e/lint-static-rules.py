@@ -73,8 +73,8 @@ EXEMPTIONS = [
     # textContent，不认本地 `esc(` 简写，故「同行已 esc()」成片误报；封装函数已逐一体内核对。
     ("F-3", "plugins/admin/frontend/js/admin-common.js:226", "右值＝openModal 形参 bodyHtml；14 个调用点的模板体对外链数据一律 esc()"),
     ("F-3", "plugins/admin/frontend/js/admin-common.js:389", "右值＝本文件 pickerHtml()：只有 encodeURIComponent(静态 module 名) 与 :281 esc(label)"),
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:454", "右值＝previewHtml(p)：label/message/ignored_columns/sheet/notes/模式名+文件名逐条 esc()（:329-349），未 esc 仅数值"),
-    ("F-3", "plugins/admin/frontend/js/admin-common.js:475", "右值＝doneHtml(p)：只拼 summaryHtml(p.summary)（纯数字）与静态文案"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:462", "右值＝previewHtml(p)（L9 插入绑定点后 +8 移行）：label/message/ignored_columns/sheet/notes/模式名+文件名逐条 esc()（:329-349），未 esc 仅数值"),
+    ("F-3", "plugins/admin/frontend/js/admin-common.js:483", "右值＝doneHtml(p)（L9 插入绑定点后 +8 移行）：只拼 summaryHtml(p.summary)（纯数字）与静态文案"),
     ("F-3", "plugins/admin/frontend/js/admin-dept.js:16", "同行已 esc(err.message)"),
     ("F-3", "plugins/admin/frontend/js/admin-dept.js:25", "departments.map 模板体内 d.id/name/unit_name/description 全部 esc()（:26-33），users_count 为数值"),
     ("F-3", "plugins/admin/frontend/js/admin-llm.js:66", "rows 构造于 :51-64：模式名/problem/url/label/format/model 均 esc()；okClass、keyText 取本文件枚举，user_count 数值"),

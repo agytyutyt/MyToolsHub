@@ -36,6 +36,7 @@ from flask import jsonify, request
 
 API_PREFIX = "/api/qr-video-decode"
 
+SIZE_INDEX = 3        # 帧头字段 base64 编码前字节数（序号/总帧数/FEC 参数各 3 字节；契约 §2）
 SIZE_PREFIX = 4       # 帧头序号/总帧数 占 4 个 base64 字符（=3 字节）
 SIZE_DATASIZE = 4     # 文件长度前缀占 4 字节
 BYTE_ORDER = "big"
