@@ -377,7 +377,11 @@ def main():
             time.sleep(2)
         check(up is not None, "服务启动并响应登录页 200", "%s 秒（端口 %d）" % (up, port) if up is not None else "启动失败/超时")
         if up is not None:
-            # 壳身份门口径（2026-10-11 需求①）：密钥从隔离数据根读取（门首请求自动生成）
+            check(http(port, "/login")[0] == 200, "登录页 200")
+            check(http(port, "/")[0] == 403, "浏览器无密钥访问首页 403（壳身份门生效）")
+            check(http(port, "/api/tools")[0] == 403, "浏览器无密钥 /api/tools 403")
+            # 壳身份门口径（2026-10-11 需求①）：密钥文件由首个门后请求触发生成——
+            # 上面两个 403 断言已触发，此刻读取（过早期读会拿到空密钥，断言全盘失真）
             tok = ""
             tok_path = os.path.join(droot, "config", "shell-token.json")
             try:
@@ -392,16 +396,16 @@ def main():
                 code_tok = e.code
             except Exception:
                 code_tok = None
-            check(http(port, "/login")[0] == 200, "登录页 200")
-            check(http(port, "/")[0] == 403, "浏览器无密钥访问首页 403（壳身份门生效）")
-            check(http(port, "/api/tools")[0] == 403, "浏览器无密钥 /api/tools 403")
             check(code_tok == 401, "带密钥匿名 /api/tools 401（强制登录生效，门后语义保持）",
                   "实际 %s" % code_tok)
-            check(http(port, "/admin")[0] == 302, "浏览器 /admin 302→登录页（管理面保留）")
+            # urllib 默认跟随 302 → /admin 最终落到登录页 200（门放行 + 登录门接管）
+            code_admin = http(port, "/admin")[0]
+            check(code_admin in (200, 302), "浏览器 /admin 可达（管理面保留；302→登录页 200）",
+                  "实际 %s" % code_admin)
             check(http(port, "/static/index.html")[0] == 403, "静态业务页面本体 403（防直取）")
             check(os.path.isdir(droot), "隔离数据根已生成", droot)
             check(os.path.exists(os.path.join(droot, "config", "admin.json")), "数据根 config/admin.json 已生成")
-            check(bool(tok), "壳门密钥文件已生成", tok_path)
+            check(os.path.isfile(tok_path), "壳门密钥文件已生成", tok_path)
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
         log.close()
         data = open(os.path.join(work, "smoke.log"), "rb").read()

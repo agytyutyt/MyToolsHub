@@ -94,41 +94,6 @@
                                            "frontend_sha256":  "16ff0d842676c0ae0c91fe7a0d23421e9776669ae63bf24bf88699425690a074",
                                            "frontend_size":  8069
                                        },
-                     "store":  {
-                                   "version":  "1.0.0",
-                                   "api_version":  1,
-                                   "file":  "JZToolsHub-store-后端-v1.0.0.zip",
-                                   "sha256":  "82cc0b8057463f4a3ac810ca0d9c63c5b749b596c53b075e986d8636ba3e99cd",
-                                   "size":  46795,
-                                   "built_at":  "2026-10-09T08:50:09+08:00",
-                                   "code_sha256":  "c02c944aa60b758aafb4eb970be9bd125bd8045299ac8602e1b899b406c45544",
-                                   "file_count":  7,
-                                   "requires_restart":  true,
-                                   "file_hashes":  {
-                                                       "plugins/store/backend/__init__.py":  "fe23335de6016851",
-                                                       "plugins/store/backend/routes.py":  "84bfeb1e502893c0",
-                                                       "plugins/store/frontend/index.html":  "3aeee576eb48fb1c",
-                                                       "plugins/store/frontend/store.js":  "e1d0590d2f4def31",
-                                                       "plugins/store/frontend/style.css":  "9fd021fa1cbcf870",
-                                                       "plugins/store/manifest.json":  "f66222f196178b77",
-                                                       "plugins/store/README.md":  "c05ac7aa256d5529"
-                                                   },
-                                   "assets":  {
-                                                  "frontend/store.js":  {
-                                                                            "h":  "e1d0590d2f4def31",
-                                                                            "v":  17,
-                                                                            "referenced":  true
-                                                                        },
-                                                  "frontend/style.css":  {
-                                                                             "h":  "9fd021fa1cbcf870",
-                                                                             "v":  8,
-                                                                             "referenced":  true
-                                                                         }
-                                              },
-                                   "frontend_file":  "JZToolsHub-store-前端-v1.0.0.zip",
-                                   "frontend_sha256":  "4d5f9da9033203fc5807571b2f7a67b7c1b3a2c855842aca2bffd6d904990427",
-                                   "frontend_size":  14893
-                               },
                      "trajectory-convert":  {
                                                 "version":  "1.2.2",
                                                 "api_version":  1,
@@ -712,49 +677,49 @@
                                              "frontend_size":  73880
                                          },
                      "admin":  {
-                                   "version":  "1.5.1",
+                                   "version":  "1.5.2",
                                    "api_version":  1,
-                                   "file":  "JZToolsHub-admin-后端-v1.5.1.zip",
-                                   "sha256":  "6e52401512c90c0027deaae1e097cadc939d083bf1c2f51a04d2b179873e33b9",
-                                   "size":  207755,
-                                   "built_at":  "2026-10-11T09:58:15+08:00",
-                                   "code_sha256":  "6fc4613602e57f79eaa4b897ffdd6e497e8a170ae616e84a9b786e117417f00e",
+                                   "file":  "JZToolsHub-admin-后端-v1.5.2.zip",
+                                   "sha256":  "b79258a1c3b2553c0e8434cb988ea3e0e6b3a1bca61ec34e145830688209eb77",
+                                   "size":  212175,
+                                   "built_at":  "2026-10-11T14:25:46+08:00",
+                                   "code_sha256":  "cffcf22e6897496975de0ada766e8490ee19574fdf4e273233ed6948a6c912e9",
                                    "file_count":  34,
-                                   "requires_restart":  false,
+                                   "requires_restart":  true,
                                    "file_hashes":  {
                                                        "plugins/admin/backend/__init__.py":  "26b7bb556a0aac8f",
                                                        "plugins/admin/backend/admin_org.py":  "de451d79651eb1a1",
                                                        "plugins/admin/backend/admin_plugins_api.py":  "4fffb3c9f2deac0e",
-                                                       "plugins/admin/backend/admin_store_api.py":  "09de81805d040183",
+                                                       "plugins/admin/backend/admin_store_api.py":  "be49de2b3fda57ee",
                                                        "plugins/admin/backend/batch_io.py":  "6ade9e38f145a2be",
                                                        "plugins/admin/backend/data_migrate.py":  "bc5d1caefe8a2c16",
                                                        "plugins/admin/backend/plugin_admin.py":  "fc4bf331b2f5cd4b",
                                                        "plugins/admin/backend/requirements.txt":  "61b243a19f403736",
-                                                       "plugins/admin/backend/routes.py":  "0d7e1743863569a0",
-                                                       "plugins/admin/backend/store_admin.py":  "bb427b8e1eb70ee8",
-                                                       "plugins/admin/frontend/admin.html":  "35920422a46d8ca9",
-                                                       "plugins/admin/frontend/admin-department.html":  "72dca4c2fe97545b",
-                                                       "plugins/admin/frontend/admin-llm.html":  "279330a9b9058ad9",
-                                                       "plugins/admin/frontend/admin-migrate.html":  "0c21e01b0a4f8b31",
-                                                       "plugins/admin/frontend/admin-plugins.html":  "9c119a103da52abe",
-                                                       "plugins/admin/frontend/admin-settings.html":  "462a914a92d772ca",
-                                                       "plugins/admin/frontend/admin-store.html":  "08b8e87be8b1119b",
-                                                       "plugins/admin/frontend/admin-unit.html":  "0c96a5876b20fe6f",
-                                                       "plugins/admin/frontend/admin-user.html":  "fb593a9689c2f666",
+                                                       "plugins/admin/backend/routes.py":  "e2c4e6bde219e2c8",
+                                                       "plugins/admin/backend/store_admin.py":  "c2f31a0f08f6f5b6",
+                                                       "plugins/admin/frontend/admin.html":  "0edf3461b096ae09",
+                                                       "plugins/admin/frontend/admin-department.html":  "1ab64fa57cd937fe",
+                                                       "plugins/admin/frontend/admin-llm.html":  "6b249aedef2e39a0",
+                                                       "plugins/admin/frontend/admin-migrate.html":  "a8c4f5cc8919c4d4",
+                                                       "plugins/admin/frontend/admin-plugins.html":  "ee52a908f396d849",
+                                                       "plugins/admin/frontend/admin-settings.html":  "ce59e898098971a4",
+                                                       "plugins/admin/frontend/admin-store.html":  "dae90ab2a6f0f6cc",
+                                                       "plugins/admin/frontend/admin-unit.html":  "3bd2040b904770f2",
+                                                       "plugins/admin/frontend/admin-user.html":  "0011391f9518ff29",
                                                        "plugins/admin/frontend/css/admin.css":  "24d31dda02406f61",
                                                        "plugins/admin/frontend/js/admin.js":  "b70ab463d2cf6c4a",
-                                                       "plugins/admin/frontend/js/admin-common.js":  "67e52aad171ab8db",
+                                                       "plugins/admin/frontend/js/admin-common.js":  "20203a10f44333f9",
                                                        "plugins/admin/frontend/js/admin-dept.js":  "2f5289eac88303cc",
                                                        "plugins/admin/frontend/js/admin-llm.js":  "11af44006fa59347",
                                                        "plugins/admin/frontend/js/admin-migrate.js":  "7f1623338c84116a",
                                                        "plugins/admin/frontend/js/admin-plugins.js":  "dbeda60f1a8138f1",
-                                                       "plugins/admin/frontend/js/admin-settings.js":  "ea596a34467b254b",
-                                                       "plugins/admin/frontend/js/admin-store.js":  "b0c989bff1e1f644",
+                                                       "plugins/admin/frontend/js/admin-settings.js":  "3852cef3eed0026a",
+                                                       "plugins/admin/frontend/js/admin-store.js":  "c2c19bee57eb8454",
                                                        "plugins/admin/frontend/js/admin-unit.js":  "bdaf76bb8edd5807",
                                                        "plugins/admin/frontend/js/admin-user.js":  "323bb1a8ddc54c1b",
                                                        "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
-                                                       "plugins/admin/frontend/login.html":  "dd84cf7704d3be32",
-                                                       "plugins/admin/manifest.json":  "b48a84ac96887315",
+                                                       "plugins/admin/frontend/login.html":  "978a43289dcd100d",
+                                                       "plugins/admin/manifest.json":  "1fd2722e428f42b9",
                                                        "plugins/admin/README.md":  "f5e452998bc2e9ef"
                                                    },
                                    "assets":  {
@@ -769,8 +734,8 @@
                                                                                "referenced":  true
                                                                            },
                                                   "frontend/js/admin-common.js":  {
-                                                                                      "h":  "67e52aad171ab8db",
-                                                                                      "v":  10,
+                                                                                      "h":  "20203a10f44333f9",
+                                                                                      "v":  11,
                                                                                       "referenced":  true
                                                                                   },
                                                   "frontend/js/admin-dept.js":  {
@@ -794,12 +759,12 @@
                                                                                        "referenced":  false
                                                                                    },
                                                   "frontend/js/admin-settings.js":  {
-                                                                                        "h":  "ea596a34467b254b",
+                                                                                        "h":  "3852cef3eed0026a",
                                                                                         "v":  null,
                                                                                         "referenced":  false
                                                                                     },
                                                   "frontend/js/admin-store.js":  {
-                                                                                     "h":  "b0c989bff1e1f644",
+                                                                                     "h":  "c2c19bee57eb8454",
                                                                                      "v":  null,
                                                                                      "referenced":  false
                                                                                  },
@@ -819,9 +784,44 @@
                                                                                "referenced":  false
                                                                            }
                                               },
-                                   "frontend_file":  "JZToolsHub-admin-前端-v1.5.1.zip",
-                                   "frontend_sha256":  "3317265998924beb2f918d560ed3c464240eae168a79ea600e3667617bd64f7b",
-                                   "frontend_size":  80645
+                                   "frontend_file":  "JZToolsHub-admin-前端-v1.5.2.zip",
+                                   "frontend_sha256":  "0227df6a07867d53e13cae3f7cf73f73d68265b73206beed687e7b6e4ee8e405",
+                                   "frontend_size":  82768
+                               },
+                     "store":  {
+                                   "version":  "1.0.1",
+                                   "api_version":  1,
+                                   "file":  "JZToolsHub-store-后端-v1.0.1.zip",
+                                   "sha256":  "f56f60015da611f70f18cf2ae46a7828e8c873fbf32561378ed4a7a0756ec998",
+                                   "size":  46768,
+                                   "built_at":  "2026-10-11T14:25:55+08:00",
+                                   "code_sha256":  "75c0bccad33a0a678dbca1f1e17af686a2196ed673ea5673d0f56698d9826217",
+                                   "file_count":  7,
+                                   "requires_restart":  true,
+                                   "file_hashes":  {
+                                                       "plugins/store/backend/__init__.py":  "fe23335de6016851",
+                                                       "plugins/store/backend/routes.py":  "d4f3e492a303f4d1",
+                                                       "plugins/store/frontend/index.html":  "5e2d18eb85025e19",
+                                                       "plugins/store/frontend/store.js":  "26bef76dd3a194a5",
+                                                       "plugins/store/frontend/style.css":  "30b6dfd676275882",
+                                                       "plugins/store/manifest.json":  "9839f7cb5f60390f",
+                                                       "plugins/store/README.md":  "c05ac7aa256d5529"
+                                                   },
+                                   "assets":  {
+                                                  "frontend/store.js":  {
+                                                                            "h":  "26bef76dd3a194a5",
+                                                                            "v":  19,
+                                                                            "referenced":  true
+                                                                        },
+                                                  "frontend/style.css":  {
+                                                                             "h":  "30b6dfd676275882",
+                                                                             "v":  9,
+                                                                             "referenced":  true
+                                                                         }
+                                              },
+                                   "frontend_file":  "JZToolsHub-store-前端-v1.0.1.zip",
+                                   "frontend_sha256":  "fd0d8b6710761cfd2c4b981b39536d8fa02a9cb8df7050bba8ea9844144e2c76",
+                                   "frontend_size":  15015
                                }
                  }
 }
