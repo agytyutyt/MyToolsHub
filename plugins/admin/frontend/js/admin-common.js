@@ -276,9 +276,9 @@
         （表头行请勿改动，示例行可删除）。
       </div>
       <div class="batch-links">
-        <a class="admin-btn small" href="${base}/template?format=xlsx">下载 xlsx 模板</a>
-        <a class="admin-btn small" href="${base}/template?format=csv">下载 csv 模板</a>
-        <a class="admin-btn small" href="${base}/export?format=xlsx">导出当前${esc(label)}</a>
+        <a class="admin-btn small" href="#" data-dl="${base}/template?format=xlsx">下载 xlsx 模板</a>
+        <a class="admin-btn small" href="#" data-dl="${base}/template?format=csv">下载 csv 模板</a>
+        <a class="admin-btn small" href="#" data-dl="${base}/export?format=xlsx">导出当前${esc(label)}</a>
       </div>
       <div class="batch-drop" id="bi-drop">
         <input type="file" id="bi-file" accept=".xlsx,.xlsm,.csv" hidden>
@@ -387,6 +387,14 @@
 
       function stepPicker() {
         root.innerHTML = pickerHtml();
+        // 快捷入口走 download()（401 跳登录 / 错误提示 / 中文文件名），不走裸 <a href>
+        // ——浏览器对带会话 cookie 的直链会吐 JSON 错误页而非提示（设计文档 §7 已知偏差，L9 修复）。
+        root.querySelectorAll('.batch-links [data-dl]').forEach((a) => {
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            download(a.dataset.dl).catch((err) => showToast(err.message, true));
+          });
+        });
         const drop = root.querySelector('#bi-drop');
         const input = root.querySelector('#bi-file');
         const nameEl = root.querySelector('#bi-filename');
