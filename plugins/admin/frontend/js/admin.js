@@ -33,7 +33,7 @@
     const meta = MODULE_META[m.id] || { icon: '1f9e9.svg', accent: '#4285F4' };
     const countLabel = m.id === 'permission' ? '角色数' : '记录数';
     const countText = MODULE_DESC[m.id] || `${countLabel} ${m.count} 条`;
-    // 系统设置同样跳独立页（2026-10-12：独立页含 数据目录 + 桌面端接入密钥 两卡；
+    // 系统设置同样跳独立页（2026-10-11：独立页含 数据目录 + 桌面端接入密钥 两卡；
     // 原弹窗实现已删——弹窗只有数据目录，接入密钥进不去）
     const href = m.id === 'settings' ? ' href="/admin/settings"' : ' href="/admin/' + m.id + '"';
     return '<a class="tool-card"' + href
