@@ -3287,9 +3287,10 @@ def _run_build_video(task_id):
         set_task(task_id, video_status="canceled", video_progress=0.0,
                  video_detail="已停止生成视频")
     except (ValueError, RuntimeError) as e:
+        code, detail = _error_of(e, "VIDEO_BUILD_FAILED", "生成视频文件失败")
         _remove_video_file(task_id)
         set_task(task_id, video_status="error", video_progress=0.0,
-                 video_detail=str(e))
+                 video_detail=detail, code=code)
     except Exception as e:
         _remove_video_file(task_id)
         set_task(task_id, video_status="error", video_progress=0.0,

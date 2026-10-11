@@ -55,6 +55,7 @@ import json
 import logging
 import os
 import re
+import sys
 import tempfile
 import threading
 import uuid
@@ -646,6 +647,8 @@ def register(app) -> None:
             "convert_legacy": all(deps.values()),
             "office_render": engine,
             "office_preview": bool(engine.get("available")),
+            "python_version": sys.version.split()[0],
+            "preview_cache_version": PREVIEW_CACHE_VERSION,
         })
 
     @app.get(f"{API_PREFIX}/config")

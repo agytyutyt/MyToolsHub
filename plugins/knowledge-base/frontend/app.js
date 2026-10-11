@@ -116,7 +116,7 @@
     username: "",          // 当前登录用户名（/config；前端"能否管理受限分类内容"的镜子用）
     superAdmin: false,     // 是否超管（/config；同上）
     categories: [],        // 后端原始列表
-    catCount: {},          // 分类id -> 递归文件数（渲染树时统计）
+    catCount: {},          // 分类id -> 直接计数（buildCounts 原始值：每分类 1；树渲染经 recursiveCount 递归合成，与 ：220 消费点一致）
     currentCat: "all",     // all | root | 分类id
     q: "",
     sortKey: "time",       // time（上传时间）| name（名称拼音）

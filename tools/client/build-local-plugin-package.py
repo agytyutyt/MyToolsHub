@@ -290,7 +290,56 @@ def build_staging(args, base_id, rules):
             notes.append("frontend 取自 %s" % os.path.abspath(args.frontend_from))
         with open(os.path.join(staging, "manifest.json"), encoding="utf-8-sig") as f:
             manifest = json.load(f)
+        _check_frontend_from_sync(args, manifest, notes)
     return staging, manifest, notes
+
+
+def _ver_tuple(v):
+    """三段式版本 → 可比较元组；非数字段按 0 处理（容忍 1.2.3b 等形态，仅用于门槛比较）。"""
+    parts = []
+    for x in str(v or "").split("."):
+        digits = ""
+        for ch in x:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def _check_frontend_from_sync(args, manifest, notes):
+    """L-12 扩展（P3-1 D7 口径的门禁化）：-FrontendFrom 指向服务器插件 frontend 时，
+    本地工件 manifest 版本不得落后于该服务器插件的 manifest 版本——服务器侧
+    frontend/backend 任一变化必须同批重生成工件 + 同步递增（否则本地插件用户长期拿旧前端，
+    实锤案例 = local-qr-video-decode 停 1.2.1 而服务器已 1.2.2）。工件超前=合法独立演进，仅告警。"""
+    ff = os.path.abspath(args.frontend_from) if args.frontend_from else ""
+    m = re.search(r"[\\/]+plugins[\\/]+([A-Za-z0-9_-]+)[\\/]+frontend[\\/]*$", ff.replace("/", "\\"))
+    if not m:
+        return
+    srv_id = m.group(1)
+    srv_manifest = os.path.join(os.path.dirname(os.path.dirname(ff)), srv_id, "manifest.json")
+    if not os.path.isfile(srv_manifest):
+        die("-FrontendFrom 指向服务器插件 %s 但缺 %s（L-12 同步校验无从比对）" % (srv_id, srv_manifest))
+    with open(srv_manifest, encoding="utf-8-sig") as f:
+        sm = json.load(f)
+    srv_v = str(sm.get("version") or "")
+    local_v = str(manifest.get("version") or "")
+    if not srv_v or not local_v:
+        die("L-12 同步校验：服务器/工件 manifest 缺 version（%s vs %s）" % (srv_v, local_v))
+    if _ver_tuple(local_v) < _ver_tuple(srv_v):
+        die("本地工件版本落后于服务器插件（L-12 同步门槛，P3-1 D7 口径）：\n"
+            "      服务器 %s = v%s > 本地工件 = v%s\n"
+            "      服务器侧 frontend/backend 变化未同步本地工件。\n"
+            "      修法：① 跑对应 adapt-* 补丁器重生成 client-plugins/local-%s/（C 类）或\n"
+            "            改用 --derive-local 直接派生（B 类）；② 同步递增工件 manifest 的 version。\n"
+            "      口径真源：docs/design/同源副本台账.md §2.7"
+            % (srv_id, srv_v, local_v, srv_id))
+    if _ver_tuple(local_v) > _ver_tuple(srv_v):
+        notes.append("!! 本地工件 v%s 超前于服务器插件 %s v%s（合法的独立演进；若属同批改动请核对是否漏递增服务器侧）"
+                     % (local_v, srv_id, srv_v))
 
 
 def main():
