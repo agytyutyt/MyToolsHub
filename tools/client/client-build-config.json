@@ -13,10 +13,10 @@
     "default_address": ""
   },
   "webview2": {
-    "fallback": "evergreen",
-    "version": "100.0.1185.50",
+    "fallback": "fixed",
+    "version": "109.0.1518.78",
     "source": "核验 2026-10-09：官方固定版清单（developer.microsoft.com/microsoft-edge/api/webview2，下载页 Fixed Version 下拉同源 API）只保留最近 5 个版本——现为 155.0.4283.45 / 154.0.4258.62 / 153.0.4234.48 / 152.0.4191.62 / 151.0.4129.107（x64/x86/arm64 CAB）；备选阶梯 100.x→109.x→92.x 三线官方 CDN 直链均已 404（末版分别为 100.0.1185.50 / 109.0.1518.78 / 92.0.902.84，形态均为 CAB，直链取自官方页 Wayback 快照并用 HTTP HEAD 复验）；Microsoft Update Catalog 亦无旧版固定版（仅近月常青更新包，q=100.0.1185/109.0.1518/92.0.902 均 0 命中）——故版本号保持占位（前缀匹配）。100.x 唯一可得渠道=Web Archive 存档副本（非官方，正式分发前须过法务）：https://web.archive.org/web/20220430144006if_/https://msedge.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/f1ef4889-266b-41d8-9725-76f5b1e37f7f/Microsoft.WebView2.FixedVersionRuntime.100.0.1185.50.x64.cab（175070735 字节，sha256 8b4b13ed3f6ade24ba67a7945924766cfe74b9e44ef6a6a1011e611c5c890f7d，解包后 msedgewebview2.exe FileVersion=100.0.1185.50 已实测）。取包/裁剪/分件：python tools/client/build-webview2-kernel.py（--list 核验可得版本；--from-local/--url 离线/指定源；--zip 出 JZClient-内核-webview2-<版本>-<架构>-v1.zip）；目标机装载：tools/client/install.ps1 -Kernel <分件>。若改钉当前官方在售版本：改本字段 version 后直接跑 build-webview2-kernel.py 即从官方 CDN 取包。",
     "trim": "仅留 zh-CN/en-US 语言包；目录随出包脚本执行 NTFS compact LZX",
-    "fixed_status": "2026-10-11 真机实测（Windows 10 19045 + pywebview 6.2.1）：100.0.1185.50 分件装载后 WebView2 环境创建失败——无 msedgewebview2 进程、profile 目录零写入、壳白屏；两层原因（①常青 154 写过的 profile 被内核降级复用——Chromium 降级保护；已修 shell_window.py profile 按内核形态分离 webview2-profile-fixed；②profile 分离后环境创建仍失败——100 代内核在本机形态下不可用，需 R3 重拍板改钉官方在售版本 151–155）。故 fallback 改回 evergreen，runtime/webview2 已改名 webview2.off-100-实测环境创建失败；改钉在售版本时改本字段 version 后跑 build-webview2-kernel.py 即从官方 CDN 取包。白屏复盘与修复记录见 client/shell_window.py:139-150 注释与 client.log。"
+    "fixed_status": "2026-10-11 实测定版（Win10 19045 + pywebview 6.2.1，本机实测）：①100.0.1185.50 装载后环境创建失败（无 msedgewebview2 进程、壳白屏）——两层原因=常青 154 profile 被降级复用（已修 shell_window.py profile 按内核形态分离 webview2-profile-fixed，a9a0120）+ 100 代内核自身不可用；②**109.0.1518.78 （Win7 末版，Wayback 存档 CAB sha256 记 .workbuddy/cache 同名 .sha256）实测通过**——3 个渲染进程、fixed profile Last Version=109.0.1518.78、渲染管线完整（T11 以 109 形态闭项）；用户确认窗口渲染后此拍板（钉 109）即闭合。分发前置不变：109 亦为非官方存档渠道，正式分发前过法务/供应链。取包：build-webview2-kernel.py --version 109.0.1518.78 --url <Wayback 直链>（URL 见本文件 git 历史）。"
   }
 }
