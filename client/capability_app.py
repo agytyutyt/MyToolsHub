@@ -24,6 +24,7 @@ import tempfile
 import threading
 import uuid
 import time
+from urllib.parse import quote as _urlquote
 
 import requests
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -33,7 +34,7 @@ import jz_plugin_host
 import local_registry
 import pkg_install
 import plugin_source
-from client_config import hidden_tools, set_hidden_tool
+from client_config import hidden_tools
 from jz_relay import JzRelay
 from plugin_executor import PluginExecutor
 from session_mirror import SessionMirror
@@ -65,6 +66,21 @@ border-radius:6px;text-decoration:none;font-size:14px}
 <p>服务器已启用壳身份门：业务功能仅限桌面客户端访问。<br>
 当前客户端的接入密钥未配置或不正确，请向管理员索取后填写。</p>
 <a href="/connection" target="_top">打开连接设置</a>
+</div></body></html>"""
+
+# 未安装提示页（D7）：壳页对未登记插件不出裸 404，给可执行指引 + 返回主界面
+_NOT_INSTALLED_HTML = """<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>插件未安装</title><style>
+body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#f1f3f4;margin:0;
+display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.12);
+padding:32px 40px;max-width:520px;width:92%;text-align:center}
+h1{font-size:19px;margin:0 0 8px;color:#b06000}p{color:#5f6368;line-height:1.7;font-size:14px}
+a{display:inline-block;margin-top:14px;padding:9px 28px;background:#1a73e8;color:#fff;
+border-radius:6px;text-decoration:none;font-size:14px}
+</style></head><body><div class="card">
+<h1>插件未安装</h1><p>「__TOOL_ID__」__REASON__。<br>请打开插件商店安装后再使用。</p>
+<a href="/" target="_top">返回主界面</a>
 </div></body></html>"""
 
 
@@ -153,9 +169,375 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def _mirror_clear_hook():
         _mirror_clear()                       # 登出/401 → 身份立即作废
         invalidate_identity()
+        _account_clear()                      # 账号上下文同步作废（D19：根切 _anonymous + 停 worker）
 
     mirror.update_from_set_cookie = _mirror_update_hook
     mirror.clear = _mirror_clear_hook
+
+    # ---- 账号上下文与账号级安装（2026-10-11 账号级安装批次 G2-1/G2-2/G3-1，D1–D22）----
+    # 登录/续期时缓存 username 并拉取账号安装登记（GET /plugin/store/api/installs，§2.1）；
+    # 登出/401（镜像清空信号）清空。离线快照 account-state.json（账号+installs+ts）：
+    # 启动时无服务器可达按快照显示（G3-5），联网后刷新覆盖。插件可见数据根随账号切换
+    # （JZTOOLS_DATA_ROOT 每次现读 → 进程内即时生效；worker 由执行器显式注入，G3-2）。
+    _account = {"username": None, "installs": None, "installs_ok": False,
+                "ts": 0.0, "root": "", "signed_out": False}
+    _account_state_path = os.path.join(_data_dir, "account-state.json")
+    _users_root = os.path.join(_data_dir, "users")
+    _on_root_change = {"fn": None}     # 数据根切换后重挂 hybrid 子应用（模块级缓存数据根的旧子应用退役）
+    _builtin_ids = {"store", "admin"}  # 主体自带插件不参与安装登记（常驻入口，不参与装卸）
+    _visible_cache = {"ids": None, "ts": 0.0}     # 服务器 /api/tools 可见清单（D22 停用优先判定源）
+    _catalog_cache = {"flat": None, "ts": 0.0, "ok": False}   # 商店 flat 投影（云卡元数据源）
+
+    def _account_dir(username):
+        # D20：目录名 = quote(username, safe='')（可逆、防穿越、中文/空格安全）
+        name = _urlquote(str(username or ""), safe="")
+        if not name or name in (".", "..") or any(c in name for c in '\\/:*?"<>|'):
+            return ""
+        return name
+
+    def _apply_account_root(username, reload_hybrids=True):
+        """账号确定/变化 → 数据根切 users/<账号>（未登录 _anonymous，D19）；切号停常驻 worker。"""
+        name = _account_dir(username)
+        sub = os.path.abspath(os.path.join(_users_root, name if name else "_anonymous"))
+        if not sub.startswith(os.path.abspath(_users_root) + os.sep):
+            _log("账号数据根路径校验失败（拒绝 %r）" % username)
+            return
+        if os.environ.get("JZTOOLS_DATA_ROOT") != sub:
+            os.environ["JZTOOLS_DATA_ROOT"] = sub
+            if executor is not None:
+                executor.stop_residents()     # G3-2：切号停常驻 worker（防持旧根写串数据）
+            _log("插件数据根：%s" % sub)
+            if reload_hybrids and _on_root_change["fn"]:
+                try:
+                    _on_root_change["fn"]()   # 重挂 hybrid（旧子应用可能模块级缓存了旧数据根）
+                except Exception as exc:
+                    _log("账号切换重挂本地插件失败：%r" % exc)
+        _account["root"] = sub
+
+    def _load_account_state():
+        try:
+            with open(_account_state_path, "r", encoding="utf-8") as f:
+                obj = json.load(f)
+            if isinstance(obj, dict) and obj.get("username"):
+                return obj
+        except Exception:
+            pass
+        return None
+
+    def _save_account_state():
+        try:
+            os.makedirs(_users_root, exist_ok=True)
+            tmp = _account_state_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"username": _account["username"] or "",
+                           "installs": _account["installs"] or {},
+                           "ts": time.time()}, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, _account_state_path)
+        except Exception as exc:
+            _log("account-state.json 写入失败：%r" % exc)
+
+    def _account_clear():
+        """登出/401（D19）：停 worker + 数据根切 _anonymous；快照保留内容但不展示。
+
+        signed_out 只置位不清位（登录才复位）——mirror.clear 在一次登出里会被触发两次
+        （删除型 Cookie 的镜像处理 + 401 统一信号），第二次 username 已空，若按
+        had_account 重算会把第一次置的位抹掉（台架 C4 抓出）。"""
+        had_account = bool(_account["username"])
+        _account.update({"username": None, "installs": None, "installs_ok": False,
+                         "ts": 0.0})
+        if had_account:
+            _account["signed_out"] = True
+        _apply_account_root(None)
+
+    def _account_reg():
+        """当前账号登记 dict；账号模式未启用（未登录/旧服务器 404 降级）→ None（G2-7）。"""
+        if not _account["installs_ok"] or not _account["username"]:
+            return None
+        return _account["installs"] if isinstance(_account["installs"], dict) else {}
+
+    def _gate_resource(pid):
+        """D7 会话可用性门：账号模式下未登记/账号停用的本机资源一律不可达。
+
+        返回 (gated, allowed, reason)：gated=False = 账号模式未启用，调用方按旧逻辑放行。
+        A 类附加条件（id 在服务器可见清单）由安装/预检面叠加（§2.6/D22）；页面门在清单
+        取不到（离线）时不硬拦——内容面随后走中继兜底/登录页，不产生越权内容。
+        """
+        reg = _account_reg()
+        if reg is None:
+            return False, True, ""
+        if pid in _builtin_ids:
+            return False, True, ""       # 主体自带插件常驻可达（商店/后台入口）
+        rec = reg.get(pid)
+        if rec is None:
+            return True, False, "未安装"
+        if rec.get("enabled") is False:
+            return True, False, "已被停用"
+        return True, True, ""
+
+    def _not_installed_page(pid, reason):
+        """壳页可读提示（D7：不出裸 404），带返回主界面链接。
+
+        用占位符替换而非 % 格式化——模板 CSS 含字面 `%`，%s 会撞车（台架抓出）。"""
+        safe = re.sub(r"[^A-Za-z0-9_-]", "", str(pid or ""))
+        html = (_NOT_INSTALLED_HTML
+                .replace("__TOOL_ID__", safe)
+                .replace("__REASON__", ("在当前账号%s" % reason) if reason else "未安装"))
+        return Response(html, status=404, content_type="text/html; charset=utf-8")
+
+    def _fetch_installs():
+        """GET /plugin/store/api/installs（用户会话）。返回 (installs, status)：
+        True=成功；False=旧服务器无该 API（404，降级旧行为 G2-7）；None=暂时不可达（保持现状）。"""
+        if not state["address"]:
+            return None, None
+        try:
+            r = upstream.get(state["address"] + "/plugin/store/api/installs",
+                             headers=client_headers(), timeout=(5, 15))
+        except requests.RequestException:
+            return None, None
+        if r.status_code == 200:
+            try:
+                inst = (r.json() or {}).get("installs")
+                return (inst if isinstance(inst, dict) else {}), True
+            except Exception:
+                return None, None
+        if r.status_code == 404:
+            return None, False
+        return None, None
+
+    def _installs_write(action, ids, version="", source="store"):
+        """写服务端账号登记（D18：先登记后落盘）。成功回包同步进内存（登记变化即时生效）。"""
+        if not state["address"]:
+            return False
+        try:
+            r = upstream.post(state["address"] + "/plugin/store/api/installs",
+                              headers=client_headers(), timeout=(5, 15),
+                              json={"action": action, "ids": list(ids),
+                                    "version": version, "source": source})
+        except requests.RequestException:
+            return False
+        if r.status_code != 200:
+            return False
+        try:
+            inst = (r.json() or {}).get("installs")
+            if isinstance(inst, dict) and _account["username"]:
+                _account["installs"] = inst
+                _account["installs_ok"] = True
+                _save_account_state()
+        except Exception:
+            pass
+        return True
+
+    def _server_visible_ids():
+        """服务器 /api/tools 可见清单 id 集合（60s 缓存；D22 停用优先的判定源）。
+        取不到（离线/异常）返回 None —— 判定面按「不硬拦」处理。"""
+        now = time.time()
+        if _visible_cache["ids"] is not None and now - _visible_cache["ts"] < 60:
+            return _visible_cache["ids"]
+        ids = None
+        if state["address"]:
+            try:
+                r = upstream.get(state["address"] + "/api/tools", headers=client_headers(),
+                                 timeout=(5, 15))
+                if r.status_code == 200:
+                    d = r.json()
+                    tools = d.get("tools") if isinstance(d, dict) else d
+                    if isinstance(tools, list):
+                        ids = {str(t.get("id") or "") for t in tools
+                               if isinstance(t, dict) and t.get("id")}
+            except Exception:
+                ids = None
+        _visible_cache.update({"ids": ids, "ts": now})
+        return ids
+
+    def _catalog_flat():
+        """商店 flat 投影（60s 缓存；云卡元数据源 §2.2 第 4 点）。取不到返回 {}（降级）。"""
+        now = time.time()
+        if _catalog_cache["flat"] is not None and now - _catalog_cache["ts"] < 60:
+            return _catalog_cache["flat"]
+        flat, ok = {}, False
+        if state["address"]:
+            try:
+                r = upstream.get(state["address"] + "/plugin/store/api/catalog",
+                                 headers=client_headers(), timeout=(5, 15))
+                if r.status_code == 200:
+                    for p in (r.json() or {}).get("packages") or []:
+                        if isinstance(p, dict) and p.get("id"):
+                            flat[str(p["id"])] = p
+                    ok = True
+            except Exception:
+                flat, ok = {}, False
+        _catalog_cache.update({"flat": flat, "ts": now, "ok": ok})
+        return flat
+
+    def _migrate_legacy_data(username):
+        """遗留**数据**归属（D2/G3-3）：<数据目录>/plugins/ → 首个登录账号
+        users/<账号>/plugins/（move 一次；标记 users/.legacy-migrated 幂等；失败下轮重试）。
+        其余账号空白起步（升级说明给出手工复制指引）。"""
+        marker = os.path.join(_users_root, ".legacy-migrated")
+        if os.path.isfile(marker):
+            return
+        name = _account_dir(username)
+        if not name:
+            return
+        legacy = os.path.join(_data_dir, "plugins")
+        try:
+            os.makedirs(_users_root, exist_ok=True)
+            moved = 0
+            if os.path.isdir(legacy):
+                dest_root = os.path.join(_users_root, name, "plugins")
+                os.makedirs(dest_root, exist_ok=True)
+                for entry in os.listdir(legacy):
+                    if os.path.exists(os.path.join(dest_root, entry)):
+                        continue          # 目标已存在不覆盖（幂等）
+                    shutil.move(os.path.join(legacy, entry), os.path.join(dest_root, entry))
+                    moved += 1
+                try:
+                    os.rmdir(legacy)      # 移空才删；有残留（目标占位）留下轮
+                except OSError:
+                    pass
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), username))
+            _log("遗留插件数据已归属账号 %s（迁移 %d 项）" % (username, moved))
+        except Exception as exc:
+            _log("遗留数据迁移失败（下轮登录重试）：%r" % exc)
+
+    def _seed_legacy_installs(username):
+        """登记补种（D11）：升级遗留机器的**首个登录账号**一次性——集合 = 本机
+        local-plugins/* + server-frontends/*（store/admin 不参与），尊重 hidden_tools
+        （列表内不补种）；机器级 local_state 停用映射为该账号 enabled=False（§7.7/D4）。
+        消费后清 hidden_tools 键；installs API 不可达（旧服务器）→ 不消费不清理留待下轮。
+        dep-slot 组件不进登记（D6：依赖是机器能力非账号插件）。"""
+        marker = os.path.join(_users_root, ".legacy-seeded")
+        if os.path.isfile(marker):
+            return
+        name = _account_dir(username)
+        if not name or not state["address"]:
+            return
+        ids = {str(m.get("id")) for m in local_manifests if m.get("id")}
+        ids |= {str(fid) for fid in frontends}
+        ids -= _builtin_ids
+        ids -= set(hidden_tools(build_cfg))     # 尊重 hidden：列表内的不补种
+        if not _installs_write("install", sorted(ids), source="migrated"):
+            return                              # API 不可达：不消费不清理（下轮再试）
+        try:
+            os.makedirs(_users_root, exist_ok=True)
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write("%s %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), username))
+        except OSError:
+            return
+        # 机器级停用 → 账号级 enabled=False（一次性语义迁移，D4/§7.7）
+        states_cfg = (load_client_config(build_cfg).get("local_state") or {})
+        off = [p for p, v in states_cfg.items() if v is False and p in ids]
+        if off:
+            _installs_write("disable", off)
+        # 消费后清除 hidden_tools 键（登记制取代本机隐藏，§2.4）
+        from client_config import save_client_config
+        cfg = dict(load_client_config(build_cfg))
+        if cfg.get("hidden_tools"):
+            cfg.pop("hidden_tools", None)
+            save_client_config(build_cfg, cfg)
+        _log("已为首个登录账号 %s 补种安装登记 %d 项（迁移）" % (username, len(ids)))
+
+    def refresh_account(force=False):
+        """登录/续期后同步账号上下文（60s TTL；force=登记写后即时校准）。"""
+        user = refresh_identity()
+        username = str((user or {}).get("username") or "")
+        if not username:
+            return
+        changed = _account["username"] != username
+        if changed:
+            _account["username"] = username
+            _account["signed_out"] = False      # 重登恢复显示（D19）
+            _apply_account_root(username)
+            _migrate_legacy_data(username)     # D2：首个登录账号继承遗留数据（幂等）
+            _seed_legacy_installs(username)    # D11：登记补种（幂等）
+        now = time.time()
+        if force or changed or _account["installs"] is None or now - _account["ts"] >= 60:
+            inst, ok = _fetch_installs()
+            if ok is True:
+                _account["installs"] = inst
+                _account["installs_ok"] = True
+                _account["ts"] = now
+                _save_account_state()
+            elif ok is False:
+                if _account["installs_ok"]:
+                    _log("服务器 installs API 不可用（404）：降级为机器级行为（G2-7）")
+                _account["installs"] = None
+                _account["installs_ok"] = False
+                _account["ts"] = now
+            # None=暂时不可达：保持现状（离线快照显示）
+
+    # 启动：离线快照恢复（G3-5）——账号 + 登记按快照显示，数据根指向快照账号
+    _snap = _load_account_state()
+    if _snap and _snap.get("username") and isinstance(_snap.get("installs"), dict):
+        _account.update({"username": str(_snap["username"]),
+                         "installs": dict(_snap["installs"]),
+                         "installs_ok": True, "ts": 0.0})
+        _log("账号离线快照恢复：%s（按快照显示，联网后刷新）" % _snap["username"])
+    _apply_account_root(_account["username"], reload_hybrids=False)
+
+    def _cloud_item(pid, rec, meta, cat_entry, order, catalog_ok=True):
+        """灰蒙版云卡条目（§2.2 第 3/4 点）：登记有、本机副本缺。元数据优先级 =
+        /api/tools（A 类）> 商店 flat > 登记记录降级（缺图标用默认）。"""
+        src = cat_entry or {}
+        item = {
+            "id": pid,
+            "name": (meta or {}).get("name") or src.get("name") or pid,
+            "description": (meta or {}).get("description") or src.get("description", ""),
+            "icon": (meta or {}).get("icon") or src.get("icon") or "🧩",
+            "accent": (meta or {}).get("accent") or src.get("accent") or "#4285F4",
+            "entry": "index.html", "features": [],
+            "category": (meta or {}).get("category") or src.get("category") or "本地插件",
+            "category_id": (meta or {}).get("category_id") or "local",
+            "order": order, "health": "ok", "health_degraded": [],
+            "version": src.get("version") or rec.get("version") or "",
+            "cloud": True, "machine_present": False, "account_installed": True,
+        }
+        if cat_entry is None and catalog_ok:
+            item["delisted"] = True        # D21①：catalog 无 published 投影 → 标注已下架
+        return item
+
+    def _account_grid_payload(data, base, reg):
+        """账号登记为显示全集（需求①）+ 双源匹配 + 云卡（§2.2 四象限；D22 组合口径）。"""
+        by_id = {str(t.get("id") or ""): t for t in base if isinstance(t, dict)}
+        local_by_id = {m.get("id"): m for m in local_manifests}
+        machine_disabled = {p for p, v in
+                            (load_client_config(build_cfg).get("local_state") or {}).items()
+                            if v is False}    # 机器级停用=次级开关（本地管理页），保留过滤
+        flat, flat_ok = _catalog_flat(), _catalog_cache.get("ok", False)
+        tools, cloud = [], []
+        order = max([t.get("order", 0) for t in base] or [0]) + 1000
+        for pid in sorted(reg.keys()):
+            rec = reg.get(pid) or {}
+            if rec.get("enabled") is False:
+                continue                          # 停用随账号（D4）：本账号不显示
+            meta = by_id.get(pid)
+            m = local_by_id.get(pid)
+            if meta is not None:                  # A 类：id 在服务器可见清单（D22 求交）
+                if m is not None or pid in frontends:
+                    tools.append(meta)            # 正常卡（A=在线直出前端副本/API 中继）
+                else:
+                    cloud.append(_cloud_item(pid, rec, meta, flat.get(pid), order, flat_ok))
+                    order += 1
+                continue
+            if m is not None:                     # B/C：本机副本在 → 正常卡（下架不影响已装者 D21①）
+                if pid in machine_disabled:
+                    continue
+                tools.append(local_registry.tool_item(m, order))
+                order += 1
+                continue
+            if str(pid).startswith("local-"):     # B/C 副本缺 → 云卡（缺元数据时降级）
+                cloud.append(_cloud_item(pid, rec, None, flat.get(pid), order, flat_ok))
+                order += 1
+            # 其余：A 类 meta 缺（服务器端停用/无权限，D22 规则 1/2）→ 不显示
+        if not isinstance(data, dict):
+            data = {}
+        cats = data.get("categories")
+        if isinstance(cats, list) and all(c.get("id") != "local" for c in cats):
+            cats.append(dict(local_registry.LOCAL_CATEGORY))
+        data["tools"] = tools + cloud
+        data["account_mode"] = True
+        return data
 
     try:
         import jz_api as _jz_api
@@ -355,6 +737,10 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.get("/tool/<tool_id>")
     def tool_page(tool_id):
+        # 会话可用性门（D7）：账号模式下未登记/账号停用的插件 → 可读提示页，不出裸 404
+        gated, allowed, reason = _gate_resource(tool_id)
+        if gated and not allowed:
+            return _not_installed_page(tool_id, reason)
         # 工具外壳页是通用件：iframe 的 src 决定内容来自远程（类 A）还是本地（类 B/C）
         if tool_id.startswith("local-"):
             return send_from_directory(static_dir, "tool.html")   # 本地插件离线可用
@@ -371,12 +757,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.get("/plugin/local-<plugin_id>/<path:filename>")
     def local_plugin_assets(plugin_id, filename):
+        gated, allowed, _r = _gate_resource("local-" + plugin_id)   # D7：未登记 → 404
+        if gated and not allowed:
+            return jsonify({"error": "未安装", "plugin": "local-" + plugin_id}), 404
         return send_from_directory(local_plugins_dir, "local-%s/frontend/%s" % (plugin_id, filename))
 
     @app.get("/plugin/<plugin_id>/<path:filename>")
     def server_frontend_assets(plugin_id, filename):
         """server 前端包本地直出（需求⑧）：仅 GET 且文件命中已装前端包清单才本地伺服；
-        其余（未安装/已停用/清单外路径/非 GET）照旧中继——零安装体验与浏览器路径不破坏。"""
+        其余（未安装/已停用/清单外路径/非 GET）照旧中继。
+
+        账号级安装（D7/§2.2 收窄注）：未登记插件的页面资产一律 404——中继直出仅保留为
+        已装副本缺失时的技术兜底（登记制取代其作为网格入口）。"""
+        gated, allowed, reason = _gate_resource(plugin_id)
+        if gated and not allowed:
+            return jsonify({"error": "未安装", "plugin": plugin_id, "reason": reason}), 404
         fe = frontends.get(plugin_id)
         if request.method == "GET" and fe and _frontend_enabled(plugin_id) \
                 and filename in (fe.get("files") or []):
@@ -397,7 +792,18 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     @app.route("/api/local/<plugin_id>/<path:rest>",
                methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
     def local_plugin_api(plugin_id, rest=""):
+        refresh_account()                     # 登记即时性（60s TTL；登录/切号在此收敛）
         m = _find_local(plugin_id)
+        if m is not None:
+            gated, allowed, reason = _gate_resource(m.get("id", plugin_id))   # D7 门
+        else:
+            g1 = _gate_resource(plugin_id)
+            g2 = _gate_resource("local-" + plugin_id)
+            gated = g1[0] or g2[0]
+            allowed = (not g1[0] or g1[1]) and (not g2[0] or g2[1])
+            reason = "未安装"
+        if gated and not allowed:
+            return jsonify({"error": "未安装", "plugin": plugin_id, "reason": reason}), 404
         if m is None:
             return jsonify({"error": "本地插件不存在"}), 404
         pid = m.get("id", plugin_id)
@@ -467,30 +873,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                            "enabled": bool(cfg_states.get(fid, True))})
         return jsonify({"plugins": out, "store": build_cfg.get("plugin_store") or {},
                         "server_frontends": fronts,
-                        "hidden_tools": hidden_tools(build_cfg),
                         "components": pkg_install.installed_components(_program_dir)})
-
-    @app.get("/local-api/plugins/hidden")
-    def lp_hidden_list():
-        """本机从主界面移除的服务器侧工具 id 列表（客户端本机显示状态）。"""
-        return jsonify({"hidden_tools": hidden_tools(build_cfg)})
-
-    @app.post("/local-api/plugins/hidden")
-    def lp_hidden_set():
-        """写本机显示状态：{id, hidden}。桌面端「卸载」置 hidden=true、「安装」置 false。
-
-        **只改客户端数据目录的 config.json**（服务器端后端包/运行状态一概不动；
-        服务器端撤下只发生在商店管理·超级管理员的 停用/卸载）。
-        """
-        data = request.get_json(silent=True) or {}
-        tid = str(data.get("id") or "").strip()
-        hidden = bool(data.get("hidden"))
-        if not tid or not re.fullmatch(r"[A-Za-z0-9_-]+", tid):
-            return jsonify({"ok": False, "error": "id 非法：%r" % tid}), 400
-        ids = set_hidden_tool(build_cfg, tid, hidden)
-        _log("本机工具显示状态：%s %s（hidden_tools=%s）"
-             % ("已移除" if hidden else "已恢复", tid, ids))
-        return jsonify({"ok": True, "hidden_tools": ids})
 
     @app.post("/local-api/plugins/install")
     def lp_install():
@@ -522,6 +905,28 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def lp_uninstall():
         data = request.get_json(force=True, silent=True) or {}
         pid = data.get("id", "")
+        refresh_account()
+        if _account_reg() is not None:
+            # 账号级卸载（2026-10-11 需求①④/§2.4/D3/D18）：只移**账号登记**；
+            # 本机副本保留为缓存（多账号共用，A 卸不删 B 的可用性，换回秒装）。
+            if pid in _builtin_ids:
+                return jsonify({"error": "内置插件不可卸载"}), 400
+            if not _installs_write("uninstall", [pid]):
+                return jsonify({"error": "卸载登记失败（服务器不可达），请稍后重试"}), 502
+            purged = False
+            if data.get("purge_data"):
+                # 清除数据（可选，D9）：作用域 = 当前账号数据目录 users\<账号>\plugins\<id>
+                import re as _re
+                if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(pid)):
+                    return jsonify({"error": "非法 id，拒绝清除数据"}), 400
+                root = _account["root"] or _data_dir
+                droot = os.path.join(root, "plugins", pid)
+                base = os.path.abspath(os.path.join(root, "plugins"))
+                if os.path.abspath(droot).startswith(base + os.sep) and os.path.isdir(droot):
+                    shutil.rmtree(droot, ignore_errors=True)
+                    purged = True
+            return jsonify({"ok": True, "restart_required": False,
+                            "data_purged": purged, "copy_kept": True})
         if not pid.startswith("local-"):
             # server 前端本地副本（需求⑧生命周期）：删副本 → 自动回退中继直出
             r = pkg_install.remove_frontend(frontends_dir, pid)
@@ -534,19 +939,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return jsonify({"error": "本地插件不存在"}), 404
         kind = next((m.get("kind") for m in local_manifests if m.get("id") == pid), "local")
         shutil.rmtree(target, ignore_errors=True)
-        purged = False
-        if data.get("purge_data"):
-            # 清除数据（可选）：数据根 plugins/<id>（配置/缓存/本地业务数据）；id 先严格校验防穿越
-            import re as _re
-            if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(pid)):
-                return jsonify({"error": "非法 id，拒绝清除数据"}), 400
-            droot = os.path.join(_data_dir, "plugins", pid)
-            base = os.path.abspath(os.path.join(_data_dir, "plugins"))
-            if os.path.abspath(droot).startswith(base + os.sep) and os.path.isdir(droot):
-                shutil.rmtree(droot, ignore_errors=True)
-                purged = True
         _rescan()
-        return jsonify({"ok": True, "restart_required": kind == "hybrid", "data_purged": purged})
+        return jsonify({"ok": True, "restart_required": kind == "hybrid", "data_purged": False})
 
     @app.post("/local-api/plugins/state")
     def lp_state():
@@ -685,6 +1079,14 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         ver, err = _find_catalog_entry(catalog, pid, version)
         if err:
             return jsonify({"error": err, "installable": False, "deps": []}), 200
+        # D22 安装门：server 条目必须仍在服务器可见清单（停用/无权限 → 拒绝并给可读原因；
+        # 停用≠下架，商店目录不动，故必须由安装门补位）。清单取不到（离线）不硬拦。
+        if (ver.get("runtime") or "") == "server":
+            vis = _server_visible_ids()
+            if vis is not None and pid not in vis:
+                return jsonify({"error": "该插件在服务器端已停用或无权使用",
+                                "installable": False, "deps": [],
+                                "server_disabled": True}), 200
         manifest = {"requires": ver.get("requires") or {}}
         try:
             verdict = jz_deps.evaluate("store:" + pid, "", manifest,
@@ -825,6 +1227,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         if err:
             return jsonify({"ok": False, "error": err}), 200
         runtime = ver.get("runtime") or "local"
+        # D22 安装门（§2.6）：server 条目不在服务器可见清单 → 拒绝（停用/无权限）
+        if runtime == "server":
+            vis = _server_visible_ids()
+            if vis is not None and pid not in vis:
+                return jsonify({"ok": False,
+                                "error": "该插件在服务器端已停用或无权使用"}), 200
+        # D18（§5）：先写账号登记（服务端确认）→ 再落本机副本。登记失败且登记面可用
+        # → 拒绝（登记是网格显示全集，落了盘也不显示；报错可重试自愈）。
+        # 旧服务器（installs 404 降级，G2-7）与 dep-slot（D6 依赖不进登记）照旧。
+        refresh_account()
+        if _account["installs_ok"] and runtime != "dep-slot":
+            if not _installs_write("install", [pid],
+                                   version=str(ver.get("version") or ""), source="store"):
+                return jsonify({"ok": False,
+                                "error": "安装登记失败（服务器不可达），请稍后重试"}), 200
 
         # 进度台账（可选）：权重 = 依赖包 size（按序）+ 主件 size；顺序与下方安装顺序一致
         prog = None
@@ -1141,6 +1558,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             if pid not in alive:
                 hybrid_apps.pop(pid, None)    # 卸载即弹（热插拔 L2/L3）
 
+    _on_root_change["fn"] = _rescan       # 账号切换 → 数据根变更后重挂 hybrid 子应用
+
     def _rescan_frontends():
         """重扫 server 前端包注册表（装卸后调用；停用只读配置，无需重扫）。"""
         frontends.clear()
@@ -1244,9 +1663,43 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         # 本地条目（local-plugins）是离线网格的唯一载体，A 类离线显兜底页（既有口径）
         enabled = [m for m in local_manifests
                    if local_states.get(m.get("id"), {}).get("status") != "disabled"]
-        payload = {"tools": local_registry.tool_items(enabled, 1000),
-                   "categories": [dict(local_registry.LOCAL_CATEGORY)],
-                   "degraded": True}
+        reg = _account_reg()
+        if reg is not None:
+            # 账号模式离线（G3-5）：网格按快照登记显示——登记 ∧ 本机副本在 → 正常卡；
+            # B/C 登记 ∧ 副本缺 → 云卡但下载禁用（D15：离线无包可取，给明确原因不静默）；
+            # A 类云卡离线不合成（其运行面本就需要服务器）。
+            tools, order = [], 1000
+            for pid in sorted(reg.keys()):
+                rec = reg.get(pid) or {}
+                if rec.get("enabled") is False:
+                    continue
+                m = next((x for x in enabled if x.get("id") == pid), None)
+                if m is not None:
+                    tools.append(local_registry.tool_item(m, order))
+                    order += 1
+                elif str(pid).startswith("local-"):
+                    tools.append({"id": pid, "name": pid,
+                                  "description": "该插件未装到本机，联网后可从云端下载",
+                                  "icon": "🧩", "accent": "#9AA0A6",
+                                  "entry": "index.html", "features": [],
+                                  "category": local_registry.LOCAL_CATEGORY["name"],
+                                  "category_id": "local", "order": order,
+                                  "health": "ok", "health_degraded": [],
+                                  "version": rec.get("version") or "",
+                                  "cloud": True, "machine_present": False,
+                                  "account_installed": True, "offline": True})
+                    order += 1
+            payload = {"tools": tools,
+                       "categories": [dict(local_registry.LOCAL_CATEGORY)],
+                       "degraded": True, "account_mode": True}
+        else:
+            payload = {"tools": local_registry.tool_items(enabled, 1000),
+                       "categories": [dict(local_registry.LOCAL_CATEGORY)],
+                       "degraded": True}
+            if _account.get("signed_out"):
+                # D19：登出/401 后网格空 + 登录引导（离线亦然，快照保留不展示）
+                payload = {"tools": [], "categories": [], "degraded": True,
+                           "signed_out": True, "account_mode": True}
         if gate_blocked:
             # 服务器壳门拒绝（G2-4）：带标记让主界面给可执行指引（main.js 渲染横幅）
             payload["gate_blocked"] = True
@@ -1292,8 +1745,20 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                             content_type=r.headers.get("Content-Type", "application/json"))
         base = data.get("tools") if isinstance(data, dict) else data
         base = base if isinstance(base, list) else []
-        # 本机移除（桌面端「卸载」的显示面，2026-10-08）：服务器侧条目在本机不再下发。
-        # 只影响本机（客户端数据目录 config.json），服务器端运行与全局清单不受影响。
+        refresh_account()                     # 账号上下文同步（登录/切号/登记刷新，60s TTL）
+        reg = _account_reg()
+        if reg is not None:
+            # 账号级安装（2026-10-11 需求①②）：登记为显示全集 + 双源匹配 + 云卡（§2.2/D22）。
+            # 本机 hidden 过滤不再参与（登记制取代本机隐藏；升级补种后 hidden 键已清）。
+            return jsonify(_account_grid_payload(data if isinstance(data, dict) else {},
+                                                 base, reg))
+        if _account.get("signed_out"):
+            # D19：登出/401 后网格空 + 登录引导（快照保留内容但不展示）
+            return jsonify({"tools": [], "categories": [], "signed_out": True,
+                            "account_mode": True})
+        # 本机移除（legacy：旧服务器无 installs API 时的机器级行为，G2-7 保留）：
+        # 服务器侧条目在本机不再下发。只影响本机（客户端数据目录 config.json），
+        # 服务器端运行与全局清单不受影响。
         hidden = set(hidden_tools(build_cfg))
         if hidden:
             dropped = [str(t.get("id") or "") for t in base if str(t.get("id") or "") in hidden]

@@ -5,6 +5,8 @@
     数据根\\store\\catalog.json   admin 写 → 本插件只读（防御性校验，坏行跳过不炸页面）
     数据根\\store\\packages\\      admin 写 → 本插件只读 + 分发（流式回包）
     数据根\\store\\stats.jsonl    本插件唯一可写（追加式下载事件）
+    数据根\\store\\installs.json  本插件唯一可写（账号级安装登记，2026-10-11 需求①；
+                                  客户端网格显示全集的唯一依据，§2.1 契约）
 
 纪律：
 - 对 catalog.json / packages\\ 无任何写代码（C6 验收：grep 无写点）；
@@ -31,6 +33,7 @@ STORE_DIR = jztools_data.get_data_root_dir("store")
 CATALOG_PATH = os.path.join(STORE_DIR, "catalog.json")
 PACKAGES_DIR = os.path.join(STORE_DIR, "packages")
 STATS_PATH = os.path.join(STORE_DIR, "stats.jsonl")
+INSTALLS_PATH = os.path.join(STORE_DIR, "installs.json")
 
 API_PREFIX = "/plugin/store/api"
 
@@ -38,6 +41,7 @@ CATALOG_SCHEMA = 2
 ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 VERSION_RE = re.compile(r"^\d+(\.\d+)*$")
 STATS_LOCK = threading.Lock()
+INSTALLS_LOCK = threading.Lock()
 
 VALID_RUNTIME = ("local", "server", "dep-slot")
 
@@ -180,6 +184,76 @@ def _stats_rows():
     return rows
 
 
+# ===================== 账号安装登记（2026-10-11 需求①，本插件第二个写点） =====================
+
+INSTALLS_SCHEMA = 1
+
+
+def load_installs():
+    """读 installs.json（防御性）：结构不符/坏记录一律按缺失处理，不炸页面。
+
+    契约（§2.1）：{"schema":1, "updated_at":"…", "users":{"<username>":{"<plugin_id>":
+    {"version","installed_at","source","enabled"}}}}。缺失（老数据根）视为空登记。
+    """
+    try:
+        with open(INSTALLS_PATH, "r", encoding="utf-8-sig") as f:
+            obj = json.load(f)
+    except Exception:
+        return {"schema": INSTALLS_SCHEMA, "updated_at": "", "users": {}}
+    if not isinstance(obj, dict) or obj.get("schema") != INSTALLS_SCHEMA:
+        return {"schema": INSTALLS_SCHEMA, "updated_at": "", "users": {}}
+    users = {}
+    for username, recs in (obj.get("users") or {}).items():
+        if not isinstance(recs, dict):
+            continue
+        clean = {}
+        for pid, rec in recs.items():
+            if isinstance(rec, dict) and ID_RE.match(str(pid or "")):
+                clean[str(pid)] = rec
+        users[str(username)] = clean
+    return {"schema": INSTALLS_SCHEMA, "updated_at": str(obj.get("updated_at") or ""),
+            "users": users}
+
+
+def save_installs(data):
+    """原子写 installs.json（jztools_data.atomic_write_json；单写方 + 低频，不加锁文件）。"""
+    os.makedirs(STORE_DIR, exist_ok=True)
+    data["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    jztools_data.atomic_write_json(INSTALLS_PATH, data)
+    return data
+
+
+def mutate_installs(username, action, ids, version="", source="store"):
+    """对单人登记执行 install/uninstall/enable/disable（幂等）；返回最新本人登记。
+
+    ids：单条为 [id]；批量补种传多条（action=install）。卸载 = 删该 id 记录（不触机器副本）。
+    """
+    with INSTALLS_LOCK:
+        data = load_installs()
+        users = data.setdefault("users", {})
+        mine = dict(users.get(username) or {})
+        for pid in ids:
+            if not ID_RE.match(str(pid or "")):
+                continue
+            if action == "install":
+                rec = dict(mine.get(pid) or {})
+                rec.update({"version": str(version or rec.get("version") or ""),
+                            "installed_at": datetime.now().isoformat(timespec="seconds"),
+                            "source": str(source or "store"), "enabled": True})
+                mine[pid] = rec
+            elif action == "uninstall":
+                mine.pop(pid, None)
+            elif action in ("enable", "disable"):
+                if pid in mine:
+                    mine[pid] = dict(mine[pid], enabled=(action == "enable"))
+        if mine:
+            users[username] = mine
+        else:
+            users.pop(username, None)
+        save_installs(data)
+        return mine
+
+
 # ===================== 路由 =====================
 
 def register(app) -> None:
@@ -262,3 +336,38 @@ def register(app) -> None:
         if user is None:
             return jsonify({"error": "未登录或登录已过期"}), 401
         return jsonify({"ok": True, "rows": _stats_rows()})
+
+    @app.get(f"{API_PREFIX}/installs")
+    def st_installs_get():
+        """本人账号安装登记全量（客户端网格显示全集的唯一依据，§2.1）。"""
+        user = _viewer()
+        if user is None:
+            return jsonify({"error": "未登录或登录已过期"}), 401
+        username = str(user.get("username") or "")
+        data = load_installs()
+        return jsonify({"ok": True, "installs": data["users"].get(username) or {},
+                        "updated_at": data.get("updated_at", "")})
+
+    @app.post(f"{API_PREFIX}/installs")
+    def st_installs_post():
+        """写本人登记：{action: install|uninstall|enable|disable, id, version?, source?}；
+        批量补种 {action:"install", ids:[…]}（迁移用，幂等）。会话鉴权、不分角色
+        （沿用「本机操作不分角色」口径——登记的是本人账号的安装事实）。"""
+        user = _viewer()
+        if user is None:
+            return jsonify({"error": "未登录或登录已过期"}), 401
+        username = str(user.get("username") or "")
+        if not username:
+            return jsonify({"error": "会话缺少账号名"}), 401
+        data = request.get_json(force=True, silent=True) or {}
+        action = str(data.get("action") or "")
+        if action not in ("install", "uninstall", "enable", "disable"):
+            return jsonify({"error": "action 仅支持 install/uninstall/enable/disable"}), 400
+        ids = [str(x) for x in (data.get("ids") or [])] or [str(data.get("id") or "")]
+        ids = [x for x in ids if x]
+        if not ids:
+            return jsonify({"error": "缺少 id"}), 400
+        mine = mutate_installs(username, action, ids,
+                               version=str(data.get("version") or ""),
+                               source=str(data.get("source") or "store"))
+        return jsonify({"ok": True, "installs": mine})

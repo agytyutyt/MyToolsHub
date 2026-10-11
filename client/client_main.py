@@ -136,7 +136,8 @@ def main():
     worker_python = runtime_python_exe(build_cfg)
     executor = PluginExecutor(
         worker_python, host_script_path(),
-        os.path.join(program_dir(), "runtime", "pylibs"), data_dir, log)
+        os.path.join(program_dir(), "runtime", "pylibs"), data_dir, log,
+        data_root_fn=lambda: os.environ.get("JZTOOLS_DATA_ROOT") or "")
     # 插件 worker 运行时留痕（打包态应为 runtime/python/python.exe；缺则回落本进程解释器=构建缺陷）
     log("插件 worker 运行时：%s" % worker_python)
 

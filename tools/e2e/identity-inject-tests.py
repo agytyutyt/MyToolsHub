@@ -195,7 +195,9 @@ def main():
         check("5e 停用条目降级清单同样隐藏", "local-idprobe-w" not in ids, ids)
 
         # 5f 上游可达 → 合并清单含远程条目（F5 曾因装饰器错挂致 /api/tools 全局降级——
-        # 该断言即为此类"路由断裂"兜底；只测降级路径会漏掉健康路径的回归）
+        # 该断言即为此类"路由断裂"兜底；只测降级路径会漏掉健康路径的回归）。
+        # 先重登录：账号级安装批次（2026-10-11）起登出后网格空（D19），第 3 步已登出。
+        c.post("/api/login", json={"username": "admin", "password": "x"})
         r = c.get("/api/tools")
         d3 = r.get_json()
         ids3 = [t["id"] for t in (d3.get("tools") or [])]

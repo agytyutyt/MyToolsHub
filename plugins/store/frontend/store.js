@@ -22,7 +22,8 @@
   var CATALOG_API = '/plugin/store/api/catalog?all=1';
   var IN_SHELL = document.documentElement.classList.contains('jz-shell');
   var catalog = [];              // flat 条目（含 versions 历史）
-  var localState = { plugins: {}, frontends: {}, components: {}, hidden: {}, loaded: false };
+  var localState = { plugins: {}, frontends: {}, components: {}, loaded: false };
+  var installs = null;           // 账号安装登记（§2.1，2026-10-11 需求①）；null=旧服务器无该 API（降级机器级行为）
 
   function $(s, el) { return (el || document).querySelector(s); }
   function esc(s) {
@@ -80,10 +81,12 @@
       });
     });
   }
-  function humanRuntime(rt) {
-    // 2026-10-11 需求②（二次调整）：server 条目=装前端副本、后端在服务器运行 →「在线」；
-    // local（B 类纯本地与 C 类客户端工件）→「离线降级」；dep-slot →「依赖」。
-    return rt === 'server' ? '在线' : rt === 'dep-slot' ? '依赖' : '离线降级';
+  function humanRuntime(e) {
+    // 徽标拆分（2026-10-11 需求⑤）：server=在线；local 按 server_data 判——
+    // C 类客户端工件（server_data=true）→「离线降级」，B 类纯本地 →「本地」；dep-slot →「依赖」。
+    if (e.runtime === 'server') return '在线';
+    if (e.runtime === 'dep-slot') return '依赖';
+    return e.server_data ? '离线降级' : '本地';
   }
   function runtimeClass(rt) {
     return rt === 'server' ? 'server' : rt === 'dep-slot' ? 'dep' : 'local';
@@ -93,12 +96,11 @@
   function loadLocalState() {
     if (!IN_SHELL) { localState.loaded = true; return Promise.resolve(); }
     return fetch('/local-api/plugins').then(function (r) { return r.json(); }).then(function (d) {
-      var plugins = {}, frontends = {}, components = {}, hidden = {};
+      var plugins = {}, frontends = {}, components = {};
       (d.plugins || []).forEach(function (p) {
         plugins[p.id] = { version: p.version, enabled: p.enabled !== false, kind: p.kind,
                           server_data: !!p.server_data };
       });
-      (d.hidden_tools || []).forEach(function (x) { hidden[String(x)] = true; });
       (d.server_frontends || []).forEach(function (f) {
         frontends[f.id] = { version: f.version, enabled: f.enabled !== false };
       });
@@ -106,8 +108,16 @@
         components[c.id] = { version: c.version, pending: !!c.pending };
       });
       localState = { plugins: plugins, frontends: frontends, components: components,
-                     hidden: hidden, loaded: true };
+                     loaded: true };
     }).catch(function () { localState.loaded = true; });
+  }
+
+  // ---------- 账号安装登记（2026-10-11 需求①，§2.1） ----------
+  function loadInstalls() {
+    if (!IN_SHELL) return Promise.resolve();
+    return fetch('/plugin/store/api/installs').then(function (r) { return r.json(); })
+      .then(function (d) { installs = (d && d.installs) || {}; })
+      .catch(function () { installs = null; });   // 旧服务器无该 API → 降级机器级行为
   }
 
   // ---------- 渲染 ----------
@@ -142,21 +152,23 @@
     if (e.runtime === 'dep-slot') return depResolutionState(e);
     var map = e.runtime === 'server' ? localState.frontends : localState.plugins;
     var inst = map[e.id];
-    var st = { installed: !!inst && inst.enabled !== false, upgradable: false,
-               disabled: !!inst && inst.enabled === false, entry: inst || null };
+    var st = { account: !!installs, registered: false, installed: false, upgradable: false,
+               disabled: false, copy_missing: false, entry: inst || null };
+    if (installs) {
+      // 账号登记三态（D10）：未装→安装；已装+副本在→卸载+启停；已装+副本缺→安装到本机
+      var rec = installs[e.id];
+      st.registered = !!rec;
+      st.installed = !!rec && !!inst && inst.enabled !== false;
+      st.disabled = !!rec && rec.enabled === false;
+      st.copy_missing = !!rec && !inst;
+      if (rec && verGt(e.version, rec.version)) st.upgradable = true;
+      return st;
+    }
+    // 降级（旧服务器，G2-7）：机器级行为不变
+    st.installed = !!inst && inst.enabled !== false;
+    st.disabled = !!inst && inst.enabled === false;
     if (inst && verGt(e.version, inst.version)) st.upgradable = true;
     return st;
-  }
-
-  function setHiddenTool(id, hidden) {
-    // 本机显示状态（客户端 config.json）：桌面端「卸载」置 hidden、「安装」恢复。
-    // 只影响本机主界面显示；服务器端后端包与其运行状态不动（撤下只在商店管理做）。
-    return fetch('/local-api/plugins/hidden', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: id, hidden: !!hidden }),
-    }).then(function (r) { return r.json().catch(function () { return {}; }); })
-      .catch(function (e) { return { ok: false, error: String(e) }; });
   }
 
   function dlButtonHtml(e, label) {
@@ -177,42 +189,50 @@
   function buttonsHtml(e) {
     var st = pluginInstallState(e);
     var html = '';
-    if (IN_SHELL && e.runtime !== 'server') {
+    if (IN_SHELL && e.runtime === 'dep-slot') {
+      // 依赖组件是机器能力（D6）：装/卸/升级仍按机器态，不进账号登记
       if (!st.installed) {
         html += installBtnHtml(e, '安装');
       } else if (st.upgradable) {
         html += installBtnHtml(e, '升级到 ' + e.version);
-      } else if (e.runtime === 'dep-slot') {
+      } else {
         html += '<button class="st-btn-install" disabled title="依赖组件已在本机生效">已安装</button>';
       }
-    }
-    if (IN_SHELL && e.runtime === 'dep-slot' && (st.installed || st.entry)) {
-      html += '<button class="st-btn-danger" data-act="uninstall-dep" data-id="' + esc(e.id) + '">卸载</button>';
+      if (st.installed || st.entry) {
+        html += '<button class="st-btn-danger" data-act="uninstall-dep" data-id="' + esc(e.id) + '">卸载</button>';
+      }
     }
     if (IN_SHELL && e.runtime === 'server') {
-      if (!st.installed && !st.disabled) {
+      // A 类（在线）：账号登记三态（D10）；副本缺=云卡同款「安装到本机」链
+      if (!st.registered) {
         html += installBtnHtml(e, '安装');
+      } else if (st.copy_missing) {
+        html += installBtnHtml(e, '安装到本机');
       } else if (st.upgradable) {
         html += installBtnHtml(e, '升级到 ' + e.version);
       }
-      if (st.installed) {
-        html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id) + '" data-en="0">停用（回退中继）</button>';
-      } else if (st.disabled) {
-        html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id) + '" data-en="1">启用本地直出</button>';
-      }
-      // server 条目：桌面端只装/卸**前端包**（2026-10-08 口径）。卸载后页面回退中继直出，
-      // 插件默认在服务器端运行、主页条目照旧——不带任何"隐藏/恢复"开关。
-      if (st.installed || st.disabled) {
+      if (st.registered && !st.copy_missing) {
+        html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id)
+          + '" data-en="' + (st.disabled ? '1' : '0') + '" data-account="1">'
+          + (st.disabled ? '启用' : '停用') + '</button>';
         html += '<button class="st-btn-danger" data-act="uninstall" data-id="' + esc(e.id) + '">卸载</button>';
       }
     }
-    if (IN_SHELL && e.runtime === 'local' && st.entry) {
-      if (st.disabled) {
-        html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id) + '" data-en="1">启用</button>';
-      } else {
-        html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id) + '" data-en="0">停用</button>';
+    if (IN_SHELL && e.runtime === 'local') {
+      // B/C 类：账号登记三态（D10）
+      if (!st.registered) {
+        html += installBtnHtml(e, '安装');
+      } else if (st.copy_missing) {
+        html += installBtnHtml(e, '安装到本机');
+      } else if (st.upgradable) {
+        html += installBtnHtml(e, '升级到 ' + e.version);
       }
-      html += '<button class="st-btn-danger" data-act="uninstall" data-id="' + esc(e.id) + '">卸载</button>';
+      if (st.registered && !st.copy_missing) {
+        html += '<button class="st-btn-warn" data-act="toggle" data-id="' + esc(e.id)
+          + '" data-en="' + (st.disabled ? '1' : '0') + '" data-account="1">'
+          + (st.disabled ? '启用' : '停用') + '</button>';
+        html += '<button class="st-btn-danger" data-act="uninstall" data-id="' + esc(e.id) + '">卸载</button>';
+      }
     }
     // 下载（2026-10-08 需求：**全部插件**都提供「安装」「下载」两个按钮，按钮上不写说明）——
     // 桌面端「下载」= 仅下载不安装（能力层落数据目录 downloads\）；server 条目取**客户端工件
@@ -246,10 +266,11 @@
     rows.push('<div class="st-md-head"><span class="st-icon st-md-icon">' + esc(e.icon || '🧩')
       + '</span><div><p class="st-name">' + esc(e.name) + '</p>'
       + '<div class="st-badges"><span class="st-badge ' + runtimeClass(e.runtime) + '">'
-      + humanRuntime(e.runtime) + '</span>'
+      + humanRuntime(e) + '</span>'
       + (e.deps_mode === 'venv' ? '<span class="st-badge venv">独立环境</span>' : '')
-      + (IN_SHELL && st.installed ? '<span class="st-badge local">已安装 v'
+      + (IN_SHELL && st.installed && !st.upgradable ? '<span class="st-badge local">已安装 v'
         + esc((st.entry || {}).version || '') + '</span>' : '')
+      + (IN_SHELL && st.copy_missing ? '<span class="st-badge venv">未装到本机</span>' : '')
       + (st.upgradable ? '<span class="st-badge up">可升级</span>' : '') + '</div></div></div>');
     rows.push('<dl class="st-md-list">'
       + '<dt>版本</dt><dd>v' + esc(e.version) + '（' + fmtSize(e.size) + '）</dd>'
@@ -282,13 +303,12 @@
     }
     list.forEach(function (e, idx) {
       var st = pluginInstallState(e);
-      var badges = '<span class="st-badge ' + runtimeClass(e.runtime) + '">' + humanRuntime(e.runtime) + '</span>'
+      var badges = '<span class="st-badge ' + runtimeClass(e.runtime) + '">' + humanRuntime(e) + '</span>'
         + (e.deps_mode === 'venv' ? '<span class="st-badge venv">独立环境</span>' : '')
         + (IN_SHELL && st.installed && !st.upgradable ? '<span class="st-badge local">已安装</span>' : '')
+        + (IN_SHELL && st.copy_missing ? '<span class="st-badge venv">未装到本机</span>' : '')
         + (st.upgradable ? '<span class="st-badge up">可升级</span>' : '')
         + (st.disabled ? '<span class="st-badge venv">已停用</span>' : '')
-        + (e.runtime === 'server' && !st.installed && localState.hidden && localState.hidden[e.id]
-           ? '<span class="st-badge venv">已从本机移除</span>' : '')
         // V5 数据出机明示：server_data 条目（本地数据会发送到服务器）常显徽标
         + ((e.server_data || (st.entry && st.entry.server_data))
            ? '<span class="st-badge dep" title="该插件会把必要数据发送到服务器（server_data 明示）">数据出机</span>'
@@ -406,15 +426,7 @@
         clearInterval(progTimer);
         if (!d.ok) { setProg('', null, 0); msg('安装失败：' + (d.error || '未知错误'), true); return; }
         setProg('done', '已完成', 100);
-        if (e.runtime === 'server') {
-          setHiddenTool(e.id, false);        // 安装即恢复本机显示（2026-10-08）
-        }
-        if (e.runtime === 'local' && e.server_data) {
-          // C 类客户端工件安装成功（2026-10-11 需求② G3-10）：本机隐藏配对服务器工件卡片
-          // （网格只出本地卡，避免"本地引擎/服务器处理"双卡混淆）；卸载时恢复显示。
-          // 服务器工件照常在服务器运行（部署/撤下只在商店管理·超管）。
-          setHiddenTool(String(e.id).replace(/^local-/, ''), true);
-        }
+        // 账号登记由能力层安装链先写（D18：先登记后落盘），页面只刷新状态展示
         var note = [];
         var needRestart = !!d.restart_required
           || !!(d.pending_components && d.pending_components.length);
@@ -425,7 +437,7 @@
           if (!r.ok) note.push('依赖 ' + r.id + ' 安装失败：' + (r.error || ''));
         });
         msg('安装成功：' + e.id + (note.length ? '（' + note.join('；') + '）' : ''));
-        loadLocalState().then(render);
+        loadInstalls().then(loadLocalState).then(render);
         if (needRestart) {
           var yes = await stDialog({ title: '需要重启', okText: '立即重启',
             html: '本插件/依赖需要重启客户端才能生效（会话保留，免重登）。<br>现在自动重启？' });
@@ -514,9 +526,20 @@
     }
     if (act === 'install') { preflightAndInstall(e, btn); return; }
     if (act === 'toggle') {
-      post('/local-api/plugins/state', { id: id, enabled: btn.getAttribute('data-en') === '1' })
+      var enable = btn.getAttribute('data-en') === '1';
+      if (installs && btn.getAttribute('data-account') === '1') {
+        // 账号级启停（D4）：随账号的启停写安装登记；停用=该账号不显示，其他账号不受影响
+        post('/plugin/store/api/installs', { action: enable ? 'enable' : 'disable', id: id })
+          .then(function (d) {
+            msg(d.ok ? ('已' + (enable ? '启用' : '停用') + '（仅当前账号）')
+                     : ('操作失败：' + (d.error || '')), !d.ok);
+            loadInstalls().then(loadLocalState).then(render);
+          });
+        return;
+      }
+      post('/local-api/plugins/state', { id: id, enabled: enable })
         .then(function (d) {
-          msg(d.ok ? '已' + (btn.getAttribute('data-en') === '1' ? '启用' : '停用')
+          msg(d.ok ? '已' + (enable ? '启用' : '停用')
             + (d.restart_required ? '（需重启能力层完全生效）' : '') : ('操作失败：' + (d.error || '')), !d.ok);
           loadLocalState().then(render);
         });
@@ -533,19 +556,33 @@
       return;
     }
     if (act === 'uninstall') {
+      if (installs) {
+        // 账号级卸载（2026-10-11 需求①④/§2.4/D3）：只移当前账号的登记；本机副本
+        // 保留为缓存（多账号共用，换回/重装秒级可用）；数据默认保留（D9），清除时
+        // 作用域=当前账号数据目录。不再出现「已从本机移除」，文案不提删除副本。
+        if (!await stDialog({ title: '卸载', danger: true, okText: '卸载',
+          html: '从当前账号卸载 <b>' + esc(id) + '</b>？<br>'
+            + '本机副本将保留为缓存（重新安装或其他账号使用时秒级可用）；本账号的插件数据默认保留。' })) return;
+        var purgeAcc = await stDialog({ title: '是否清除数据', danger: true, okText: '清除数据', cancelText: '保留数据',
+          html: '清除当前账号在该插件名下的数据（配置 / 缓存 / 本地业务数据）？<br>'
+            + '选择「保留数据」可稍后再装回。' });
+        post('/local-api/plugins/uninstall', { id: id, purge_data: purgeAcc }).then(function (d) {
+          msg(d.ok ? ('已从当前账号卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留）'))
+                   : ('卸载失败：' + (d.error || '')), !d.ok);
+          loadInstalls().then(loadLocalState).then(render);
+        });
+        return;
+      }
       var ent = findEntry(id);
       if (ent && ent.runtime === 'server') {
-        // server 条目（2026-10-08 口径）：桌面端只装/卸**前端包**；卸载同时在本机主界面移除显示
-        // （记客户端 config.json 的 hidden_tools；服务器端后端包照常运行、全局清单不受影响）。
+        // 降级模式（旧服务器，G2-7）：删本机前端包副本 → 回退中继直出（legacy 行为）
         if (!await stDialog({ title: '卸载', danger: true, okText: '卸载',
-          html: '卸载 <b>' + esc(id) + '</b> 的本机前端包副本，并从本机主界面移除该插件？<br>'
-            + '页面回退中继直出；插件在服务器端照常运行（重新安装即恢复显示）。' })) return;
+          html: '卸载 <b>' + esc(id) + '</b> 的本机前端包副本？<br>'
+            + '页面回退中继直出；插件在服务器端照常运行（重新安装即恢复）。' })) return;
         post('/local-api/plugins/uninstall', { id: id, purge_data: false }).then(function (d) {
-          return setHiddenTool(id, true).then(function () {
-            msg(d.ok ? ('已卸载前端包副本并从本机主界面移除：' + id + '（重新安装即恢复）')
-                     : ('卸载失败：' + (d.error || '')), !d.ok);
-            loadLocalState().then(render);
-          });
+          msg(d.ok ? ('已卸载前端包副本：' + id + '（重新安装即恢复）')
+                   : ('卸载失败：' + (d.error || '')), !d.ok);
+          loadLocalState().then(render);
         });
         return;
       }
@@ -555,10 +592,6 @@
         html: '清除该插件的数据（数据根 plugins 下的插件目录：配置 / 缓存 / 本地业务数据）？<br>'
           + '选择「保留数据」可稍后再装回。' });
       post('/local-api/plugins/uninstall', { id: id, purge_data: purge }).then(function (d) {
-        if (ent && ent.server_data) {
-          // 卸载 C 类客户端工件 → 恢复配对服务器工件的本机显示（回退中继直出 UI，G3-10）
-          setHiddenTool(String(id).replace(/^local-/, ''), false);
-        }
         msg(d.ok ? ('已卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留在数据目录）'))
                  : ('卸载失败：' + (d.error || '')), !d.ok);
         loadLocalState().then(render);
@@ -598,7 +631,7 @@
   }
   renderSkeleton();
 
-  loadLocalState().then(function () {
+  loadInstalls().then(loadLocalState).then(function () {
     return fetch(CATALOG_API).then(function (r) { return r.json(); }).then(function (d) {
       if (d.error) { $('#st-grid').innerHTML = '<div class="st-empty">' + esc(d.error) + '</div>'; return; }
       catalog = d.packages || [];

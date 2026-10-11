@@ -59,6 +59,22 @@ function toolCard(tool) {
   const degraded = tool.health === 'degraded'
     ? `<span class="chip chip-degraded" title="${esc((tool.health_degraded || []).join('、'))}">功能降级</span>`
     : '';
+  // 云卡（2026-10-11 账号级安装批次 G2-4）：账号已登记、本机副本缺失——灰蒙版 + 锁形
+  // 提示，不跳转 /tool/<id>；主按钮「从云端下载」走商店安装链（D21②复用 preflight）。
+  if (tool.cloud) {
+    const off = !!tool.offline;   // 离线（D15）：禁用 + 明确原因，不静默
+    return `
+    <div class="tool-card tool-card-cloud" data-tool-id="${tool.id}"
+         style="--tool-accent: ${accents}; --tool-accent-rgb: ${hexToRgb(accents)};">
+      <div class="tool-icon">${JZIcon.html(tool.icon || '🧩')}</div>
+      <div class="tool-name">${esc(tool.name)}${tool.delisted ? '<span class="chip chip-degraded">条目已下架</span>' : ''}</div>
+      <div class="tool-desc">${esc(tool.description || '')}</div>
+      <div class="tool-features"><span class="chip chip-cloud">未装到本机</span></div>
+      <button type="button" class="cloud-dl-btn" data-cloud-id="${esc(tool.id)}"
+              data-cloud-ver="${esc(tool.version || '')}" ${off ? 'disabled' : ''}>
+        ${off ? '需连接服务器' : '⇩ 从云端下载'}</button>
+    </div>`;
+  }
   return `
     <a class="tool-card" data-tool-id="${tool.id}" href="/tool/${encodeURIComponent(tool.id)}"
        style="--tool-accent: ${accents}; --tool-accent-rgb: ${hexToRgb(accents)};">
@@ -69,6 +85,44 @@ function toolCard(tool) {
         ${(tool.features || []).map(f => `<span class="chip">${esc(f)}</span>`).join('')}
       </div>
     </a>`;
+}
+
+// 云卡「从云端下载」（G2-4/D21②）：商店 preflight 复用（缺依赖提示/联合安装同商店口径）
+// → /local-api/store/install（拉包→sha256→落位→重扫）→ 成功后重渲染转正常卡。
+async function cloudDownload(btn) {
+  const id = btn.getAttribute('data-cloud-id');
+  btn.disabled = true;
+  btn.textContent = '正在安装…';
+  let wantDeps = false, deps = [];
+  try {
+    const pre = await fetch('/local-api/store/preflight', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).then(r => r.json()).catch(() => ({}));
+    const missing = (pre.deps || []).filter(d =>
+      (d.state === 'missing' || d.state === 'mismatch') && d.required !== false && !d.informational);
+    const unresolvable = missing.filter(d => d.resolve !== 'dep-package');
+    if (unresolvable.length) {
+      showToast('缺少依赖：' + unresolvable.map(d => d.name).join('、') + '（可稍后补装）', true);
+    }
+    wantDeps = missing.some(d => d.resolve === 'dep-package');
+    deps = missing.filter(d => d.resolve === 'dep-package')
+      .map(d => ({ dep_id: d.dep_id, dep_version: d.dep_version }));
+  } catch (e) { /* 预检失败不阻断安装（D-8 口径） */ }
+  try {
+    const res = await fetch('/local-api/store/install', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, include_deps: wantDeps, deps }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    showToast('安装完成');
+    render();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = '⇩ 从云端下载';
+    showToast('下载失败：' + err.message, true);
+  }
 }
 
 // 拉取 /api/tools 并渲染首页
@@ -105,12 +159,17 @@ async function render() {
     // 元数据保留在 /api/tools 里，/tool/store 壳页仍需要它
     const gridTools = tools.filter(t => t.id !== "store");
     if (gridTools.length === 0) {
-      // 首装引导（主体与插件解耦后，主包只带核心插件 admin）：
-      // 业务插件由「插件集 / 插件包」安装——给出可执行的下一步，而不是让管理员面对空白页。
-      grid.innerHTML = '<div class="loading">暂无可用工具。<br>'
-        + '主程序默认只带管理后台：请安装「插件集」或逐个安装插件包后刷新本页'
-        + '（解压插件集 → 双击「安装插件集.bat」；详见 docs/guide/离线部署包说明.md）。<br>'
-        + '管理员可登录后台在「插件管理」中查看已装插件与依赖状态。</div>';
+      // 首装引导：账号级安装（2026-10-11 需求①）下新账号/离线无登记=空网格，指引开商店；
+      // 登出态（D19）给登录引导；服务器旧部署（非账号模式）沿用插件集安装说明。
+      grid.innerHTML = data.signed_out
+        ? '<div class="loading">当前未登录。<br>请先登录后使用；登录后将显示该账号已安装的插件。</div>'
+        : data.account_mode
+          ? '<div class="loading">当前账号还没有安装任何插件。<br>'
+            + '请打开左侧「插件商店」选择安装，安装后插件会出现在本页。</div>'
+          : '<div class="loading">暂无可用工具。<br>'
+            + '主程序默认只带管理后台：请安装「插件集」或逐个安装插件包后刷新本页'
+            + '（解压插件集 → 双击「安装插件集.bat」；详见 docs/guide/离线部署包说明.md）。<br>'
+            + '管理员可登录后台在「插件管理」中查看已装插件与依赖状态。</div>';
       return;
     }
 
@@ -375,6 +434,12 @@ function showToast(msg, isError) {
 // 编辑模式下点击卡片不跳转
 content.addEventListener('click', (e) => {
   if (editing && e.target.closest('.tool-card')) e.preventDefault();
+});
+
+// 云卡「从云端下载」（G2-4）：事件委托——render() 重画后按钮无需重绑
+content.addEventListener('click', (e) => {
+  const btn = e.target.closest('.cloud-dl-btn');
+  if (btn && !btn.disabled) { e.preventDefault(); cloudDownload(btn); }
 });
 
 // ===================== 插件卡片：Android 桌面式指针拖拽 =====================

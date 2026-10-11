@@ -200,6 +200,52 @@ body {
   border: 1px solid rgba(249, 171, 0, 0.45);
 }
 
+/* 云卡（2026-10-11 账号级安装批次 G2-4）：账号已登记、本机副本缺失——灰蒙版 + 下载按钮。
+   卡片是 div 非 <a>（不跳转），主按钮走商店安装链。 */
+.tool-card-cloud {
+  cursor: default;
+}
+
+.tool-card-cloud::after {
+  /* 灰蒙版：压暗卡片内容，与正常卡一眼区分 */
+  content: "";
+  position: absolute;
+  inset: 4px 0 0 0;
+  background: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.tool-card-cloud > * {
+  position: relative;
+}
+
+.tool-card-cloud .chip-cloud {
+  background: rgba(95, 99, 104, 0.12);
+  color: #5f6368;
+  border: 1px solid rgba(95, 99, 104, 0.3);
+}
+
+.tool-card-cloud .cloud-dl-btn {
+  margin-top: 12px;
+  padding: 9px 16px;
+  font-size: 14px;
+  border: none;
+  border-radius: 6px;
+  background: #1a73e8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.tool-card-cloud .cloud-dl-btn:hover:not(:disabled) {
+  background: #1765cc;
+}
+
+.tool-card-cloud .cloud-dl-btn:disabled {
+  background: #dadce0;
+  color: #80868b;
+  cursor: not-allowed;
+}
+
 /* ---------- 右侧分类快速定位标签 ---------- */
 .cat-nav {
   position: fixed;

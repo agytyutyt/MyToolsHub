@@ -23,12 +23,14 @@ WORKER_BODY_LIMIT = 8 * 1024 * 1024   # 规范 §16.3 L-3：worker 响应体上�
 
 
 class PluginExecutor:
-    def __init__(self, runtime_python, host_script, pylibs_dir, data_dir, log=None):
+    def __init__(self, runtime_python, host_script, pylibs_dir, data_dir, log=None,
+                 data_root_fn=None):
         self._python = runtime_python
         self._host = host_script
         self._pylibs = pylibs_dir
         self._audit_path = os.path.join(data_dir, "plugin-audit.log")
         self._log = log or (lambda m: None)
+        self._data_root_fn = data_root_fn   # G3-2：spawn 时现取账号数据根（显式注入 env）
         self._residents = {}          # plugin_id → Popen
         self._locks = {}              # plugin_id → Lock（常驻串行化）
         self._lock_all = threading.Lock()
@@ -69,6 +71,23 @@ class PluginExecutor:
                 except Exception:
                     pass
             self._residents.clear()
+
+    def stop_residents(self):
+        """停掉全部常驻 worker（账号切换/登出，G3-2）：防子进程持旧账号数据根写串。
+
+        下次请求按当前 manifest 正常拉起（spawn 时注入新数据根），非崩溃路径。"""
+        with self._lock_all:
+            procs = list(self._residents.values())
+            self._residents.clear()
+            self._last_used.clear()
+            self._resident_ttl.clear()
+        for proc in procs:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        if procs:
+            self._log("已停止 %d 个常驻 worker（账号上下文变化）" % len(procs))
 
     # ---------------- 内部 ----------------
 
@@ -185,11 +204,18 @@ class PluginExecutor:
             if self._pylibs:
                 argv += ["--pylibs", self._pylibs]
         err = self._stderr_file(pid)      # stderr 归日志（T20 契约）
+        # G3-2：spawn 时现取账号数据根显式注入（不依赖父进程环境继承的时序——
+        # 账号切换后 os.environ 已被能力层改写，但显式传 env 消除时序歧义）
+        env = None
+        if self._data_root_fn is not None:
+            root = self._data_root_fn() or ""
+            if root:
+                env = dict(os.environ, JZTOOLS_DATA_ROOT=root)
         try:
             # CREATE_NO_WINDOW：运行时 python.exe 是控制台子系统程序，GUI 父进程不加该标志
             # 会弹出黑色控制台窗口（真机报告：打开插件弹黑窗，2026-10-08）；stdio 管道不受影响。
             return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=err,
+                                    stderr=err, env=env,
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         finally:
             err.close()

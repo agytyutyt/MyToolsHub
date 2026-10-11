@@ -490,7 +490,10 @@ def part_d(work):
 
     @upstream.get("/api/tools")
     def _tools():
-        return jsonify({"tools": [{"id": "remote-one", "name": "远程插件", "order": 1}],
+        # svc-bar 须在服务器可见清单中（D22 安装门：server 条目安装前校验 id 在
+        # /api/tools 清单——账号级安装批次 2026-10-11 起，不在即拒绝+「已停用」）
+        return jsonify({"tools": [{"id": "remote-one", "name": "远程插件", "order": 1},
+                                  {"id": "svc-bar", "name": "服务插件", "order": 2}],
                         "categories": [{"id": "office", "name": "办公", "enabled": True}]})
 
     @upstream.get("/plugin/store/api/catalog")

@@ -260,24 +260,23 @@ def smoke(out, cfg):
             fail("打包态 worker 往返异常：status=%s body=%s" % (resp.get("status"), wbody[:200]))
         print("smoke：打包态 worker 往返通过（运行时 python + plugin_host + Flask 栈，status 200）")
 
-        # 本机工具显示状态（2026-10-08）：桌面端「卸载」写 hidden_tools、「安装」恢复，
-        # /api/tools 合并时按本机清单过滤——冒烟走一次写入 / 回传 / 清除。
-        def _post_hidden(hidden):
-            rq = urllib.request.Request(
-                base + "/local-api/plugins/hidden",
-                data=json.dumps({"id": "smoke-probe", "hidden": hidden}).encode(),
-                headers={"Content-Type": "application/json"}, method="POST")
-            return json.loads(opener.open(rq, timeout=10).read())
-        r = _post_hidden(True)
-        if not r.get("ok") or "smoke-probe" not in (r.get("hidden_tools") or []):
-            fail("本机显示状态写入失败：%s" % r)
+        # 本机显示状态退役回归（2026-10-11 账号级安装批次 G2-5）：卸载/显示改由账号
+        # 安装登记（服务端 installs）决定，hidden_tools 写链退役——端点应 404，
+        # /local-api/plugins 不再回传 hidden_tools 键。
+        req = urllib.request.Request(
+            base + "/local-api/plugins/hidden",
+            data=json.dumps({"id": "smoke-probe", "hidden": True}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            opener.open(req, timeout=10)
+            fail("hidden 端点应已退役（预期 404），实际可达")
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                fail("hidden 端点退役异常：HTTP %s" % e.code)
         d = json.loads(opener.open(base + "/local-api/plugins", timeout=10).read())
-        if "smoke-probe" not in (d.get("hidden_tools") or []):
-            fail("/local-api/plugins 未回传 hidden_tools：%s" % d.get("hidden_tools"))
-        r = _post_hidden(False)
-        if not r.get("ok") or "smoke-probe" in (r.get("hidden_tools") or []):
-            fail("本机显示状态清除失败：%s" % r)
-        print("smoke：本机工具显示状态往返通过（写入 / 回传 / 清除）")
+        if "hidden_tools" in d:
+            fail("/local-api/plugins 仍回传 hidden_tools（应已退役）")
+        print("smoke：本机显示状态退役回归通过（hidden 端点 404 / 键已移除）")
 
         # 自重启链路（2026-10-08 加固）：该端点曾因裸名 sys（NameError→500 HTML）从未
         # 生效过，前端只见「自动重启失败」。断言：旧进程退出 → 新实例带 --await-pid
