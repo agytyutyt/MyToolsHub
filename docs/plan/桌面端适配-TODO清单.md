@@ -11,7 +11,7 @@
 | --- | --- |
 | 接口契约 | 批次 3 的路由分区表与会话中继口径、批次 4 的本地插件 manifest 契约（均引自方案 §6，本文不复制） |
 | 实现路径 | 改动面：新建客户端工程（内核同源复用 + UI 层壳 + 能力层路由）+ `static/` 与 16 插件前端的流式改造 |
-| 当前实现状态 | **批次 0 完成（T01–T05 ✅ 2026-10-03，spike 存档 `demo/desktop-spike/README.md`）**；批次 1–8b 主体完成（遗留见各批次）；**批次 9/10 已大量完成（剩真机/上架项）、批次 11 未开工** |
+| 当前实现状态 | **批次 0 完成（T01–T05 ✅ 2026-10-03，spike 存档 `demo/desktop-spike/README.md`）**；批次 1–8b 主体完成（遗留见各批次）；**批次 0–11 主体完成（上架项已清：12 项 published + D7 纠偏；批次 11 C 类收尾与全量验收的本机部分 2026-10-09 全过；剩真机/人工项 = 真机清单 R1–R10）** |
 | 后续优化方向 | 本文即桌面端落地唯一活清单；完成并出包后整文移入 `docs/archive/` |
 
 > **覆盖范围**：桌面客户端全部实施步骤（spike → 内核/UI/中继/插件四层建设 → 流式布局改造 → 验收出包）、门控关系与红线（唯一活清单）
@@ -279,11 +279,11 @@
 
 | # | 任务 | 内容 | 状态 |
 | --- | --- | --- | --- |
-| X-1 | D-1 出包白名单缺 store | `build-deploy.ps1` 核心插件白名单缺 store（静默产出无商店残包），与 `build-deploy-local.py`/`verify-package.py` 口径不一 | ✅ 已完成（commit `7e4083e`）；端到端验证待下次整包 |
+| X-1 | D-1 出包白名单缺 store | `build-deploy.ps1` 核心插件白名单缺 store（静默产出无商店残包），与 `build-deploy-local.py`/`verify-package.py` 口径不一 | ✅ 已完成（commit `7e4083e`；端到端验证已闭——v2.3.25–v2.3.30 六轮 `verify-package --smoke` 全绿含 D-1 断言，2026-10-11 回销） |
 | X-2 | D-2 B-heavy 本地包丢 timeout_ms | 重出包时漏传 `-TimeoutMs` → 能力层超时上限回落 60s | ✅ 已完成（commit `53bab50`）；三插件升补丁号重出：info-transfer 1.2.10 / qr-video-decode 1.1.7 / trajectory-convert 1.2.1<br>2026-10-09 后续：info-transfer→1.2.11、qr→1.2.0 已重出（含服务器包，登记 commit `d7d13f9`）；本地条目已随 Q3 上架 published |
 | X-3 | D-8 store 无 README | store 插件缺 README（接口唯一真源）；出包链对 README 缺失只 Warn | ✅ 已完成（commit `95c219d`）：README 门禁升格为「必须/Die」+ 上架机器校验兜底；store 登记 `8e14e5c` |
 | X-4 | C1 迁移上移 | 插件历史 LLM 迁移上移主体 `app.py`（代码质量报告 C1 整改） | ✅ 已完成（commit `747412d`：app.py 落点 + `llm_migrated.flag` 退场标记；删除窗口=flag 全覆盖后，已写入代码注释） |
-| X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | ✅ 已完成（2026-10-09，Q1–Q4 链：服务器包重出登记 `d7d13f9`、本地包 10 个含 README 重出 + 补件 `abf3e2b`、商店 12 项 published（10 本地 + file-filter v1.6.1 / trajectory-sketch v1.3.1，服务器条目走隔离 base_dir 部署验证）、catalog 名称修复见 S13；②**待窗口批次**（L1/L2 完成后并入）：ts v1.3.3 / ff v1.6.2 / nb v1.0.6 / admin 1.4.x / it 1.2.12 / tc 1.2.2 / cg 1.2.2 / qr 1.2.1 —— 全量表与执行步骤见 `docs/plan/20261009决策落地方案（面向执行模型）.md` §2/§L3） |
+| X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | ✅ 已完成（2026-10-09，Q1–Q4 链：服务器包重出登记 `d7d13f9`、本地包 10 个含 README 重出 + 补件 `abf3e2b`、商店 12 项 published（10 本地 + file-filter v1.6.1 / trajectory-sketch v1.3.1，服务器条目走隔离 base_dir 部署验证）、catalog 名称修复见 S13；②~~待窗口批次~~ **✅ 已由决策方案 L3（2026-10-10）按 §2 表执行完毕**；其后 P3-1 批次又迭代 ts 1.3.6 / ff 1.6.4 / it 1.2.22 / admin 1.5.0 等并重上架（2026-10-11 回销）） |
 | X-6 | D-5 WebView2 fixed 内核链 | 备选阶梯 100.x→109.x→92.x（2026-10-09 拍板） | 进行中：**定版已拍板（2026-10-09）：钉 100.0.1185.50**（目标机约束：Win7 最高 109 / 其他系统最高 92 → 取 100 折中；存档副本，分发前过法务/供应链）；可执行项已就绪（`tools/client/build-webview2-kernel.py` + `install.ps1`）；物化与真机待窗口 |
 | X-7-1 | 残留小项① | admin manifest 版本递增（admin 代码 `747412d` 有改动） | ✅ 已完成（2026-10-09：admin 1.4.1→1.4.2，随源码对齐重出批次，登记 commit `e50f00f`） |
 | X-7-2 | 残留小项② | `tools/e2e/plugin-upgrade-sandbox-tests.ps1` 依赖旧路径 `deploy\JZToolsHub\version.json`（现为 `deploy\服务端\JZToolsHub`）需修 | ✅ 已完成（2026-10-09，commit 4e10e38+b022e57：新布局优先旧回退 + 版本号现取；整套 77 项全绿） |
