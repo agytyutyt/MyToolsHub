@@ -284,7 +284,7 @@
 | X-3 | D-8 store 无 README | store 插件缺 README（接口唯一真源）；出包链对 README 缺失只 Warn | ✅ 已完成（commit `95c219d`）：README 门禁升格为「必须/Die」+ 上架机器校验兜底；store 登记 `8e14e5c` |
 | X-4 | C1 迁移上移 | 插件历史 LLM 迁移上移主体 `app.py`（代码质量报告 C1 整改） | ✅ 已完成（commit `747412d`：app.py 落点 + `llm_migrated.flag` 退场标记；删除窗口=flag 全覆盖后，已写入代码注释） |
 | X-5 | D-4 商店上架链收口 | 含 C 类服务器工件、trajectory-sketch 新条目、catalog 数据修复（S13） | ✅ 已完成（2026-10-09，Q1–Q4 链：服务器包重出登记 `d7d13f9`、本地包 10 个含 README 重出 + 补件 `abf3e2b`、商店 12 项 published（10 本地 + file-filter v1.6.1 / trajectory-sketch v1.3.1，服务器条目走隔离 base_dir 部署验证）、catalog 名称修复见 S13；②~~待窗口批次~~ **✅ 已由决策方案 L3（2026-10-10）按 §2 表执行完毕**；其后 P3-1 批次又迭代 ts 1.3.6 / ff 1.6.4 / it 1.2.22 / admin 1.5.0 等并重上架（2026-10-11 回销）） |
-| X-6 | D-5 WebView2 fixed 内核链 | 备选阶梯 100.x→109.x→92.x（2026-10-09 拍板） | 进行中：**定版已拍板（2026-10-09）：钉 100.0.1185.50**（目标机约束：Win7 最高 109 / 其他系统最高 92 → 取 100 折中；存档副本，分发前过法务/供应链）；可执行项已就绪（`tools/client/build-webview2-kernel.py` + `install.ps1`）；物化与真机待窗口 |
+| X-6 | D-5 WebView2 fixed 内核链 | 备选阶梯 100.x→109.x→92.x（2026-10-09 拍板） | ✅ **定版钉 109.0.1518.78（2026-10-11，法务审核通过 + 本机实测通过：3 渲染进程/fixed profile 隔离生效）**（100.0.1185.50 先行实测环境创建失败→壳白屏→改钉 109，复盘见真机清单 R3）；分件已装载（364.4MB）；**剩=真干净机装载走查（R3 尾）** |
 | X-7-1 | 残留小项① | admin manifest 版本递增（admin 代码 `747412d` 有改动） | ✅ 已完成（2026-10-09：admin 1.4.1→1.4.2，随源码对齐重出批次，登记 commit `e50f00f`） |
 | X-7-2 | 残留小项② | `tools/e2e/plugin-upgrade-sandbox-tests.ps1` 依赖旧路径 `deploy\JZToolsHub\version.json`（现为 `deploy\服务端\JZToolsHub`）需修 | ✅ 已完成（2026-10-09，commit 4e10e38+b022e57：新布局优先旧回退 + 版本号现取；整套 77 项全绿） |
 | X-7-3 | 残留小项③ | 本地派生包未拷 README（上架告警将长期误报） | ✅ 已完成（2026-10-09 Q2：派生链随包 README + 两个 C 类工件补 `README.md`（`abf3e2b`），重出后 10/10 包根含 README，上架机器校验告警 0） |
