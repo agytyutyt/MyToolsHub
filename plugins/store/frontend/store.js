@@ -392,7 +392,11 @@
       if (!ok) return;
     } else {
       // V5：server_data 条目安装时**明示弹出**数据出机提示（红线 5）
-      var sdNote = (e.server_data || (st.entry && st.entry.server_data))
+      // 修复（2026-10-12 真机）：此处原写 `st.entry`——st 只是 pluginInstallState() 内的
+      // 局部变量，本作用域未定义 → 全新安装（非升级）路径抛 ReferenceError 后静默中断：
+      // 点「安装」无确认框、无请求、无报错（已装条目走升级分支，故此前偶有成功假象）。
+      var stFresh = pluginInstallState(e);
+      var sdNote = (e.server_data || (stFresh.entry && stFresh.entry.server_data))
         ? '<br><br><b>数据出机提示</b>：该插件的部分必要数据会发送到服务器（server_data 明示）。'
         : '';
       ok = await stDialog({ title: '安装确认', okText: '安装',
