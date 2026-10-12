@@ -47,6 +47,12 @@ def catalog_fixture():
              {"name": "openpyxl", "version": ">=3.1", "required": True,
               "hint": "缺少 openpyxl：xlsx 表格过滤不可用。请在插件商店「依赖」页签安装 openpyxl 组件包。"}]},
          "size": 100, "sha256": "1" * 64, "file": "needs.zip"},
+        {"id": "svc-needs", "runtime": "server", "name": "服务端插件（需 openpyxl）", "version": "1.0.0",
+         "requires": {"python_packages": [
+             {"name": "openpyxl", "version": ">=3.1", "required": False,
+              "hint": "缺少 openpyxl：服务端导出不可用。"}]},
+         "size": 100, "sha256": "2" * 64, "file": "svc.zip",
+         "frontend_file": "svc-fe.zip", "frontend_size": 50, "frontend_sha256": "3" * 64},
     ]}
 
 
@@ -75,7 +81,26 @@ def stub_server(catalog):
 
     @app.get("/plugin/store/api/installs")
     def _installs():
-        return jsonify({"ok": True, "installs": {}, "updated_at": ""})
+        return jsonify({"ok": True, "installs": dict(getattr(app, '_bench_installs', {}) or {}),
+                        "updated_at": ""})
+
+    @app.post("/plugin/store/api/installs")
+    def _installs_write():
+        """登记写（D18/升级补种会用到；真机 API 同形）。"""
+        body = fq.get_json(force=True, silent=True) or {}
+        action = body.get("action")
+        mine = dict(getattr(app, '_bench_installs', {}) or {})
+        for pid in [str(x) for x in (body.get("ids") or [body.get("id")]) if x]:
+            if action == "install":
+                mine[pid] = {"version": str(body.get("version") or ""),
+                             "installed_at": "2026-01-01T00:00:00", "enabled": True,
+                             "source": str(body.get("source") or "store")}
+            elif action == "uninstall":
+                mine.pop(pid, None)
+            elif action in ("enable", "disable") and pid in mine:
+                mine[pid] = dict(mine[pid], enabled=(action == "enable"))
+        app._bench_installs = mine
+        return jsonify({"ok": True, "installs": dict(mine)})
 
     from werkzeug.serving import make_server
     srv = make_server("127.0.0.1", 0, app, threaded=True)
@@ -283,6 +308,65 @@ def main():
             check("I2 清扫后登记已清", "orpy" not in ids8, str(ids8))
         finally:
             srv.shutdown()
+
+        # —— J：本地插件健康度（「功能降级」角标数据）+ A 类依赖 informational ——
+        jroot = os.path.join(work, "J")
+        jlp = os.path.join(jroot, "local-plugins", "local-needs")
+        os.makedirs(jlp, exist_ok=True)
+        with open(os.path.join(jlp, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump({"id": "local-needs", "name": "需要 openpyxl 的插件", "version": "1.0.0",
+                       "runtime": "local", "kind": "local",
+                       "entry": {"frontend": "index.html"},
+                       "requires": {"python_packages": [
+                           {"name": "openpyxl", "version": ">=3.1", "required": False,
+                            "hint": "缺少 openpyxl：xlsx 不可用。"}]}}, f, ensure_ascii=False)
+        with open(os.path.join(jlp, "index.html"), "w", encoding="utf-8") as f:
+            f.write("<h1>needs</h1>")
+        jstatic = os.path.join(work, "Jstatic")
+        os.makedirs(jstatic, exist_ok=True)
+        with open(os.path.join(jstatic, "index.html"), "w", encoding="utf-8") as f:
+            f.write("<html>home</html>")
+        srv2, addr2 = stub_server(catalog_fixture())
+        srv2.app._bench_installs = {"bench": {"local-needs": {
+            "version": "1.0.0", "enabled": True, "source": "store", "installed_at": ""}}}
+        try:
+            jprog = os.path.join(jroot, "_program")
+            jpy = os.path.join(jprog, "runtime", "pylibs")
+            os.makedirs(os.path.join(jprog, "config"), exist_ok=True)
+            with open(os.path.join(jprog, "config", "installed-deps.json"), "w", encoding="utf-8") as f:
+                json.dump({"schema": 1, "packages": {"flask": "3.1.3"},
+                           "modules": {"flask": "flask"}}, f)
+            os.makedirs(jpy, exist_ok=True)
+            write_manifest(jpy, [])
+
+            _, cj = new_app(jroot, addr2, jstatic)
+            d = cj.get("/api/tools").get_json()
+            item = next((t for t in (d.get("tools") or []) if t.get("id") == "local-needs"), None)
+            check("J1 缺依赖的本地插件 → 主界面网格标「功能降级」+ 具名清单",
+                  bool(item) and item.get("health") == "degraded"
+                  and "openpyxl" in (item.get("health_degraded") or []),
+                  json.dumps(item, ensure_ascii=False)[:200])
+
+            j1 = cj.post("/local-api/store/deps-check", json={"id": "svc-needs", "version": "1.0.0"}).get_json()
+            row = (j1.get("rows") or [{}])[0]
+            check("J2 A 类条目：依赖行标 informational + server_side（本机检测不决定可用性）",
+                  j1.get("server_side") is True and row.get("informational") is True,
+                  json.dumps({"server_side": j1.get("server_side"), "row": row}, ensure_ascii=False)[:200])
+            j2 = cj.post("/local-api/store/deps-check", json={"id": "local-needs", "version": "1.0.0"}).get_json()
+            r2 = (j2.get("rows") or [{}])[0]
+            check("J3 本地条目：依赖行 informational=False（可联动本机安装）",
+                  j2.get("server_side") is False and r2.get("informational") is False,
+                  json.dumps(r2, ensure_ascii=False)[:160])
+
+            write_manifest(jpy, [comp_entry("depx")])      # 装上提供方
+            _, cj2 = new_app(jroot, addr2, jstatic)
+            d2 = cj2.get("/api/tools").get_json()
+            item2 = next((t for t in (d2.get("tools") or []) if t.get("id") == "local-needs"), None)
+            check("J4 补装依赖后 → 健康度回 ok（角标消失）",
+                  bool(item2) and (item2.get("health") or "ok") == "ok",
+                  json.dumps(item2, ensure_ascii=False)[:160])
+        finally:
+            srv2.shutdown()
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

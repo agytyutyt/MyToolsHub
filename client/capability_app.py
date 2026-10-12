@@ -497,6 +497,24 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             item["delisted"] = True        # D21①：catalog 无 published 投影 → 标注已下架
         return item
 
+    def _local_item_with_health(m, order):
+        """本地插件网格条目 + 三态健康度（2026-10-12）。
+
+        真机反馈：卸载全部依赖后本地插件（过滤器/轨迹速写等）**照常降级运行却无任何提示**——
+        main.js 有 「功能降级」chip 的渲染（health/health_degraded），但本地条目此前把 health
+        硬编码为 ok、没人给数据；三态结论只落在 /local-api/plugins 的 state 里。
+        """
+        item = local_registry.tool_item(m, order)
+        st = local_states.get(m.get("id")) or {}
+        status = st.get("status")
+        if status in ("degraded", "blocked"):
+            names = list(st.get("degraded") or []) or list(st.get("missing") or [])
+            if not names and st.get("reason"):
+                names = [str(st.get("reason"))]
+            item["health"] = "degraded"
+            item["health_degraded"] = names
+        return item
+
     def _account_grid_payload(data, base, reg):
         """账号登记为显示全集（需求①）+ 双源匹配 + 云卡（§2.2 四象限；D22 组合口径）。"""
         by_id = {str(t.get("id") or ""): t for t in base if isinstance(t, dict)}
@@ -523,7 +541,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             if m is not None:                     # B/C：本机副本在 → 正常卡（下架不影响已装者 D21①）
                 if pid in machine_disabled:
                     continue
-                tools.append(local_registry.tool_item(m, order))
+                tools.append(_local_item_with_health(m, order))
                 order += 1
                 continue
             if str(pid).startswith("local-"):     # B/C 副本缺 → 云卡（缺元数据时降级）
@@ -611,7 +629,38 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     local_states[pid] = {"status": "error", "reason": str(exc)}
                     _log("本地插件 %s 挂载失败，已隔离：%s" % (pid, exc))
             elif (m.get("entry") or {}).get("backend"):
-                local_states[pid] = {"status": "ok", "mode": "worker"}
+                # worker 型同样三态评估（2026-10-12）：缺依赖要能在主界面标「功能降级」；
+                # 运行期门由 worker 自己把（此处不改挂载/派发行为）
+                try:
+                    verdict = jz_deps.evaluate(
+                        pid, pdir, m,
+                        app_dir=build_cfg.get("_program_dir"),
+                        app_version=(build_cfg.get("product") or {}).get("version"),
+                        plugin_api=build_cfg.get("plugin_api", "1.0"))
+                    local_states[pid] = {"status": verdict["status"],
+                                         "missing": verdict.get("missing", []),
+                                         "degraded": verdict.get("degraded", []),
+                                         "reason": verdict.get("reason", ""),
+                                         "mode": "worker"}
+                except Exception as exc:
+                    local_states[pid] = {"status": "ok", "mode": "worker"}
+                    _log("本地插件 %s 依赖评估异常（按 ok 展示）：%s" % (pid, exc))
+            else:
+                # 纯前端本地插件同样三态评估（2026-10-12）：声明了依赖/版本门就要能在
+                # 主界面标「功能降级」（此前该分支不落 state → 角标永远不出现）
+                try:
+                    verdict = jz_deps.evaluate(
+                        pid, pdir, m,
+                        app_dir=build_cfg.get("_program_dir"),
+                        app_version=(build_cfg.get("product") or {}).get("version"),
+                        plugin_api=build_cfg.get("plugin_api", "1.0"))
+                    local_states[pid] = {"status": verdict["status"],
+                                         "missing": verdict.get("missing", []),
+                                         "degraded": verdict.get("degraded", []),
+                                         "reason": verdict.get("reason", "")}
+                except Exception as exc:
+                    local_states[pid] = {"status": "ok"}
+                    _log("本地插件 %s 依赖评估异常（按 ok 展示）：%s" % (pid, exc))
 
     _refresh_local_states()
     _probe = {"ts": 0.0, "ok": False}
@@ -1663,6 +1712,9 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         if err:
             return jsonify({"ok": False, "error": err, "rows": []}), 200
         manifest = {"requires": ver.get("requires") or {}}
+        # 服务端（A 类）条目的依赖属服务器侧（2026-10-12 真机）：本机检测不决定其可用性——
+        # 与 preflight 同口径标 informational；可用性以服务器 health 为准（主界面角标）。
+        server_side = (ver.get("runtime") == "server")
         try:
             verdict = jz_deps.evaluate("deps-check:" + pid, "", manifest,
                                        app_dir=_program_dir,
@@ -1678,6 +1730,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             item = {"name": name, "kind": row.get("kind"), "require": row.get("require"),
                     "actual": row.get("actual"), "state": row.get("state"),
                     "required": row.get("required", True), "note": row.get("note") or "",
+                    "informational": server_side,
                     "resolve": "missing", "dep_id": "", "dep_version": ""}
             if row.get("kind") == "python_package":
                 for dep in dep_entries:
@@ -1693,7 +1746,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         ok_n = sum(1 for r in rows if r.get("state") == "ok")
         return jsonify({"ok": True, "id": pid, "version": ver.get("version"),
                         "rows": rows, "ok_count": ok_n, "total": len(rows),
-                        "status": verdict.get("status"),
+                        "status": verdict.get("status"), "server_side": server_side,
                         "note": "unknown=清单不可核验，不按缺失处理"})
 
     @app.post("/local-api/store/reveal")
@@ -1884,7 +1937,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                        "categories": [dict(local_registry.LOCAL_CATEGORY)],
                        "degraded": True, "account_mode": True}
         else:
-            payload = {"tools": local_registry.tool_items(enabled, 1000),
+            payload = {"tools": [_local_item_with_health(m, 1000 + i)
+                                 for i, m in enumerate(enabled)],
                        "categories": [dict(local_registry.LOCAL_CATEGORY)],
                        "degraded": True}
             if _account.get("signed_out"):

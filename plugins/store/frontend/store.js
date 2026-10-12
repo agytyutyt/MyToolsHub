@@ -583,13 +583,18 @@
             return;
           }
           var html = ['<div class="st-deps-sum">共 ' + rows2.length + ' 项，正常 ' + (d.ok_count || 0)
-            + ' 项' + (d.status && d.status !== 'ok' ? '（结论：' + esc(d.status) + '）' : '') + '</div>'];
+            + ' 项' + (d.status && d.status !== 'ok' ? '（结论：' + esc(d.status) + '）' : '')
+            + (d.server_side ? '　<span class="st-md-muted">服务器侧依赖：装/卸本机依赖不影响该插件可用性，可用性以服务器端为准</span>' : '')
+            + '</div>'];
           rows2.forEach(function (r) {
             var ok = r.state === 'ok', unk = r.state === 'unknown';
-            var cls = ok ? 'st-deps-ok' : (unk ? 'st-deps-unk' : 'st-deps-bad');
+            var cls = ok ? 'st-deps-ok' : (unk ? 'st-deps-unk' : (r.informational ? 'st-deps-unk' : 'st-deps-bad'));
             var mark = ok ? '✓' : (unk ? '？' : '✗');
             var tail = '';
-            if (!ok && !unk && r.resolve === 'dep-package') {
+            if (!ok && !unk && r.informational) {
+              // 服务端（A 类）条目的依赖属服务器侧：本机有没有不决定可用性（与安装预检同口径）
+              tail = '（服务器侧依赖，本机装/卸不影响该插件）';
+            } else if (!ok && !unk && r.resolve === 'dep-package') {
               tail = '（可在商店安装依赖包 ' + esc(r.dep_id || r.name)
                 + (r.dep_version ? ' v' + esc(r.dep_version) : '') + '）';
             } else if (!ok && !unk && r.resolve === 'manual') {
