@@ -6,6 +6,7 @@
 
   var API = '/plugin/admin/store';
   var filter = 'pending';
+  var scope = 'plugin';   // 二级页签：插件 / 依赖（2026-10-12 优化——范围筛选替代上下分段）
   var packages = [];
   var installedNames = [];   // 主包运行时自带依赖（服务端 installed-deps）
   var canReview = true;      // 审核/下架/部署权限（2026-10-08：仅管理员/超管；提交全员）
@@ -54,8 +55,10 @@
   var STATUS_KIND = { pending: 'warn', published: 'ok', rejected: 'bad', delisted: 'muted' };
   var RUNTIME_KIND = { local: 'info', server: 'primary', 'dep-slot': 'purple' };
 
+  function isDepRow(r) { return r.runtime === 'dep-slot'; }
+  function inScope(r) { return (scope === 'dep') === isDepRow(r); }
   function updateCounts() {
-    var rows = flatRows();
+    var rows = flatRows().filter(inScope);
     function n(f) { return rows.filter(f).length; }
     document.getElementById('cnt-pending').textContent = n(function (r) { return r.status === 'pending'; });
     document.getElementById('cnt-published').textContent = n(function (r) { return r.status === 'published'; });
@@ -499,14 +502,17 @@
     var tbody = document.getElementById('st-rows');
     var wrap = document.getElementById('st-table-wrap');
     var statsBox = document.getElementById('st-stats');
+    var scopeBox = document.getElementById('st-scope');
     if (filter === 'stats') {
       wrap.hidden = true;
       statsBox.hidden = false;
+      if (scopeBox) scopeBox.style.display = 'none';
       renderStats();
       return;
     }
     wrap.hidden = false;
     statsBox.hidden = true;
+    if (scopeBox) scopeBox.style.display = '';
     thead.innerHTML = '<th>插件（组内为各版本）</th><th>版本</th><th>类别</th><th>状态</th><th>上架时间</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
     var allRows = flatRows();
     function passFilter(r) {
@@ -517,7 +523,7 @@
     var groups = buildGroups();
     tbody.innerHTML = '';
     var any = false;
-    // 需求④（2026-10-12）：待审核/已上架/已下架 三个列表页签内均按「插件 / 依赖」分段
+    // 2026-10-12 优化：插件/依赖 由上下分段改为**二级页签范围筛选**（依赖不再需要下拉翻找）
     function isDepGroup(g) { return (g.server || g.client || g.single).runtime === 'dep-slot'; }
     function renderGroups(list) {
       list.forEach(function (g) {
@@ -561,21 +567,13 @@
       });
       });
     }
-    var plugGroups = groups.filter(function (g) { return !isDepGroup(g); });
-    var depGroups = groups.filter(isDepGroup);
-    [['插件', plugGroups], ['依赖', depGroups]].forEach(function (pairSec) {
-      var label = pairSec[0], list = pairSec[1];
-      if (!list.length) return;
-      var trSec = document.createElement('tr');
-      trSec.className = 'st-section-row';
-      trSec.innerHTML = '<td colspan="8">' + esc(label) + '</td>';
-      tbody.appendChild(trSec);
-      renderGroups(list);
-    });
+    renderGroups(groups.filter(function (g) { return (scope === 'dep') === isDepGroup(g); }));
     if (!any) {
       var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
                     off: '暂无已下架 / 已驳回条目' };
-      tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
+      var scoped = (scope === 'dep' ? '依赖' : '插件');
+      tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">'
+        + (EMPTY[filter] || '暂无数据') + '（当前范围：' + scoped + '）</td></tr>';
     }
     syncTableOverflow();
   }
@@ -629,7 +627,7 @@
     b.type = 'button';
     b.className = 'st-filter';
     b.id = 'st-expand-all';
-    b.style.marginLeft = 'auto';
+    b.style.marginLeft = '10px';   // 二级页签（st-scope）占用了 auto 位置（2026-10-12）
     b.textContent = '全部展开';
     b.addEventListener('click', function () {
       // 任一已展开 → 全部折叠；否则全部展开（默认收缩，首次点击即"展开全部"）
@@ -649,6 +647,17 @@
       document.querySelectorAll('.st-filter').forEach(function (b) { b.classList.remove('active'); });
       btn.classList.add('active');
       filter = btn.getAttribute('data-f');
+      render();
+    });
+  });
+
+  // 二级页签：插件 / 依赖（2026-10-12 优化）——切换即重算状态计数与列表
+  document.querySelectorAll('.st-scope-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.st-scope-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      scope = btn.getAttribute('data-scope') === 'dep' ? 'dep' : 'plugin';
+      updateCounts();
       render();
     });
   });

@@ -97,6 +97,16 @@
     .st-stat-label { font-size: 13px; color: #5f6368; }
     .st-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
     .st-stats-grid h4 { margin: 4px 0 8px; font-size: 14px; color: #202124; }
+    /* 二级页签：插件 / 依赖 范围筛选（2026-10-12 优化）——依赖不再需要向下翻 */
+    .st-scope { margin-left: auto; display: inline-flex; align-items: center; gap: 0;
+                border: 1px solid rgba(0,0,0,.14); border-radius: 8px; overflow: hidden;
+                align-self: center; margin-bottom: 4px; }
+    .st-scope-btn { appearance: none; border: none; background: #fff; padding: 5px 16px;
+                    font-size: 13px; color: #5f6368; cursor: pointer; }
+    .st-scope-btn + .st-scope-btn { border-left: 1px solid rgba(0,0,0,.14); }
+    .st-scope-btn:hover { color: #202124; }
+    .st-scope-btn.active { background: rgba(66,133,244,.12); color: var(--md-primary, #4285F4); font-weight: 600; }
+
     /* 展开板细化（2026-10-12 需求③⑤）：上架时间列窄、操作列限宽多行、分段行 */
     #st-table th:nth-child(5), #st-table td:nth-child(5) { white-space: nowrap; }
     #st-table th:last-child, #st-table td:last-child { width: 236px; max-width: 236px; }
@@ -237,6 +247,10 @@
         <button type="button" class="st-filter" data-f="published">已上架<span class="st-count" id="cnt-published">0</span></button>
         <button type="button" class="st-filter" data-f="off">已下架 · 已驳回<span class="st-count" id="cnt-off">0</span></button>
         <button type="button" class="st-filter" data-f="stats">统计</button>
+        <span class="st-scope" id="st-scope" role="tablist" aria-label="插件 / 依赖 范围">
+          <button type="button" class="st-scope-btn active" data-scope="plugin">插件</button>
+          <button type="button" class="st-scope-btn" data-scope="dep">依赖</button>
+        </span>
       </div>
       <div class="data-table-wrap" id="st-table-wrap">
         <table class="data-table" id="st-table">
@@ -253,7 +267,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=16"></script>
+<script src="/plugin/admin/js/admin-store.js?v=17"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
