@@ -113,13 +113,16 @@
        ③插件中文名/英文名两行显示（st-grp-title），不再显示版本数。 */
     #st-table { table-layout: fixed; min-width: 1040px; }
     #st-table th, #st-table td { white-space: normal; overflow-wrap: anywhere; }
+    /* 徽标内部允许折行（真机 2026-10-12：「未部署（服务器当前 v1.3.3）」172px 徽标
+       在 120px 列内向右溢出 68px、被钉住的"操作列"永久遮住——折行后不再藏字） */
+    #st-table .st-chip { white-space: normal; word-break: break-word; }
     #st-table th:nth-child(1), #st-table td:nth-child(1) { width: 230px; }
     #st-table th:nth-child(2), #st-table td:nth-child(2) { width: 90px; }
     #st-table th:nth-child(3), #st-table td:nth-child(3) { width: 80px; }
     #st-table th:nth-child(4), #st-table td:nth-child(4) { width: 120px; }
     #st-table th:nth-child(5), #st-table td:nth-child(5) { width: 110px; }
-    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 180px; }
-    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 120px; }
+    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 160px; }
+    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 140px; }
     #st-table th:last-child, #st-table td:last-child { width: 110px; }
     /* 操作区与内容区的视觉分界（钉列左侧描边，随悬停底色保持恒定） */
     #st-table th:last-child, #st-table td:last-child { border-left: 1px solid var(--md-outline-variant); }
@@ -289,7 +292,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=20"></script>
+<script src="/plugin/admin/js/admin-store.js?v=21"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
