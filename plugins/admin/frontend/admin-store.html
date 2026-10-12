@@ -107,11 +107,25 @@
     .st-scope-btn:hover { color: #202124; }
     .st-scope-btn.active { background: rgba(66,133,244,.12); color: var(--md-primary, #4285F4); font-weight: 600; }
 
-    /* 展开板细化（2026-10-12 需求③⑤）：上架时间列窄、操作列限宽多行、分段行 */
-    #st-table th:nth-child(5), #st-table td:nth-child(5) { white-space: nowrap; }
-    #st-table th:last-child, #st-table td:last-child { width: 236px; max-width: 236px; }
-    .st-ops { white-space: normal; word-break: keep-all; }
-    .st-ops .admin-btn { margin: 2px 0 2px 6px; }
+    /* 展开板细化 + 换行/限宽根治（2026-10-12 需求③⑤，二次修复）：
+       admin.css 的 `.data-table td{white-space:nowrap}`（0,1,1）会压过页面 `.st-ops`（0,1,0）
+       → 用 #st-table 前缀（1,x,x）覆盖；同时改用**固定表格布局 + 列宽配比**：
+       auto 布局下"操作列内容 min-content 挤压"会把它压成一字宽的竖条并撑宽整表
+       （真机实测 88px 竖排按钮 + 表头白色溢出区），固定布局一次根治：
+       ①全表按比例分列（合计 100%），表格恒等于容器宽、无横向溢出/白色区；
+       ②操作列 23%（≈216px，三颗按钮折行排布）；③单元格按词/字折行、不撑破列宽。 */
+    #st-table { table-layout: fixed; }
+    #st-table th, #st-table td { white-space: normal; overflow-wrap: anywhere; }
+    #st-table th:nth-child(1), #st-table td:nth-child(1) { width: 20%; }
+    #st-table th:nth-child(2), #st-table td:nth-child(2) { width: 8%; }
+    #st-table th:nth-child(3), #st-table td:nth-child(3) { width: 7%; }
+    #st-table th:nth-child(4), #st-table td:nth-child(4) { width: 11%; }
+    #st-table th:nth-child(5), #st-table td:nth-child(5) { width: 9%; }
+    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 13%; }
+    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 9%; }
+    #st-table th:last-child, #st-table td:last-child { width: 23%; }
+    #st-table td.st-ops { white-space: normal; }
+    #st-table td.st-ops .admin-btn { white-space: normal; margin: 2px 0 2px 6px; }
     .st-section-row > td {
       background: rgba(66,133,244,.07); color: #1a73e8; font-weight: 700; font-size: 13px;
       padding: 7px 12px; letter-spacing: 1px;
@@ -267,7 +281,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=17"></script>
+<script src="/plugin/admin/js/admin-store.js?v=19"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
