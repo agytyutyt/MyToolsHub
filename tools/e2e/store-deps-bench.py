@@ -365,6 +365,17 @@ def main():
             check("J4 补装依赖后 → 健康度回 ok（角标消失）",
                   bool(item2) and (item2.get("health") or "ok") == "ok",
                   json.dumps(item2, ensure_ascii=False)[:160])
+
+            # K：卸载依赖 → **同一实例**回主界面即刻见降级（免重启，2026-10-12 需求）
+            r = cj2.post("/local-api/store/uninstall-dep", json={"id": "depx"})
+            check("K1 卸载依赖端点 ok", bool((r.get_json() or {}).get("ok")),
+                  json.dumps(r.get_json(), ensure_ascii=False)[:120])
+            d3 = cj2.get("/api/tools").get_json()
+            item3 = next((t for t in (d3.get("tools") or []) if t.get("id") == "local-needs"), None)
+            check("K2 同一实例回主界面即见「功能降级」（无需重启）",
+                  bool(item3) and item3.get("health") == "degraded"
+                  and "openpyxl" in (item3.get("health_degraded") or []),
+                  json.dumps(item3, ensure_ascii=False)[:160])
         finally:
             srv2.shutdown()
     finally:

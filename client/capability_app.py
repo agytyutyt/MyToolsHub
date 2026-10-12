@@ -586,6 +586,45 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     local_states = {}
     hybrid_apps = {}      # id → Flask 子应用（进程内；装卸/升级=字典操作，天然全热插拔）
 
+    _verdicts_at = {"ts": 0.0}
+
+    def _eval_local_verdict(m, pdir):
+        """单插件三态结论（依赖/版本门）——纯读取，无副作用（不挂载、不改配置）。"""
+        return jz_deps.evaluate(
+            m.get("id"), pdir, m,
+            app_dir=build_cfg.get("_program_dir"),
+            app_version=(build_cfg.get("product") or {}).get("version"),
+            plugin_api=build_cfg.get("plugin_api", "1.0"))
+
+    def _refresh_local_verdicts(force=False, ttl=2.0):
+        """只复评三态结论（不重挂 hybrid 子应用）——主界面/商店每次加载即读。
+
+        2026-10-12 真机：依赖卸载后降级徽标只在重启后出现（三态只在启动/重扫时算过）。
+        成本＝每插件读 installed-deps/components 两份清单 + 规则判定，纯文件级、无 import；
+        再加 2 秒 TTL 兜住连续请求（force=True 用于依赖装卸后即时翻转）。
+        保号：disabled（停用）/ error（挂载失败）原样保留，其余只更新三态字段。
+        """
+        now = time.time()
+        if not force and now - _verdicts_at["ts"] < ttl:
+            return
+        _verdicts_at["ts"] = now
+        for m in local_manifests:
+            pid = m.get("id")
+            cur = local_states.get(pid) or {}
+            if cur.get("status") in ("disabled", "error"):
+                continue
+            pdir = os.path.join(local_plugins_dir, m.get("_dir", ""))
+            try:
+                v = _eval_local_verdict(m, pdir)
+            except Exception as exc:
+                _log("本地插件 %s 依赖复评异常（保留原状态）：%s" % (pid, exc))
+                continue
+            merged = {"status": v["status"], "missing": v.get("missing", []),
+                      "degraded": v.get("degraded", []), "reason": v.get("reason", "")}
+            if cur.get("mode"):
+                merged["mode"] = cur["mode"]
+            local_states[pid] = merged
+
     def _refresh_local_states():
         from client_config import load_client_config
         # 停用状态读磁盘最新配置（lp_state 免重启写盘后 rescan 立即生效，不用启动快照）
@@ -599,11 +638,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 hybrid_apps.pop(pid, None)
                 continue
             if m.get("kind") == "hybrid":
-                verdict = jz_deps.evaluate(
-                    pid, pdir, m,
-                    app_dir=build_cfg.get("_program_dir"),
-                    app_version=(build_cfg.get("product") or {}).get("version"),
-                    plugin_api=build_cfg.get("plugin_api", "1.0"))
+                verdict = _eval_local_verdict(m, pdir)
                 local_states[pid] = {"status": verdict["status"],
                                      "missing": verdict.get("missing", []),
                                      "degraded": verdict.get("degraded", []),
@@ -632,11 +667,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 # worker 型同样三态评估（2026-10-12）：缺依赖要能在主界面标「功能降级」；
                 # 运行期门由 worker 自己把（此处不改挂载/派发行为）
                 try:
-                    verdict = jz_deps.evaluate(
-                        pid, pdir, m,
-                        app_dir=build_cfg.get("_program_dir"),
-                        app_version=(build_cfg.get("product") or {}).get("version"),
-                        plugin_api=build_cfg.get("plugin_api", "1.0"))
+                    verdict = _eval_local_verdict(m, pdir)
                     local_states[pid] = {"status": verdict["status"],
                                          "missing": verdict.get("missing", []),
                                          "degraded": verdict.get("degraded", []),
@@ -649,11 +680,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 # 纯前端本地插件同样三态评估（2026-10-12）：声明了依赖/版本门就要能在
                 # 主界面标「功能降级」（此前该分支不落 state → 角标永远不出现）
                 try:
-                    verdict = jz_deps.evaluate(
-                        pid, pdir, m,
-                        app_dir=build_cfg.get("_program_dir"),
-                        app_version=(build_cfg.get("product") or {}).get("version"),
-                        plugin_api=build_cfg.get("plugin_api", "1.0"))
+                    verdict = _eval_local_verdict(m, pdir)
                     local_states[pid] = {"status": verdict["status"],
                                          "missing": verdict.get("missing", []),
                                          "degraded": verdict.get("degraded", []),
@@ -903,6 +930,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.get("/local-api/plugins")
     def lp_list():
+        _refresh_local_verdicts()      # 商店页每次加载同批复评（与主界面同源）
         out = []
         for m in local_manifests:
             st = dict(local_states.get(m.get("id"), {}))
@@ -1337,6 +1365,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 dep_results.append(dict(d_res, id=dep_id))
                 if prog:
                     prog.pkg_done()
+        if include_deps and dep_results:
+            _refresh_local_verdicts(force=True)   # 依赖装完即复评：回主界面徽标即时消失
 
         # ② 主件按 runtime 分派
         if runtime == "server":
@@ -1686,6 +1716,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             # 依赖旗标由各插件 install_refresher 在请求期刷新（既有机制）
         except Exception:
             pass
+        _refresh_local_verdicts(force=True)    # 回主界面即刻见降级徽标（免重启，2026-10-12 需求）
         note = ""
         if pending_remove:
             note = "部分文件被占用，将在下次启动客户端后清除"
@@ -1958,6 +1989,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def api_tools_merged():
         # 注意：本装饰器必须紧跟本函数——F5 曾把辅助函数插在两者之间，致 /api/tools
         # 全局误走降级分支（2026-10-08 台架抓出；插入带装饰器函数前一律锚定装饰器行）
+        _refresh_local_verdicts()      # 每次加载主界面复评三态（依赖装卸后徽标即时翻转）
         if not state["address"]:
             return _local_only_tools_response()
         headers = client_headers()
