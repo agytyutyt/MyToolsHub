@@ -678,7 +678,9 @@
     });
   });
   $('#st-q').addEventListener('input', render);
-  $('#st-grid').addEventListener('click', function (ev) {
+  // 动作委托挂 document（2026-10-12 修复）：原挂 #st-grid，而详情卡 .st-modal 是
+  // appendChild 到 document.body 的——卡内按钮（含新增的「检测本机依赖」）点了永不触发。
+  document.addEventListener('click', function (ev) {
     var btn = ev.target.closest ? ev.target.closest('button[data-act]') : null;
     if (btn) { onAction(btn.getAttribute('data-act'), btn); return; }
     var card = ev.target.closest ? ev.target.closest('.st-card') : null;
