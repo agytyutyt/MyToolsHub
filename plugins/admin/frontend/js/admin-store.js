@@ -217,7 +217,8 @@
   // 同一插件的多个版本收进一个可折叠分组；C 类（配对）在组内用「后端包/前端包」切换卡。
   var groupState = {};   // key -> {expanded: bool, subtab: 'backend'|'frontend'}
   function gs(key) {
-    if (!groupState[key]) groupState[key] = { expanded: true, subtab: 'backend' };
+    // 默认收缩（2026-10-12 需求①）：首次访问某组时处于折叠态，点击 ▸ 展开
+    if (!groupState[key]) groupState[key] = { expanded: false, subtab: 'backend' };
     return groupState[key];
   }
   function buildGroups() {
@@ -252,8 +253,12 @@
       consumed[p.id] = 1;
       groups.push({ key: p.id, kind: 'single', server: null, client: null, single: p });
     });
-    // 组内改按 key 排序（与旧行序一致：按 id）
-    groups.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+    // 需求③（2026-10-12）：默认按**名称**排序（组间）；组内版本按**上架时间**倒序
+    // （未上架/无时间的排后，并列回落版本号倒序）
+    groups.sort(function (a, b) {
+      var ta = groupTitleOf(a), tb = groupTitleOf(b);
+      return String(ta.name).localeCompare(String(tb.name), 'zh-Hans-CN');
+    });
     return groups;
   }
 
@@ -372,6 +377,8 @@
       + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
       + '<td class="st-cell-stack">' + chip(statusLabel(r.status), STATUS_KIND[r.status] || 'muted')
       + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
+      + '<td class="st-mono"><span class="st-muted">'
+      + esc(String(r.published_at || '').replace('T', ' ').slice(0, 16) || '—') + '</span></td>'
       + '<td class="st-cell-stack">' + depsHtml + '</td>'
       + '<td class="st-cell-stack">' + svr + '</td>'
       + '<td class="st-ops">' + ops + '</td>';
@@ -383,6 +390,17 @@
     if (g.client) ids.push(g.client.id);
     if (g.single) ids.push(g.single.id);
     return ids;
+  }
+
+  function latestPublished(rows) {
+    // 组内最新「已上架」时间（截断到分钟；无已上架版本返回空串）
+    var best = '';
+    rows.forEach(function (r) {
+      if (r.status !== 'published' || !r.published_at) return;
+      var t = String(r.published_at);
+      if (t > best) best = t;
+    });
+    return best ? best.replace('T', ' ').slice(0, 16) : '';
   }
 
   function groupHeaderHtml(g, allRows) {
@@ -424,9 +442,35 @@
       + '<td class="st-cell-stack st-mono"><span class="st-muted">—</span></td>'
       + '<td>' + chip(runtimeLabel(base.runtime), RUNTIME_KIND[base.runtime] || 'muted') + '</td>'
       + '<td class="st-cell-stack">' + (st || '<span class="st-muted">—</span>') + '</td>'
+      + '<td class="st-mono"><span class="st-muted">'
+      + esc(latestPublished(rows) || '—') + '</span></td>'
       + '<td><span class="st-muted">—（见各版本行）</span></td>'
       + '<td class="st-cell-stack">' + svr + '</td>'
-      + '<td class="st-ops"><span class="st-muted">' + (expanded ? '已展开' : '已折叠') + '</span></td>';
+      + '<td class="st-ops">' + groupOpsHtml(g, rows) + '</td>';
+  }
+
+  function groupOpsHtml(g, rows) {
+    // 组级操作（2026-10-12 需求②）：点击后对**该插件全部版本**生效。
+    // 下架（全部版本）= 对组内各条目全体已上架版本下架；停用/卸载＝插件级动作，
+    // 锚定服务器上已部署的版本（未部署则禁用/不显示）。
+    if (!canReview) return '<span class="st-muted">待管理员审核</span>';
+    var html = '';
+    var hasPub = rows.some(function (r) { return r.status === 'published'; });
+    if (hasPub) {
+      html += '<button class="admin-btn small" data-op="gdelist" data-group="' + esc(g.key) + '">下架（全部版本）</button>';
+    }
+    if (g.server) {
+      var dep = g.server.installed_version;
+      if (dep && canSrv) {
+        if (g.server.srv_enabled === false) {
+          html += ' <button class="admin-btn small" data-op="gsrv" data-group="' + esc(g.key) + '" data-en="1">启用</button>';
+        } else {
+          html += ' <button class="admin-btn small" data-op="gsrv" data-group="' + esc(g.key) + '" data-en="0">停用</button>';
+        }
+        html += ' <button class="admin-btn small" data-op="gwithdraw" data-group="' + esc(g.key) + '">卸载（撤下后端包）</button>';
+      }
+    }
+    return html || '<span class="st-muted">—</span>';
   }
 
   function subtabHtml(g) {
@@ -443,7 +487,7 @@
         + ' data-subtab="' + tab + '" data-group="' + esc(g.key) + '">'
         + esc(label) + (extra ? ' <span class="st-muted">· ' + extra + '</span>' : '') + '</button>';
     }
-    return '<td colspan="7" class="st-subtab-cell">'
+    return '<td colspan="8" class="st-subtab-cell">'
       + '<span class="st-muted">工件切换：</span>'
       + sideBtn('backend', '后端包（服务器工件）', g.server)
       + sideBtn('frontend', '前端包（客户端工件）', g.client)
@@ -463,7 +507,7 @@
     }
     wrap.hidden = false;
     statsBox.hidden = true;
-    thead.innerHTML = '<th>插件（组内为各版本）</th><th>版本</th><th>类别</th><th>状态</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
+    thead.innerHTML = '<th>插件（组内为各版本）</th><th>版本</th><th>类别</th><th>状态</th><th>上架时间</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
     var allRows = flatRows();
     function passFilter(r) {
       if (filter === 'pending') return r.status === 'pending';
@@ -473,7 +517,10 @@
     var groups = buildGroups();
     tbody.innerHTML = '';
     var any = false;
-    groups.forEach(function (g) {
+    // 需求④（2026-10-12）：待审核/已上架/已下架 三个列表页签内均按「插件 / 依赖」分段
+    function isDepGroup(g) { return (g.server || g.client || g.single).runtime === 'dep-slot'; }
+    function renderGroups(list) {
+      list.forEach(function (g) {
       var ids = rowsOfGroup(g);
       var tab = gs(g.key).subtab;
       var mine = allRows.filter(function (r) {
@@ -486,7 +533,11 @@
       });
       if (!mine.length) return;   // 当前筛选（+页签）下该组无行 → 整组隐藏
       any = true;
-      mine.sort(function (a, b) { return a.version < b.version ? -1 : a.version > b.version ? 1 : 0; });
+      mine.sort(function (a, b) {
+        var pa = String(a.published_at || ''), pb = String(b.published_at || '');
+        if (pa !== pb) return pa < pb ? 1 : -1;        // 上架时间倒序
+        return a.version < b.version ? 1 : a.version > b.version ? -1 : 0;  // 并列：版本倒序
+      });
       var trH = document.createElement('tr');
       trH.className = 'st-group-row';
       trH.innerHTML = groupHeaderHtml(g, allRows);
@@ -508,13 +559,37 @@
         tr.innerHTML = versionRowHtml(r, g);
         tbody.appendChild(tr);
       });
+      });
+    }
+    var plugGroups = groups.filter(function (g) { return !isDepGroup(g); });
+    var depGroups = groups.filter(isDepGroup);
+    [['插件', plugGroups], ['依赖', depGroups]].forEach(function (pairSec) {
+      var label = pairSec[0], list = pairSec[1];
+      if (!list.length) return;
+      var trSec = document.createElement('tr');
+      trSec.className = 'st-section-row';
+      trSec.innerHTML = '<td colspan="8">' + esc(label) + '</td>';
+      tbody.appendChild(trSec);
+      renderGroups(list);
     });
     if (!any) {
       var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
                     off: '暂无已下架 / 已驳回条目' };
-      tbody.innerHTML = '<tr><td colspan="7" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
     }
     syncTableOverflow();
+  }
+
+  function byKindOf(obj, kind) {
+    // 统计拆表（需求④）：按 runtime 归类条目（dep-slot→依赖，其余→插件）
+    var rt = {};
+    packages.forEach(function (p) { rt[p.id] = p.runtime; });
+    var out = {};
+    Object.keys(obj).forEach(function (k) {
+      var isDep = rt[k] === 'dep-slot';
+      if ((kind === 'dep') === isDep) out[k] = obj[k];
+    });
+    return out;
   }
 
   function renderStats() {
@@ -538,7 +613,9 @@
         +   '<div class="st-stat-card"><div class="st-stat-num">' + (via.browser || 0) + '</div><div class="st-stat-label">浏览器</div></div>'
         + '</div>'
         + '<div class="st-stats-grid">'
-        + list(d.by_package, '按条目') + list(d.by_version, '按版本')
+        + list(byKindOf(d.by_package || {}, 'plugin'), '按条目 · 插件')
+        + list(byKindOf(d.by_package || {}, 'dep'), '按条目 · 依赖')
+        + list(d.by_version, '按版本')
         + list(d.by_day, '按日') + list(d.by_user, '按用户')
         + '</div>';
       syncTableOverflow();
@@ -553,15 +630,13 @@
     b.className = 'st-filter';
     b.id = 'st-expand-all';
     b.style.marginLeft = 'auto';
-    b.textContent = '全部折叠';
+    b.textContent = '全部展开';
     b.addEventListener('click', function () {
-      var anyExpanded = Object.keys(groupState).some(function (k) { return groupState[k].expanded; })
-        || Object.keys(groupState).length === 0;
-      Object.keys(groupState).forEach(function (k) { groupState[k].expanded = !anyExpanded; });
-      // 尚未进过 state 的组：用默认态取反（默认 expanded=true）
-      groupState.__default = { expanded: !anyExpanded, subtab: 'backend' };
+      // 任一已展开 → 全部折叠；否则全部展开（默认收缩，首次点击即"展开全部"）
+      var anyExpanded = Object.keys(groupState).some(function (k) { return groupState[k].expanded; });
       buildGroups().forEach(function (g) {
-        if (!groupState[g.key]) groupState[g.key] = { expanded: !anyExpanded, subtab: 'backend' };
+        var st = gs(g.key);
+        st.expanded = !anyExpanded;
       });
       b.textContent = anyExpanded ? '全部展开' : '全部折叠';
       render();
@@ -593,6 +668,47 @@
       gs(g2).subtab = sb.getAttribute('data-subtab') === 'frontend' ? 'frontend' : 'backend';
       render();
       return;
+    }
+    // 组级操作（需求②）：点击后对全部版本生效——下架全体已上架版本 / 插件级停用·卸载
+    var gb = ev.target.closest ? ev.target.closest('button[data-op^="g"][data-group]') : null;
+    if (gb) {
+      var gk = gb.getAttribute('data-group');
+      var g = buildGroups().filter(function (x) { return x.key === gk; })[0];
+      if (!g) return;
+      var gop = gb.getAttribute('data-op');
+      if (gop === 'gdelist') {
+        var okd = await adDialog({ title: '下架（全部版本）', danger: true, okText: '全部下架',
+          html: '把 <b>' + esc(gk) + '</b> 的**全部已上架版本**下架？（客户端可见性整体隐藏；'
+            + '已装客户端不受影响）' });
+        if (!okd) return;
+        var ids = rowsOfGroup(g);
+        for (var i = 0; i < ids.length; i++) {
+          var rr = await post('/delist', { id: ids[i], all: true });
+          if (!rr.data.ok) { toast('下架失败（' + ids[i] + '）：' + (rr.data.error || ''), true); load(); return; }
+        }
+        toast('已下架全部版本：' + gk);
+        load();
+        return;
+      }
+      if (gop === 'gsrv' || gop === 'gwithdraw') {
+        var srv = g.server;
+        if (!srv || !srv.installed_version) { toast('该插件未部署到服务器', true); return; }
+        var en = gb.getAttribute('data-en') === '1';
+        var verb = gop === 'gsrv' ? (en ? '启用' : '停用') : '卸载（撤下后端包）';
+        var ok2 = await adDialog({ title: '插件级操作', danger: gop !== 'gsrv' || !en, okText: verb,
+          html: (gop === 'gsrv'
+            ? verb + ' <b>' + esc(srv.id) + '</b> 的服务器端运行？<br>作用于当前部署版本 v' + esc(srv.installed_version) + '（插件级）。'
+            : '把 <b>' + esc(srv.id) + '</b> v' + esc(srv.installed_version) + ' 的后端包从服务器撤下？<br>自动备份，可用「重新部署」恢复。') });
+        if (!ok2) return;
+        var path2 = gop === 'gsrv' ? '/srv-state' : '/withdraw';
+        var body2 = gop === 'gsrv'
+          ? { id: srv.id, version: srv.installed_version, enabled: en }
+          : { id: srv.id, version: srv.installed_version, note: '组级卸载' };
+        var r2 = await post(path2, body2);
+        if (r2.data.ok) { toast(verb + '完成'); load(); }
+        else { toast(verb + '失败：' + (r2.data.error || ''), true); }
+        return;
+      }
     }
     var btn = ev.target.closest ? ev.target.closest('button[data-op]') : null;
     if (!btn) return;

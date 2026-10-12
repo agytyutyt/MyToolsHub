@@ -65,7 +65,7 @@ RULES = {
 # 2026-10-11 平移：admin-common.js +1（壳门站点名改 /api/site）、admin-store.js（C 配对表单/配对徽标）、store.js（浏览器分支删除/配对安装联动）——行号随本轮改动平移，豁免理由不变
 # 2026-10-12 平移：store.js（账号级安装批次：登记三态/徽标拆分/hidden 退役）——270→291、597→630、603→636、607→640，豁免理由不变
 # 2026-10-12 平移：admin.js 设置卡改跳转+弹窗删除（-61 行）、store.js 预检报错修补（+8 行）——行号随改动平移，豁免理由不变
-# 2026-10-12 平移/改形（二/三/四）：admin-store.js 多版本作用域 + 合成行 + 展开板重写 → 原单点 347 拆为三处（492/498/508，行模板迁入构建函数）
+# 2026-10-12 平移/改形（二/三/四/五）：admin-store.js 多版本作用域→合成行→展开板→细化（默认收缩/组级操作/上架时间列/分段）→ 三处 543/549/559 + 新增 571（分段行）
 EXEMPTIONS = [
     ("L-14", "plugins/", "test_*.py 与台架夹具不参与出包，模块级 import 重依赖属预期（构建期剔除）"),
     ("F-1", "plugins/admin/frontend/", "占位符文案里的示例路径（`D:\\…`）是给用户看的说明文字，非代码取径"),
@@ -161,9 +161,10 @@ EXEMPTIONS = [
     # ---- 裁定 7 ①：F-3 补齐「对象字面量 { innerHTML: }」与「跨行拼接」两形态后的新增命中 ----
     ("F-3", "plugins/admin/frontend/js/admin-common.js:112", "跨行拼接的侧栏「登录」项：动态部分只有 encodeURIComponent(location.pathname)（属性上下文无法逃逸）与静态文案/本文件 sideIcon() 封装"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:203", "右值在下一行，模板内插值只有 ${esc(err.message)}（本文件 esc 真替换 &<>\"'）"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:492", "展开板父行：groupHeaderHtml() 内全部动态值经 esc()/chip() 包装（name/id/version），计数与文案为数值与常量"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:498", "C 类工件切换行：subtabHtml() 内 label/version 经 esc()，其余为静态按钮骨架"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:508", "组内版本行：versionRowHtml() 内所有插值经 esc()/chip()（原 :314 行模板迁入函数，口径不变）"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:543", "展开板父行：groupHeaderHtml() 内全部动态值经 esc()/chip() 包装（name/id/version），计数与文案为数值与常量"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:549", "C 类工件切换行：subtabHtml() 内 label/version 经 esc()，其余为静态按钮骨架"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:559", "组内版本行：versionRowHtml() 内所有插值经 esc()/chip()（原 :314 行模板迁入函数，口径不变）"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:571", "分段行：仅 esc(label)（插件/依赖 两个常量）与静态 colspan/骨架，无其他插值"),
     ("F-3", "plugins/case-report/frontend/app.js:672", "units.map 体内两处均为 esc(u)，前段是静态 option 骨架"),
     ("F-3", "plugins/notice-board/frontend/app.js:356", "同行已 esc(created_by_name||created_by)（L2 批 3 修掉的真风险；本行是 { innerHTML: … } 对象字面量形态，旧口径漏检、现口径命中）"),
     ("F-3", "plugins/shared-docs/frontend/app.js:163", "跨行拼接的文档卡：卡片各动态字段（d.name/lv/scopeLabel/d.created_by_name/d.updated_by）均 esc()；meta 的 updated_at/version 原为裸插值，本批已补 esc（shared-docs 1.2.6）"),

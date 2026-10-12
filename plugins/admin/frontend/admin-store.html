@@ -97,6 +97,16 @@
     .st-stat-label { font-size: 13px; color: #5f6368; }
     .st-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
     .st-stats-grid h4 { margin: 4px 0 8px; font-size: 14px; color: #202124; }
+    /* 展开板细化（2026-10-12 需求③⑤）：上架时间列窄、操作列限宽多行、分段行 */
+    #st-table th:nth-child(5), #st-table td:nth-child(5) { white-space: nowrap; }
+    #st-table th:last-child, #st-table td:last-child { width: 236px; max-width: 236px; }
+    .st-ops { white-space: normal; word-break: keep-all; }
+    .st-ops .admin-btn { margin: 2px 0 2px 6px; }
+    .st-section-row > td {
+      background: rgba(66,133,244,.07); color: #1a73e8; font-weight: 700; font-size: 13px;
+      padding: 7px 12px; letter-spacing: 1px;
+    }
+
     /* 展开板（2026-10-12 需求①）：插件分组行 / 组内版本行缩进 / C 类工件切换卡 */
     .st-group-row > td { background: rgba(0,0,0,.035); font-weight: 600; }
     .st-group-row .st-group-toggle {
@@ -243,7 +253,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=15"></script>
+<script src="/plugin/admin/js/admin-store.js?v=16"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>

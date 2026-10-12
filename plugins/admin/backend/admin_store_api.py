@@ -373,7 +373,25 @@ def register(app, deps):
             return jsonify({"ok": False, "error": "仅管理员或超级管理员可下架"}), 403
         data = request.get_json(silent=True) or {}
         by = str((_deps["get_session_user"]() or {}).get("username") or "")
-        res = store_admin.delist(_deps["store_root"](), str(data.get("id") or ""),
+        root = _deps["store_root"]()
+        # 组级「下架（全部版本）」（2026-10-12 需求②）：all=true 时对该条目**全部已上架
+        # 版本**逐个下架（逐版本仍走既有状态机与台账；配对条目的另一侧由前端分别调用）。
+        if data.get("all"):
+            entry = store_admin.find_entry(store_admin.load_catalog(root),
+                                           str(data.get("id") or ""))
+            if entry is None:
+                return jsonify({"ok": False, "error": "条目不存在：%s" % data.get("id")}), 404
+            pub = [v for v in (entry.get("versions") or []) if v.get("status") == "published"]
+            if not pub:
+                return jsonify({"ok": False, "error": "该条目没有已上架版本"}), 409
+            done = []
+            for v in pub:
+                r = store_admin.delist(root, str(entry.get("id")), str(v.get("version")),
+                                       by, str(data.get("note") or "组级下架（全部版本）"))
+                if r.get("ok"):
+                    done.append(str(v.get("version")))
+            return jsonify({"ok": True, "id": entry.get("id"), "delisted": done})
+        res = store_admin.delist(root, str(data.get("id") or ""),
                                  str(data.get("version") or ""), by,
                                  str(data.get("note") or ""))
         if res.get("ok"):
