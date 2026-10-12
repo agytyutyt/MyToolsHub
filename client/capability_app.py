@@ -1788,6 +1788,14 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return jsonify(local_registry.tool_item(m, 0))
         return forward("api/tools/" + tool_id)
 
+    @app.route("/local-api/<path:_rest>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+    def local_api_fallback(_rest):
+        """本地接口兜底：/local-api/* 未命中任何端点 → 404（不落中继兜底）。
+
+        hidden_tools 写链退役（2026-10-11 账号级批次）后 /local-api/plugins/hidden 等退役
+        端点由此给出明确的 404，而不是撞 <path:path> 兜底被转发到远程（smoke 抓出 502）。"""
+        return jsonify({"error": "接口不存在或已退役", "path": "/local-api/" + _rest}), 404
+
     @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
     @app.route("/<path:path>", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
     def relay(path):
