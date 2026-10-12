@@ -385,13 +385,12 @@
       ops += opBtn('republish', IDP, '重新上架');
     }
     return '<td class="st-cell-stack"><span class="st-mono">v' + esc(r.version) + '</span>'
+      + (r.frontend_file ? ' ' + chip('前端包成对', 'muted') : '')   // 原「版本」列内容并入（2026-10-12）
       + (r.synthetic
-          ? '<span class="st-chip st-chip-info" title="目录外版本：服务器部署的版本不在商店目录中（历史部署）">目录外版本</span>'
+          ? ' <span class="st-chip st-chip-info" title="目录外版本：服务器部署的版本不在商店目录中（历史部署）">目录外版本</span>'
           : '')
-      + (r.side_label ? '<span class="st-muted">' + esc(r.side_label) + '</span>' : '')
+      + (r.side_label ? ' <span class="st-muted">' + esc(r.side_label) + '</span>' : '')
       + '</td>'
-      + '<td class="st-cell-stack st-mono">'
-      + (r.frontend_file ? chip('前端包成对', 'muted') : '') + '</td>'
       + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
       + '<td class="st-cell-stack">' + chip(statusLabel(r.status), STATUS_KIND[r.status] || 'muted')
       + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
@@ -460,7 +459,6 @@
       + '<span class="st-muted">' + esc(t.id) + '</span></span>'
       + (kindChips ? ' ' + kindChips : '')
       + '</td>'
-      + '<td class="st-cell-stack st-mono"><span class="st-muted">—</span></td>'
       + '<td>' + chip(runtimeLabel(base.runtime), RUNTIME_KIND[base.runtime] || 'muted') + '</td>'
       + '<td class="st-cell-stack">' + (st || '<span class="st-muted">—</span>') + '</td>'
       + '<td class="st-mono"><span class="st-muted">'
@@ -502,7 +500,7 @@
         + ' data-subtab="' + tab + '" data-group="' + esc(g.key) + '">'
         + esc(label) + (extra ? ' <span class="st-muted">· ' + extra + '</span>' : '') + '</button>';
     }
-    return '<td colspan="8" class="st-subtab-cell">'
+    return '<td colspan="7" class="st-subtab-cell">'
       + '<span class="st-muted">工件切换：</span>'
       + sideBtn('backend', '后端包（服务器工件）', g.server)
       + sideBtn('frontend', '前端包（客户端工件）', g.client)
@@ -525,7 +523,8 @@
     wrap.hidden = false;
     statsBox.hidden = true;
     if (scopeBox) scopeBox.style.display = '';
-    thead.innerHTML = '<th>插件（组内为各版本）</th><th>版本</th><th>类别</th><th>状态</th><th>上架时间</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
+    // 2026-10-12 需求：去「版本」列（版本号已在插件列展示）；操作列表头随操作格居中
+    thead.innerHTML = '<th>插件（组内为各版本）</th><th>类别</th><th>状态</th><th>上架时间</th><th>依赖</th><th>服务器侧</th><th>操作</th>';
     var allRows = flatRows();
     function passFilter(r) {
       if (filter === 'pending') return r.status === 'pending';
@@ -584,7 +583,7 @@
       var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
                     off: '暂无已下架 / 已驳回条目' };
       var scoped = (scope === 'dep' ? '依赖' : '插件');
-      tbody.innerHTML = '<tr><td colspan="8" class="admin-empty">'
+      tbody.innerHTML = '<tr><td colspan="7" class="admin-empty">'
         + (EMPTY[filter] || '暂无数据') + '（当前范围：' + scoped + '）</td></tr>';
     }
     syncTableOverflow();

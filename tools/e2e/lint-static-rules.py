@@ -161,9 +161,9 @@ EXEMPTIONS = [
     # ---- 裁定 7 ①：F-3 补齐「对象字面量 { innerHTML: }」与「跨行拼接」两形态后的新增命中 ----
     ("F-3", "plugins/admin/frontend/js/admin-common.js:112", "跨行拼接的侧栏「登录」项：动态部分只有 encodeURIComponent(location.pathname)（属性上下文无法逃逸）与静态文案/本文件 sideIcon() 封装"),
     ("F-3", "plugins/admin/frontend/js/admin-plugins.js:203", "右值在下一行，模板内插值只有 ${esc(err.message)}（本文件 esc 真替换 &<>\"'）"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:561", "展开板父行：groupHeaderHtml() 内全部动态值经 esc()/chip() 包装（name/id/version），计数与文案为数值与常量"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:567", "C 类工件切换行：subtabHtml() 内 label/version 经 esc()，其余为静态按钮骨架"),
-    ("F-3", "plugins/admin/frontend/js/admin-store.js:577", "组内版本行：versionRowHtml() 内所有插值经 esc()/chip()（原 :314 行模板迁入函数，口径不变）"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:560", "展开板父行：groupHeaderHtml() 内全部动态值经 esc()/chip() 包装（name/id/version），计数与文案为数值与常量"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:566", "C 类工件切换行：subtabHtml() 内 label/version 经 esc()，其余为静态按钮骨架"),
+    ("F-3", "plugins/admin/frontend/js/admin-store.js:576", "组内版本行：versionRowHtml() 内所有插值经 esc()/chip()（原 :314 行模板迁入函数，口径不变）"),
     ("F-3", "plugins/case-report/frontend/app.js:672", "units.map 体内两处均为 esc(u)，前段是静态 option 骨架"),
     ("F-3", "plugins/notice-board/frontend/app.js:356", "同行已 esc(created_by_name||created_by)（L2 批 3 修掉的真风险；本行是 { innerHTML: … } 对象字面量形态，旧口径漏检、现口径命中）"),
     ("F-3", "plugins/shared-docs/frontend/app.js:163", "跨行拼接的文档卡：卡片各动态字段（d.name/lv/scopeLabel/d.created_by_name/d.updated_by）均 esc()；meta 的 updated_at/version 原为裸插值，本批已补 esc（shared-docs 1.2.6）"),
