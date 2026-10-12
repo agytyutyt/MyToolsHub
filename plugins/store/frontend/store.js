@@ -280,6 +280,11 @@
       rows.push('<dt>前端包</dt><dd>' + esc(e.frontend_file) + '（' + fmtSize(e.frontend_size) + '）</dd>');
     }
     rows.push('<dt>依赖版本声明</dt><dd>' + (requiresText(e) || '—') + '</dd></dl>');
+    // 检测本机依赖（2026-10-12 需求②）：详情卡内即时三态检测，unknown 不按缺失处理
+    rows.push('<div class="st-md-deps">'
+      + '<button type="button" class="st-btn-deps" data-act="deps-check" data-id="' + esc(e.id)
+      + '" data-ver="' + esc(e.version) + '">检测本机依赖</button>'
+      + '<div class="st-deps-result" id="st-deps-result" aria-live="polite"></div></div>');
     if (e.changelog) rows.push('<h4>变更说明</h4><p class="st-md-text">' + esc(e.changelog) + '</p>');
     var hist = (e.versions || []).map(function (v) {
       return v.status === 'published'
@@ -554,6 +559,54 @@
           msg(d.ok ? '已' + (enable ? '启用' : '停用')
             + (d.restart_required ? '（需重启能力层完全生效）' : '') : ('操作失败：' + (d.error || '')), !d.ok);
           loadLocalState().then(render);
+        });
+      return;
+    }
+    if (act === 'deps-check') {                     // 详情卡「检测本机依赖」（只读展示面）
+      var res = document.getElementById('st-deps-result');
+      if (!res) { return; }
+      if (!IN_SHELL) { res.innerHTML = '<span class="st-md-muted">本机依赖检测需在桌面客户端内使用。</span>'; return; }
+      res.innerHTML = '<span class="st-md-muted">检测中…</span>';
+      post('/local-api/store/deps-check', { id: id, version: ver })
+        .then(function (d) {
+          if (!d || !d.ok) {
+            var em = (d && d.error) || '无法连接本机服务';
+            if (d && /接口不存在|已退役|HTTP 4/.test(String(em))) {
+              em = '当前客户端版本不支持本机依赖检测（请更新客户端包）';
+            }
+            res.innerHTML = '<span class="st-deps-bad">检测失败：' + esc(em) + '</span>';
+            return;
+          }
+          var rows2 = d.rows || [];
+          if (!rows2.length) {
+            res.innerHTML = '<span class="st-deps-ok">该条目未声明依赖（无需检测）。</span>';
+            return;
+          }
+          var html = ['<div class="st-deps-sum">共 ' + rows2.length + ' 项，正常 ' + (d.ok_count || 0)
+            + ' 项' + (d.status && d.status !== 'ok' ? '（结论：' + esc(d.status) + '）' : '') + '</div>'];
+          rows2.forEach(function (r) {
+            var ok = r.state === 'ok', unk = r.state === 'unknown';
+            var cls = ok ? 'st-deps-ok' : (unk ? 'st-deps-unk' : 'st-deps-bad');
+            var mark = ok ? '✓' : (unk ? '？' : '✗');
+            var tail = '';
+            if (!ok && !unk && r.resolve === 'dep-package') {
+              tail = '（可在商店安装依赖包 ' + esc(r.dep_id || r.name)
+                + (r.dep_version ? ' v' + esc(r.dep_version) : '') + '）';
+            } else if (!ok && !unk && r.resolve === 'manual') {
+              tail = '（需手工处理）';
+            }
+            var line = '<span class="' + cls + '">' + mark + ' ' + esc(r.name)
+              + (r.require ? ' ' + esc(r.require) : '') + '</span>'
+              + '<span class="st-md-muted"> ' + esc(r.state)
+              + (r.actual ? ' · 本机 ' + esc(r.actual) : '') + '</span>'
+              + (tail ? ' <span class="st-md-muted">' + tail + '</span>' : '');
+            if (r.note) line += '<div class="st-md-muted st-deps-note">' + esc(r.note) + '</div>';
+            html.push('<div class="st-deps-row">' + line + '</div>');
+          });
+          res.innerHTML = html.join('');
+        })
+        .catch(function (err) {
+          res.innerHTML = '<span class="st-deps-bad">检测异常：' + esc(err) + '</span>';
         });
       return;
     }

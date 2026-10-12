@@ -286,6 +286,47 @@ def _merge_component_manifest(pylibs, entry, cid):
     jztools_data.atomic_write_json(m_path, merged, newline="\n")
 
 
+def drop_component_entry(app_dir, cid):
+    """从依赖组件清单（runtime/pylibs/manifest.json）移除指定组件条目（原子写、幂等）。
+
+    卸载路径专用（2026-10-12 真机 bug）：卸载只删组件目录、没人清清单，而
+    installed_components()/商店状态判断正是读这份清单 —— 结果"卸载成功"却仍显示已安装。
+    返回 True=确有条目被移除；清单不存在/不可解析/无该条目 → False（无副作用）。
+    """
+    import jztools_data    # 调用期导入：口径同 _merge_component_manifest
+    path = _first_file(_layout_roots(app_dir), DEPS_COMPONENT_REL)
+    if not path or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            obj = json.load(f)
+    except Exception:
+        return False
+    if not isinstance(obj, dict):
+        return False
+    changed = False
+    comps = obj.get("components")
+    if isinstance(comps, list) and comps:
+        keep = [c for c in comps
+                if not (isinstance(c, dict) and str(c.get("id")) == str(cid))]
+        if len(keep) != len(comps):
+            obj["components"] = keep
+            changed = True
+    else:
+        # 单组件简写形态（无 components 列表、顶层 packages）：id 命中则整份清空
+        if isinstance(obj.get("packages"), dict) and str(obj.get("id") or "") == str(cid):
+            obj.pop("packages", None)
+            obj.pop("modules", None)
+            changed = True
+    if not changed:
+        return False
+    try:
+        jztools_data.atomic_write_json(path, obj, newline="\n")
+    except Exception:
+        return False
+    return True
+
+
 def _apply_one_pending(pylibs, pend, cid):
     """应用单个暂存组件；成功返回 True。
 

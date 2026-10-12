@@ -1460,6 +1460,10 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             return
         for name in os.listdir(rm_root):
             shutil.rmtree(os.path.join(rm_root, name), ignore_errors=True)
+            try:   # 清单同步（2026-10-12）：只删目录不更新清单 → 商店仍显示"已安装"
+                jz_deps.drop_component_entry(_program_dir, name)
+            except Exception:
+                pass
         try:
             os.rmdir(rm_root)
             _log("已清扫待卸载依赖组件（.pending-remove）")
@@ -1500,10 +1504,67 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             # 依赖旗标由各插件 install_refresher 在请求期刷新（既有机制）
         except Exception:
             pass
+        try:
+            # 清单同步（2026-10-12 真机 bug）：installed_components() 读 runtime/pylibs/manifest.json，
+            # 原实现只删目录不清条目 → 卸载成功后商店卡片仍显示"已安装"。原生库占用转 .pending-remove
+            # 的情形同样清（用户语义=已卸载；文件由启动清扫兜底删除）。
+            jz_deps.drop_component_entry(_program_dir, cid)
+        except Exception:
+            pass
         except Exception:
             pass
         return jsonify({"ok": True, "pending_remove": pending_remove,
                         "note": "原生库已被占用，将在下次启动客户端后清除" if pending_remove else ""})
+
+    @app.post("/local-api/store/deps-check")
+    def store_deps_check():
+        """本机依赖检测（2026-10-12 需求②：详情卡「检测本机依赖」）。
+
+        与 preflight 同源口径（jz_deps.evaluate；unknown=不可核验，不按缺失处理），
+        区别=返回**全部**明细行（含 ok）与汇总，且不改任何状态（纯只读展示面）。
+        """
+        data = request.get_json(force=True, silent=True) or {}
+        pid = str(data.get("id") or "")
+        version = str(data.get("version") or "")
+        catalog, err = _store_source().get_catalog()
+        if err:
+            return jsonify({"ok": False, "error": err, "rows": []}), 200
+        ver, err = _find_catalog_entry(catalog, pid, version)
+        if err:
+            return jsonify({"ok": False, "error": err, "rows": []}), 200
+        manifest = {"requires": ver.get("requires") or {}}
+        try:
+            verdict = jz_deps.evaluate("deps-check:" + pid, "", manifest,
+                                       app_dir=_program_dir,
+                                       app_version=(build_cfg.get("product") or {}).get("version"),
+                                       plugin_api=build_cfg.get("plugin_api", "1.0"))
+        except Exception as exc:
+            return jsonify({"ok": False, "error": "依赖评估异常：%s" % exc, "rows": []}), 200
+        dep_entries = [p for p in catalog.get("packages") or []
+                       if p.get("runtime") == "dep-slot"]
+        rows = []
+        for row in verdict.get("detail") or []:
+            name = str(row.get("name") or "")
+            item = {"name": name, "kind": row.get("kind"), "require": row.get("require"),
+                    "actual": row.get("actual"), "state": row.get("state"),
+                    "required": row.get("required", True), "note": row.get("note") or "",
+                    "resolve": "missing", "dep_id": "", "dep_version": ""}
+            if row.get("kind") == "python_package":
+                for dep in dep_entries:
+                    provides = [str(x) for x in (dep.get("provides") or [])]
+                    if dep.get("id") == name or name in provides:
+                        item["resolve"] = "dep-package"
+                        item["dep_id"] = dep.get("id")
+                        item["dep_version"] = dep.get("version")
+                        break
+            elif row.get("kind") in ("external", "vendored"):
+                item["resolve"] = "manual"
+            rows.append(item)
+        ok_n = sum(1 for r in rows if r.get("state") == "ok")
+        return jsonify({"ok": True, "id": pid, "version": ver.get("version"),
+                        "rows": rows, "ok_count": ok_n, "total": len(rows),
+                        "status": verdict.get("status"),
+                        "note": "unknown=清单不可核验，不按缺失处理"})
 
     @app.post("/local-api/store/reveal")
     def store_reveal():

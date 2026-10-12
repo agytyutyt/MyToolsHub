@@ -180,3 +180,16 @@ html.jz-shell .jz-only{display:inline-block !important}
   transition:background .15s var(--ease),transform .08s var(--ease)}
 .st-dlg-btns button:active{transform:scale(.97)}
 .st-dlg-btns button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+/* 详情卡「检测本机依赖」（2026-10-12 需求②） */
+.st-md-deps { margin-top: 10px; }
+.st-btn-deps { appearance: none; border: 1px solid rgba(0,0,0,.16); background: #fff; border-radius: 8px;
+               padding: 5px 14px; font-size: 13px; cursor: pointer; color: #1a73e8; }
+.st-btn-deps:hover { border-color: #4285F4; background: rgba(66,133,244,.08); }
+.st-deps-result { margin-top: 8px; font-size: 13px; line-height: 1.7; }
+.st-deps-sum { color: #5f6368; margin-bottom: 4px; }
+.st-deps-row { padding: 2px 0; border-bottom: 1px dashed rgba(0,0,0,.06); }
+.st-deps-note { font-size: 12px; }
+.st-deps-ok { color: #188038; }
+.st-deps-bad { color: #c5221f; }
+.st-deps-unk { color: #b06000; }
