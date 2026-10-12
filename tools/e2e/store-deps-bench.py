@@ -264,6 +264,23 @@ def main():
                   not os.path.exists(locked) and not os.path.isfile(jr))
             ids7, _ = comps_of(c2)
             check("H4 清扫后 components 不含 locky", "locky" not in ids7, str(ids7))
+
+            # —— I：清扫按登记收尾"散落载荷"（真机 numpy.libs 孤儿实例）——
+            put("orpy/pkg/mod.py")
+            put("orpy.libs/bin.dat")
+            write_manifest(pylibs, [comp_entry("orpy", files=["orpy/pkg/mod.py", "orpy.libs/bin.dat"])])
+            os.makedirs(os.path.join(pylibs, ".pending-remove", "orpy"), exist_ok=True)
+            with open(os.path.join(pylibs, ".pending-remove", "orpy", "old.dll"), "w") as f:
+                f.write("x")
+            _, c3 = new_app(data_root, addr, static_dir)      # 启动清扫
+            check("I1 清扫删目录 + 按登记收尾散落载荷（孤儿清零）",
+                  not os.path.isdir(os.path.join(pylibs, "orpy"))
+                  and not os.path.isdir(os.path.join(pylibs, "orpy.libs"))
+                  and not os.path.isdir(os.path.join(pylibs, ".pending-remove", "orpy")))
+            with open(os.path.join(pylibs, "manifest.json"), "r", encoding="utf-8") as f:
+                m3 = json.load(f)
+            ids8 = [x.get("id") for x in (m3.get("components") or [])]
+            check("I2 清扫后登记已清", "orpy" not in ids8, str(ids8))
         finally:
             srv.shutdown()
     finally:

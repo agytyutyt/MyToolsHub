@@ -1453,6 +1453,50 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 os.path.join(pylibs, ".pending", cid),
                 os.path.join(pylibs, ".pending-remove", cid))
 
+    def _drop_dep_payload_files(cid):
+        """按登记 entry.files 删组件载荷文件（排除其它组件仍声明的共享文件）+ 空目录剪枝。
+
+        卸载端点与启动清扫共用（2026-10-12：清扫原来只删 .pending-remove/<cid> 这一层，
+        组件铺在 pylibs 根的其余载荷会变孤儿——真机 numpy.libs 即实例）。→ (removed, failed)
+        """
+        try:
+            entry = jz_deps.component_entry(_program_dir, cid)
+        except Exception:
+            entry = None
+        if not entry:
+            return 0, []
+        pylibs = os.path.join(_program_dir, "runtime", "pylibs")
+        others = set()
+        try:
+            for rel, ids in (jz_deps.component_file_owners(_program_dir) or {}).items():
+                if any(str(x) != cid for x in ids):
+                    others.add(rel)
+        except Exception:
+            others = set()
+        removed, failed = 0, []
+        for rel in [str(f).lstrip("\\/").replace("/", "\\") for f in (entry.get("files") or [])]:
+            if not rel or rel.lower() == "manifest.json" or rel.lower() in others:
+                continue
+            pth = os.path.join(pylibs, rel)
+            try:
+                if os.path.isdir(pth):
+                    shutil.rmtree(pth)
+                    removed += 1
+                elif os.path.exists(pth):
+                    os.remove(pth)
+                    removed += 1
+            except OSError:
+                failed.append(rel)
+        for cur, subs, _fs in os.walk(pylibs, topdown=False):
+            for d in subs:
+                pd = os.path.join(cur, d)
+                try:
+                    if os.path.isdir(pd) and not os.listdir(pd):
+                        os.rmdir(pd)
+                except OSError:
+                    pass
+        return removed, failed
+
     def _sweep_dep_files_journal(path):
         """处理卸载台账 <cid>.json：逐项删 payload 文件；返回仍删不掉的项（写回台账）。"""
         try:
@@ -1490,6 +1534,15 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             pth = os.path.join(rm_root, name)
             if os.path.isdir(pth):
                 shutil.rmtree(pth, ignore_errors=True)
+                _removed, failed = _drop_dep_payload_files(name)
+                if failed:      # 仍被占用的落台账，下次启动再收
+                    try:
+                        with open(os.path.join(rm_root, name + ".json"), "w",
+                                  encoding="utf-8") as f:
+                            json.dump({"schema": 1, "id": name, "files": failed}, f,
+                                      ensure_ascii=False, indent=1)
+                    except OSError:
+                        pass
                 try:   # 清单同步（2026-10-12）：只删目录不更新清单 → 商店仍显示"已安装"
                     jz_deps.drop_component_entry(_program_dir, name)
                 except Exception:
@@ -1541,15 +1594,6 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         active, staged, rm = _component_dirs(cid)
         if entry is None and not os.path.isdir(active) and not os.path.isdir(staged):
             return jsonify({"ok": False, "error": "该依赖组件未安装"}), 404
-        pylibs = os.path.join(_program_dir, "runtime", "pylibs")
-        # 共享文件保护：其它组件也声明的文件不删
-        others = set()
-        try:
-            for rel, ids in (jz_deps.component_file_owners(_program_dir) or {}).items():
-                if any(str(x) != cid for x in ids):
-                    others.add(rel)
-        except Exception:
-            others = set()
         removed = 0
         failed = []
         pending_remove = False
@@ -1569,31 +1613,9 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     pending_remove = True
                 except OSError as exc:
                     return jsonify({"ok": False, "error": "删除失败：%s" % exc}), 500
-        # ② 载荷文件（清单 files 为准）
-        files = [str(f).lstrip("\\/").replace("/", "\\")
-                 for f in ((entry or {}).get("files") or [])]
-        for rel in files:
-            if not rel or rel.lower() == "manifest.json" or rel.lower() in others:
-                continue
-            pth = os.path.join(pylibs, rel)
-            try:
-                if os.path.isdir(pth):
-                    shutil.rmtree(pth)
-                    removed += 1
-                elif os.path.exists(pth):
-                    os.remove(pth)
-                    removed += 1
-            except OSError:
-                failed.append(rel)
-        # ③ 空目录剪枝（含 lxml/ 这类只在 files 里出现的共享目录残留）
-        for cur, subs, _fs in os.walk(pylibs, topdown=False):
-            for d in subs:
-                pd = os.path.join(cur, d)
-                try:
-                    if os.path.isdir(pd) and not os.listdir(pd):
-                        os.rmdir(pd)
-                except OSError:
-                    pass
+        # ②③ 载荷文件（清单 files 为准）+ 空目录剪枝（与启动清扫共用助手）
+        n_files, failed = _drop_dep_payload_files(cid)
+        removed += n_files
         # ④ 登记清除
         try:
             jz_deps.drop_component_entry(_program_dir, cid)
