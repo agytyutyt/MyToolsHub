@@ -320,7 +320,9 @@
           + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '')
           + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
       } else if (r.installed_version) {
-        svr = chip('未部署（服务器当前 v' + esc(r.installed_version) + '）', 'muted');
+        // 文案限宽（2026-10-12 需求①）：本列即"服务器侧"，「服务器当前」冗余；
+        // 缩短后单徽标一行完整落列（原 172px 超列 19px，压到钉列 3px）
+        svr = '<span class="st-chip st-chip-muted" title="未部署（服务器当前 v' + esc(r.installed_version) + '）">未部署（当前 v' + esc(r.installed_version) + '）</span>';
       } else {
         svr = chip('未部署（后端包已撤下）', 'muted')
           + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
@@ -383,7 +385,9 @@
       ops += opBtn('republish', IDP, '重新上架');
     }
     return '<td class="st-cell-stack"><span class="st-mono">v' + esc(r.version) + '</span>'
-      + (r.synthetic ? chip('目录外版本（历史部署）', 'info') : '')
+      + (r.synthetic
+          ? '<span class="st-chip st-chip-info" title="目录外版本：服务器部署的版本不在商店目录中（历史部署）">目录外版本</span>'
+          : '')
       + (r.side_label ? '<span class="st-muted">' + esc(r.side_label) + '</span>' : '')
       + '</td>'
       + '<td class="st-cell-stack st-mono">'
@@ -442,8 +446,11 @@
       svr = '<span class="st-muted">—（本地/依赖）</span>';
     }
     var kindChips = '';
-    if (g.kind === 'pair') kindChips = chip('C 类配对 · 前端包 + 后端包', 'info');
-    else if (g.kind === 'client') kindChips = chip('客户端工件 · 服务器工件未上架', 'warn');
+    if (g.kind === 'pair') {   // 文案限宽（长文进 title，徽标整体不拆行，2026-10-12 需求①）
+      kindChips = '<span class="st-chip st-chip-info" title="C 类配对：前端包（客户端工件）+ 后端包（服务器工件）">C 类配对</span>';
+    } else if (g.kind === 'client') {
+      kindChips = '<span class="st-chip st-chip-warn" title="该客户端工件的服务器工件尚未上架">服务器工件未上架</span>';
+    }
     var expanded = gs(g.key).expanded;
     var base = (g.server || g.client || g.single);
     return '<td class="st-cell-stack">'
@@ -563,7 +570,7 @@
       mine.forEach(function (r) {
         if (g.kind === 'pair') {
           r.side_label = (g.kind === 'pair' && r.id === g.client.id)
-            ? '（前端包 · 客户端工件）' : '（后端包 · 服务器工件）';
+            ? '（前端包）' : '（后端包）';
         }
         var tr = document.createElement('tr');
         tr.className = 'st-version-row';
@@ -648,6 +655,9 @@
   })();
 
   document.querySelectorAll('.st-filter').forEach(function (btn) {
+    // 修复（2026-10-12 真机复核发现）："全部展开/折叠"复用 .st-filter 样式但无 data-f，
+    // 被此绑定一并接管 → filter=null → 列表只剩"已下架/驳回"条目。无 data-f 直接跳过。
+    if (!btn.getAttribute('data-f')) return;
     btn.addEventListener('click', function () {
       document.querySelectorAll('.st-filter').forEach(function (b) { b.classList.remove('active'); });
       btn.classList.add('active');

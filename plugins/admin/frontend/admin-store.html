@@ -111,22 +111,27 @@
        ①内容区列定宽（超宽换行），操作区独立成列（图标按钮 2/行 + title 中文标签）；
        ②表设 min-width —— 窗口窄时**恢复横向滚动**（操作列 sticky 钉右）；
        ③插件中文名/英文名两行显示（st-grp-title），不再显示版本数。 */
-    #st-table { table-layout: fixed; min-width: 1040px; }
-    #st-table th, #st-table td { white-space: normal; overflow-wrap: anywhere; }
-    /* 徽标内部允许折行（真机 2026-10-12：「未部署（服务器当前 v1.3.3）」172px 徽标
-       在 120px 列内向右溢出 68px、被钉住的"操作列"永久遮住——折行后不再藏字） */
-    #st-table .st-chip { white-space: normal; word-break: break-word; }
-    #st-table th:nth-child(1), #st-table td:nth-child(1) { width: 230px; }
-    #st-table th:nth-child(2), #st-table td:nth-child(2) { width: 90px; }
-    #st-table th:nth-child(3), #st-table td:nth-child(3) { width: 80px; }
-    #st-table th:nth-child(4), #st-table td:nth-child(4) { width: 120px; }
-    #st-table th:nth-child(5), #st-table td:nth-child(5) { width: 110px; }
-    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 160px; }
-    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 140px; }
+    #st-table { table-layout: fixed; min-width: 1080px; }
+    /* 徽标=整体不拆行（2026-10-12 需求①）：单徽标靠**列宽预算**保证一行完整显示；
+       多徽标在单元格内按"整颗"换行到下一行；列内容一律水平+垂直居中（需求②）。
+       列宽预算依据（最长内容实测）：服务器侧 185 容纳「未部署（服务器当前 v1.x.x）」
+       ≈172px；版本列 120 容纳「前端包成对」≈83px；超长徽标文案已缩短为 title 全文。 */
+    #st-table th, #st-table td {
+      white-space: normal; overflow-wrap: anywhere;
+      text-align: center; vertical-align: middle;
+    }
+    #st-table .st-chip { white-space: nowrap; }
+    #st-table th:nth-child(1), #st-table td:nth-child(1) { width: 215px; }
+    #st-table th:nth-child(2), #st-table td:nth-child(2) { width: 120px; }
+    #st-table th:nth-child(3), #st-table td:nth-child(3) { width: 75px; }
+    #st-table th:nth-child(4), #st-table td:nth-child(4) { width: 115px; }
+    #st-table th:nth-child(5), #st-table td:nth-child(5) { width: 105px; }
+    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 155px; }
+    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 185px; }
     #st-table th:last-child, #st-table td:last-child { width: 110px; }
     /* 操作区与内容区的视觉分界（钉列左侧描边，随悬停底色保持恒定） */
     #st-table th:last-child, #st-table td:last-child { border-left: 1px solid var(--md-outline-variant); }
-    .st-ops-grid { display: grid; grid-template-columns: repeat(2, 32px); gap: 6px; justify-content: end; }
+    .st-ops-grid { display: grid; grid-template-columns: repeat(2, 32px); gap: 6px; justify-content: center; }
     .st-op-btn {
       width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
       border: 1px solid rgba(0,0,0,.16); border-radius: 8px; background: #fff; cursor: pointer;
@@ -292,7 +297,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=21"></script>
+<script src="/plugin/admin/js/admin-store.js?v=22"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
