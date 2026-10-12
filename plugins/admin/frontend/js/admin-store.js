@@ -192,8 +192,23 @@
           srv_component_version: p.srv_component_version,
           frontend_file: v.frontend_file, deps_mode: p.deps_mode,
           requires: p.requires, server_data: !!p.server_data,
+          // 多版本独立配置（2026-10-12）：该行是否即服务器上正在运行的版本
+          deployed: !!p.installed_version && String(v.version) === String(p.installed_version),
         });
       });
+      // 目录外版本（真机 2026-10-12）：服务器部署的版本不在目录版本列表里（历史部署/
+      // 目录被清理），补一条合成行承载"停用/卸载"等插件级操作，否则它们无处落脚。
+      if (p.runtime === 'server' && p.installed_version
+          && !versionsOf(p).some(function (v) {
+               return String(v.version) === String(p.installed_version); })) {
+        rows.push({
+          id: p.id, name: p.name || p.id, runtime: 'server',
+          version: String(p.installed_version), status: 'published', synthetic: true,
+          deployed: true, installed_version: p.installed_version,
+          restart_pending: p.restart_pending, srv_enabled: p.srv_enabled, backups: p.backups,
+          deps_mode: p.deps_mode, requires: p.requires,
+        });
+      }
     });
     return rows;
   }
@@ -247,13 +262,17 @@
       var tr = document.createElement('tr');
       var svr = '<span class="st-muted">—</span>';
       if (r.runtime === 'server' && r.status === 'published') {
-        if (r.installed_version) {
-          svr = chip('已部署 v' + esc(r.installed_version), 'ok')
+        if (r.deployed) {
+          // 部署中的版本行：这里才承载"停用/卸载"等插件级动作的状态（多版本作用域）
+          svr = chip('部署中 v' + esc(r.version), 'ok')
             + (r.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
-            + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '');
+            + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '')
+            + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
+        } else if (r.installed_version) {
+          // 已上架但未部署的版本：可"部署到该版本"切换/回退
+          svr = chip('未部署（服务器当前 v' + esc(r.installed_version) + '）', 'muted');
         } else {
           svr = chip('未部署（后端包已撤下）', 'muted')
-            + (r.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
             + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
         }
       } else if (r.runtime === 'server') {
@@ -290,22 +309,36 @@
           + (unsat.length ? ' disabled title="依赖不满足：' + esc(unsat.join('、')) + '——待对应依赖组件包上架"' : '')
           + '>通过（发布）</button> '
           + '<button class="admin-btn small" data-op="reject" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">驳回</button>';
+      } else if (r.status === 'published' && r.synthetic) {
+        // 目录外版本行：只有插件级动作（停用/启用、卸载撤包）——它不在目录中，
+        // 无"下架/部署"可谈。
+        if (canSrv) {
+          if (r.srv_enabled === false) {
+            ops += '<button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
+          } else {
+            ops += '<button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
+          }
+          ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
+        }
       } else if (r.status === 'published') {
         ops += '<button class="admin-btn small" data-op="delist" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">下架</button>';
         if (r.runtime === 'dep-slot') {
           ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">部署到服务器</button>';
         }
         if (r.runtime === 'server') {
-          ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新部署</button>';
-          if (canSrv) {   // 服务器端启停/撤包（2026-10-08 口径）：后端包只在此处被撤下
+          // 多版本独立配置（2026-10-12）：部署按**行版本**——未部署行=「部署到该版本」
+          // （含回退到旧版）；部署行=「重新部署」。
+          ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">'
+            + (r.deployed ? '重新部署' : '部署到该版本') + '</button>';
+          if (r.deployed && canSrv) {
+            // 服务器端启停/撤包是插件级动作：只在**部署中的版本行**出现（否则会让人
+            // 误以为"卸载 1.3.2"却把跑着的 1.3.3 撤下——真机报告 2026-10-12）。
             if (r.srv_enabled === false) {
               ops += ' <button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
             } else {
               ops += ' <button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
             }
-            if (r.installed_version) {
-              ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
-            }
+            ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
           }
         }
       } else if (r.status === 'delisted') {
@@ -314,6 +347,7 @@
       tr.innerHTML =
         '<td class="st-cell-stack"><b>' + esc(r.name) + '</b>'
         + '<span class="st-muted">' + esc(r.id) + (r.deps_mode === 'venv' ? ' · venv' : '') + '</span>'
+        + (r.synthetic ? chip('目录外版本（历史部署）', 'info') : '')
         + (pairInfo[r.id]
             ? (pairInfo[r.id].hidden
                 ? chip('配对 ' + pairInfo[r.id].partner + ' · 不出商店卡（发布即部署）', 'muted')
@@ -407,6 +441,12 @@
         dlgOpts.redeploy = { title: '部署到服务器', okText: '部署',
           html: '把依赖组件 <b>' + esc(id) + ' v' + esc(v) + '</b> 部署到服务器？<br>'
             + '装入服务器 runtime/pylibs（客户端安装只落桌面端）；无需重启即生效。' };
+      } else if (prow.runtime === 'server' && prow.installed_version
+                 && String(prow.installed_version) !== String(v)) {
+        // 多版本独立配置（2026-10-12）：部署非当前版本 = 版本切换（含回退）
+        dlgOpts.redeploy = { title: '部署到该版本', okText: '部署',
+          html: '把 <b>' + esc(id) + '</b> 从当前部署的 v' + esc(prow.installed_version)
+            + ' 切换为 <b>v' + esc(v) + '</b>？<br>自动备份，可用「部署到该版本」切回。' };
       }
     }
     var r = await adDialog(dlgOpts[op] || { title: '确认', html: esc(op + '？') });

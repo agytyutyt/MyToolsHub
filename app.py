@@ -349,6 +349,35 @@ def api_tools_visibility_save():
         return _set_category_enabled(registry, tid, enabled, allowed)
 
 
+def warn_missing_plugin_dirs(app):
+    """实例一致性守卫（2026-10-12 两次真机事故）：注册表（数据根 tools.json）里已启用、
+    但**本实例 plugins/ 下没有目录**的插件 → 醒目告警。
+
+    典型场景=误启动了 deploy 下的「解包副本 / 组装目录」（其 plugins/ 仅含核心插件、
+    也没有组件 pylibs）：业务插件在清单里整体消失、/api/tools 只剩 store，桌面客户端
+    会按 D22 把它判成"服务器端已停用"，管理后台则报大片依赖缺失（均为误导性症状）。
+    日常运行请用安装目录的 start.bat / 桌面图标。
+    """
+    try:
+        reg_ids = [str(t.get("id") or "") for t in (load_registry().get("tools") or [])
+                   if t.get("enabled", True) and str(t.get("id") or "")]
+        missing = []
+        for pid in reg_ids:
+            pdir = get_plugin_dir(pid)
+            if not pdir or not os.path.isdir(pdir):
+                missing.append(pid)
+        if missing:
+            app.logger.warning(
+                "★ 本实例 plugins/ 缺少注册表中 %d 个已启用插件的目录：%s%s —— 很可能是"
+                "启动了部署副本（deploy 下解包/组装目录）而非安装目录；日常运行请用"
+                "安装目录的 start.bat / 桌面图标。",
+                len(missing), "、".join(missing[:8]), "…" if len(missing) > 8 else "")
+        return missing
+    except Exception:
+        app.logger.debug("插件目录一致性自检失败（不阻断）", exc_info=True)
+        return []
+
+
 def _run_restart_helper(wait_pid):
     """冻结模式自重启助手（`exe --wait-restart <旧PID>`，由 routes._spawn_self_restart 派出）。
 
@@ -516,6 +545,7 @@ if __name__ == "__main__":
             app.logger.warning("清除插件历史大模型配置失败：%s", bad)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
+    warn_missing_plugin_dirs(app)
     # E 架构反代桥（T-O2-12b）：worker 化插件的 /api/<id>/* 转发 + 统一 errorhandler
     # ——必须在 register_plugin_backends 之后注册（before_request 排在 admin 鉴权门
     # 之后执行，鉴权管线先行；见 supervisor/mainapp_bridge.py 模块头）。

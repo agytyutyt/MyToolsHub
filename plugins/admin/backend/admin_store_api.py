@@ -305,6 +305,16 @@ def register(app, deps):
         entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
         if entry is None or entry.get("runtime") != "server":
             return jsonify({"ok": False, "error": "仅「服务器」类目已上架条目可停用/启用"}), 400
+        # 版本作用域守卫（2026-10-12 多版本独立配置）：停用/启用是**插件级**动作，
+        # 只作用于服务器上正在运行的版本——传入的版本必须与已部署版本一致，防止
+        # “在旧版本行点停用 → 整个插件（跑着新版本）被停、语义不明”。
+        _ver = str(data.get("version") or "")
+        _deployed = _deps["plugin_admin"].installed_version(_deps["project_dir"], pid)
+        if _ver and _deployed and _ver != str(_deployed):
+            return jsonify({"ok": False,
+                            "error": "该操作作用于服务器上已部署的版本 v%s（当前 v%s 未部署）；"
+                                     "如需切换版本请先点该版本的「部署到该版本」"
+                                     % (_deployed, _ver)}), 409
         if not _deps["plugin_admin"].set_plugin_enabled(root, pid, enabled):
             return jsonify({"ok": False,
                             "error": "注册表（tools.json）中没有该插件条目——先「重新部署」"}), 400
@@ -333,6 +343,15 @@ def register(app, deps):
         entry = store_admin.find_entry(store_admin.load_catalog(root), pid)
         if entry is None or entry.get("runtime") != "server":
             return jsonify({"ok": False, "error": "仅「服务器」类目已上架条目可卸载（撤下后端包）"}), 400
+        # 版本作用域守卫（2026-10-12 多版本独立配置）：服务器一个插件目录只能放一个版本，
+        # 撤包是**插件级**动作——传入版本必须与已部署版本一致，防止“卸载 1.3.2 却把
+        # 跑着的 1.3.3 一起撤下”（真机报告）。
+        _deployed = _deps["plugin_admin"].installed_version(_deps["project_dir"], pid)
+        if version and _deployed and str(version) != str(_deployed):
+            return jsonify({"ok": False,
+                            "error": "服务器上部署的是 v%s，v%s 未部署、无需卸载；"
+                                     "如需切换版本请点该版本的「部署到该版本」"
+                                     % (_deployed, version)}), 409
         res = store_admin.withdraw_backend_package(_deps["project_dir"], root, pid)
         if not res.get("ok"):
             return jsonify(res), 500
