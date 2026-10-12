@@ -1453,17 +1453,60 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 os.path.join(pylibs, ".pending", cid),
                 os.path.join(pylibs, ".pending-remove", cid))
 
+    def _sweep_dep_files_journal(path):
+        """处理卸载台账 <cid>.json：逐项删 payload 文件；返回仍删不掉的项（写回台账）。"""
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                rec = json.load(f) or {}
+        except Exception:
+            return []
+        pylibs = os.path.join(_program_dir, "runtime", "pylibs")
+        left = []
+        for rel in (rec.get("files") or []):
+            rel = str(rel).lstrip("\\/")
+            q = os.path.join(pylibs, rel)
+            try:
+                if os.path.isdir(q):
+                    shutil.rmtree(q)
+                elif os.path.exists(q):
+                    os.remove(q)
+            except OSError:
+                left.append(rel)
+        if left:
+            rec["files"] = left
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(rec, f, ensure_ascii=False, indent=1)
+            except OSError:
+                pass
+        return left
+
     def _sweep_pending_component_removals():
         """启动清扫：.pending-remove 下的组件目录（上次卸载时被占用的）此刻未映射，直接删除。"""
         rm_root = os.path.join(_program_dir, "runtime", "pylibs", ".pending-remove")
         if not os.path.isdir(rm_root):
             return
         for name in os.listdir(rm_root):
-            shutil.rmtree(os.path.join(rm_root, name), ignore_errors=True)
-            try:   # 清单同步（2026-10-12）：只删目录不更新清单 → 商店仍显示"已安装"
-                jz_deps.drop_component_entry(_program_dir, name)
-            except Exception:
-                pass
+            pth = os.path.join(rm_root, name)
+            if os.path.isdir(pth):
+                shutil.rmtree(pth, ignore_errors=True)
+                try:   # 清单同步（2026-10-12）：只删目录不更新清单 → 商店仍显示"已安装"
+                    jz_deps.drop_component_entry(_program_dir, name)
+                except Exception:
+                    pass
+                continue
+            if name.endswith(".json"):      # 文件台账（卸载时被占用的载荷文件）
+                cid = name[:-5]
+                left = _sweep_dep_files_journal(pth)
+                try:
+                    jz_deps.drop_component_entry(_program_dir, cid)
+                except Exception:
+                    pass
+                if not left:
+                    try:
+                        os.remove(pth)
+                    except OSError:
+                        pass
         try:
             os.rmdir(rm_root)
             _log("已清扫待卸载依赖组件（.pending-remove）")
@@ -1474,20 +1517,49 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.post("/local-api/store/uninstall-dep")
     def store_uninstall_dep():
-        """依赖组件卸载：纯 Python 即时删（刷新旗标）；原生库被映射无法删 → 移入
-        .pending-remove，下次启动清除（与安装的 .pending 语义对偶）。"""
+        r"""依赖组件卸载（2026-10-12 重写：以**登记为准、按清单 files 逐项删**）。
+
+        原实现只看 pylibs/<cid> 目录：组件生效后载荷是铺在 pylibs 根（docx/、lxml/、
+        公共 VC DLL 等顶层项），<cid> 目录通常不存在 → 误报"未安装"；且第一次卸载把
+        pylibs/<cid> 删掉后登记未清 → 再次卸载 404（真机 docx 症状）。
+        现口径：
+          ① 有登记（manifest 条目）或存在目录 = 可卸载；
+          ② 按 entry.files 逐项删（排除仍被其它已装组件声明的共享文件，如 msvcp140.dll）；
+          ③ 空目录剪枝（删文件留空壳，而"已装组件"另有按目录列举的路径）；
+          ④ 清登记（jz_deps.drop_component_entry）；
+          ⑤ 被占用删不掉的写 .pending-remove/<cid>.json 台账，下次启动清扫收尾。
+        """
         data = request.get_json(force=True, silent=True) or {}
         cid = str(data.get("id") or "")
         import re as _re
         if not _re.fullmatch(r"[A-Za-z0-9_+.-]{1,64}", cid):
             return jsonify({"ok": False, "error": "非法组件 id"}), 400
+        try:
+            entry = jz_deps.component_entry(_program_dir, cid)
+        except Exception:
+            entry = None
         active, staged, rm = _component_dirs(cid)
-        if not os.path.isdir(active) and not os.path.isdir(staged):
+        if entry is None and not os.path.isdir(active) and not os.path.isdir(staged):
             return jsonify({"ok": False, "error": "该依赖组件未安装"}), 404
+        pylibs = os.path.join(_program_dir, "runtime", "pylibs")
+        # 共享文件保护：其它组件也声明的文件不删
+        others = set()
+        try:
+            for rel, ids in (jz_deps.component_file_owners(_program_dir) or {}).items():
+                if any(str(x) != cid for x in ids):
+                    others.add(rel)
+        except Exception:
+            others = set()
+        removed = 0
+        failed = []
         pending_remove = False
+        # ① 暂存目录/同名目录（保留原语义）
+        if os.path.isdir(staged):
+            shutil.rmtree(staged, ignore_errors=True)   # 待应用暂存一并取消
         if os.path.isdir(active):
             try:
                 shutil.rmtree(active)
+                removed += 1
             except OSError:
                 os.makedirs(os.path.dirname(rm), exist_ok=True)
                 try:
@@ -1497,24 +1569,60 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     pending_remove = True
                 except OSError as exc:
                     return jsonify({"ok": False, "error": "删除失败：%s" % exc}), 500
-        if os.path.isdir(staged):
-            shutil.rmtree(staged, ignore_errors=True)   # 待应用暂存一并取消
+        # ② 载荷文件（清单 files 为准）
+        files = [str(f).lstrip("\\/").replace("/", "\\")
+                 for f in ((entry or {}).get("files") or [])]
+        for rel in files:
+            if not rel or rel.lower() == "manifest.json" or rel.lower() in others:
+                continue
+            pth = os.path.join(pylibs, rel)
+            try:
+                if os.path.isdir(pth):
+                    shutil.rmtree(pth)
+                    removed += 1
+                elif os.path.exists(pth):
+                    os.remove(pth)
+                    removed += 1
+            except OSError:
+                failed.append(rel)
+        # ③ 空目录剪枝（含 lxml/ 这类只在 files 里出现的共享目录残留）
+        for cur, subs, _fs in os.walk(pylibs, topdown=False):
+            for d in subs:
+                pd = os.path.join(cur, d)
+                try:
+                    if os.path.isdir(pd) and not os.listdir(pd):
+                        os.rmdir(pd)
+                except OSError:
+                    pass
+        # ④ 登记清除
+        try:
+            jz_deps.drop_component_entry(_program_dir, cid)
+        except Exception:
+            pass
+        # ⑤ 台账：删不掉的留给下次启动
+        if failed:
+            os.makedirs(os.path.dirname(rm), exist_ok=True)
+            try:
+                with open(os.path.join(os.path.dirname(rm), cid + ".json"), "w",
+                          encoding="utf-8") as f:
+                    json.dump({"schema": 1, "id": cid, "files": failed}, f,
+                              ensure_ascii=False, indent=1)
+                pending_remove = True
+            except OSError:
+                pass
         try:
             jz_plugin_host.setup_dep_components(_program_dir, _log)   # 重注入（已删路径无副作用）；
             # 依赖旗标由各插件 install_refresher 在请求期刷新（既有机制）
         except Exception:
             pass
-        try:
-            # 清单同步（2026-10-12 真机 bug）：installed_components() 读 runtime/pylibs/manifest.json，
-            # 原实现只删目录不清条目 → 卸载成功后商店卡片仍显示"已安装"。原生库占用转 .pending-remove
-            # 的情形同样清（用户语义=已卸载；文件由启动清扫兜底删除）。
-            jz_deps.drop_component_entry(_program_dir, cid)
-        except Exception:
-            pass
-        except Exception:
-            pass
+        note = ""
+        if pending_remove:
+            note = "部分文件被占用，将在下次启动客户端后清除"
+        elif entry is not None and removed == 0:
+            note = "组件文件此前已不在本机，已清除安装登记"
         return jsonify({"ok": True, "pending_remove": pending_remove,
-                        "note": "原生库已被占用，将在下次启动客户端后清除" if pending_remove else ""})
+                        "files_removed": removed, "files_failed": len(failed),
+                        "note": note})
 
     @app.post("/local-api/store/deps-check")
     def store_deps_check():

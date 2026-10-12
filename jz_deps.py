@@ -327,6 +327,60 @@ def drop_component_entry(app_dir, cid):
     return True
 
 
+def _component_manifest(app_dir):
+    """读依赖组件清单（obj, path）；缺/坏 → (None, path)。"""
+    path = _first_file(_layout_roots(app_dir), DEPS_COMPONENT_REL)
+    if not path or not os.path.isfile(path):
+        return None, path
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            obj = json.load(f)
+    except Exception:
+        return None, path
+    return (obj if isinstance(obj, dict) else None), path
+
+
+def component_entry(app_dir, cid):
+    """清单里某组件条目（dict）或 None。
+
+    卸载判定以登记为准（2026-10-12 真机：组件生效后文件铺在 pylibs 根、并无 <cid>
+    同id目录，只认目录会误报"未安装"）。兼容单组件简写形态。
+    """
+    obj, _path = _component_manifest(app_dir)
+    if obj is None:
+        return None
+    comps = obj.get("components") if isinstance(obj.get("components"), list) else []
+    for c in comps:
+        if isinstance(c, dict) and str(c.get("id")) == str(cid):
+            return c
+    if not comps and isinstance(obj.get("packages"), dict) \
+            and str(obj.get("id") or "") == str(cid):
+        return {"id": obj.get("id"), "name": obj.get("name"),
+                "version": obj.get("version"), "packages": obj.get("packages"),
+                "modules": obj.get("modules")}
+    return None
+
+
+def component_file_owners(app_dir):
+    """→ {归一化相对路径（小写、反斜杠）: [组件 id…]}——共享文件保护用。
+
+    组件载荷里的公共 VC 运行时 DLL（msvcp140.dll 等）被多个组件同时声明；
+    卸载一个组件不得删掉其它已装组件仍需要的文件。
+    """
+    obj, _path = _component_manifest(app_dir)
+    out = {}
+    comps = (obj or {}).get("components") if isinstance((obj or {}).get("components"), list) else []
+    for c in comps:
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get("id") or "")
+        for f in (c.get("files") or []):
+            rel = str(f).lstrip("\\/").replace("/", "\\").lower()
+            if rel:
+                out.setdefault(rel, []).append(cid)
+    return out
+
+
 def _apply_one_pending(pylibs, pend, cid):
     """应用单个暂存组件；成功返回 True。
 

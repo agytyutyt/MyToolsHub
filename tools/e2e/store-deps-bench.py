@@ -94,11 +94,14 @@ def write_manifest(pylibs, comps, shorthand=False):
         json.dump(body, f, ensure_ascii=False)
 
 
-def comp_entry(cid, version="1.0.0", packages=None):
+def comp_entry(cid, version="1.0.0", packages=None, files=None):
     # modules 的值是**发行包名**（契约：import 名 → 包名，如 {"cv2": "opencv-python"}）
-    return {"id": cid, "name": cid, "version": version,
-            "packages": packages or {"openpyxl": "3.1.5"},
-            "modules": {"openpyxl": "openpyxl"}}
+    e = {"id": cid, "name": cid, "version": version,
+         "packages": packages or {"openpyxl": "3.1.5"},
+         "modules": {"openpyxl": "openpyxl"}}
+    if files:
+        e["files"] = files
+    return e
 
 
 def new_app(data_root, addr, static_dir):
@@ -210,6 +213,57 @@ def main():
                 m2 = json.load(f)
             check("F3 单组件简写形态：命中 id → 清空顶层 packages", got and "packages" not in m2,
                   json.dumps(m2, ensure_ascii=False))
+
+            # —— G：文件级卸载（真机 docx 症状：载荷铺在 pylibs 根、无 <cid> 目录）——
+            def put(rel):
+                q = os.path.join(pylibs, *rel.split("/"))
+                os.makedirs(os.path.dirname(q), exist_ok=True)
+                with open(q, "w") as f:
+                    f.write("x")
+                return q
+            d1 = put("docx/__init__.py")
+            lx = put("lxml/etree.py")
+            put("typing_extensions.py")
+            sh = put("shared.dll")
+            write_manifest(pylibs, [comp_entry("docx", files=["docx/__init__.py", "lxml/etree.py",
+                                                              "typing_extensions.py", "shared.dll"]),
+                                    comp_entry("other", files=["shared.dll"])])
+            r = c.post("/local-api/store/uninstall-dep", json={"id": "docx"})
+            j = r.get_json()
+            check("G1 无 <cid> 目录也能卸载（真机 docx 症状修复）", bool(j.get("ok")),
+                  json.dumps(j, ensure_ascii=False))
+            check("G2 载荷文件已删 + 空目录剪枝",
+                  not os.path.exists(d1) and not os.path.exists(lx)
+                  and not os.path.isdir(os.path.join(pylibs, "docx")))
+            check("G3 共享文件保留（other 仍声明 shared.dll）", os.path.isfile(sh))
+            ids6, _ = comps_of(c)
+            check("G4 登记清 → components 不含 docx", "docx" not in ids6, str(ids6))
+            r = c.post("/local-api/store/uninstall-dep", json={"id": "docx"})
+            check("G5 再卸载 → 404（确无登记无目录）", r.status_code == 404, str(r.status_code))
+
+            write_manifest(pylibs, [comp_entry("ghost", files=["ghost/mod.py"])])
+            r = c.post("/local-api/store/uninstall-dep", json={"id": "ghost"})
+            j = r.get_json()
+            check("G6 文件缺失但登记在 → 仍可卸载（清登记并说明）",
+                  bool(j.get("ok")) and "已清除安装登记" in (j.get("note") or ""),
+                  json.dumps(j, ensure_ascii=False))
+
+            # —— H：文件被占用 → 台账 + 下次启动清扫收尾 ——
+            locked = put("lockdir/mod.py")
+            write_manifest(pylibs, [comp_entry("locky", files=["lockdir/mod.py"])])
+            fh = open(locked, "r+b")          # 持有句柄：Windows 下删除会被拒
+            r = c.post("/local-api/store/uninstall-dep", json={"id": "locky"})
+            j = r.get_json()
+            check("H1 被占用 → ok + pending_remove 台账", bool(j.get("ok")) and bool(j.get("pending_remove")),
+                  json.dumps(j, ensure_ascii=False))
+            jr = os.path.join(pylibs, ".pending-remove", "locky.json")
+            check("H2 台账文件已写", os.path.isfile(jr))
+            fh.close()
+            _, c2 = new_app(data_root, addr, static_dir)      # 模拟下次启动（创建时清扫）
+            check("H3 下次启动清扫：文件已删 + 台账销账",
+                  not os.path.exists(locked) and not os.path.isfile(jr))
+            ids7, _ = comps_of(c2)
+            check("H4 清扫后 components 不含 locky", "locky" not in ids7, str(ids7))
         finally:
             srv.shutdown()
     finally:
