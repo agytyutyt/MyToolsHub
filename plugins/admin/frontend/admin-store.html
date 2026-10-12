@@ -107,25 +107,33 @@
     .st-scope-btn:hover { color: #202124; }
     .st-scope-btn.active { background: rgba(66,133,244,.12); color: var(--md-primary, #4285F4); font-weight: 600; }
 
-    /* 展开板细化 + 换行/限宽根治（2026-10-12 需求③⑤，二次修复）：
-       admin.css 的 `.data-table td{white-space:nowrap}`（0,1,1）会压过页面 `.st-ops`（0,1,0）
-       → 用 #st-table 前缀（1,x,x）覆盖；同时改用**固定表格布局 + 列宽配比**：
-       auto 布局下"操作列内容 min-content 挤压"会把它压成一字宽的竖条并撑宽整表
-       （真机实测 88px 竖排按钮 + 表头白色溢出区），固定布局一次根治：
-       ①全表按比例分列（合计 100%），表格恒等于容器宽、无横向溢出/白色区；
-       ②操作列 23%（≈216px，三颗按钮折行排布）；③单元格按词/字折行、不撑破列宽。 */
-    #st-table { table-layout: fixed; }
+    /* 内容区 / 操作区 两分（2026-10-12 需求①②③）：
+       ①内容区列定宽（超宽换行），操作区独立成列（图标按钮 2/行 + title 中文标签）；
+       ②表设 min-width —— 窗口窄时**恢复横向滚动**（操作列 sticky 钉右）；
+       ③插件中文名/英文名两行显示（st-grp-title），不再显示版本数。 */
+    #st-table { table-layout: fixed; min-width: 1040px; }
     #st-table th, #st-table td { white-space: normal; overflow-wrap: anywhere; }
-    #st-table th:nth-child(1), #st-table td:nth-child(1) { width: 20%; }
-    #st-table th:nth-child(2), #st-table td:nth-child(2) { width: 8%; }
-    #st-table th:nth-child(3), #st-table td:nth-child(3) { width: 7%; }
-    #st-table th:nth-child(4), #st-table td:nth-child(4) { width: 11%; }
-    #st-table th:nth-child(5), #st-table td:nth-child(5) { width: 9%; }
-    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 13%; }
-    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 9%; }
-    #st-table th:last-child, #st-table td:last-child { width: 23%; }
-    #st-table td.st-ops { white-space: normal; }
-    #st-table td.st-ops .admin-btn { white-space: normal; margin: 2px 0 2px 6px; }
+    #st-table th:nth-child(1), #st-table td:nth-child(1) { width: 230px; }
+    #st-table th:nth-child(2), #st-table td:nth-child(2) { width: 90px; }
+    #st-table th:nth-child(3), #st-table td:nth-child(3) { width: 80px; }
+    #st-table th:nth-child(4), #st-table td:nth-child(4) { width: 120px; }
+    #st-table th:nth-child(5), #st-table td:nth-child(5) { width: 110px; }
+    #st-table th:nth-child(6), #st-table td:nth-child(6) { width: 180px; }
+    #st-table th:nth-child(7), #st-table td:nth-child(7) { width: 120px; }
+    #st-table th:last-child, #st-table td:last-child { width: 110px; }
+    /* 操作区与内容区的视觉分界（钉列左侧描边，随悬停底色保持恒定） */
+    #st-table th:last-child, #st-table td:last-child { border-left: 1px solid var(--md-outline-variant); }
+    .st-ops-grid { display: grid; grid-template-columns: repeat(2, 32px); gap: 6px; justify-content: end; }
+    .st-op-btn {
+      width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(0,0,0,.16); border-radius: 8px; background: #fff; cursor: pointer;
+      font-size: 15px; line-height: 1; padding: 0;
+    }
+    .st-op-btn:hover { border-color: var(--md-primary, #4285F4); background: rgba(66,133,244,.08); }
+    .st-op-btn:disabled { opacity: .45; cursor: not-allowed; }
+    .st-op-btn:disabled:hover { border-color: rgba(0,0,0,.16); background: #fff; }
+    .st-grp-title { display: inline-flex; flex-direction: column; vertical-align: middle; max-width: calc(100% - 30px); }
+    .st-grp-title b { font-weight: 600; }
     .st-section-row > td {
       background: rgba(66,133,244,.07); color: #1a73e8; font-weight: 700; font-size: 13px;
       padding: 7px 12px; letter-spacing: 1px;
@@ -281,7 +289,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=19"></script>
+<script src="/plugin/admin/js/admin-store.js?v=20"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
