@@ -213,6 +213,64 @@
     return rows;
   }
 
+  // ---------- 展开板分组（2026-10-12 需求①） ----------
+  // 同一插件的多个版本收进一个可折叠分组；C 类（配对）在组内用「后端包/前端包」切换卡。
+  var groupState = {};   // key -> {expanded: bool, subtab: 'backend'|'frontend'}
+  function gs(key) {
+    if (!groupState[key]) groupState[key] = { expanded: true, subtab: 'backend' };
+    return groupState[key];
+  }
+  function buildGroups() {
+    // 分组口径：server 条目 + 其配对客户端工件（显式 client_entry 或 local-<id>+server_data）
+    // 合成一个 pair 组；未配对的条目各自 single 组。
+    var byId = {};
+    packages.forEach(function (p) { byId[p.id] = p; });
+    var consumed = {};
+    var groups = [];
+    packages.forEach(function (p) {
+      if (consumed[p.id]) return;
+      if (p.runtime === 'server') {
+        var ce = '';
+        (p.versions || []).forEach(function (v) { if (v.client_entry) ce = v.client_entry; });
+        var cli = ce ? byId[ce] : null;
+        if (!cli) {
+          var sib = byId['local-' + p.id];
+          if (sib && sib.server_data) cli = sib;
+        }
+        if (cli) consumed[cli.id] = 1;
+        consumed[p.id] = 1;
+        groups.push({ key: p.id, kind: cli ? 'pair' : 'server', server: p, client: cli || null });
+        return;
+      }
+      if (p.runtime === 'local' && p.server_data) {
+        var srv = byId[p.id.replace(/^local-/, '')];
+        if (srv) consumed[srv.id] = 1;   // 理论上 srv 先被扫描消费；防御式
+        consumed[p.id] = 1;
+        groups.push({ key: p.id, kind: srv ? 'pair' : 'client', server: srv || null, client: p });
+        return;
+      }
+      consumed[p.id] = 1;
+      groups.push({ key: p.id, kind: 'single', server: null, client: null, single: p });
+    });
+    // 组内改按 key 排序（与旧行序一致：按 id）
+    groups.sort(function (a, b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+    return groups;
+  }
+
+  function groupTitleOf(g) {
+    var first = g.server || g.client || g.single;
+    return { name: first.name || first.id, id: first.id };
+  }
+
+  function groupRowsOf(g) {
+    // 组内应参与渲染的条目（pair 组按当前 subtab 选边）
+    if (g.kind === 'pair') {
+      var tab = gs(g.key).subtab;
+      return tab === 'frontend' ? [g.client] : [g.server];
+    }
+    return [g.server || g.client || g.single].filter(Boolean);
+  }
+
   // 横向溢出侦测（2026-10-08）：本页不引 admin-plugins.js，需自带；驱动钉列渐变带
   // （.is-overflowing）与左缘渐隐（.is-scrolled），语义与插件列表页 syncTableOverflow 一致。
   function syncTableOverflow() {
@@ -230,6 +288,168 @@
     });
   }
 
+  // 单版本行（组内子行）——沿用既有列语义；条目列改为版本号 + 侧别/合成标记
+  function versionRowHtml(r, g) {
+    var svr = '<span class="st-muted">—</span>';
+    if (r.runtime === 'server' && r.status === 'published') {
+      if (r.deployed) {
+        svr = chip('部署中 v' + esc(r.version), 'ok')
+          + (r.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
+          + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '')
+          + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
+      } else if (r.installed_version) {
+        svr = chip('未部署（服务器当前 v' + esc(r.installed_version) + '）', 'muted');
+      } else {
+        svr = chip('未部署（后端包已撤下）', 'muted')
+          + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
+      }
+    } else if (r.runtime === 'server') {
+      svr = '<span class="st-muted">发布时自动部署</span>';
+    } else if (r.runtime === 'dep-slot' && r.status === 'published') {
+      svr = r.srv_component_version
+        ? chip('已部署 v' + esc(r.srv_component_version), 'ok')
+        : chip('未部署（服务器端）', 'muted');
+    }
+    var depsHtml = '<span class="st-muted">—</span>';
+    var unsat = [];
+    var reqs = (r.requires || {}).python_packages || [];
+    if (reqs.length) {
+      depsHtml = '';
+      reqs.forEach(function (x) {
+        var name = String(x.name || '');
+        var ok = depProvides[name.toLowerCase()] || installedNames.indexOf(name.toLowerCase()) >= 0;
+        if (!ok) unsat.push(name);
+        depsHtml += chip((ok ? '✓ ' : '✗ ') + name, ok ? 'ok' : 'bad')
+          + '<span class="st-muted"> </span>';
+      });
+      if (unsat.length && r.status === 'pending') {
+        depsHtml += '<span class="st-muted">待依赖组件包上架（任意用户可传）</span>';
+      }
+    }
+    var ops = '';
+    if (!canReview) {
+      ops = '<span class="st-muted">待管理员审核</span>';
+    } else if (r.status === 'pending') {
+      ops += '<button class="admin-btn small primary" data-op="approve" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '"'
+        + (unsat.length ? ' disabled title="依赖不满足：' + esc(unsat.join('、')) + '——待对应依赖组件包上架"' : '')
+        + '>通过（发布）</button> '
+        + '<button class="admin-btn small" data-op="reject" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">驳回</button>';
+    } else if (r.status === 'published' && r.synthetic) {
+      if (canSrv) {
+        if (r.srv_enabled === false) {
+          ops += '<button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
+        } else {
+          ops += '<button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
+        }
+        ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
+      }
+    } else if (r.status === 'published') {
+      ops += '<button class="admin-btn small" data-op="delist" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">下架</button>';
+      if (r.runtime === 'dep-slot') {
+        ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">部署到服务器</button>';
+      }
+      if (r.runtime === 'server') {
+        ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">'
+          + (r.deployed ? '重新部署' : '部署到该版本') + '</button>';
+        if (r.deployed && canSrv) {
+          if (r.srv_enabled === false) {
+            ops += ' <button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
+          } else {
+            ops += ' <button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
+          }
+          ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
+        }
+      }
+    } else if (r.status === 'delisted') {
+      ops += '<button class="admin-btn small" data-op="republish" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新上架</button>';
+    }
+    return '<td class="st-cell-stack"><span class="st-mono">v' + esc(r.version) + '</span>'
+      + (r.synthetic ? chip('目录外版本（历史部署）', 'info') : '')
+      + (r.side_label ? '<span class="st-muted">' + esc(r.side_label) + '</span>' : '')
+      + '</td>'
+      + '<td class="st-cell-stack st-mono">'
+      + (r.frontend_file ? chip('前端包成对', 'muted') : '') + '</td>'
+      + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
+      + '<td class="st-cell-stack">' + chip(statusLabel(r.status), STATUS_KIND[r.status] || 'muted')
+      + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
+      + '<td class="st-cell-stack">' + depsHtml + '</td>'
+      + '<td class="st-cell-stack">' + svr + '</td>'
+      + '<td class="st-ops">' + ops + '</td>';
+  }
+
+  function rowsOfGroup(g) {
+    var ids = [];
+    if (g.server) ids.push(g.server.id);
+    if (g.client) ids.push(g.client.id);
+    if (g.single) ids.push(g.single.id);
+    return ids;
+  }
+
+  function groupHeaderHtml(g, allRows) {
+    var t = groupTitleOf(g);
+    var ids = rowsOfGroup(g);
+    var rows = allRows.filter(function (r) { return ids.indexOf(r.id) >= 0; });
+    var cnt = { pending: 0, published: 0, off: 0 };
+    rows.forEach(function (r) {
+      if (r.status === 'pending') cnt.pending++;
+      else if (r.status === 'published') cnt.published++;
+      else cnt.off++;
+    });
+    var st = '';
+    if (cnt.pending) st += chip('待审核 ' + cnt.pending, 'warn') + ' ';
+    if (cnt.published) st += chip('已上架 ' + cnt.published, 'ok') + ' ';
+    if (cnt.off) st += chip('已下架/驳回 ' + cnt.off, 'muted');
+    var svr = '';
+    if (g.server && g.server.installed_version) {
+      svr = chip('部署中 v' + esc(g.server.installed_version), 'ok')
+        + (g.server.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
+        + (g.server.restart_pending ? ' ' + chip('待重启', 'bad') : '');
+    } else if (g.server) {
+      svr = '<span class="st-muted">未部署</span>';
+    } else {
+      svr = '<span class="st-muted">—（本地/依赖）</span>';
+    }
+    var kindChips = '';
+    if (g.kind === 'pair') kindChips = chip('C 类配对 · 前端包 + 后端包', 'info');
+    else if (g.kind === 'client') kindChips = chip('客户端工件 · 服务器工件未上架', 'warn');
+    var expanded = gs(g.key).expanded;
+    var base = (g.server || g.client || g.single);
+    return '<td class="st-cell-stack">'
+      + '<button type="button" class="st-group-toggle" data-group-toggle="' + esc(g.key) + '" title="展开/折叠该插件的版本列表">'
+      + (expanded ? '▾' : '▸') + '</button> '
+      + '<b>' + esc(t.name) + '</b> <span class="st-muted">' + esc(t.id) + '</span>'
+      + ' <span class="st-muted">（' + rows.length + ' 个版本）</span> '
+      + (kindChips || '')
+      + '</td>'
+      + '<td class="st-cell-stack st-mono"><span class="st-muted">—</span></td>'
+      + '<td>' + chip(runtimeLabel(base.runtime), RUNTIME_KIND[base.runtime] || 'muted') + '</td>'
+      + '<td class="st-cell-stack">' + (st || '<span class="st-muted">—</span>') + '</td>'
+      + '<td><span class="st-muted">—（见各版本行）</span></td>'
+      + '<td class="st-cell-stack">' + svr + '</td>'
+      + '<td class="st-ops"><span class="st-muted">' + (expanded ? '已展开' : '已折叠') + '</span></td>';
+  }
+
+  function subtabHtml(g) {
+    var st = gs(g.key);
+    function sideBtn(tab, label, entry) {
+      var act = st.subtab === tab;
+      var extra = '';
+      if (entry) {
+        if (tab === 'backend' && entry.installed_version) extra = '部署中 v' + esc(entry.installed_version);
+        else if (tab === 'backend') extra = '未部署';
+        else extra = '可安装';
+      }
+      return '<button type="button" class="st-subtab-btn' + (act ? ' active' : '') + '"'
+        + ' data-subtab="' + tab + '" data-group="' + esc(g.key) + '">'
+        + esc(label) + (extra ? ' <span class="st-muted">· ' + extra + '</span>' : '') + '</button>';
+    }
+    return '<td colspan="7" class="st-subtab-cell">'
+      + '<span class="st-muted">工件切换：</span>'
+      + sideBtn('backend', '后端包（服务器工件）', g.server)
+      + sideBtn('frontend', '前端包（客户端工件）', g.client)
+      + '</td>';
+  }
+
   function render() {
     var thead = document.getElementById('st-thead');
     var tbody = document.getElementById('st-rows');
@@ -243,128 +463,57 @@
     }
     wrap.hidden = false;
     statsBox.hidden = true;
-    thead.innerHTML = '<th>条目</th><th>版本</th><th>类别</th><th>状态</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
-    var rows = flatRows().filter(function (r) {
+    thead.innerHTML = '<th>插件（组内为各版本）</th><th>版本</th><th>类别</th><th>状态</th><th>依赖</th><th>服务器侧</th><th style="text-align:right">操作</th>';
+    var allRows = flatRows();
+    function passFilter(r) {
       if (filter === 'pending') return r.status === 'pending';
       if (filter === 'published') return r.status === 'published';
       return r.status === 'delisted' || r.status === 'rejected';
-    });
+    }
+    var groups = buildGroups();
     tbody.innerHTML = '';
-    if (!rows.length) {
+    var any = false;
+    groups.forEach(function (g) {
+      var ids = rowsOfGroup(g);
+      var tab = gs(g.key).subtab;
+      var mine = allRows.filter(function (r) {
+        if (ids.indexOf(r.id) < 0 || !passFilter(r)) return false;
+        // C 类配对：组内版本行按当前工件页签选边（前端包=客户端工件 / 后端包=服务器工件）
+        if (g.kind === 'pair') {
+          return tab === 'frontend' ? r.id === g.client.id : r.id === g.server.id;
+        }
+        return true;
+      });
+      if (!mine.length) return;   // 当前筛选（+页签）下该组无行 → 整组隐藏
+      any = true;
+      mine.sort(function (a, b) { return a.version < b.version ? -1 : a.version > b.version ? 1 : 0; });
+      var trH = document.createElement('tr');
+      trH.className = 'st-group-row';
+      trH.innerHTML = groupHeaderHtml(g, allRows);
+      tbody.appendChild(trH);
+      if (!gs(g.key).expanded) return;
+      if (g.kind === 'pair') {
+        var trS = document.createElement('tr');
+        trS.className = 'st-subtab-row';
+        trS.innerHTML = subtabHtml(g);
+        tbody.appendChild(trS);
+      }
+      mine.forEach(function (r) {
+        if (g.kind === 'pair') {
+          r.side_label = (g.kind === 'pair' && r.id === g.client.id)
+            ? '（前端包 · 客户端工件）' : '（后端包 · 服务器工件）';
+        }
+        var tr = document.createElement('tr');
+        tr.className = 'st-version-row';
+        tr.innerHTML = versionRowHtml(r, g);
+        tbody.appendChild(tr);
+      });
+    });
+    if (!any) {
       var EMPTY = { pending: '暂无待审核条目——上架新包后在这里审核', published: '暂无已上架条目',
                     off: '暂无已下架 / 已驳回条目' };
       tbody.innerHTML = '<tr><td colspan="7" class="admin-empty">' + (EMPTY[filter] || '暂无数据') + '</td></tr>';
-      syncTableOverflow();
-      return;
     }
-    rows.sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
-    rows.forEach(function (r) {
-      var tr = document.createElement('tr');
-      var svr = '<span class="st-muted">—</span>';
-      if (r.runtime === 'server' && r.status === 'published') {
-        if (r.deployed) {
-          // 部署中的版本行：这里才承载"停用/卸载"等插件级动作的状态（多版本作用域）
-          svr = chip('部署中 v' + esc(r.version), 'ok')
-            + (r.srv_enabled === false ? ' ' + chip('已停用', 'warn') : '')
-            + (r.restart_pending ? ' ' + chip('待重启', 'bad') : '')
-            + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
-        } else if (r.installed_version) {
-          // 已上架但未部署的版本：可"部署到该版本"切换/回退
-          svr = chip('未部署（服务器当前 v' + esc(r.installed_version) + '）', 'muted');
-        } else {
-          svr = chip('未部署（后端包已撤下）', 'muted')
-            + (r.backups ? ' ' + chip('有备份 ' + r.backups, 'info') : '');
-        }
-      } else if (r.runtime === 'server') {
-        svr = '<span class="st-muted">发布时自动部署</span>';
-      } else if (r.runtime === 'dep-slot' && r.status === 'published') {
-        // 依赖组件：服务器侧（runtime/pylibs）装没装（2026-10-08；客户端安装只落桌面端）
-        svr = r.srv_component_version
-          ? chip('已部署 v' + esc(r.srv_component_version), 'ok')
-          : chip('未部署（服务器端）', 'muted');
-      }
-      // 依赖核验（✓ 满足 / ✗ 不满足）：主包自带或已上架依赖条目可满足 → ✓
-      var depsHtml = '<span class="st-muted">—</span>';
-      var unsat = [];
-      var reqs = (r.requires || {}).python_packages || [];
-      if (reqs.length) {
-        depsHtml = '';
-        reqs.forEach(function (x) {
-          var name = String(x.name || '');
-          var ok = depProvides[name.toLowerCase()] || installedNames.indexOf(name.toLowerCase()) >= 0;
-          if (!ok) unsat.push(name);
-          depsHtml += chip((ok ? '✓ ' : '✗ ') + name, ok ? 'ok' : 'bad')
-            + '<span class="st-muted"> </span>';
-        });
-        if (unsat.length && r.status === 'pending') {
-          depsHtml += '<span class="st-muted">待依赖组件包上架（任意用户可传）</span>';
-        }
-      }
-      var ops = '';
-      if (!canReview) {
-        // 权限门控（2026-10-08 修订）：非管理员仅可提交上架；审核/下架/部署按钮不出现
-        ops = '<span class="st-muted">待管理员审核</span>';
-      } else if (r.status === 'pending') {
-        ops += '<button class="admin-btn small primary" data-op="approve" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '"'
-          + (unsat.length ? ' disabled title="依赖不满足：' + esc(unsat.join('、')) + '——待对应依赖组件包上架"' : '')
-          + '>通过（发布）</button> '
-          + '<button class="admin-btn small" data-op="reject" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">驳回</button>';
-      } else if (r.status === 'published' && r.synthetic) {
-        // 目录外版本行：只有插件级动作（停用/启用、卸载撤包）——它不在目录中，
-        // 无"下架/部署"可谈。
-        if (canSrv) {
-          if (r.srv_enabled === false) {
-            ops += '<button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
-          } else {
-            ops += '<button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
-          }
-          ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
-        }
-      } else if (r.status === 'published') {
-        ops += '<button class="admin-btn small" data-op="delist" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">下架</button>';
-        if (r.runtime === 'dep-slot') {
-          ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">部署到服务器</button>';
-        }
-        if (r.runtime === 'server') {
-          // 多版本独立配置（2026-10-12）：部署按**行版本**——未部署行=「部署到该版本」
-          // （含回退到旧版）；部署行=「重新部署」。
-          ops += ' <button class="admin-btn small" data-op="redeploy" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">'
-            + (r.deployed ? '重新部署' : '部署到该版本') + '</button>';
-          if (r.deployed && canSrv) {
-            // 服务器端启停/撤包是插件级动作：只在**部署中的版本行**出现（否则会让人
-            // 误以为"卸载 1.3.2"却把跑着的 1.3.3 撤下——真机报告 2026-10-12）。
-            if (r.srv_enabled === false) {
-              ops += ' <button class="admin-btn small" data-op="srv_enable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">启用</button>';
-            } else {
-              ops += ' <button class="admin-btn small" data-op="srv_disable" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">停用</button>';
-            }
-            ops += ' <button class="admin-btn small" data-op="withdraw" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">卸载（撤下后端包）</button>';
-          }
-        }
-      } else if (r.status === 'delisted') {
-        ops += '<button class="admin-btn small" data-op="republish" data-id="' + esc(r.id) + '" data-v="' + esc(r.version) + '">重新上架</button>';
-      }
-      tr.innerHTML =
-        '<td class="st-cell-stack"><b>' + esc(r.name) + '</b>'
-        + '<span class="st-muted">' + esc(r.id) + (r.deps_mode === 'venv' ? ' · venv' : '') + '</span>'
-        + (r.synthetic ? chip('目录外版本（历史部署）', 'info') : '')
-        + (pairInfo[r.id]
-            ? (pairInfo[r.id].hidden
-                ? chip('配对 ' + pairInfo[r.id].partner + ' · 不出商店卡（发布即部署）', 'muted')
-                : chip('商店卡 · 配对服务器工件 ' + pairInfo[r.id].partner, 'info'))
-            : (r.runtime === 'local' && r.server_data
-                ? chip('C 类客户端工件 · 服务器工件未上架', 'warn') : ''))
-        + '</td>'
-        + '<td class="st-cell-stack st-mono"><span>v' + esc(r.version) + '</span>'
-        + (r.frontend_file ? chip('前端包成对', 'muted') : '') + '</td>'
-        + '<td>' + chip(runtimeLabel(r.runtime), RUNTIME_KIND[r.runtime] || 'muted') + '</td>'
-        + '<td class="st-cell-stack">' + chip(statusLabel(r.status), STATUS_KIND[r.status] || 'muted')
-        + (r.submit_by ? '<span class="st-muted">提交：' + esc(r.submit_by) + '</span>' : '') + '</td>'
-        + '<td class="st-cell-stack">' + depsHtml + '</td>'
-        + '<td class="st-cell-stack">' + svr + '</td>'
-        + '<td class="st-ops">' + ops + '</td>';
-      tbody.appendChild(tr);
-    });
     syncTableOverflow();
   }
 
@@ -396,6 +545,30 @@
     }).catch(function (e) { box.textContent = '统计加载失败：' + e; });
   }
 
+  (function bindExpandAll() {
+    var bar = document.querySelector('.st-tabs');
+    if (!bar) return;
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'st-filter';
+    b.id = 'st-expand-all';
+    b.style.marginLeft = 'auto';
+    b.textContent = '全部折叠';
+    b.addEventListener('click', function () {
+      var anyExpanded = Object.keys(groupState).some(function (k) { return groupState[k].expanded; })
+        || Object.keys(groupState).length === 0;
+      Object.keys(groupState).forEach(function (k) { groupState[k].expanded = !anyExpanded; });
+      // 尚未进过 state 的组：用默认态取反（默认 expanded=true）
+      groupState.__default = { expanded: !anyExpanded, subtab: 'backend' };
+      buildGroups().forEach(function (g) {
+        if (!groupState[g.key]) groupState[g.key] = { expanded: !anyExpanded, subtab: 'backend' };
+      });
+      b.textContent = anyExpanded ? '全部展开' : '全部折叠';
+      render();
+    });
+    bar.appendChild(b);
+  })();
+
   document.querySelectorAll('.st-filter').forEach(function (btn) {
     btn.addEventListener('click', function () {
       document.querySelectorAll('.st-filter').forEach(function (b) { b.classList.remove('active'); });
@@ -406,6 +579,21 @@
   });
 
   document.getElementById('st-rows').addEventListener('click', async function (ev) {
+    // 展开板交互（2026-10-12 需求①）：分组折叠 + C 类工件页签切换——纯视图态，直接重渲染
+    var tg = ev.target.closest ? ev.target.closest('[data-group-toggle]') : null;
+    if (tg) {
+      var k = tg.getAttribute('data-group-toggle');
+      gs(k).expanded = !gs(k).expanded;
+      render();
+      return;
+    }
+    var sb = ev.target.closest ? ev.target.closest('[data-subtab]') : null;
+    if (sb) {
+      var g2 = sb.getAttribute('data-group');
+      gs(g2).subtab = sb.getAttribute('data-subtab') === 'frontend' ? 'frontend' : 'backend';
+      render();
+      return;
+    }
     var btn = ev.target.closest ? ev.target.closest('button[data-op]') : null;
     if (!btn) return;
     var op = btn.getAttribute('data-op');

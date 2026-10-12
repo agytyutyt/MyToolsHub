@@ -97,6 +97,26 @@
     .st-stat-label { font-size: 13px; color: #5f6368; }
     .st-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 8px; }
     .st-stats-grid h4 { margin: 4px 0 8px; font-size: 14px; color: #202124; }
+    /* 展开板（2026-10-12 需求①）：插件分组行 / 组内版本行缩进 / C 类工件切换卡 */
+    .st-group-row > td { background: rgba(0,0,0,.035); font-weight: 600; }
+    .st-group-row .st-group-toggle {
+      appearance: none; border: 1px solid rgba(0,0,0,.15); background: #fff; border-radius: 6px;
+      width: 22px; height: 22px; line-height: 1; cursor: pointer; color: #5f6368; font-size: 12px;
+      vertical-align: middle; margin-right: 2px;
+    }
+    .st-group-row .st-group-toggle:hover { border-color: var(--md-primary, #4285F4); color: var(--md-primary, #4285F4); }
+    .st-version-row > td:first-child { padding-left: 30px; }
+    .st-subtab-row > td { padding: 4px 10px 8px 30px; background: rgba(0,0,0,.02); }
+    .st-subtab-cell .st-subtab-btn {
+      appearance: none; border: 1px solid rgba(0,0,0,.15); background: #fff; border-radius: 8px;
+      padding: 4px 12px; margin-right: 8px; font-size: 13px; cursor: pointer; color: #5f6368;
+    }
+    .st-subtab-cell .st-subtab-btn:hover { border-color: var(--md-primary, #4285F4); color: #202124; }
+    .st-subtab-cell .st-subtab-btn.active {
+      border-color: var(--md-primary, #4285F4); color: var(--md-primary, #4285F4);
+      background: rgba(66,133,244,.08); font-weight: 600;
+    }
+
     /* 主包拖拽上传区（包主导：控件置顶，识别命名→自动选类别） */
     .st-dropzone { border: 2px dashed rgba(0,0,0,.2); border-radius: 12px; padding: 20px 16px;
                    text-align: center; cursor: pointer; margin-bottom: 12px;
@@ -223,7 +243,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=14"></script>
+<script src="/plugin/admin/js/admin-store.js?v=15"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>
