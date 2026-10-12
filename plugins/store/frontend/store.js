@@ -350,7 +350,15 @@
     var pre = { installable: true, deps: [] };
     try {
       pre = (await post('/local-api/store/preflight', { id: e.id, version: e.version })) || pre;
-    } catch (err) { /* 预检失败不阻断安装（D-8 口径：提示不阻断） */ }
+    } catch (err) { /* 网络异常：pre 保持默认，安装请求仍会给出可读错误 */ }
+    // 预检不可读（本地壳自证 403 / 会话失效 401 / 条目不存在等）：**显式报错并终止**——
+    // 2026-10-12 真机报告：浏览器直开本地端口时预检被 403 HTML 打中，错误被静默吞掉，
+    // 界面永远停在「正在预检依赖…」。D-8 的"提示不阻断"只适用于"依赖评估"失败，
+    // 不适用于"预检本身没拿到结果"。
+    if (!pre || pre.error) {
+      msg('预检失败：' + ((pre && pre.error) || '无法连接本机服务（请从桌面客户端内打开商店）'), true);
+      return;
+    }
     // 三态纪律（2026-10-08）：unknown=清单不可核验 → 不阻断（与 jz_deps 口径一致，
     // 此前把 unknown 当"缺"导致打包客户端必弹「缺少依赖」）；只有 missing/mismatch 才算缺。
     // 服务端条目的依赖属服务器侧（客户端装的是前端包），行上标 informational 不联动本地安装。
