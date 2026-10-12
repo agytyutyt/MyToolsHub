@@ -429,15 +429,36 @@ def run_excel(path: str) -> None:
         print("  [SKIP] 当前环境没有 openpyxl，无法读取 Excel")
         return
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
-    ws = wb.active
     # 只读模式的遍历范围取自工作表 <dimension> 声明，而它只是"提示"：部分工具会写出
     # 与实际内容不符的声明（如声明 A1、实际 A1:A4），此时只读出首格。清掉声明改按
     # sheetData 实际内容扫描，并补齐行宽（清声明后稀疏行不再按声明宽度补齐）。
     # 引擎不感知 Excel，故此处内联处理，不引入对 excel_io 的依赖。
-    if hasattr(ws, "reset_dimensions"):
-        ws.reset_dimensions()
-    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    sheets = []
+    for ws in wb.worksheets:
+        if hasattr(ws, "reset_dimensions"):
+            ws.reset_dimensions()
+        sheets.append([list(r) for r in ws.iter_rows(values_only=True)])
     wb.close()
+    # 多工作表口径与 excel_io.read_rows 一致：顺序拼接、重复表头跳过、空表跳过、
+    # 逐表裁尾空行。
+    rows = []
+    header = None
+    for sh in sheets:
+        while sh and all(v is None or str(v).strip() == "" for v in sh[-1]):
+            sh.pop()
+        if not sh:
+            continue
+        if header is None:
+            header = ["" if v is None else str(v).strip() for v in sh[0]]
+            rows.extend(sh)
+            continue
+        first = ["" if v is None else str(v).strip() for v in sh[0]]
+        n = max(len(first), len(header))
+        pad_f = first + [""] * (n - len(first))
+        pad_h = header + [""] * (n - len(header))
+        if any(pad_h) and pad_f == pad_h:
+            sh = sh[1:]
+        rows.extend(sh)
     width = max((len(r) for r in rows), default=0)
     if width:
         rows = [r + [None] * (width - len(r)) for r in rows]

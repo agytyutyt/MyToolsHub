@@ -28,7 +28,7 @@ except Exception:  # pragma: no cover
 
 PLUGIN_ID = "trajectory-sketch"
 CACHE_TTL_SECONDS = 30 * 60
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024            # 20MB（SEC-3）
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024           # 100MB（SEC-3；2026-10-10 依需求方要求由 20MB 抬升）
 
 STAGES: Dict[str, Dict[str, Any]] = {}
 TASKS: Dict[str, Dict[str, Any]] = {}

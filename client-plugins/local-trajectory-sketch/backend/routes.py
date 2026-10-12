@@ -364,7 +364,8 @@ def register(app):
         if not blob:
             return jsonify({"error": "文件为空"}), 400
         if len(blob) > report_store.MAX_UPLOAD_BYTES:
-            return jsonify({"error": "文件超过 20MB 上限"}), 413
+            return jsonify({"error": "文件超过 %dMB 上限"
+                            % (report_store.MAX_UPLOAD_BYTES // (1024 * 1024))}), 413
 
         cfg = config_store.load_config()
         keep_cols, notes = config_store.expand_keep_columns(cfg)

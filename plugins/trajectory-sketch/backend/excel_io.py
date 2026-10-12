@@ -33,7 +33,9 @@ except Exception:  # pragma: no cover
     XLRD_AVAILABLE = False
 
 ALLOWED_EXTS = {"xlsx", "xls", "csv"}
-MAX_ROWS = 100000
+# 行数上限：多工作表顺序合并后的**总数据行**（单表约定最多 20 万零 1 行、超出部分
+# 顺序放入后续工作表；2026-10-10 依据需求方"支持 100MB 以内数据表"由 10 万行抬升）。
+MAX_ROWS = 2000000
 MAX_COLS = 256
 _BOM = "\ufeff"
 
@@ -86,7 +88,7 @@ def read_rows(path: str, filename: str) -> List[List[Any]]:
 
     if not raw:
         raise TableError("表格为空。")
-    raw = [list(r) for r in raw]
+    raw = _pad_rows([list(r) for r in raw])      # 多表合并后按全局最大列宽补齐矩形
     while raw and all(clean_text(v) == "" for v in raw[-1]):
         raw.pop()
     if len(raw) > MAX_ROWS + 1:
@@ -132,12 +134,54 @@ def _read_xlsx(path: str) -> List[List[Any]]:
     except Exception as exc:
         raise TableError("Excel 文件解析失败（%s）。" % type(exc).__name__)
     try:
-        ws = wb.active
-        _reset_dimensions(ws)
-        rows = [[json_safe(v) for v in row] for row in ws.iter_rows(values_only=True)]
+        sheets = []
+        for ws in wb.worksheets:                 # 按工作表顺序逐张读
+            _reset_dimensions(ws)
+            sheets.append([[json_safe(v) for v in row]
+                           for row in ws.iter_rows(values_only=True)])
     finally:
         wb.close()
-    return _pad_rows(rows)
+    return _merge_sheets(sheets)
+
+
+def _merge_sheets(sheets: List[List[List[Any]]]) -> List[List[Any]]:
+    """多工作表**顺序拼接**为一张二维表（口径：单表最多 20 万零 1 行，超出部分
+    顺序放入后续工作表）。
+
+    - 首张非空表的首行 = 表头；
+    - 后续表若以**相同表头**开头（导出工具常见的每表重复表头）→ 跳过该行，
+      否则整表视为数据（无表头的溢接表）；
+    - 完全为空的工作表跳过；每张表先裁掉尾部全空行再拼接（表间不留空行）；
+    - 表头比较按 ``clean_text`` 规整（忽略 BOM / 全角空格 / 首尾空白），
+      宽度不一致时按空串补齐比较。
+    """
+    merged: List[List[Any]] = []
+    header: List[str] = []
+    for rows in sheets:
+        rows = [list(r) for r in rows]
+        while rows and all(clean_text(v) == "" for v in rows[-1]):
+            rows.pop()
+        if not rows:
+            continue
+        if not merged:
+            header = [clean_text(v) for v in rows[0]]
+            merged.extend(rows)
+            continue
+        first = [clean_text(v) for v in rows[0]]
+        if _same_header(first, header):
+            rows = rows[1:]
+        merged.extend(rows)
+    return merged
+
+
+def _same_header(row: List[str], header: List[str]) -> bool:
+    """规整后的两行是否同一表头（空表头不算；宽度不一致按空串补齐比较）。"""
+    if not any(header):
+        return False
+    n = max(len(row), len(header))
+    a = list(row) + [""] * (n - len(row))
+    b = list(header) + [""] * (n - len(header))
+    return a == b
 
 
 def _read_xls(path: str) -> List[List[Any]]:
@@ -147,22 +191,24 @@ def _read_xls(path: str) -> List[List[Any]]:
         book = xlrd.open_workbook(path)
     except Exception as exc:
         raise TableError("Excel 文件解析失败（%s）。" % type(exc).__name__)
-    sheet = book.sheet_by_index(0)
-    out: List[List[Any]] = []
-    for r in range(sheet.nrows):
-        row = []
-        for c in range(sheet.ncols):
-            cell = sheet.cell(r, c)
-            if cell.ctype == xlrd.XL_CELL_DATE:
-                try:
-                    row.append(xlrd.xldate_as_datetime(cell.value, book.datemode)
-                               .strftime("%Y-%m-%d %H:%M:%S"))
-                except Exception:
-                    row.append(cell.value)
-            else:
-                row.append(json_safe(cell.value))
-        out.append(row)
-    return out
+    sheets: List[List[List[Any]]] = []
+    for sheet in book.sheets():                  # 按工作表顺序逐张读
+        out: List[List[Any]] = []
+        for r in range(sheet.nrows):
+            row = []
+            for c in range(sheet.ncols):
+                cell = sheet.cell(r, c)
+                if cell.ctype == xlrd.XL_CELL_DATE:
+                    try:
+                        row.append(xlrd.xldate_as_datetime(cell.value, book.datemode)
+                                   .strftime("%Y-%m-%d %H:%M:%S"))
+                    except Exception:
+                        row.append(cell.value)
+                else:
+                    row.append(json_safe(cell.value))
+            out.append(row)
+        sheets.append(out)
+    return _merge_sheets(sheets)
 
 
 def _read_csv(path: str) -> List[List[Any]]:

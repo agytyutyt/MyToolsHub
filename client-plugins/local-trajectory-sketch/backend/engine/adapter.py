@@ -27,7 +27,7 @@ _BOM = "\ufeff"
 
 _NUM_IN_TEXT = re.compile(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
-MAX_ROWS = 100000
+MAX_ROWS = 2000000
 MAX_COLS = 256
 
 # 丢弃原因（统计口径固定字符串，前端直接展示）
