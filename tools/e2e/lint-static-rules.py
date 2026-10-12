@@ -64,6 +64,7 @@ RULES = {
 #     逐处分诊（F-3 存量清诊）用它，避免把整个文件的将来命中一起吞掉。
 # 2026-10-11 平移：admin-common.js +1（壳门站点名改 /api/site）、admin-store.js（C 配对表单/配对徽标）、store.js（浏览器分支删除/配对安装联动）——行号随本轮改动平移，豁免理由不变
 # 2026-10-12 平移：store.js（账号级安装批次：登记三态/徽标拆分/hidden 退役）——270→291、597→630、603→636、607→640，豁免理由不变
+# 2026-10-12 平移：admin.js 设置卡改跳转+弹窗删除（-61 行）、store.js 预检报错修补（+8 行）——行号随改动平移，豁免理由不变
 EXEMPTIONS = [
     ("L-14", "plugins/", "test_*.py 与台架夹具不参与出包，模块级 import 重依赖属预期（构建期剔除）"),
     ("F-1", "plugins/admin/frontend/", "占位符文案里的示例路径（`D:\\…`）是给用户看的说明文字，非代码取径"),
@@ -110,8 +111,8 @@ EXEMPTIONS = [
     ("F-3", "plugins/admin/frontend/js/admin-user.js:37", "同行已 esc(err.message)"),
     ("F-3", "plugins/admin/frontend/js/admin-user.js:212", "deptOptionsHtml(:108-114) 对 d.id/d.name esc，其余为静态 option（P3-1 D6-1 拆分自 :201 移行）"),
     ("F-3", "plugins/admin/frontend/js/admin-user.js:358", "roles.map 体 :359-371：opt.name（本文件 MODULE_OPTIONS 常量）/r.id/r.name/r.description 全 esc；usage 数值（P3-1 D6-1 拆分自 :348 移行）"),
-    ("F-3", "plugins/admin/frontend/js/admin.js:120", "moduleCard(:32-47) 已 esc(m.name)；meta/icon 取本文件 MODULE_META 常量与 encodeURIComponent；m.id 为后端 ADMIN_MODULES 闭集（routes.py:60），count 数值"),
-    ("F-3", "plugins/admin/frontend/js/admin.js:125", "同行已 esc(err.message)"),
+    ("F-3", "plugins/admin/frontend/js/admin.js:59", "moduleCard(:32-48) 已 esc(m.name)；meta/icon 取本文件 MODULE_META 常量与 encodeURIComponent；m.id 为后端 ADMIN_MODULES 闭集（routes.py:60），count 数值"),
+    ("F-3", "plugins/admin/frontend/js/admin.js:61", "同行已 esc(err.message)"),
     # ---- L2 批 2（2026-10-10）：case-report / knowledge-base / shared-docs ----
     # knowledge-base reader.js 的 Excel 渲染原为**真风险**（SheetJS 只转义单元格正文，
     # data-v / data-z / 超链接 href 属属性侧裸拼），已在生成处补 DOMPurify.sanitize；
@@ -145,9 +146,9 @@ EXEMPTIONS = [
     ("F-3", "plugins/notice-board/frontend/app.js:350", "nl2br＝先 esc 再把换行转 <br>（:21-24），item.content 已全量转义"),
     ("F-3", "plugins/notice-board/frontend/app.js:395", "同 :350（详情窗复用同一 nl2br）"),
     ("F-3", "plugins/store/frontend/store.js:291", "rows 由详情渲染函数(:236 起)产出：icon/name/version/published_at/id/frontend_file/changelog 与版本历史 v.* 逐个 esc(:29)；requiresText(:124-130) 对 d.name/d.version 各 esc；humanRuntime/fmtSize 为常量与数值"),
-    ("F-3", "plugins/store/frontend/store.js:630", "html 为 :592-593 循环拼出的固定骨架串，零外部插值"),
-    ("F-3", "plugins/store/frontend/store.js:636", "同行 esc(d.error)"),
-    ("F-3", "plugins/store/frontend/store.js:640", "同行 esc(err)（Error 对象先 String() 再转义）"),
+    ("F-3", "plugins/store/frontend/store.js:638", "html 为 :592-593 循环拼出的固定骨架串，零外部插值"),
+    ("F-3", "plugins/store/frontend/store.js:644", "同行 esc(d.error)"),
+    ("F-3", "plugins/store/frontend/store.js:648", "同行 esc(err)（Error 对象先 String() 再转义）"),
     ("F-3", "plugins/json-formatter/frontend/index.html:115", "全静态串＋JZIcon.html('✅')（字面量）；含用户输入的 e.message 分支走 :121 textContent＋appendChild"),
     ("F-3", "plugins/json-formatter/frontend/index.html:134", "同 :115（另一处成功态渲染，错误分支 :139 走 textContent）"),
     ("F-3", "plugins/color-picker/frontend/index.html:124", "items 为 ['HEX', hex.toUpperCase()] 等本行组合：hex 来自 <input type=color>（浏览器规范化 #rrggbb），hexToRgb(:82-85) 有正则白名单，rgbToHsl 返回整数，label 静态"),

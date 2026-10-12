@@ -789,28 +789,28 @@
                                    "frontend_size":  82768
                                },
                      "store":  {
-                                   "version":  "1.0.2",
+                                   "version":  "1.0.3",
                                    "api_version":  1,
-                                   "file":  "JZToolsHub-store-后端-v1.0.2.zip",
-                                   "sha256":  "bcb84590e6b00fd802d652289a16181d5f81f5c9cac5e68b67b138b44a1956fd",
-                                   "size":  48149,
-                                   "built_at":  "2026-10-12T08:53:48+08:00",
-                                   "code_sha256":  "b2cc873da4930c776d55401f076a462f8c2fbd34f04006bb2f25ac7d51d42060",
+                                   "file":  "JZToolsHub-store-后端-v1.0.3.zip",
+                                   "sha256":  "c0b003fc7569c0236cd6fbdc3c916267caff26d8178dd72ae7e593989fbe41bb",
+                                   "size":  47999,
+                                   "built_at":  "2026-10-12T11:22:31+08:00",
+                                   "code_sha256":  "84f05ccd1a779caa0dc2aca2aea6d1b5f7f5a7a218458d4eba5b5dc0b02e9a3a",
                                    "file_count":  7,
-                                   "requires_restart":  true,
+                                   "requires_restart":  false,
                                    "file_hashes":  {
                                                        "plugins/store/backend/__init__.py":  "fe23335de6016851",
                                                        "plugins/store/backend/routes.py":  "4ef0828d97b85103",
-                                                       "plugins/store/frontend/index.html":  "d98bebd03aaebb6b",
-                                                       "plugins/store/frontend/store.js":  "ba35dac5dc1904b9",
+                                                       "plugins/store/frontend/index.html":  "2ea482ae5caf522c",
+                                                       "plugins/store/frontend/store.js":  "a3177148a40079f4",
                                                        "plugins/store/frontend/style.css":  "30b6dfd676275882",
-                                                       "plugins/store/manifest.json":  "228037781bc1464e",
+                                                       "plugins/store/manifest.json":  "5351760177d076ab",
                                                        "plugins/store/README.md":  "c05ac7aa256d5529"
                                                    },
                                    "assets":  {
                                                   "frontend/store.js":  {
-                                                                            "h":  "ba35dac5dc1904b9",
-                                                                            "v":  20,
+                                                                            "h":  "a3177148a40079f4",
+                                                                            "v":  21,
                                                                             "referenced":  true
                                                                         },
                                                   "frontend/style.css":  {
@@ -819,9 +819,9 @@
                                                                              "referenced":  true
                                                                          }
                                               },
-                                   "frontend_file":  "JZToolsHub-store-前端-v1.0.2.zip",
-                                   "frontend_sha256":  "e796fdce4e7294a58b0f27c8e5816c611bd2a3bb2f545582bebb273821f594db",
-                                   "frontend_size":  15265
+                                   "frontend_file":  "JZToolsHub-store-前端-v1.0.3.zip",
+                                   "frontend_sha256":  "6810a3d17ab9873950b1440fbe56a922da866c7419e92194fd651f1509b9e566",
+                                   "frontend_size":  15579
                                }
                  }
 }
