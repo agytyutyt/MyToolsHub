@@ -8,6 +8,8 @@
   能力层秒级重启后免重登（GD4 轮拍板，方案 §6.7）。
 """
 import os
+import threading
+import time
 import traceback
 
 
@@ -54,13 +56,24 @@ class SessionMirror:
         return self.cookie
 
     def _persist(self):
+        # 2026-10-12：原实现固定用 path+'.tmp' 单临时名——并发写（中继多线程/双进程）
+        # 互相踩文件，真机日志反复出现 PermissionError（tmp 被占用 / os.replace 目标被占）。
+        # 改：临时名带 pid+线程号隔离 + 短重试；仍失败才记日志。
         try:
             from secure_store import protect
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             blob = protect((self.cookie or "").encode("utf-8"))
-            tmp = self.path + ".tmp"
+            tmp = "%s.%d.%d.tmp" % (self.path, os.getpid(), threading.get_ident())
             with open(tmp, "wb") as f:
                 f.write(blob)
-            os.replace(tmp, self.path)
+            last = None
+            for _ in range(4):
+                try:
+                    os.replace(tmp, self.path)
+                    return
+                except PermissionError as exc:      # 目标被读方短暂占用（Windows）
+                    last = exc
+                    time.sleep(0.15)
+            raise last
         except Exception:
-            self._log("会话镜像持久化失败:\n" + traceback.format_exc())
+            self._log("会话镜像持久化失败：" + chr(10) + traceback.format_exc())
