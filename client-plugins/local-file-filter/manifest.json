@@ -3,7 +3,7 @@
   "name": "过滤器（本地）",
   "icon": "🧹",
   "accent": "#00897B",
-  "version": "1.6.4",
+  "version": "1.6.5",
   "author": "JZToolsHub 团队",
   "runtime": "local",
   "kind": "hybrid",
