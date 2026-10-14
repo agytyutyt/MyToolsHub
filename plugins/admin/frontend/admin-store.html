@@ -177,14 +177,46 @@
                    background: rgba(66,133,244,.06); }
     .st-file-hidden { display: none; }
 
+    /* ============ 页面级视图标签页（2026-10-14 需求①） ============
+       「上架新包」/「目录管理」两视图互斥显示。刻意**不复用** .st-filter：
+       二级页签的 active 清理（全表 remove('active')）与「全部展开」按钮都按 .st-filter 接管，
+       复用会让主标签页的选中态被清掉。 */
+    .st-viewtabs { display: flex; gap: 4px; border-bottom: 1px solid rgba(0,0,0,.09);
+                   margin: 0 0 16px; flex: none; }
+    .st-viewtab { appearance: none; background: none; border: none; border-bottom: 2px solid transparent;
+                  padding: 10px 18px 8px; font-size: 15px; color: #5f6368; cursor: pointer; }
+    .st-viewtab:hover { color: #202124; }
+    .st-viewtab.active { color: var(--md-primary, #4285F4); border-bottom-color: var(--md-primary, #4285F4);
+                         font-weight: 600; }
+    .st-viewtab .st-count { margin-left: 6px; }
+
+    /* ============ 目录管理定高（2026-10-14 需求②） ============
+       整页不滚（body 锁 100vh），面板吃满剩余视口高度 → #st-table-wrap 成为**唯一**滚动容器：
+       横向滚动条常驻它的底边（= 屏幕可视区底部），超出的行由同一容器的纵向滚动条控制。
+       此前 wrap 高度随内容增长，行数一多横向滑块就被顶到屏幕外（真机报告）。 */
+    body.st-store-page { height: 100vh; overflow: hidden; }
+    .admin-content.st-page { display: flex; flex-direction: column; min-height: 0;
+                             padding-top: 24px; padding-bottom: 14px; }
+    .st-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    /* hidden 与 display:flex 的优先级坑（同 .st-form-grid .form-row[hidden]）：须显式覆盖 */
+    .st-panel[hidden] { display: none !important; }
+    #panel-upload { display: block; overflow-y: auto; overflow-x: hidden; padding-bottom: 4px; }
+    #panel-catalog { overflow: hidden; }
+    #panel-catalog > .settings-card { flex: 1; min-height: 0; display: flex; flex-direction: column;
+                                      margin-top: 0; overflow: hidden; }
+    #st-catalog-tabs { margin-top: 0; }
+    /* 表格区：双向滚动——覆盖 admin.css 的 overflow-y: hidden（"唯一滚动容器"的实现点） */
+    #st-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+    #st-stats { flex: 1; min-height: 0; overflow: auto; }
+
     @media (max-width: 900px) {
       .st-form-grid, .st-stats-grid, .st-stat-cards { grid-template-columns: 1fr; }
     }
   </style>
 </head>
-<body data-page="admin" data-side-suffix=" · 管理后台" data-side-back="/tool/store">
+<body class="st-store-page" data-page="admin" data-side-suffix=" · 管理后台" data-side-back="/tool/store">
 
-  <main class="admin-content" id="app">
+  <main class="admin-content st-page" id="app">
     <div class="admin-head">
       <div>
         <h1>商店管理</h1>
@@ -194,6 +226,15 @@
       </div>
     </div>
 
+    <div class="st-viewtabs" role="tablist" aria-label="商店管理视图">
+      <button type="button" class="st-viewtab active" id="tab-upload" data-panel="upload"
+              role="tab" aria-selected="true" aria-controls="panel-upload">上架新包</button>
+      <button type="button" class="st-viewtab" id="tab-catalog" data-panel="catalog"
+              role="tab" aria-selected="false" aria-controls="panel-catalog">目录管理<span class="st-count"
+              id="cnt-tab-pending" title="待审核条目数（插件 + 依赖合计）" hidden>0</span></button>
+    </div>
+
+    <section class="st-panel" id="panel-upload" role="tabpanel" aria-labelledby="tab-upload">
     <details class="st-guide">
       <summary>流程与口径速览（点开查看）</summary>
       <ul>
@@ -271,10 +312,11 @@
         <span id="upload-result" class="st-upload-result"></span>
       </div>
     </div>
+    </section>
 
+    <section class="st-panel" id="panel-catalog" role="tabpanel" aria-labelledby="tab-catalog" hidden>
     <div class="settings-card wide">
-      <h3>目录管理</h3>
-      <div class="st-tabs">
+      <div class="st-tabs" id="st-catalog-tabs">
         <button type="button" class="st-filter active" data-f="pending">待审核<span class="st-count" id="cnt-pending">0</span></button>
         <button type="button" class="st-filter" data-f="published">已上架<span class="st-count" id="cnt-published">0</span></button>
         <button type="button" class="st-filter" data-f="off">已下架 · 已驳回<span class="st-count" id="cnt-off">0</span></button>
@@ -292,6 +334,7 @@
       </div>
       <div id="st-stats" hidden></div>
     </div>
+    </section>
   </main>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -299,7 +342,7 @@
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
   <script src="/static/js/jz-dialog.js?v=1"></script>
-<script src="/plugin/admin/js/admin-store.js?v=23"></script>
+<script src="/plugin/admin/js/admin-store.js?v=24"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>

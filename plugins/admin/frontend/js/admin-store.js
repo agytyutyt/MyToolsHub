@@ -632,7 +632,8 @@
   }
 
   (function bindExpandAll() {
-    var bar = document.querySelector('.st-tabs');
+    // 2026-10-14：改用 id 取二级页签栏——页首新增了同类的页面级视图标签页，'.st-tabs' 不再唯一
+    var bar = document.getElementById('st-catalog-tabs');
     if (!bar) return;
     var b = document.createElement('button');
     b.type = 'button';
@@ -675,6 +676,39 @@
       render();
     });
   });
+
+  // ---------------- 页面级视图标签页（2026-10-14 需求①）：上架新包 / 目录管理 ----------------
+  // 两视图互斥显示；目录管理面板 display:none 时量不到宽度，切回时须重跑溢出侦测
+  // （syncTableOverflow 读 clientWidth/scrollWidth，隐藏态读到 0 → 钉列渐变带会漏打）。
+  var viewTabs = document.querySelectorAll('.st-viewtab');
+  function showView(name) {
+    var pu = document.getElementById('panel-upload');
+    var pc = document.getElementById('panel-catalog');
+    if (!pu || !pc) return;
+    var isCatalog = name === 'catalog';
+    pu.hidden = isCatalog;
+    pc.hidden = !isCatalog;
+    viewTabs.forEach(function (b) {
+      var on = b.getAttribute('data-panel') === (isCatalog ? 'catalog' : 'upload');
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (isCatalog) syncTableOverflow();
+  }
+  viewTabs.forEach(function (b) {
+    b.addEventListener('click', function () { showView(b.getAttribute('data-panel')); });
+  });
+  showView('upload');
+
+  // 目录管理标签页的待审核角标：**全范围**计数（不受插件/依赖二级页签影响）——
+  // 审核入口不该被范围筛选藏掉；为 0 时收起角标。
+  function updateTabBadge() {
+    var el = document.getElementById('cnt-tab-pending');
+    if (!el) return;
+    var n = flatRows().filter(function (r) { return r.status === 'pending'; }).length;
+    el.textContent = n;
+    el.hidden = !n;
+  }
 
   document.getElementById('st-rows').addEventListener('click', async function (ev) {
     // 展开板交互（2026-10-12 需求①）：分组折叠 + C 类工件页签切换——纯视图态，直接重渲染
@@ -826,6 +860,7 @@
         });
       });
       updateCounts();
+      updateTabBadge();
       render();
     }).catch(function (e) { toast('目录加载失败：' + e, true); });
   }
