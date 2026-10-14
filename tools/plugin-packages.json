@@ -5,9 +5,9 @@
                                    "version":  "1.5.3",
                                    "api_version":  1,
                                    "file":  "JZToolsHub-admin-后端-v1.5.3.zip",
-                                   "sha256":  "e24ea630bbd496dc1bef3c311d1a625a139de1fd5f4808ecda1d184ff3ed42b5",
-                                   "size":  219243,
-                                   "built_at":  "2026-10-15T01:38:01+08:00",
+                                   "sha256":  "2ecb27f46e909159b27ddc751ecf009473faac5e2d80352d8a7e528c895c5818",
+                                   "size":  219230,
+                                   "built_at":  "2026-10-15T01:53:16+08:00",
                                    "code_sha256":  "402c31645a9c9cb49f7db2bfbed1ce2f01d97682a57532fbb7ac91a925e9661b",
                                    "file_count":  34,
                                    "requires_restart":  false,
@@ -110,16 +110,16 @@
                                                                            }
                                               },
                                    "frontend_file":  "JZToolsHub-admin-前端-v1.5.3.zip",
-                                   "frontend_sha256":  "c84b9e947219e890c91a8111283422844bd5307a781e46f240377357826cc4e0",
-                                   "frontend_size":  89292
+                                   "frontend_sha256":  "6e8d3a7022201169579551ee071f91d7e7c5b592984f43ca071a165ebc0c44cc",
+                                   "frontend_size":  89295
                                },
                      "base64":  {
                                     "version":  "1.0.3",
                                     "api_version":  1,
                                     "file":  "JZToolsHub-base64-后端-v1.0.3.zip",
-                                    "sha256":  "60a88f516f57fda298741eeb49c62dbdb44173c5bef66ec33d474a327ed1bae4",
-                                    "size":  26270,
-                                    "built_at":  "2026-10-15T01:38:06+08:00",
+                                    "sha256":  "904e42725be816e952bf3afe98b5b87ab7961b13d2deec21008f6cf3e94fb2bf",
+                                    "size":  25866,
+                                    "built_at":  "2026-10-15T01:53:19+08:00",
                                     "code_sha256":  "e14ca239a2b9c9a604b6a9ba8a5a82cac3feaaae727c13f459570df66e9c9c44",
                                     "file_count":  3,
                                     "requires_restart":  false,
@@ -132,16 +132,16 @@
 
                                                },
                                     "frontend_file":  "JZToolsHub-base64-前端-v1.0.3.zip",
-                                    "frontend_sha256":  "5bb048f44e0c3f32ad5d2719d668f454f08e37d660090bc695cee0ed8409de28",
-                                    "frontend_size":  3355
+                                    "frontend_sha256":  "3b1c77a5c18da998d1f04457ac96c34ad441fc9fded3e6904582d6f8184b169e",
+                                    "frontend_size":  3357
                                 },
                      "case-report":  {
                                          "version":  "1.3.3",
                                          "api_version":  1,
                                          "file":  "JZToolsHub-case-report-后端-v1.3.3.zip",
-                                         "sha256":  "906368703fda3fb1346dbd133001e8ca6cda30246a5ba508f5911f5349b903c2",
-                                         "size":  71930,
-                                         "built_at":  "2026-10-15T01:38:09+08:00",
+                                         "sha256":  "856bb4719b6dd4b23be79b3b963f150f22c0f3db1d26d7f8c400f25a63633c4c",
+                                         "size":  71931,
+                                         "built_at":  "2026-10-15T01:53:23+08:00",
                                          "code_sha256":  "c0ab607ee6ee450939e8a3ce3f6df6a819e8e2ac6e9be514de26497097be073c",
                                          "file_count":  13,
                                          "requires_restart":  false,
@@ -173,16 +173,16 @@
                                                                                }
                                                     },
                                          "frontend_file":  "JZToolsHub-case-report-前端-v1.3.3.zip",
-                                         "frontend_sha256":  "de355d3bcce897949abd522b7dda800588270ba07b64e0ebc7f66dbc99fb6d3a",
+                                         "frontend_sha256":  "6014907e2d4b92961e9bf5d2aaefc4ef6aa66c5ec2cf2933bbdb3de8ebb1164e",
                                          "frontend_size":  22499
                                      },
                      "character-graph":  {
                                              "version":  "1.2.3",
                                              "api_version":  1,
                                              "file":  "JZToolsHub-character-graph-后端-v1.2.3.zip",
-                                             "sha256":  "b3d4b37969d326bb56950d47fcebf3a43f1914beaa94d48fb3324482a8c8bb0a",
-                                             "size":  313482,
-                                             "built_at":  "2026-10-15T01:38:17+08:00",
+                                             "sha256":  "87e9669458745d046ee6db0df40602981fb933aa5168b1579b4d31a424302e47",
+                                             "size":  313480,
+                                             "built_at":  "2026-10-15T01:53:30+08:00",
                                              "code_sha256":  "1c24156db1a7f782a3ff19037073642e8da3e63ab8a97d99fc320db7f798ab01",
                                              "file_count":  14,
                                              "requires_restart":  false,
@@ -230,16 +230,16 @@
                                                                                                       }
                                                         },
                                              "frontend_file":  "JZToolsHub-character-graph-前端-v1.2.3.zip",
-                                             "frontend_sha256":  "483c78352f5bf95334706c5ceeb1c4254a316e07017fcae1997ca9db62ae54de",
+                                             "frontend_sha256":  "9005f79bae7c7095ca16e5ff22d2f3ff427d07468d5d5f6f04043026adfcef59",
                                              "frontend_size":  278141
                                          },
                      "color-picker":  {
                                           "version":  "1.0.3",
                                           "api_version":  1,
                                           "file":  "JZToolsHub-color-picker-后端-v1.0.3.zip",
-                                          "sha256":  "f876300aeed7624765eed4ecb275d8acc650635e21dee5dea61229bebb1d095e",
-                                          "size":  26247,
-                                          "built_at":  "2026-10-15T01:38:21+08:00",
+                                          "sha256":  "cfc4fe6ba632ecd4043e1b5fadac9ed259cafc4f3f39a709e9ab28338634f5fc",
+                                          "size":  25854,
+                                          "built_at":  "2026-10-15T01:53:34+08:00",
                                           "code_sha256":  "71bbc77910e718c89145b5f7a685cd3adf54a6b0c889bbadcbf6a9430c5c56cb",
                                           "file_count":  3,
                                           "requires_restart":  false,
@@ -252,16 +252,16 @@
 
                                                      },
                                           "frontend_file":  "JZToolsHub-color-picker-前端-v1.0.3.zip",
-                                          "frontend_sha256":  "3ae2ac9b770da34ce6e670c5edf2903eaa7f8ed378f2000d4a7868aab8c56cad",
+                                          "frontend_sha256":  "11b83b3f2a26a3404120e16c90087a04d369a5e6ffaba2e9235314e57bbd27fb",
                                           "frontend_size":  3317
                                       },
                      "file-filter":  {
                                          "version":  "1.6.5",
                                          "api_version":  1,
                                          "file":  "JZToolsHub-file-filter-后端-v1.6.5.zip",
-                                         "sha256":  "afedd7b2b034dc2b022b46317d35e3f621584d1f5146d1facc4e9346ba7a051c",
-                                         "size":  105841,
-                                         "built_at":  "2026-10-15T01:38:25+08:00",
+                                         "sha256":  "e5741d9c5ae82d3d96e1ba507058d3a4f08952b9d5e146e6b6641075ecc460a3",
+                                         "size":  105813,
+                                         "built_at":  "2026-10-15T01:53:37+08:00",
                                          "code_sha256":  "284f7ba80a29dbfb9706e5c6d63f57760e9f1859fbeed2570b55fd2940faf1c8",
                                          "file_count":  17,
                                          "requires_restart":  false,
@@ -297,16 +297,16 @@
                                                                                }
                                                     },
                                          "frontend_file":  "JZToolsHub-file-filter-前端-v1.6.5.zip",
-                                         "frontend_sha256":  "5d341c2ffdc51f6439bc0c34c01027d27f752fed368ebdd7a451fbea2619259f",
-                                         "frontend_size":  27918
+                                         "frontend_sha256":  "9cf23c00a3e2a21d49a2bb7f765b659c64bce20f17b0d4bbccdfb4797d677907",
+                                         "frontend_size":  27919
                                      },
                      "info-transfer":  {
                                            "version":  "1.2.24",
                                            "api_version":  1,
                                            "file":  "JZToolsHub-info-transfer-后端-v1.2.24.zip",
-                                           "sha256":  "b2ca936b5302abc88145d44d9151aa42fd68d0a40d40d9848baabac7ea5fdd8c",
-                                           "size":  122316,
-                                           "built_at":  "2026-10-15T01:38:29+08:00",
+                                           "sha256":  "a68a3fd782516a8542f3a4b907b1ae02420c4e52150f18a661cbfc6ca5c2d86e",
+                                           "size":  121590,
+                                           "built_at":  "2026-10-15T01:53:40+08:00",
                                            "code_sha256":  "b0ad30dfacee9d104e4dc3f4084985a7efdf10541bddc3e536e5703c754f2bf7",
                                            "file_count":  10,
                                            "requires_restart":  false,
@@ -326,16 +326,16 @@
 
                                                       },
                                            "frontend_file":  "JZToolsHub-info-transfer-前端-v1.2.24.zip",
-                                           "frontend_sha256":  "fd66dc02123e4b3adaaca8579851eedf196439c7973b862dcf8eb8c73cb193da",
+                                           "frontend_sha256":  "4bf814909c27391687e0c374ca33482b4ef85358dd781bf893a37db9cb3dbc72",
                                            "frontend_size":  26730
                                        },
                      "json-formatter":  {
                                             "version":  "1.0.4",
                                             "api_version":  1,
                                             "file":  "JZToolsHub-json-formatter-后端-v1.0.4.zip",
-                                            "sha256":  "a1d8c27830011a3649b62df36c24ab0cbae58f84dacbf3d9723a1b797e10228f",
-                                            "size":  26342,
-                                            "built_at":  "2026-10-15T01:38:32+08:00",
+                                            "sha256":  "0be997c7ad5a7df7f8c94f487a19314d703a20961fbc9168772f9ddca4c405d3",
+                                            "size":  26200,
+                                            "built_at":  "2026-10-15T01:53:43+08:00",
                                             "code_sha256":  "4bd473fd88b7c97f7341b0245265c64870cca1be56234432d63a84f9f0516c58",
                                             "file_count":  3,
                                             "requires_restart":  false,
@@ -348,16 +348,16 @@
 
                                                        },
                                             "frontend_file":  "JZToolsHub-json-formatter-前端-v1.0.4.zip",
-                                            "frontend_sha256":  "3594241714ebd9efb50d28ba47c10a37e08f51ac150a9bd29fae0869e9bdec86",
+                                            "frontend_sha256":  "cb953371ea8bd2db62ec91244ac1cc1f8015aae58b991a764d45485bc264b1e3",
                                             "frontend_size":  3587
                                         },
                      "knowledge-base":  {
                                             "version":  "1.3.16",
                                             "api_version":  1,
                                             "file":  "JZToolsHub-knowledge-base-后端-v1.3.16.zip",
-                                            "sha256":  "5fa740e65553840b9c30ceff243e202d2093fc09a70d4bc5895575f70f8ea6d9",
-                                            "size":  1316785,
-                                            "built_at":  "2026-10-15T01:38:40+08:00",
+                                            "sha256":  "f507577295be992cd118def35bd3ffb5d3f4a9235e47a2338b15c4b2b9044138",
+                                            "size":  1315462,
+                                            "built_at":  "2026-10-15T01:53:50+08:00",
                                             "code_sha256":  "c4cd16fd39204935f9046c8769f32598fa11e9582050b469d532f07ff93b146b",
                                             "file_count":  78,
                                             "requires_restart":  false,
@@ -514,16 +514,16 @@
                                                                                                      }
                                                        },
                                             "frontend_file":  "JZToolsHub-knowledge-base-前端-v1.3.16.zip",
-                                            "frontend_sha256":  "c32f04651faba974ceeb1dbba934c944652e66a257fc21a4dc1e0c59f9f5ca75",
+                                            "frontend_sha256":  "5f6b8accda2adfdf2b23705398fcb2248445a4eedb7bdfff69e57fe328d7d56f",
                                             "frontend_size":  1055697
                                         },
                      "map-marker":  {
                                         "version":  "1.0.5",
                                         "api_version":  1,
                                         "file":  "JZToolsHub-map-marker-后端-v1.0.5.zip",
-                                        "sha256":  "c73e3b0364691ad3f717b3060d7fb43bfc29faf1bc5f0182d91ae7fa8a2dce5c",
-                                        "size":  95865,
-                                        "built_at":  "2026-10-15T01:38:47+08:00",
+                                        "sha256":  "1f2278e9b597628296ff92e3c5aca24eee08e89fd356ef986de948ea5dd2f48c",
+                                        "size":  95480,
+                                        "built_at":  "2026-10-15T01:53:56+08:00",
                                         "code_sha256":  "ba11d05641a1fb97a963c8830a5a3588ad1e1204424d7c7d54f694f5ed908d2d",
                                         "file_count":  4,
                                         "requires_restart":  false,
@@ -541,16 +541,16 @@
                                                                                 }
                                                    },
                                         "frontend_file":  "JZToolsHub-map-marker-前端-v1.0.5.zip",
-                                        "frontend_sha256":  "77dfb2ca2de23bf409d67d32553bbf389c4e235e7d8ff0c03a09f2266e76b04d",
+                                        "frontend_sha256":  "0cea4a712487d34979f4f15b81a0b942ae21444ff07cc5b95650bfdb8a802223",
                                         "frontend_size":  71944
                                     },
                      "md5-generator":  {
                                            "version":  "1.0.4",
                                            "api_version":  1,
                                            "file":  "JZToolsHub-md5-generator-后端-v1.0.4.zip",
-                                           "sha256":  "126d1fe01b6212eb0aa4ae55c3d46526f764e896a7e5953cc4c172fd057f6ca6",
-                                           "size":  31328,
-                                           "built_at":  "2026-10-15T01:38:50+08:00",
+                                           "sha256":  "9c07b4c75ddc78877f5a6731ea19764f48c4b27de452e8a67f912b3e9ffdeb85",
+                                           "size":  31308,
+                                           "built_at":  "2026-10-15T01:54:00+08:00",
                                            "code_sha256":  "828f1e3f895ef3d93061bb338279b6a80c285019a0eb9b0c784d09657e8e6ba3",
                                            "file_count":  4,
                                            "requires_restart":  false,
@@ -568,16 +568,16 @@
                                                                               }
                                                       },
                                            "frontend_file":  "JZToolsHub-md5-generator-前端-v1.0.4.zip",
-                                           "frontend_sha256":  "1c85f40ee37d660f5ffecd2d0237be683c181d1865b1e6790b13184ba34a2c16",
+                                           "frontend_sha256":  "06c13cbc6c9ff5ed01c5e9ced9dbc43ee500681e44839df32d8e02a476cce707",
                                            "frontend_size":  8451
                                        },
                      "notice-board":  {
                                           "version":  "1.0.8",
                                           "api_version":  1,
                                           "file":  "JZToolsHub-notice-board-后端-v1.0.8.zip",
-                                          "sha256":  "53cdd9705b588e41dfa12f2f1f27b96d46a18bc298a4e0ebf161685ad693c23b",
-                                          "size":  43066,
-                                          "built_at":  "2026-10-15T01:38:54+08:00",
+                                          "sha256":  "58855c92adbe53676dec480a5f62c8ae7d7813c538f3089e03f5ef85f9822414",
+                                          "size":  43036,
+                                          "built_at":  "2026-10-15T01:54:03+08:00",
                                           "code_sha256":  "de9ccaea5143764c39e960dd3a5a87d8f30e42e34622328b0baccfdf94b15c2d",
                                           "file_count":  8,
                                           "requires_restart":  false,
@@ -604,16 +604,16 @@
                                                                                 }
                                                      },
                                           "frontend_file":  "JZToolsHub-notice-board-前端-v1.0.8.zip",
-                                          "frontend_sha256":  "b624465bd5f1f52fa6d6d54602f5ed786a668337a85caa445c6a253f457fd3f4",
+                                          "frontend_sha256":  "dcd2974b54211dcc82cddcaae2a03aae5af28bb34ff48af4e237cd57c9fbd226",
                                           "frontend_size":  12100
                                       },
                      "qr-video-decode":  {
                                              "version":  "1.2.4",
                                              "api_version":  1,
                                              "file":  "JZToolsHub-qr-video-decode-后端-v1.2.4.zip",
-                                             "sha256":  "e88578f4809d3fcf21d3f95c0b335c86e71d538202795e90172f60b29a5f7d22",
-                                             "size":  105815,
-                                             "built_at":  "2026-10-15T01:38:58+08:00",
+                                             "sha256":  "a7b8fc911a75e436bd434ddce96e9bb306b2f16b5b374c3bfe3afc3230c0f8ea",
+                                             "size":  105766,
+                                             "built_at":  "2026-10-15T01:54:07+08:00",
                                              "code_sha256":  "bbb537a367b4f50ff298abce1b6dd68698b58356431e3f4e62f5d6dbe760158d",
                                              "file_count":  9,
                                              "requires_restart":  false,
@@ -646,16 +646,16 @@
                                                                                    }
                                                         },
                                              "frontend_file":  "JZToolsHub-qr-video-decode-前端-v1.2.4.zip",
-                                             "frontend_sha256":  "c82fee267083ac92b7ef0c503e7db159283d9e7d8ea01213be8dd2182403c226",
-                                             "frontend_size":  74263
+                                             "frontend_sha256":  "e435ff541026cc0cd6d8798a861bf6e079c8826dedaa831ce0d1000a7db3bbb4",
+                                             "frontend_size":  74262
                                          },
                      "shared-docs":  {
                                          "version":  "1.2.6",
                                          "api_version":  1,
                                          "file":  "JZToolsHub-shared-docs-后端-v1.2.6.zip",
-                                         "sha256":  "9f53a9fc9af2972414e426f2b3549962194538e9ea67a95b2b04b598746c44db",
+                                         "sha256":  "f5a55b660fbcf8fa140d6fb36b37085d116bbaca7ec7aec871f7b0a5df7f464a",
                                          "size":  49400,
-                                         "built_at":  "2026-10-15T01:39:02+08:00",
+                                         "built_at":  "2026-10-15T01:54:09+08:00",
                                          "code_sha256":  "a6102bb5f6638f76e6d679cd4169f713de028d205e6cf4675a3472634f938a45",
                                          "file_count":  8,
                                          "requires_restart":  false,
@@ -682,16 +682,16 @@
                                                                                }
                                                     },
                                          "frontend_file":  "JZToolsHub-shared-docs-前端-v1.2.6.zip",
-                                         "frontend_sha256":  "444f0032d7fb7a875a68da8fd606a9675440ef98728be871a3900da31aae2bbc",
+                                         "frontend_sha256":  "584b23dfb2258bba9ed73e029314b7a6fdb9a7ff60a9575a28c117dc73713e18",
                                          "frontend_size":  14567
                                      },
                      "store":  {
                                    "version":  "1.0.6",
                                    "api_version":  1,
                                    "file":  "JZToolsHub-store-后端-v1.0.6.zip",
-                                   "sha256":  "34845855abb668d933f92c3f807b65465041d1070944544fa8617c117516720e",
+                                   "sha256":  "3255caf53ae29e15f73a35be778c4f6eed9c4b85ade3e056f88a2e12e4163c3e",
                                    "size":  52107,
-                                   "built_at":  "2026-10-15T01:39:06+08:00",
+                                   "built_at":  "2026-10-15T01:54:12+08:00",
                                    "code_sha256":  "12d78ccb98b10e7b0b2dda53bdad8d8e978e399dcd7fb43b721f784c87e4c22f",
                                    "file_count":  7,
                                    "requires_restart":  false,
@@ -717,16 +717,16 @@
                                                                          }
                                               },
                                    "frontend_file":  "JZToolsHub-store-前端-v1.0.6.zip",
-                                   "frontend_sha256":  "bb9598f702025d7bfc7e3feb639072dec77e1569a07c4a5ec51351172c2f1b84",
+                                   "frontend_sha256":  "819ec2da8aacf54ef9d54c1652bd69f76f9ffbe56d959f7719098652f786449f",
                                    "frontend_size":  19602
                                },
                      "trajectory-convert":  {
                                                 "version":  "1.2.3",
                                                 "api_version":  1,
                                                 "file":  "JZToolsHub-trajectory-convert-后端-v1.2.3.zip",
-                                                "sha256":  "332652f792d8365faced725c6b1a6277fa467722b8b7c1b0e12352a6de14fca9",
-                                                "size":  52532,
-                                                "built_at":  "2026-10-15T01:39:09+08:00",
+                                                "sha256":  "5b3d3c270bbd23ae44fb72e7ef526ca4ac8270e948aa1e0e56b892fc067f2350",
+                                                "size":  52058,
+                                                "built_at":  "2026-10-15T01:54:15+08:00",
                                                 "code_sha256":  "b3fb07d6a57fa748d52f57c3a58e05015561aad5948e0fcf05c41b0c384990e5",
                                                 "file_count":  6,
                                                 "requires_restart":  false,
@@ -742,16 +742,16 @@
 
                                                            },
                                                 "frontend_file":  "JZToolsHub-trajectory-convert-前端-v1.2.3.zip",
-                                                "frontend_sha256":  "9c8ef60e555ce22b3f78682679636b6facdb0fa3ac4bc6c99421423535aaf1a0",
+                                                "frontend_sha256":  "ec7df3aeefcfb58dac468844dbcb103eb6b2a0e95990ac72e856f792d09a7b82",
                                                 "frontend_size":  9639
                                             },
                      "trajectory-sketch":  {
                                                "version":  "1.3.8",
                                                "api_version":  1,
                                                "file":  "JZToolsHub-trajectory-sketch-后端-v1.3.8.zip",
-                                               "sha256":  "9841d69b720bee616965c8cc3b490310746c33a56b4ca24211636dbea9d70d73",
-                                               "size":  170680,
-                                               "built_at":  "2026-10-15T01:39:15+08:00",
+                                               "sha256":  "c5101d98795abcd1988e297bd7f06472783548110ae277ba64aacd7cc8e4d877",
+                                               "size":  170006,
+                                               "built_at":  "2026-10-15T01:54:19+08:00",
                                                "code_sha256":  "581e9d5d08135e5737c7fa87e94aed6260fab0d00e6559140f1316ec30aa8a90",
                                                "file_count":  54,
                                                "requires_restart":  false,
@@ -824,7 +824,7 @@
                                                                                      }
                                                           },
                                                "frontend_file":  "JZToolsHub-trajectory-sketch-前端-v1.3.8.zip",
-                                               "frontend_sha256":  "1c9136a2f24dc6430227ffdef087f0ccc2f45bc7ef3d765cca7c651249584586",
+                                               "frontend_sha256":  "c26a4086e5d60b8724d36f0eb21a75431d4a2a827235392fdcbe73c65bbe9564",
                                                "frontend_size":  27206
                                            }
                  }
