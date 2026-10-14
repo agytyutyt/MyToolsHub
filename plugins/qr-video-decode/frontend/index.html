@@ -237,6 +237,15 @@
 @media (max-width:480px){ body{ padding:12px } }
 
 @media (max-width:767px){ canvas, video, img { max-width:100%; height:auto } }
+  /* Material Design 滚动条（统一口径，同框架 static/css/style.css，2026-10-14）：
+     本页自带样式、不引框架 CSS，故自带一份；细轨 10px + 透明轨道 + 圆角拇指 #dadce0，
+     悬停 #bdc1c6，不渲染箭头按钮。不写 scrollbar-color/scrollbar-width（Chromium ≥121
+     设了会整段忽略 ::-webkit-scrollbar，新老内核观感分叉；基线 Chrome ≥72 只认前者）。 */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#dadce0;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#bdc1c6}
+  ::-webkit-scrollbar-corner{background:transparent}
 </style>
 </body>
 </html>

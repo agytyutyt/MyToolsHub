@@ -18,6 +18,13 @@
   #msg{margin:10px 0;font-size:13px;color:#188038;min-height:16px}
   input[type=file]{font-size:13px}
   .miss{color:#c5221f;font-size:12px}
+  /* Material Design 滚动条（口径同框架 static/css/style.css，2026-10-14）：
+     本页（本地插件管理）自带样式、不引框架 CSS，表格与页面纵向滑块此前是 Chromium 默认样式。 */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#dadce0;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#bdc1c6}
+  ::-webkit-scrollbar-corner{background:transparent}
 </style>
 </head>
 <body>

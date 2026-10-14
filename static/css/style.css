@@ -1148,3 +1148,37 @@ html.jz-shell.jz-viewport-tiny .jz-tiny-hint {
   align-items: center; justify-content: center; background: #fff;
   color: #5f6368; font-size: 15px; text-align: center;
 }
+
+/* ==================== Material Design 滚动条（统一口径，2026-10-14） ====================
+   此前框架层**完全没有**滚动条样式：桌面端主界面（壳层 index/tool）、admin 全站
+   （含商店管理页）以及登录页的纵向/横向滑块一律走 Chromium 默认样式（宽 15px、两端带
+   箭头按钮、灰色实底轨道），与站点的 Material 语言不一致。此块是**单源口径**，凡引用
+   本表的页面自动统一；插件页在各自 style.css / 内联 <style> 里抄同一份（框架与插件
+   CSS 互不污染，往 iframe 注入样式会破坏 tool.html 的承诺，故只能各页自带）。
+   - 细轨：纵向 10px、横向 10px（与 admin.css 的 .data-table-wrap 既有实现同值，观感对齐）
+   - 轨道透明，拇指 var(--md-outline)（Google Gray 300）圆角 5px，悬停 #bdc1c6（Gray 400）
+   - 不写 scrollbar-width / scrollbar-color：Chromium ≥121 只要设了 scrollbar-color 就会
+     **整段忽略** ::-webkit-scrollbar，两套并存会让新老内核观感分叉；基线 Chrome ≥72 只认
+     前者（同「居中定宽容器 + 滚动条」那条笔记的基线口径，见 HANDOFF §7.3 第 22 条）。
+   - 不写 ::-webkit-scrollbar-button：不渲染即为"无箭头按钮"的 MD 观感。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--md-outline);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bdc1c6;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

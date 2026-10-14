@@ -419,3 +419,14 @@ body {
 
 /* ==================== 响应式（统一档位 1023/767/480；高度 640） ==================== */
 @media (max-width:480px){ body{ padding:12px } header{ flex-wrap:wrap } }
+/* ==================== Material Design 滚动条（统一口径，2026-10-14） ====================
+   口径与框架 static/css/style.css 完全一致：细轨 10px（纵横）、轨道透明、拇指 #dadce0
+   圆角 5px、悬停 #bdc1c6、不渲染箭头按钮。框架与插件 CSS 互不污染（插件页在 iframe 里，
+   框架无法代修），故各插件自带同一份。不写 scrollbar-color / scrollbar-width：Chromium
+   ≥121 一旦设了 scrollbar-color 会整段忽略 ::-webkit-scrollbar，新老内核观感会分叉
+   （基线 Chrome ≥72 只认前者）。 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 5px; }
+::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
+::-webkit-scrollbar-corner { background: transparent; }

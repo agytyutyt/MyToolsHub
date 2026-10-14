@@ -20,6 +20,13 @@
   .save{background:#e8f0fe;color:#1a73e8}
   #msg{margin-top:12px;font-size:13px;color:#188038;min-height:18px}
   #err{font-size:12px;color:#9aa0a6;word-break:break-all}
+  /* Material Design 滚动条（口径同框架 static/css/style.css，2026-10-14）：
+     本页是连不上服务器时的离线兜底页，不引框架 CSS，故自带一份。 */
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#dadce0;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#bdc1c6}
+  ::-webkit-scrollbar-corner{background:transparent}
 </style>
 </head>
 <body>

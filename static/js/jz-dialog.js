@@ -43,7 +43,17 @@
     + '.jz-dlg-ok{background:#4285F4;color:#fff}'
     + '.jz-dlg-ok:hover{background:#3b78e7}'
     + '.jz-dlg-danger{background:rgba(197,34,31,.1);color:#c5221f}'
-    + '.jz-dlg-danger:hover{background:rgba(197,34,31,.18)}';
+    + '.jz-dlg-danger:hover{background:rgba(197,34,31,.18)}'
+    // Material Design 滚动条（统一口径，2026-10-14）：面板 max-height + overflow:auto，是纵向
+    // 滚动容器。本组件承诺「自包含、调用方零 CSS 携带」，故滚动条口径也随样式一起注入；用
+    // 后代选择器**限定在面板内**，不改宿主页面的全局滚动条（插件页在 iframe 里、宿主 CSS 各
+    // 自一份，注入全局规则等于污染宿主）。口径同 static/css/style.css：细轨 10px、轨道透明、
+    // 拇指 #dadce0 圆角 5px、悬停 #bdc1c6、不渲染箭头按钮。
+    + '.jz-dlg-panel::-webkit-scrollbar{width:10px;height:10px}'
+    + '.jz-dlg-panel::-webkit-scrollbar-track{background:transparent}'
+    + '.jz-dlg-panel::-webkit-scrollbar-thumb{background:#dadce0;border-radius:5px}'
+    + '.jz-dlg-panel::-webkit-scrollbar-thumb:hover{background:#bdc1c6}'
+    + '.jz-dlg-panel::-webkit-scrollbar-corner{background:transparent}';
 
   function injectStyle() {
     if (document.getElementById(STYLE_ID)) return;
