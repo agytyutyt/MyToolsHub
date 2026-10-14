@@ -19,6 +19,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import sys as _sys
 import tempfile
 import threading
@@ -101,6 +102,55 @@ class RemoteHealth:
     def snapshot(self):
         with self._lock:
             return {"remote_ok": self.ok, "last_error": self.last_error}
+
+
+def _count_tree_files(pth):
+    """预数路径下待删项数（依赖卸载进度分母）：不存在=0，目录=树内文件数，文件=1。"""
+    if os.path.isdir(pth) and not os.path.islink(pth):
+        n = 0
+        for _cur, _subs, files in os.walk(pth):
+            n += len(files)
+        return n
+    return 1 if (os.path.exists(pth) or os.path.islink(pth)) else 0
+
+
+def _rm_one(pth, tick):
+    """删单个文件/空目录（Windows 只读先摘属性重试）；返回 True=已删。成败都推进 tick()。"""
+    for attempt in (0, 1):
+        try:
+            if os.path.isdir(pth) and not os.path.islink(pth):
+                os.rmdir(pth)
+            else:
+                os.remove(pth)
+            tick()
+            return True
+        except OSError:
+            if attempt == 0:
+                try:
+                    os.chmod(pth, stat.S_IWRITE)
+                except OSError:
+                    pass
+    tick()
+    return False
+
+
+def _rm_tree_tick(pth, tick):
+    """自底向上删目录树并逐项推进 tick()（shutil.rmtree 同语义：链接只删链接本身）。
+
+    返回 True=整树删净（含根目录）；被占用/删不掉的项留在原地并返回 False——
+    调用方（卸载端点）据此走「改名 .pending-remove → 下次启动清扫」的既有兜底。
+    """
+    clean = True
+    for cur, subs, files in os.walk(pth, topdown=False):
+        for fn in files:
+            if not _rm_one(os.path.join(cur, fn), tick):
+                clean = False
+        for dn in subs:
+            if not _rm_one(os.path.join(cur, dn), tick):
+                clean = False
+    if not _rm_one(pth, tick):
+        clean = False
+    return clean
 
 
 def create_capability_app(build_cfg, client_cfg, address, static_dir,
@@ -1526,17 +1576,79 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             size_ok = exists
         return jsonify({"ok": True, "downloaded": bool(size_ok), "filename": filename})
 
+    # 依赖卸载进度台账（2026-10-13 需求①：依赖卸载按钮内的进度条）。与安装台账同款：
+    # token 由前端生成随 uninstall-dep 请求带上，服务端按阶段/文件级写百分比，前端 400ms 轮询。
+    _dep_uninstall_jobs = {}   # token → {status, phase, pct, error}
+
+    @app.get("/local-api/store/uninstall-dep/progress")
+    def store_uninstall_dep_progress():
+        st = _dep_uninstall_jobs.get(request.args.get("id") or "")
+        return jsonify(st or {"status": "unknown"})
+
+    class _DepUninstallProgress(object):
+        """依赖卸载进度：阶段文案 + 单调百分比（写台账失败静默，绝不影响卸载）。"""
+
+        def __init__(self, token):
+            self.token = str(token or "")[:64]
+            self.phase = "准备"
+            self.pct = 0
+            self._push()
+
+        def _push(self, status="running"):
+            if status == "running":
+                self.pct = min(self.pct, 99)
+            if not self.token:
+                return
+            try:
+                _dep_uninstall_jobs[self.token] = {"status": status, "phase": self.phase,
+                                                   "pct": self.pct, "error": ""}
+                while len(_dep_uninstall_jobs) > 200:      # 台账上界（淘汰最旧）
+                    _dep_uninstall_jobs.pop(next(iter(_dep_uninstall_jobs)))
+            except Exception:
+                pass
+
+        def set(self, phase, pct):
+            self.phase = phase
+            self.pct = max(self.pct, min(99, int(pct)))
+            self._push()
+
+        def span(self, lo, hi, phase, total):
+            """返回零参 tick()：把 [lo,hi] 区间按 total 份单调推进（文件级删除用）。"""
+            total = max(int(total or 0), 1)
+            box = {"n": 0}
+
+            def _tick():
+                box["n"] += 1
+                self.set(phase, lo + (hi - lo) * (min(box["n"], total) / float(total)))
+
+            return _tick
+
+        def done(self):
+            self.phase, self.pct = "完成", 100
+            self._push("done")
+
+        def fail(self, err):
+            self._push("error")
+            if not self.token:
+                return
+            try:
+                _dep_uninstall_jobs[self.token]["error"] = str(err)[:200]
+            except Exception:
+                pass
+
     def _component_dirs(cid):
         pylibs = os.path.join(_program_dir, "runtime", "pylibs")
         return (os.path.join(pylibs, cid),
                 os.path.join(pylibs, ".pending", cid),
                 os.path.join(pylibs, ".pending-remove", cid))
 
-    def _drop_dep_payload_files(cid):
+    def _drop_dep_payload_files(cid, span=None, lo=0, hi=100):
         """按登记 entry.files 删组件载荷文件（排除其它组件仍声明的共享文件）+ 空目录剪枝。
 
         卸载端点与启动清扫共用（2026-10-12：清扫原来只删 .pending-remove/<cid> 这一层，
-        组件铺在 pylibs 根的其余载荷会变孤儿——真机 numpy.libs 即实例）。→ (removed, failed)
+        组件铺在 pylibs 根的其余载荷会变孤儿——真机 numpy.libs 即实例）。
+        span：可选进度工厂 (lo, hi, phase, total) → tick()（2026-10-13 依赖卸载进度条；
+        文件级粒度：先按文件数定分母，每删一项推一格）。→ (removed, failed)
         """
         try:
             entry = jz_deps.component_entry(_program_dir, cid)
@@ -1552,20 +1664,36 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     others.add(rel)
         except Exception:
             others = set()
-        removed, failed = 0, []
-        for rel in [str(f).lstrip("\\/").replace("/", "\\") for f in (entry.get("files") or [])]:
+        rels = []
+        for f in (entry.get("files") or []):
+            rel = str(f).lstrip("\\/").replace("/", "\\")
             if not rel or rel.lower() == "manifest.json" or rel.lower() in others:
                 continue
+            rels.append(rel)
+
+        def _noop():
+            pass
+
+        if span:
+            total = sum(_count_tree_files(os.path.join(pylibs, r)) for r in rels)
+            tick = span(lo, hi, "卸载组件文件", total)
+        else:
+            tick = _noop
+        removed, failed = 0, []
+        for rel in rels:
             pth = os.path.join(pylibs, rel)
-            try:
-                if os.path.isdir(pth):
-                    shutil.rmtree(pth)
+            if os.path.isdir(pth) and not os.path.islink(pth):
+                if _rm_tree_tick(pth, tick):
                     removed += 1
-                elif os.path.exists(pth):
-                    os.remove(pth)
+                else:
+                    failed.append(rel)
+            elif os.path.exists(pth) or os.path.islink(pth):
+                if _rm_one(pth, tick):
                     removed += 1
-            except OSError:
-                failed.append(rel)
+                else:
+                    failed.append(rel)
+            else:
+                tick()                                # 已不在：仍推一格，保持分母一致
         for cur, subs, _fs in os.walk(pylibs, topdown=False):
             for d in subs:
                 pd = os.path.join(cur, d)
@@ -1660,11 +1788,15 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
           ③ 空目录剪枝（删文件留空壳，而"已装组件"另有按目录列举的路径）；
           ④ 清登记（jz_deps.drop_component_entry）；
           ⑤ 被占用删不掉的写 .pending-remove/<cid>.json 台账，下次启动清扫收尾。
+        2026-10-13 需求①：请求带 progress_id 时写进度台账（文件级百分比，前端按钮内进度条）；
+        大依赖卸载耗时数秒～数十秒，进度只写台账、不影响卸载本身。
         """
         data = request.get_json(force=True, silent=True) or {}
         cid = str(data.get("id") or "")
+        prog = _DepUninstallProgress(data.get("progress_id"))
         import re as _re
         if not _re.fullmatch(r"[A-Za-z0-9_+.-]{1,64}", cid):
+            prog.fail("非法组件 id")
             return jsonify({"ok": False, "error": "非法组件 id"}), 400
         try:
             entry = jz_deps.component_entry(_program_dir, cid)
@@ -1672,18 +1804,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             entry = None
         active, staged, rm = _component_dirs(cid)
         if entry is None and not os.path.isdir(active) and not os.path.isdir(staged):
+            prog.fail("该依赖组件未安装")
             return jsonify({"ok": False, "error": "该依赖组件未安装"}), 404
         removed = 0
         failed = []
         pending_remove = False
         # ① 暂存目录/同名目录（保留原语义）
         if os.path.isdir(staged):
-            shutil.rmtree(staged, ignore_errors=True)   # 待应用暂存一并取消
+            _rm_tree_tick(staged, prog.span(2, 12, "清理暂存组件",
+                                            max(1, _count_tree_files(staged))))   # 待应用暂存一并取消
         if os.path.isdir(active):
-            try:
-                shutil.rmtree(active)
+            prog.set("清理组件目录", 12)
+            if _rm_tree_tick(active, prog.span(12, 20, "清理组件目录",
+                                               max(1, _count_tree_files(active)))):
                 removed += 1
-            except OSError:
+            else:
                 os.makedirs(os.path.dirname(rm), exist_ok=True)
                 try:
                     if os.path.isdir(rm):
@@ -1691,11 +1826,13 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     os.rename(active, rm)      # 同卷改名，句柄不再阻塞
                     pending_remove = True
                 except OSError as exc:
+                    prog.fail("删除失败：%s" % exc)
                     return jsonify({"ok": False, "error": "删除失败：%s" % exc}), 500
         # ②③ 载荷文件（清单 files 为准）+ 空目录剪枝（与启动清扫共用助手）
-        n_files, failed = _drop_dep_payload_files(cid)
+        n_files, failed = _drop_dep_payload_files(cid, span=prog.span, lo=20, hi=90)
         removed += n_files
         # ④ 登记清除
+        prog.set("更新安装登记", 92)
         try:
             jz_deps.drop_component_entry(_program_dir, cid)
         except Exception:
@@ -1711,12 +1848,14 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                 pending_remove = True
             except OSError:
                 pass
+        prog.set("刷新依赖状态", 96)
         try:
             jz_plugin_host.setup_dep_components(_program_dir, _log)   # 重注入（已删路径无副作用）；
             # 依赖旗标由各插件 install_refresher 在请求期刷新（既有机制）
         except Exception:
             pass
         _refresh_local_verdicts(force=True)    # 回主界面即刻见降级徽标（免重启，2026-10-12 需求）
+        prog.done()
         note = ""
         if pending_remove:
             note = "部分文件被占用，将在下次启动客户端后清除"

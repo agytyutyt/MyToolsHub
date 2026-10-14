@@ -5,6 +5,16 @@
  * 桌面端（html.jz-shell）：本地状态经 /local-api/plugins 取得，安装/生命周期操作走
  * /local-api/store/* 与 /local-api/plugins/*（同源，永不中继）；浏览器下载分支已删除。
  * 每插件一张卡：C 类的配对服务器工件条目由商店投影去重（不出卡，管理面可见）。
+ * 2026-10-13 需求①②：①依赖卸载按钮内进度条（token 随 uninstall-dep 请求带上，
+ *   轮询 /local-api/store/uninstall-dep/progress；旧能力层无该端点→转 .indet 不定态）；
+ *   ②安装完成后若需重启生效（restart_required / 组件 pending），该卡按钮定格「待重启」
+ *   （不再是「安装」/「已安装」）——组件暂存态取自 /local-api/plugins 的 components，
+ *   插件的重启需求记在会话内（重启后本页重新加载即自然清零）。
+ * 2026-10-14 需求③（依赖侧同一口径）：依赖安装完成后，只要用户没选「立即重启」，
+ *   依赖卡片的「安装」按钮同样定格「待重启」——三条来源都收口成集合 pendIds：
+ *   响应 restart_required（含响应带回的组件 id）、dep_results[].pending（联合安装里
+ *   一并装上的组件）、pending_components；持久态由能力层 components[].pending 提供
+ *   （含「新版本已暂存、旧版本仍在登记」的升级场景，client/pkg_install.installed_components）。
  */
 (function () {
   'use strict';
@@ -24,6 +34,7 @@
   var catalog = [];              // flat 条目（含 versions 历史）
   var localState = { plugins: {}, frontends: {}, components: {}, loaded: false };
   var installs = null;           // 账号安装登记（§2.1，2026-10-11 需求①）；null=旧服务器无该 API（降级机器级行为）
+  var restartPending = {};       // id → true：安装已完成、待重启客户端生效（2026-10-13 需求②）
 
   function $(s, el) { return (el || document).querySelector(s); }
   function esc(s) {
@@ -141,9 +152,12 @@
   }
 
   function depResolutionState(e) {
-    // 返回本条依赖的安装态：{installed, upgradable, entry}
+    // 返回本条依赖的安装态：{installed, upgradable, pending, entry}
+    // pending=已装到本机但需重启生效（DLL 类组件暂存不应用）：按钮定格「待重启」而不是回到「安装」
     var comp = localState.components[e.id];
-    var st = { installed: !!comp && !comp.pending, upgradable: false, entry: comp || null };
+    var st = { installed: !!comp && !comp.pending, upgradable: false,
+               pending: (!!comp && !!comp.pending) || !!restartPending[e.id],
+               entry: comp || null };
     if (comp && verGt(e.version, comp.version)) st.upgradable = true;
     return st;
   }
@@ -153,6 +167,7 @@
     var map = e.runtime === 'server' ? localState.frontends : localState.plugins;
     var inst = map[e.id];
     var st = { account: !!installs, registered: false, installed: false, upgradable: false,
+               pending: !!restartPending[e.id],
                disabled: false, copy_missing: false, entry: inst || null };
     if (installs) {
       // 账号登记三态（D10）：未装→安装；已装+副本在→卸载+启停；已装+副本缺→安装到本机
@@ -186,12 +201,29 @@
       + '<span class="st-dl-fill"></span><span class="st-dl-label">' + esc(label) + '</span></button>';
   }
 
+  function pendingBtnHtml(title) {
+    // 安装完成但需重启客户端生效（2026-10-13 需求②）：按钮定格「待重启」——不再是「安装」
+    // （组件暂存态此前会翻回「安装」，看着像没装上）也不是「已安装」（尚未生效）。
+    return '<button class="st-btn-pending" disabled title="' + esc(title || '重启客户端后生效')
+      + '">待重启</button>';
+  }
+
+  function depUninstallBtnHtml(e) {
+    // 依赖卸载按钮 = 按钮内进度条容器（2026-10-13 需求①）：大依赖卸载耗时长，
+    // fill 随服务端卸载台账 pct 填充、label 叠上层；旧客户端无进度端点时转 .indet 不定态
+    return '<button class="st-btn-danger st-btn-prog" data-act="uninstall-dep" data-id="'
+      + esc(e.id) + '" data-label="卸载">'
+      + '<span class="st-dl-fill"></span><span class="st-dl-label">卸载</span></button>';
+  }
+
   function buttonsHtml(e) {
     var st = pluginInstallState(e);
     var html = '';
     if (IN_SHELL && e.runtime === 'dep-slot') {
       // 依赖组件是机器能力（D6）：装/卸/升级仍按机器态，不进账号登记
-      if (!st.installed) {
+      if (st.pending) {
+        html += pendingBtnHtml('依赖已装到本机，重启客户端后生效');
+      } else if (!st.installed) {
         html += installBtnHtml(e, '安装');
       } else if (st.upgradable) {
         html += installBtnHtml(e, '升级到 ' + e.version);
@@ -199,12 +231,14 @@
         html += '<button class="st-btn-install" disabled title="依赖组件已在本机生效">已安装</button>';
       }
       if (st.installed || st.entry) {
-        html += '<button class="st-btn-danger" data-act="uninstall-dep" data-id="' + esc(e.id) + '">卸载</button>';
+        html += depUninstallBtnHtml(e);
       }
     }
     if (IN_SHELL && e.runtime === 'server') {
       // A 类（在线）：账号登记三态（D10）；副本缺=云卡同款「安装到本机」链
-      if (!st.registered) {
+      if (st.pending) {
+        html += pendingBtnHtml('已安装，重启客户端后生效');
+      } else if (!st.registered) {
         html += installBtnHtml(e, '安装');
       } else if (st.copy_missing) {
         html += installBtnHtml(e, '安装到本机');
@@ -220,7 +254,9 @@
     }
     if (IN_SHELL && e.runtime === 'local') {
       // B/C 类：账号登记三态（D10）
-      if (!st.registered) {
+      if (st.pending) {
+        html += pendingBtnHtml('已安装，重启客户端后生效');
+      } else if (!st.registered) {
         html += installBtnHtml(e, '安装');
       } else if (st.copy_missing) {
         html += installBtnHtml(e, '安装到本机');
@@ -414,7 +450,7 @@
     var idleLabel = (btn && btn.getAttribute('data-label')) || '安装';
     function setProg(state, text, pct) {
       if (!btn) return;
-      btn.classList.remove('prog', 'done');
+      btn.classList.remove('prog', 'done', 'pending');
       if (state) btn.classList.add(state);
       btn.disabled = state === 'prog';
       var fill = btn.querySelector('.st-dl-fill');
@@ -442,16 +478,33 @@
       .then(async function (d) {
         clearInterval(progTimer);
         if (!d.ok) { setProg('', null, 0); msg('安装失败：' + (d.error || '未知错误'), true); return; }
-        setProg('done', '已完成', 100);
-        // 账号登记由能力层安装链先写（D18：先登记后落盘），页面只刷新状态展示
         var note = [];
-        var needRestart = !!d.restart_required
-          || !!(d.pending_components && d.pending_components.length);
+        // 「待重启」定格集合（2026-10-13 需求②；2026-10-14 补依赖侧）：
+        // ① 本条自身——响应 restart_required（hybrid 插件 / 含 DLL 的依赖组件包）；
+        // ② 响应带回的 id——依赖组件包的组件 id 可能不等于商店条目 id（卡片按条目 id 出，
+        //    故两侧都记，任一侧命中即定格）；
+        // ③ 本条这次一并装上的依赖组件——dep_results[].pending（能力层装完即报暂存）与
+        //    pending_components：依赖卡片同样要定格「待重启」，不能只有插件卡片定格。
+        var pendIds = {};
+        if (d.restart_required) {
+          pendIds[e.id] = true;
+          if (d.id) pendIds[d.id] = true;
+        }
+        (d.dep_results || []).forEach(function (r) {
+          if (r && r.ok && r.pending && r.id) pendIds[r.id] = true;
+        });
+        (d.pending_components || []).forEach(function (cid) { if (cid) pendIds[cid] = true; });
+        var selfPending = !!pendIds[e.id];
+        var needRestart = Object.keys(pendIds).length > 0;
+        Object.keys(pendIds).forEach(function (pid) { restartPending[pid] = true; });
+        setProg(selfPending ? 'pending' : 'done', selfPending ? '待重启' : '已完成', 100);
+        // 账号登记由能力层安装链先写（D18：先登记后落盘），页面只刷新状态展示
         if (d.pending_components && d.pending_components.length) {
           note.push('依赖组件待重启生效：' + d.pending_components.join('、'));
         }
         (d.dep_results || []).forEach(function (r) {
           if (!r.ok) note.push('依赖 ' + r.id + ' 安装失败：' + (r.error || ''));
+          else if (r.pending) note.push('依赖 ' + r.id + ' 待重启生效');
         });
         msg('安装成功：' + e.id + (note.length ? '（' + note.join('；') + '）' : ''));
         loadInstalls().then(loadLocalState).then(render);
@@ -464,7 +517,9 @@
               if (!r.ok) msg('自动重启不可用：' + (r.error || '') + '——请手动重启客户端', true);
             }).catch(function () { msg('自动重启请求失败：请手动重启客户端', true); });
           } else {
-            msg('已安装（重启客户端后生效，会话保留）');
+            // 定格已生效：本条自身未生效说「已安装」，只是依赖待重启则如实说依赖
+            msg(selfPending ? '已安装（重启客户端后生效，会话保留）'
+                            : '依赖已装到本机（重启客户端后生效，会话保留）');
           }
         }
       })
@@ -618,10 +673,53 @@
     if (act === 'uninstall-dep') {
       if (!await stDialog({ title: '卸载依赖组件', danger: true, okText: '卸载',
         html: '卸载依赖组件 <b>' + esc(id) + '</b>？<br>依赖组件无独立业务数据；正在被映射的原生库将在下次启动客户端后清除。' })) return;
-      post('/local-api/store/uninstall-dep', { id: id }).then(function (d) {
-        msg(d.ok ? ('已卸载依赖 ' + id + (d.pending_remove ? '（原生库将于下次启动清除）' : ''))
-                 : ('卸载失败：' + (d.error || '')), !d.ok);
+      if (btn.dataset.busy) return;                  // 连点去重（卸载进行中按钮亦已禁用）
+      btn.dataset.busy = '1';
+      // 按钮内进度（2026-10-13 需求①）：大依赖卸载耗时长，此前只有转圈等待易被当成卡死——
+      // 本页生成 token，服务端按删除项数写卸载台账，400ms 轮询；旧客户端无该端点（状态一直
+      // 非 running）→ 4 次后切 .indet 不定态动画，至少"在动"。
+      var upFill = btn.querySelector('.st-dl-fill');
+      var upLabel = btn.querySelector('.st-dl-label') || btn;
+      var upIdle = btn.getAttribute('data-label') || '卸载';
+      function upSet(state, text, pct) {
+        btn.classList.remove('prog', 'done', 'indet');
+        if (state) btn.classList.add(state);
+        btn.disabled = state === 'prog' || state === 'indet';
+        if (upLabel) upLabel.textContent = text || upIdle;
+        if (upFill) upFill.style.width = (pct || 0) + '%';
+      }
+      var upToken = 'un-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      var upMisses = 0;
+      upSet('prog', '卸载中 0%', 0);
+      var upTimer = setInterval(function () {
+        fetch('/local-api/store/uninstall-dep/progress?id=' + encodeURIComponent(upToken))
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            if (p && p.status === 'running') {
+              upMisses = 0;
+              btn.title = p.phase || '';
+              upSet('prog', '卸载中 ' + (p.pct || 0) + '%', p.pct || 0);
+            } else if (++upMisses >= 4) {            // 无进度来源：转不定态
+              btn.classList.add('indet');
+              btn.disabled = true;
+            }
+          })
+          .catch(function () { /* 进度轮询失败不影响卸载 */ });
+      }, 400);
+      post('/local-api/store/uninstall-dep', { id: id, progress_id: upToken }).then(function (d) {
+        clearInterval(upTimer);
+        delete btn.dataset.busy;
+        btn.title = '';
+        if (!d.ok) { upSet('', upIdle, 0); msg('卸载失败：' + (d.error || ''), true); return; }
+        delete restartPending[id];                   // 卸载即撤销「待重启」定格
+        upSet('done', '已完成', 100);
+        msg('已卸载依赖 ' + id + (d.pending_remove ? '（原生库将于下次启动清除）' : ''));
         loadLocalState().then(render);
+      }).catch(function (err) {
+        clearInterval(upTimer);
+        delete btn.dataset.busy;
+        upSet('', upIdle, 0);
+        msg('卸载异常：' + err, true);
       });
       return;
     }
@@ -637,6 +735,7 @@
           html: '清除当前账号在该插件名下的数据（配置 / 缓存 / 本地业务数据）？<br>'
             + '选择「保留数据」可稍后再装回。' });
         post('/local-api/plugins/uninstall', { id: id, purge_data: purgeAcc }).then(function (d) {
+          if (d.ok) delete restartPending[id];       // 卸载即撤销「待重启」定格
           msg(d.ok ? ('已从当前账号卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留）'))
                    : ('卸载失败：' + (d.error || '')), !d.ok);
           loadInstalls().then(loadLocalState).then(render);
@@ -650,6 +749,7 @@
           html: '卸载 <b>' + esc(id) + '</b> 的本机前端包副本？<br>'
             + '页面回退中继直出；插件在服务器端照常运行（重新安装即恢复）。' })) return;
         post('/local-api/plugins/uninstall', { id: id, purge_data: false }).then(function (d) {
+          if (d.ok) delete restartPending[id];
           msg(d.ok ? ('已卸载前端包副本：' + id + '（重新安装即恢复）')
                    : ('卸载失败：' + (d.error || '')), !d.ok);
           loadLocalState().then(render);
@@ -662,6 +762,7 @@
         html: '清除该插件的数据（数据根 plugins 下的插件目录：配置 / 缓存 / 本地业务数据）？<br>'
           + '选择「保留数据」可稍后再装回。' });
       post('/local-api/plugins/uninstall', { id: id, purge_data: purge }).then(function (d) {
+        if (d.ok) delete restartPending[id];
         msg(d.ok ? ('已卸载' + (d.data_purged ? '（数据已清除）' : '（数据保留在数据目录）'))
                  : ('卸载失败：' + (d.error || '')), !d.ok);
         loadLocalState().then(render);

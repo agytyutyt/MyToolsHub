@@ -337,11 +337,37 @@ def _install_component_zip_inner(zf, program_dir, apply_now=None, progress=None)
             "pending": cid not in applied, "native": native}
 
 
+def staged_component_version(program_dir, cid):
+    """暂存组件（runtime/pylibs/.pending/<cid>/entry.json）声明的版本；读不到 → ""。
+
+    两种写入方同形：客户端安装链（staged_by=client-store）与手工组件包安装器
+    （tools\\dep-component\\install-dep-component.ps1，staged_by=install-dep-component.ps1）
+    都写 {"id","entry":{...组件条目...},"remove":[...]}。
+    """
+    path = os.path.join(program_dir, "runtime", "pylibs", ".pending", cid, "entry.json")
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            entry = (json.load(f) or {}).get("entry") or {}
+        return str(entry.get("version") or "")
+    except Exception:
+        return ""
+
+
 def installed_components(program_dir):
-    """已装依赖组件 [{id, version}]（runtime/pylibs/manifest.json）+ 暂存中标记。"""
+    """已装依赖组件 [{id, version, pending}]（runtime/pylibs/manifest.json + 暂存区）。
+
+    pending = 「已装到本机、重启客户端后才生效」（商店卡片据此定格「待重启」，
+    不能翻回「安装」/「已安装」）。三态必须按**暂存区优先**判定（2026-10-14 修正）：
+      ① 只在登记里 → pending=False（已生效）；
+      ② 只在暂存区 → pending=True，version 取暂存声明（全新安装的 DLL 类组件）；
+      ③ **同时在暂存区与登记里 → pending=True 且 version 取暂存声明**（升级/替换：
+        新版已暂存、旧版仍在登记。此前这里只报旧版本的 pending=False —— 商店卡片于
+        「装完但未重启」时显示「已安装」/「升级到 x」，看着像安装根本没生效）。
+    """
     import jz_deps
     m_path = os.path.join(program_dir, "runtime", "pylibs", "manifest.json")
     comps = []
+    by_id = {}
     try:
         with open(m_path, "r", encoding="utf-8-sig") as f:
             raw = (json.load(f) or {}).get("components") or []
@@ -349,13 +375,20 @@ def installed_components(program_dir):
         raw = []
     for c in raw:
         if isinstance(c, dict) and c.get("id"):
-            comps.append({"id": str(c["id"]), "version": str(c.get("version") or ""),
-                          "pending": False})
-    known = {c["id"] for c in comps}
+            item = {"id": str(c["id"]), "version": str(c.get("version") or ""),
+                    "pending": False}
+            comps.append(item)
+            by_id[item["id"]] = item
     try:
         for cid in jz_deps.pending_components(program_dir):
-            if cid not in known:
-                comps.append({"id": cid, "version": "", "pending": True})
+            staged_ver = staged_component_version(program_dir, cid)
+            hit = by_id.get(cid)
+            if hit is None:
+                comps.append({"id": cid, "version": staged_ver, "pending": True})
+            else:
+                hit["pending"] = True
+                if staged_ver:
+                    hit["version"] = staged_ver
     except Exception:
         pass
     return comps

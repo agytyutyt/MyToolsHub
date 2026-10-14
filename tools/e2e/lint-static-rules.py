@@ -66,6 +66,7 @@ RULES = {
 # 2026-10-12 平移：store.js（账号级安装批次：登记三态/徽标拆分/hidden 退役）——270→291、597→630、603→636、607→640，豁免理由不变
 # 2026-10-12 平移：admin.js 设置卡改跳转+弹窗删除（-61 行）、store.js 预检报错修补（+8 行）——行号随改动平移，豁免理由不变
 # 2026-10-12 平移/改形（二~七）：多版本作用域→合成行→展开板→细化→二级页签→**图标操作区**（按钮改 st-op-btn）→ 现三处 554/560/570 + 上传行 119
+# 2026-10-14 平移：store.js（依赖「待重启」定格 + 卸载进度 + 依赖侧定格批次）——296→332、577→632、611→666、614→669、702→803、708→809、712→813，豁免理由不变
 EXEMPTIONS = [
     ("L-14", "plugins/", "test_*.py 与台架夹具不参与出包，模块级 import 重依赖属预期（构建期剔除）"),
     ("F-1", "plugins/admin/frontend/", "占位符文案里的示例路径（`D:\\…`）是给用户看的说明文字，非代码取径"),
@@ -146,13 +147,13 @@ EXEMPTIONS = [
     ("F-3", "plugins/notice-board/frontend/app.js:298", "同 :120；兄弟节点 :302/:306 走 textContent"),
     ("F-3", "plugins/notice-board/frontend/app.js:350", "nl2br＝先 esc 再把换行转 <br>（:21-24），item.content 已全量转义"),
     ("F-3", "plugins/notice-board/frontend/app.js:395", "同 :350（详情窗复用同一 nl2br）"),
-    ("F-3", "plugins/store/frontend/store.js:296", "rows 由详情渲染函数(:236 起)产出：icon/name/version/published_at/id/frontend_file/changelog 与版本历史 v.* 逐个 esc(:29)；requiresText(:124-130) 对 d.name/d.version 各 esc；humanRuntime/fmtSize 为常量与数值"),
-    ("F-3", "plugins/store/frontend/store.js:702", "html 为 :592-593 循环拼出的固定骨架串，零外部插值"),
-    ("F-3", "plugins/store/frontend/store.js:712", "同行 esc(d.error)"),
-    ("F-3", "plugins/store/frontend/store.js:577", "详情卡「检测本机依赖」：错误文案经 esc(em)，静态骨架"),
-    ("F-3", "plugins/store/frontend/store.js:611", "检测结果 html：逐行 name/require/actual/state/dep_id/note 全走 esc，其余为常量"),
-    ("F-3", "plugins/store/frontend/store.js:614", "同行 esc(err)（异常对象经 esc）"),
-    ("F-3", "plugins/store/frontend/store.js:708", "同行 esc(err)（Error 对象先 String() 再转义）"),
+    ("F-3", "plugins/store/frontend/store.js:332", "rows 由详情渲染函数(:236 起)产出：icon/name/version/published_at/id/frontend_file/changelog 与版本历史 v.* 逐个 esc(:29)；requiresText(:124-130) 对 d.name/d.version 各 esc；humanRuntime/fmtSize 为常量与数值"),
+    ("F-3", "plugins/store/frontend/store.js:803", "html 为 :592-593 循环拼出的固定骨架串，零外部插值"),
+    ("F-3", "plugins/store/frontend/store.js:813", "同行 esc(d.error)"),
+    ("F-3", "plugins/store/frontend/store.js:632", "详情卡「检测本机依赖」：错误文案经 esc(em)，静态骨架"),
+    ("F-3", "plugins/store/frontend/store.js:666", "检测结果 html：逐行 name/require/actual/state/dep_id/note 全走 esc，其余为常量"),
+    ("F-3", "plugins/store/frontend/store.js:669", "同行 esc(err)（异常对象经 esc）"),
+    ("F-3", "plugins/store/frontend/store.js:809", "同行 esc(err)（Error 对象先 String() 再转义）"),
     ("F-3", "plugins/json-formatter/frontend/index.html:115", "全静态串＋JZIcon.html('✅')（字面量）；含用户输入的 e.message 分支走 :121 textContent＋appendChild"),
     ("F-3", "plugins/json-formatter/frontend/index.html:134", "同 :115（另一处成功态渲染，错误分支 :139 走 textContent）"),
     ("F-3", "plugins/color-picker/frontend/index.html:124", "items 为 ['HEX', hex.toUpperCase()] 等本行组合：hex 来自 <input type=color>（浏览器规范化 #rrggbb），hexToRgb(:82-85) 有正则白名单，rgbToHsl 返回整数，label 静态"),

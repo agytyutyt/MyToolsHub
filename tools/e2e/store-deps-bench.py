@@ -8,9 +8,27 @@ r"""依赖卸载状态刷新 + 详情卡「检测本机依赖」台架（2026-10
   D 卸载后：检测本机依赖 → missing + resolve=dep-package（映射到可装的依赖包条目）
   E 启动清扫：.pending-remove 残件在下次启动被删，且清单条目同步清（防旧版残留）
   F drop_component_entry 边界：幂等 / 无清单 / 单组件简写形态
+  G 文件级卸载（载荷铺 pylibs 根、无 <cid> 目录）：删净 + 共享文件保留 + 登记清
+  H 文件被占用 → pending_remove 台账 → 下次启动清扫销账
+  I 清扫按登记收尾「散落载荷」孤儿（numpy.libs 实例）
+  J 本地插件健康度「功能降级」角标数据 + A 类 informational
+  K 卸载依赖 → 同一实例主界面即刻见降级（免重启）
+  L 卸载进度台账（2026-10-13 需求①）：running 中间百分比单调 → done/100；未知 token=unknown；
+    不带 progress_id 行为不变（旧前端兜底）
+  M 「待重启」判据（2026-10-13 需求②）：暂存组件 components.pending=true（按钮定格「待重启」）；
+    已生效组件 pending=false（「已安装」）；待重启组件可卸载撤销 → 回「安装」
+  N 「待重启」升级场景（2026-10-14 需求③：依赖装完但用户未重启，按钮必须显示「待重启」）：
+    登记有旧版 + 暂存区有新版的同 id → pending=true 且版本取暂存声明（此前只报旧版本的
+    pending=false，商店把「装完待重启」显示成「已安装」/「升级到 vX」，看着像安装没生效）；
+    暂存残骸（无 entry.json）→ 仍报 pending=true、版本退回登记值
+  P 真实安装端点端到端（2026-10-14 需求③）：走 /local-api/store/install 装 DLL 类依赖 →
+    restart_required=true（前端弹重启询问）+ components.pending=true（页面重载后的判据）；
+    应用暂存（=重启）后 pending=false「已安装」；升级装完 → pending=true 且版本=新版本；
+    联合安装一并装上的 DLL 依赖 → dep_results[].pending=true（前端据此定格依赖卡片）
 
 用法：python tools\e2e\store-deps-bench.py   （退出码 0=全过）
 """
+import hashlib
 import io
 import json
 import os
@@ -18,6 +36,8 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
+import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
@@ -56,9 +76,13 @@ def catalog_fixture():
     ]}
 
 
-def stub_server(catalog):
+def stub_server(catalog, packages_dir=None):
     from flask import Flask, jsonify, request as fq
     app = Flask("stub-deps")
+    # 目录/包目录可在运行中替换（app._bench_catalog / app._bench_pkg_dir）：
+    # 用于模拟「同一依赖条目出了新版本」与避免为一个桩再起一个服务。
+    app._bench_catalog = catalog
+    app._bench_pkg_dir = packages_dir
 
     @app.post("/api/login")
     def _login():
@@ -77,7 +101,22 @@ def stub_server(catalog):
 
     @app.get("/plugin/store/api/catalog")
     def _catalog():
-        return jsonify(catalog)
+        return jsonify(app._bench_catalog)
+
+    @app.get("/plugin/store/api/download/<pid>/<ver>")
+    def _download(pid, ver):
+        """包分发桩（与商店插件同形）：按 catalog 声明的 file 从包目录回包。"""
+        for p in (app._bench_catalog.get("packages") or []):
+            if p.get("id") != pid:
+                continue
+            fname = p.get("file")
+            if fq.args.get("artifact") == "frontend" and p.get("frontend_file"):
+                fname = p["frontend_file"]
+            pth = os.path.join(app._bench_pkg_dir or "", os.path.basename(str(fname or "")))
+            if fname and os.path.isfile(pth):
+                with open(pth, "rb") as f:
+                    return app.response_class(f.read(), 200)
+        return jsonify({"error": "no such package"}), 404
 
     @app.get("/plugin/store/api/installs")
     def _installs():
@@ -129,7 +168,52 @@ def comp_entry(cid, version="1.0.0", packages=None, files=None):
     return e
 
 
-def new_app(data_root, addr, static_dir):
+# ---------------------------- 真实安装端点用的小包构造 ----------------------------
+
+def make_zip(files):
+    """最小 zip 构造（依赖组件包 / 本地插件包桩）。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, body in files.items():
+            zf.writestr(name, body)
+    return buf.getvalue()
+
+
+def put_pkg(pkg_dir, fname, body):
+    """把包写进包目录并回 catalog 的 file/sha256/size 三件套。"""
+    with open(os.path.join(pkg_dir, fname), "wb") as f:
+        f.write(body)
+    return {"file": fname, "sha256": hashlib.sha256(body).hexdigest(), "size": len(body)}
+
+
+def dep_component_zip(cid, version, native=True, provides=()):
+    """依赖组件包桩：native=True 造 DLL 类载荷（暂存进 .pending，重启才生效）。"""
+    files = ["%s.dll" % cid] if native else ["%s/__init__.py" % cid]
+    payload = ({"payload/pylibs/%s.dll" % cid: "MZ"} if native
+               else {"payload/pylibs/%s/__init__.py" % cid: "X = 1\n"})
+    body = {"dep-component.json": json.dumps({"id": cid, "version": version}),
+            "manifest.json": json.dumps({"components": [
+                {"id": cid, "version": version, "provides": list(provides),
+                 "packages": {"%s-pkg" % cid: version}, "modules": {},
+                 "files": files}]})}
+    body.update(payload)
+    return make_zip(body)
+
+
+def local_plugin_zip(pid, version, require_name):
+    """本地插件包桩：requires 声明一个依赖名（联合安装用）。"""
+    return make_zip({
+        "manifest.json": json.dumps({
+            "id": pid, "runtime": "local", "kind": "local", "version": version,
+            "name": pid, "icon": "🧩", "entry": {"frontend": "index.html"},
+            "requires": {"python_packages": [
+                {"name": require_name, "version": ">=1.0", "required": True,
+                 "hint": "缺少 %s：演示用。" % require_name}]}}),
+        "frontend/index.html": "<h1>%s</h1>" % pid})
+
+
+def make_app(data_root, addr, static_dir):
+    """构造能力层 app（new_app / new_app_server 共用）。"""
     os.environ["JZCLIENT_DATA_DIR"] = data_root
     import capability_app
     build_cfg = {"_program_dir": os.path.join(data_root, "_program"),
@@ -141,10 +225,35 @@ def new_app(data_root, addr, static_dir):
         os.path.join(data_root, "local-plugins"),
         os.path.join(ROOT, "client", "fallback.html"),
         data_dir=data_root, log=lambda m: None, shell_token="deps-bench")
+    return build_cfg, app
+
+
+def new_app(data_root, addr, static_dir):
+    build_cfg, app = make_app(data_root, addr, static_dir)
     c = app.test_client()
     c.get("/shell-boot?_shell=deps-bench&next=/")
     c.post("/api/login", json={"username": "bench"})
     return build_cfg, c
+
+
+def new_app_server(data_root, addr, static_dir):
+    """真 HTTP 版（卸载进度断言需跨线程并发读台账）：返回 (build_cfg, base, session, srv)。"""
+    import time as _time
+    import requests
+    from werkzeug.serving import make_server
+    build_cfg, app = make_app(data_root, addr, static_dir)
+    srv = make_server("127.0.0.1", 0, app, threaded=True)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = "http://127.0.0.1:%d" % srv.server_port
+    c = requests.Session()
+    for _ in range(50):                     # 起服要一小会儿
+        try:
+            c.get(base + "/shell-boot?_shell=deps-bench&next=/", timeout=2)
+            break
+        except Exception:
+            _time.sleep(0.05)
+    c.post(base + "/api/login", json={"username": "bench"}, timeout=5)
+    return build_cfg, base, c, srv
 
 
 def comps_of(c):
@@ -376,6 +485,240 @@ def main():
                   bool(item3) and item3.get("health") == "degraded"
                   and "openpyxl" in (item3.get("health_degraded") or []),
                   json.dumps(item3, ensure_ascii=False)[:160])
+
+            # —— L：卸载进度台账（2026-10-13 需求①：依赖卸载按钮内进度条的服务端一半）——
+            lroot = os.path.join(work, "L")
+            lstatic = os.path.join(work, "Lstatic")
+            os.makedirs(lstatic, exist_ok=True)
+            with open(os.path.join(lstatic, "index.html"), "w", encoding="utf-8") as f:
+                f.write("<html>home</html>")
+            srv3, addr3 = stub_server(catalog_fixture())
+            l_srv = None
+            try:
+                lpy = os.path.join(lroot, "_program", "runtime", "pylibs")
+                n_files = 1200
+                for i in range(n_files):          # 载荷铺 pylibs 根（真机 docx 同形）：逐项删除可被 5ms 轮询观测
+                    q = os.path.join(lpy, "docs", "mod%02d" % (i % 20), "f%04d.py" % i)
+                    os.makedirs(os.path.dirname(q), exist_ok=True)
+                    with open(q, "w") as f:
+                        f.write("x")
+                os.makedirs(os.path.join(lroot, "_program", "config"), exist_ok=True)
+                with open(os.path.join(lroot, "_program", "config", "installed-deps.json"),
+                          "w", encoding="utf-8") as f:
+                    json.dump({"schema": 1, "packages": {"flask": "3.1.3"}}, f)
+                write_manifest(lpy, [comp_entry("bigpkg", files=["docs"])])
+                _, lbase, cl, l_srv = new_app_server(lroot, addr3, lstatic)
+
+                samples = []
+                stop = threading.Event()
+
+                def _poll():
+                    while not stop.is_set():
+                        try:
+                            p = cl.get(lbase + "/local-api/store/uninstall-dep/progress?id=p1",
+                                       timeout=5).json()
+                        except Exception:
+                            continue
+                        samples.append(p)
+                        if p.get("status") in ("done", "error"):
+                            return
+                        time.sleep(0.005)
+
+                th = threading.Thread(target=_poll, daemon=True)
+                th.start()
+                r = cl.post(lbase + "/local-api/store/uninstall-dep",
+                            json={"id": "bigpkg", "progress_id": "p1"}, timeout=60)
+                j = r.json()
+                stop.set()
+                th.join(3)
+                check("L1 带 progress_id 卸载 → ok + 载荷整树删净",
+                      bool(j.get("ok")) and j.get("files_removed") == 1
+                      and not os.path.isdir(os.path.join(lpy, "docs")),
+                      json.dumps(j, ensure_ascii=False)[:160])
+                running = [s for s in samples if s.get("status") == "running"]
+                pcts = [int(s.get("pct") or 0) for s in running]
+                check("L2 轮询观测到运行中百分比（0<pct≤99）——按钮内进度条的数据源",
+                      0 < max(pcts) <= 99 and max(pcts) > 20,      # 越过目录阶段=载荷文件级推进在跑
+                      str(pcts[:16]))
+                check("L3 百分比单调不减",
+                      all(pcts[i] <= pcts[i + 1] for i in range(len(pcts) - 1)), str(pcts[:16]))
+                pfin = cl.get(lbase + "/local-api/store/uninstall-dep/progress?id=p1",
+                              timeout=5).json()
+                check("L4 终态 done/100", pfin.get("status") == "done" and pfin.get("pct") == 100,
+                      json.dumps(pfin, ensure_ascii=False))
+                pu = cl.get(lbase + "/local-api/store/uninstall-dep/progress?id=nope", timeout=5).json()
+                check("L5 未知 token → unknown（前端据此切 .indet 不定态兜底）",
+                      pu.get("status") == "unknown", json.dumps(pu, ensure_ascii=False))
+                r2 = cl.post(lbase + "/local-api/store/uninstall-dep", json={"id": "bigpkg"},
+                             timeout=30)
+                check("L6 不带 progress_id（旧前端）→ 行为不变：404 未安装",
+                      r2.status_code == 404, str(r2.status_code))
+
+                # —— M：「待重启」契约（2026-10-13 需求②：装完定格「待重启」的判据）——
+                staged = os.path.join(lpy, ".pending", "waitnative")
+                os.makedirs(staged, exist_ok=True)
+                d = cl.get(lbase + "/local-api/plugins", timeout=5).json()
+                comp = next((x for x in (d.get("components") or [])
+                             if x.get("id") == "waitnative"), None)
+                check("M1 暂存组件（DLL 待重启）在 components 报 pending=true ——"
+                      " 前端据此把按钮定格「待重启」而非翻回「安装」",
+                      bool(comp) and comp.get("pending") is True,
+                      json.dumps(comp, ensure_ascii=False))
+                write_manifest(lpy, [comp_entry("ready")])
+                d = cl.get(lbase + "/local-api/plugins", timeout=5).json()
+                comp2 = next((x for x in (d.get("components") or []) if x.get("id") == "ready"), None)
+                check("M2 已生效组件 pending=false —— 按钮显示「已安装」",
+                      bool(comp2) and comp2.get("pending") is False,
+                      json.dumps(comp2, ensure_ascii=False))
+                r = cl.post(lbase + "/local-api/store/uninstall-dep",
+                            json={"id": "waitnative", "progress_id": "p2"}, timeout=30)
+                check("M3 待重启组件可直接卸载（撤销暂存）", bool((r.json() or {}).get("ok")),
+                      str(r.status_code) + " " + json.dumps(r.json(), ensure_ascii=False)[:120])
+                d = cl.get(lbase + "/local-api/plugins", timeout=5).json()
+                check("M4 卸载后 pending 组件消失 —— 按钮回「安装」",
+                      "waitnative" not in [x.get("id") for x in (d.get("components") or [])],
+                      str([x.get("id") for x in (d.get("components") or [])]))
+
+                # —— N：升级场景的「待重启」判据（2026-10-14 需求③）——
+                # 依赖组件升级 = 新版本先暂存（.pending/<id>）、旧版本仍在登记里；此时商店
+                # 卡片必须定格「待重启」——此前 installed_components 只看"id 是否已在登记里"，
+                # 同 id 的暂存被跳过 → 报旧版本 + pending=false，卡片显示「已安装」/「升级到 x」。
+                write_manifest(lpy, [comp_entry("gradeup", version="1.0.0")])
+                gstage = os.path.join(lpy, ".pending", "gradeup")
+                os.makedirs(os.path.join(gstage, "payload"), exist_ok=True)
+                with open(os.path.join(gstage, "entry.json"), "w", encoding="utf-8") as f:
+                    json.dump({"schema": 1, "id": "gradeup",
+                               "entry": comp_entry("gradeup", version="2.0.0"),
+                               "remove": [], "staged_by": "install-dep-component.ps1"}, f)
+                d = cl.get(lbase + "/local-api/plugins", timeout=5).json()
+                comp3 = next((x for x in (d.get("components") or [])
+                              if x.get("id") == "gradeup"), None)
+                check("N1 升级已暂存（登记 v1.0.0 + 暂存 v2.0.0）→ pending=true 且版本取暂存声明"
+                      " —— 卡片定格「待重启」而不是「已安装」/「升级到 v2.0.0」",
+                      bool(comp3) and comp3.get("pending") is True
+                      and comp3.get("version") == "2.0.0",
+                      json.dumps(comp3, ensure_ascii=False))
+                # 暂存残骸（无 entry.json）：仍算待重启，版本退回登记值（不误报"未安装"）
+                write_manifest(lpy, [comp_entry("gradeup", version="1.0.0"),
+                                     comp_entry("graderaw", version="1.0.0")])
+                os.makedirs(os.path.join(lpy, ".pending", "graderaw"), exist_ok=True)
+                d = cl.get(lbase + "/local-api/plugins", timeout=5).json()
+                comp4 = next((x for x in (d.get("components") or [])
+                              if x.get("id") == "graderaw"), None)
+                check("N2 暂存残骸（缺 entry.json）→ pending=true + 版本退回登记值",
+                      bool(comp4) and comp4.get("pending") is True
+                      and comp4.get("version") == "1.0.0",
+                      json.dumps(comp4, ensure_ascii=False))
+
+                # —— P：真实安装端点端到端（2026-10-14 需求③）——
+                # 需求原文：依赖安装完成后，若用户未选择重启，依赖的「安装」按钮应显示「待重启」。
+                # M/N 段只钉"暂存区 → components"这一段；这里从 /local-api/store/install 真装一个
+                # **DLL 类依赖组件包**开始，逐段钉住前端两条判据的数据源：
+                #   ① 安装响应 restart_required=true（前端据此弹「需要重启」询问）
+                #   ② 未重启期间 /local-api/plugins 的 components[].pending=true（页面重载后的判据）
+                #   ③ 应用暂存（=用户点「立即重启」）→ pending=false 翻「已安装」
+                #   ④ 升级装完待重启 → pending=true 且版本取新版本（不显示「升级到 vX」）
+                #   ⑤ 联合安装一并装上的 DLL 依赖 → dep_results[].pending=true（定格依赖卡片）
+                p_dir = os.path.join(work, "P")
+                p_pkgs = os.path.join(work, "Ppkgs")
+                os.makedirs(p_pkgs, exist_ok=True)
+                p_plug_zip = put_pkg(p_pkgs, "local-neednat-v1.0.0.zip",
+                                     local_plugin_zip("local-neednat", "1.0.0", "natpkg2"))
+                p_cat = catalog_fixture()
+                p_cat["packages"] += [
+                    {"id": "natdep", "runtime": "dep-slot", "name": "原生依赖包", "version": "1.0.0",
+                     "requires": {}, "provides": ["natpkg"],
+                     **put_pkg(p_pkgs, "natdep-v1.0.0.zip",
+                               dep_component_zip("natdep", "1.0.0", provides=("natpkg",)))},
+                    {"id": "natdep2", "runtime": "dep-slot", "name": "原生依赖包二", "version": "1.0.0",
+                     "requires": {}, "provides": ["natpkg2"],
+                     **put_pkg(p_pkgs, "natdep2-v1.0.0.zip",
+                               dep_component_zip("natdep2", "1.0.0", provides=("natpkg2",)))},
+                    {"id": "local-neednat", "runtime": "local", "name": "需要原生依赖的本地插件",
+                     "version": "1.0.0",
+                     "requires": {"python_packages": [
+                         {"name": "natpkg2", "version": ">=1.0", "required": True,
+                          "hint": "缺少 natpkg2：演示用。"}]},
+                     **p_plug_zip},
+                ]
+                srv4, addr4 = stub_server(p_cat, p_pkgs)
+                try:
+                    p_prog = os.path.join(p_dir, "_program")
+                    p_pylibs = os.path.join(p_prog, "runtime", "pylibs")
+                    os.makedirs(p_dir, exist_ok=True)
+                    _, pc = new_app(p_dir, addr4, static_dir)
+
+                    r = pc.post("/local-api/store/install",
+                                json={"id": "natdep", "version": "1.0.0"})
+                    j = r.get_json()
+                    check("P1 装 DLL 类依赖（真实端点）→ restart_required=true + hint"
+                          "（前端据此弹「需要重启」询问）",
+                          bool(j.get("ok")) and j.get("restart_required") is True
+                          and bool(j.get("hint")),
+                          json.dumps(j, ensure_ascii=False)[:200])
+                    nat = next((x for x in (pc.get("/local-api/plugins").get_json()
+                                            .get("components") or [])
+                                if x.get("id") == "natdep"), None)
+                    check("P2 未重启期间 components 报 pending=true —— 卡片定格「待重启」"
+                          "（用户选「稍后」/刷新页面后仍成立）",
+                          bool(nat) and nat.get("pending") is True
+                          and nat.get("version") == "1.0.0",
+                          json.dumps(nat, ensure_ascii=False))
+                    import jz_deps
+                    jz_deps.apply_pending_components(p_prog)      # = 用户点「立即重启」后能力层启动
+                    nat = next((x for x in (pc.get("/local-api/plugins").get_json()
+                                            .get("components") or [])
+                                if x.get("id") == "natdep"), None)
+                    check("P3 重启（应用暂存）后 pending=false —— 翻「已安装」",
+                          bool(nat) and nat.get("pending") is False,
+                          json.dumps(nat, ensure_ascii=False))
+
+                    # ④ 升级：catalog 换 v2 → 装完暂存、旧版仍在登记 → 必须报待重启且取新版本
+                    srv4.app._bench_catalog = dict(
+                        p_cat,
+                        packages=[dict(p) for p in p_cat["packages"] if p.get("id") != "natdep"]
+                        + [{"id": "natdep", "runtime": "dep-slot", "name": "原生依赖包",
+                            "version": "2.0.0", "requires": {}, "provides": ["natpkg"],
+                            **put_pkg(p_pkgs, "natdep-v2.0.0.zip",
+                                      dep_component_zip("natdep", "2.0.0", provides=("natpkg",)))}])
+                    r = pc.post("/local-api/store/install",
+                                json={"id": "natdep", "version": "2.0.0"})
+                    j = r.get_json()
+                    nat = next((x for x in (pc.get("/local-api/plugins").get_json()
+                                            .get("components") or [])
+                                if x.get("id") == "natdep"), None)
+                    check("P4 依赖升级装完待重启 → pending=true 且版本=v2"
+                          "（不再显示「已安装」/「升级到 v2.0.0」）",
+                          bool(j.get("ok")) and bool(nat) and nat.get("pending") is True
+                          and nat.get("version") == "2.0.0",
+                          json.dumps({"resp": j, "comp": nat}, ensure_ascii=False)[:240])
+
+                    # ⑤ 联合安装：插件的依赖随插件一起装（DLL 类）→ dep_results[].pending
+                    r = pc.post("/local-api/store/install",
+                                json={"id": "local-neednat", "version": "1.0.0",
+                                      "include_deps": True,
+                                      "deps": [{"dep_id": "natdep2", "dep_version": "1.0.0"}]})
+                    j = r.get_json()
+                    dr = next((x for x in (j.get("dep_results") or [])
+                               if x.get("id") == "natdep2"), None)
+                    check("P5 联合安装一并装上的 DLL 依赖 → dep_results[].pending=true"
+                          "（前端据此把依赖卡片一并定格「待重启」）",
+                          bool(dr) and dr.get("ok") is True and dr.get("pending") is True,
+                          json.dumps(dr, ensure_ascii=False)[:200])
+                    check("P5b 该依赖同时在 components 报 pending=true（页面重载后的持久判据）",
+                          any(x.get("id") == "natdep2" and x.get("pending") is True
+                              for x in (pc.get("/local-api/plugins").get_json()
+                                        .get("components") or [])),
+                          str([x.get("id") for x in (pc.get("/local-api/plugins").get_json()
+                                                     .get("components") or [])]))
+                    check("P5c 依赖载荷真落在暂存区（未重启前不覆盖运行中的 DLL）",
+                          os.path.isdir(os.path.join(p_pylibs, ".pending", "natdep2")))
+                finally:
+                    srv4.shutdown()
+            finally:
+                if l_srv is not None:
+                    l_srv.shutdown()
+                srv3.shutdown()
         finally:
             srv2.shutdown()
     finally:
