@@ -90,15 +90,47 @@ def hash16(path):
     return h.hexdigest()[:16]
 
 
-def semver_cmp(a, b):
-    """比较 主.次.修订；任一侧不合法返回 None。"""
-    def parts(v):
-        m = re.match(r"^(\d+)\.(\d+)\.(\d+)", str(v or ""))
-        return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
-    pa, pb = parts(a), parts(b)
-    if pa is None or pb is None:
+_NIGHTLY_TAIL_RE = re.compile(r"^[ _-]?nightly\b", re.IGNORECASE)
+# 版本号合法形态：数字核 X.Y.Z + 可选通道后缀（release / nightly），口径真源见 §2 打包部署手册
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[ _-](?:release|nightly))?$")
+
+
+def ver_key(v):
+    """版本号 → 可比较键 `(主, 次, 修订, 通道序)`；打不出三段数字核返回 None。
+
+    双通道口径（release / nightly）：数字核相同则 **nightly < release**，即
+    `X.Y.Z_nightly` 是 `X.Y.Z` 的前身，升成正式号算递增。裸号与 `_release` 同属正式通道。
+    """
+    s = str(v or "").strip()
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
         return None
-    return (pa > pb) - (pa < pb)
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)),
+            0 if _NIGHTLY_TAIL_RE.match(s[m.end():]) else 1)
+
+
+def semver_cmp(a, b):
+    """比较版本号（数字核 + 通道）；任一侧不合法返回 None。
+
+    用于**升级/发布/递增**类判定。兼容性门控请用 :func:`semver_core_cmp`，两者口径不同。
+    """
+    ka, kb = ver_key(a), ver_key(b)
+    if ka is None or kb is None:
+        return None
+    return (ka > kb) - (ka < kb)
+
+
+def semver_core_cmp(a, b):
+    """只比**数字核**（忽略 release/nightly 通道）；任一侧不合法返回 None。
+
+    用于 `min_app_version` / `upgrade_from_min` / `upgrade_from_max` 这类兼容性门控：
+    主包出 `1.0.0_nightly` 时，声明「主程序 ≥ 1.0.0」的插件必须放行，不能按通道判成版本过低。
+    """
+    ka, kb = ver_key(a), ver_key(b)
+    if ka is None or kb is None:
+        return None
+    ka, kb = ka[:3], kb[:3]
+    return (ka > kb) - (ka < kb)
 
 
 # ======================== 路径 ========================
@@ -344,8 +376,8 @@ def inspect_package(zip_path, base_dir, data_root, force=False, staging=None):
     result["to_version"] = version or None
     if not PLUGIN_ID_RE.match(pid):
         result["errors"].append("包清单 id 非法：%r" % pid)
-    if not re.match(r"^\d+\.\d+\.\d+$", version):
-        result["errors"].append("包清单版本号不是 主.次.修订：%r" % version)
+    if not VERSION_RE.match(version):
+        result["errors"].append("包清单版本号不合法（须为 X.Y.Z，可带 release / nightly 通道后缀）：%r" % version)
 
     # 依赖检测（设计文档 §5.3 D-8：**提示但不阻断**）——包内声明 vs 本机现状，
     # 结果放进计划供前端弹窗（缺失只提示，apply 照常执行：环境问题允许"先装插件、后补依赖"）。
@@ -409,11 +441,11 @@ def inspect_package(zip_path, base_dir, data_root, force=False, staging=None):
             lo = str(meta.get("upgrade_from_min") or "")
             hi = str(meta.get("upgrade_from_max") or "")
             if lo and not force:
-                c = semver_cmp(from_ver, lo)
+                c = semver_core_cmp(from_ver, lo)
                 if c is not None and c < 0:
                     result["errors"].append("不允许跳版升级：已装 %s < 本包最低起升版本 %s" % (from_ver, lo))
             if hi and not force:
-                c = semver_cmp(from_ver, hi)
+                c = semver_core_cmp(from_ver, hi)
                 if c is not None and c > 0:
                     result["errors"].append("已装版本 %s 高于本包最高起升版本 %s（属降级路径）" % (from_ver, hi))
     else:
@@ -428,7 +460,7 @@ def inspect_package(zip_path, base_dir, data_root, force=False, staging=None):
             if not force:
                 result["errors"].append("无法读取主程序版本（缺 version.json.app），而本包要求 min_app_version=%s" % min_app)
         else:
-            c = semver_cmp(app_ver, min_app)
+            c = semver_core_cmp(app_ver, min_app)
             if c is None:
                 result["warnings"].append("主程序版本号无法比较（%s vs %s），跳过该项校验" % (app_ver, min_app))
             elif c < 0:
@@ -1175,7 +1207,7 @@ def check_updates(base_dir, data_root, index_path, verify_hash=True):
                 row["blocked_reason"] = "包 sha256 与索引不符（介质损坏或被篡改）"
             elif row["min_app_version"]:
                 app_ver = app_version(base_dir)
-                if app_ver and semver_cmp(app_ver, row["min_app_version"]) == -1:
+                if app_ver and semver_core_cmp(app_ver, row["min_app_version"]) == -1:
                     row["upgrade_available"] = False
                     row["blocked_reason"] = "需先升级主程序（本机 %s < %s）" % (app_ver, row["min_app_version"])
         rows.append(row)
@@ -1361,7 +1393,7 @@ def scan_packages(base_dir, data_root=None, dirs=None, max_files=600, force=Fals
                         pass
                     min_app = str(meta.get("min_app_version") or "")
                     if abi_ok and min_app and app_ver:
-                        cmp_app = semver_cmp(app_ver, min_app)
+                        cmp_app = semver_core_cmp(app_ver, min_app)
                         if cmp_app is not None and cmp_app < 0:
                             abi_ok = False
                             abi_reason = "需要主体 ≥ %s（当前 %s）" % (min_app, app_ver)

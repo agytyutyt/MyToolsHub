@@ -31,8 +31,9 @@ r"""主包「组装」阶段：dist\JZToolsHub + 仓库源码 → deploy\<Deploy
   §4     start.bat（**GBK**，即 PowerShell 的 -Encoding Default）
 
 用法：
-    python tools\build-deploy-local.py                    # 版本：在既有部署目录基础上自动递增 patch
-    python tools\build-deploy-local.py -Version 2.1.0     # 指定版本
+    python tools\build-deploy-local.py                    # 版本：在既有部署目录数字核上递增 patch，通道 nightly
+    python tools\build-deploy-local.py -Version 2.1.0     # 指定版本（正式包：裸号 X.Y.Z）
+    python tools\build-deploy-local.py --channel release  # 自动递增但出正式通道
     python tools\build-deploy-local.py --force            # 允许与上一版同号（只改了文档/工具时）
     python tools\build-deploy-local.py --check-only       # 只做前置检查 + 打印计划，不写任何文件
     python tools\build-deploy-local.py --offline "chrome X; libreoffice Y"
@@ -155,29 +156,62 @@ def git_stamp():
     return commit + dirty, bool(dirty)
 
 
-def next_version(prev, explicit, force):
-    """与 build-deploy.ps1 §82-91 同口径：未指定则递增 patch；同号需 --force。"""
+VER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[ _-](?:release|nightly))?$")
+_NIGHTLY_TAIL_RE = re.compile(r"^[ _-]?nightly\b", re.IGNORECASE)
+
+
+def ver_key(v):
+    """版本号 → `(主, 次, 修订, 通道序)`；打不出三段数字核返回 None。
+
+    双通道口径（2026-10-15 命名规则改造，真源见 docs\\guide\\打包部署手册.md §2 与
+    tools\\_shared.psm1 中 Compare-SemVer 上方注释）：数字核相同则 **nightly < release**，
+    即 X.Y.Z_nightly 定版升 X.Y.Z 算合法递增；裸号与 _release 同属正式通道。
+    """
+    s = str(v or "").strip()
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3)),
+            0 if _NIGHTLY_TAIL_RE.match(s[m.end():]) else 1)
+
+
+def next_version(prev, explicit, force, channel=""):
+    """与 build-deploy.ps1 §90-113 同口径：数字核 X.Y.Z + 可选通道后缀（release/nightly）。
+
+    未指定 -Version 时在上一版数字核上 patch+1，通道取 --channel（缺省 nightly——在研线即
+    nightly）；上一版读不到或数字核打不出（含历史两段式如 1.6）落基线 1.0.0。
+    递增闸门同时拦同号**与降级**（原实现只拦同号，回退到更旧的号会无声放行）。
+    """
     if not explicit:
-        if re.match(r"^\d+\.\d+$", prev or ""):
-            a, b = prev.split(".")
-            explicit = "%s.%d" % (a, int(b) + 1)
-        elif re.match(r"^\d+\.\d+\.\d+$", prev or ""):
-            a, b, c = (prev or "0.0.0").split(".")
-            explicit = "%s.%s.%d" % (a, b, int(c) + 1)
-        else:
-            explicit = "1.0.0"
-        print("  [版本] 未指定 -Version，自动递增为 %s（上一版：%s）" % (explicit, prev or "无"))
-    if prev and explicit == prev and not force:
-        raise SystemExit("版本号与上一版相同（%s）→ 目标机模板同步不会触发。请指定更大的 -Version，"
-                         "或（仅当只改了文档/工具时）加 --force 明确同号重出。" % explicit)
-    if not re.match(r"^\d+\.\d+\.\d+$", explicit):
-        print("  [警告] 版本号 %s 非三段式：插件包 min_app_version 校验会退化成「无法比较→跳过」。" % explicit)
+        k = ver_key(prev)
+        explicit = "%d.%d.%d" % (k[0], k[1], k[2] + 1) if k else "1.0.0"
+        chan = (channel or "nightly").lower()
+        if chan == "nightly":
+            explicit += "_nightly"
+        print("  [版本] 未指定 -Version，自动递增为 %s（上一版：%s，通道：%s）"
+              % (explicit, prev or "无", chan))
+    if not VER_RE.match(explicit):
+        raise SystemExit("版本号不合法：%s（须为数字核 X.Y.Z，可带 _release / _nightly 通道后缀）"
+                         % explicit)
+    if prev:
+        kp, kn = ver_key(prev), ver_key(explicit)
+        if kp is None or kn is None:
+            raise SystemExit("版本号无法与上一版比较（上一版 %s，本次 %s）→ 上一版 version.json.app 非法。"
+                             % (prev, explicit))
+        if kn <= kp and not force:
+            raise SystemExit("版本号未递增（本次 %s，上一版 %s）→ 目标机模板同步不会触发或被判为降级。"
+                             "请指定更大的版本号，或（仅当只改了文档/工具时）加 --force 明确同号重出。"
+                             % (explicit, prev))
     return explicit
+
 
 
 def main():
     ap = argparse.ArgumentParser(description="主包组装（增量合并，不删库）")
-    ap.add_argument("-Version", dest="version", default="", help="版本号（缺省在既有部署目录上递增 patch）")
+    ap.add_argument("-Version", dest="version", default="",
+                    help="版本号（缺省在既有部署目录的数字核上递增 patch）")
+    ap.add_argument("--channel", dest="channel", default="", choices=["", "release", "nightly"],
+                    help="自动递增时的通道（缺省 nightly）；显式 -Version 时忽略")
     ap.add_argument("--force", action="store_true", help="允许与上一版同号重出（只改了文档/工具时）")
     ap.add_argument("--check-only", action="store_true", help="只做前置检查与差异报告，不写任何文件")
     ap.add_argument("-DeployName", dest="deploy_name", default=os.path.join("服务端", "JZToolsHub"), help="部署目录名")
@@ -222,7 +256,7 @@ def main():
     print("  部署目录: %s（既有版本 %s）" % (app, prev or "无"))
     print("  commit: %s | Python: %s" % (commit, pyver))
 
-    version = next_version(prev, args.version, args.force)
+    version = next_version(prev, args.version, args.force, args.channel)
     if args.check_only:
         print("==> [--check-only] 以下为计划，不写任何文件")
 

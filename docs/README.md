@@ -111,8 +111,8 @@ docs/
 | 易漂移事实 | 唯一取用方式 |
 | --- | --- |
 | 主包/插件包/组件包的**体积与文件数** | 以出包产物为准；历史数字只作"当时口径"叙述，须带日期 |
-| **当前主体版本号** | `deploy/JZToolsHub/version.json`（出包时写入）；源码状态见 `HANDOFF.md` §2 |
-| 插件**版本号** | 各 `plugins/<id>/manifest.json`（**禁止**在文档里写死） |
+| **当前主体版本号与通道** | `deploy/服务端/JZToolsHub/version.json` 的 `app`（出包时写入；`X.Y.Z` 数字核 + release/nightly 通道口径见 `docs/guide/打包部署手册.md` §2）；源码状态见 `HANDOFF.md` §2 |
+| 插件**版本号** | 各 `plugins/<id>/manifest.json`（**禁止**在文档里写死；通道后缀见《插件设计规范.md》V-10） |
 | `JZToolsHub.spec` 的 `PACKAGES` **项数与内容** | `JZToolsHub.spec` ∪ `DEP_COMPONENT_PACKAGES`；文档不复述项数 |
 | 打包/校验的**阈值常量**（模板数、必需文件…） | `tools/verify-package.py`（`REQUIRED`/`DOC_SINGLES`/`DOC_DIRS` 由 `tools/package-content.json` 派生）；口径说明见 `docs/guide/打包部署手册.md` |
 | **随包清单**（哪些目录/文件进包） | **单一真源 `tools/package-content.json`**（组装脚本 `tools/build-deploy-local.py` 与 `tools/verify-package.py` 共读）；口径表见本文件 §8 |

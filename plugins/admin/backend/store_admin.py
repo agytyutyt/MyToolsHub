@@ -51,7 +51,9 @@ PLUGIN_ID_RE = plugin_admin.PLUGIN_ID_RE
 
 CATALOG_SCHEMA = 2
 ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-VERSION_RE = re.compile(r"^\d+(\.\d+)+$")
+# 版本号形态：数字核（至少两段，dep-slot 组件包会用四段如 5.0.0.93）+ 可选通道后缀。
+# 三段式「包清单版本号」的严格校验走 plugin_admin.VERSION_RE（X.Y.Z + 通道）。
+VERSION_RE = re.compile(r"^\d+(\.\d+)+(?:[ _-](?:release|nightly))?$")
 RUNTIMES = ("local", "server", "dep-slot")
 STATUSES = ("pending", "rejected", "published", "delisted")
 
@@ -331,8 +333,8 @@ def check_server_backend_zip(zip_path):
     version = str(meta.get("version") or "")
     if not PLUGIN_ID_RE.match(pid):
         errors.append("包清单 id 非法：%r" % pid)
-    if not re.match(r"^\d+\.\d+\.\d+$", version):
-        errors.append("包清单版本号不是 主.次.修订：%r" % version)
+    if not plugin_admin.VERSION_RE.match(version):
+        errors.append("包清单版本号不合法（须为 X.Y.Z，可带 release / nightly 通道后缀）：%r" % version)
     manifest = _zip_json(zip_path, "payload/plugins/%s/manifest.json" % pid)
     if not isinstance(manifest, dict):
         errors.append("包结构不符：缺少 payload/plugins/%s/manifest.json" % pid)

@@ -294,10 +294,20 @@ def build_staging(args, base_id, rules):
     return staging, manifest, notes
 
 
+_NIGHTLY_RE = re.compile(r"[ _-]?nightly\b", re.IGNORECASE)
+# 版本号 = 数字核（至少两段）+ 可选通道后缀（release / nightly），见《打包部署手册》§2
+_VER_RE = re.compile(r"^\d+(\.\d+)+(?:[ _-](?:release|nightly))?$")
+
+
 def _ver_tuple(v):
-    """三段式版本 → 可比较元组；非数字段按 0 处理（容忍 1.2.3b 等形态，仅用于门槛比较）。"""
+    """版本号 → 可比较元组 `(主, 次, 修订, 通道序)`；通道口径见 `tools/_shared.psm1`
+    （同数字核则 nightly < release，裸号与 `_release` 属正式通道）。
+
+    非数字段按 0 处理（容忍 1.2.3b 等形态，仅用于门槛比较）。
+    """
+    s = str(v or "").strip()
     parts = []
-    for x in str(v or "").split("."):
+    for x in s.split("."):
         digits = ""
         for ch in x:
             if ch.isdigit():
@@ -307,7 +317,7 @@ def _ver_tuple(v):
         parts.append(int(digits) if digits else 0)
     while len(parts) < 3:
         parts.append(0)
-    return tuple(parts[:3])
+    return tuple(parts[:3] + [0 if _NIGHTLY_RE.search(s) else 1])
 
 
 def _check_frontend_from_sync(args, manifest, notes):
@@ -425,8 +435,9 @@ def main():
                 die("hybrid 的 mount 必须以 /api/local/%s 开头（实为 %r）" % (pid, mount))
 
         version = args.version or str(manifest.get("version") or "")
-        if not re.match(r"^\d+(\.\d+)+$", version):
-            die("版本号不是语义化版本：%r（manifest.version 或 -Version 指定）" % version)
+        if not _VER_RE.match(version):
+            die("版本号不合法：%r（须为 数字核 X.Y.Z，可带 release / nightly 通道后缀；"
+                "取 manifest.version 或 -Version 指定）" % version)
 
         out_dir = os.path.abspath(args.out_dir)
         os.makedirs(out_dir, exist_ok=True)

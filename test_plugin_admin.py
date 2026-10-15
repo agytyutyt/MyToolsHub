@@ -31,6 +31,44 @@ def sha256(path):
     return h.hexdigest()
 
 
+class TestVersionChannelRule(unittest.TestCase):
+    """双通道版本号口径（《插件设计规范》V-10、《打包部署手册》§2）。
+
+    锁住四处拷贝（plugin_admin / _shared.psm1 / install.ps1 / install-plugin.ps1）必须一致的结论：
+    数字核相同则 nightly < release；兼容性门控只看数字核。
+    """
+
+    def test_channel_ordering(self):
+        self.assertEqual(pa.semver_cmp("1.0.0_nightly", "1.0.0"), -1)   # 在研升正式 = 合法递增
+        self.assertEqual(pa.semver_cmp("1.0.0", "1.0.0_nightly"), 1)     # 反向 = 降级
+        self.assertEqual(pa.semver_cmp("1.0.0_nightly", "1.0.0_nightly"), 0)
+        self.assertEqual(pa.semver_cmp("1.0.0_release", "1.0.0"), 0)     # 裸号与 _release 等价
+        self.assertEqual(pa.semver_cmp("1.0.1_nightly", "1.0.0"), 1)     # 数字核优先于通道
+        self.assertEqual(pa.semver_cmp("1.10.0", "1.9.0"), 1)            # 数值比较，不是字符串比较
+
+    def test_core_comparison_ignores_channel(self):
+        for a, b, want in (("1.0.0_nightly", "1.0.0", 0), ("1.0.0", "1.0.0_nightly", 0),
+                           ("1.0.0_nightly", "1.0.1", -1), ("1.0.0_nightly", "0.9.9", 1)):
+            self.assertEqual(pa.semver_core_cmp(a, b), want, (a, b))
+
+    def test_illegal_forms(self):
+        self.assertIsNone(pa.semver_cmp("2.0", "1.0.0"))       # 两段式不再兼容，禁止使用
+        self.assertIsNone(pa.semver_cmp("", "1.0.0"))
+        self.assertIsNone(pa.semver_core_cmp("nightly", "1.0.0"))
+
+    def test_version_pattern(self):
+        for ok in ("1.0.0", "1.0.0_nightly", "1.0.0-release", "1.0.0 release"):
+            self.assertTrue(pa.VERSION_RE.match(ok), ok)
+        for bad in ("1.0", "1.0.0-beta", "1.0.0_rolling", "v1.0.0"):
+            self.assertFalse(pa.VERSION_RE.match(bad), bad)
+
+    def test_min_app_gate_ignores_channel(self):
+        """主包出 1.0.0_nightly 时，声明「主程序 ≥ 1.0.0」的插件必须放行（jz_deps 那一路）。"""
+        import jz_deps
+        self.assertTrue(jz_deps.version_satisfies("1.0.0_nightly", ">=1.0.0"))
+        self.assertFalse(jz_deps.version_satisfies("1.0.0_nightly", ">=1.0.1"))
+
+
 class Base(unittest.TestCase):
     """沙箱：<tmp>/app（程序目录，含一个 demo 插件） + <tmp>/data（数据根）。"""
 

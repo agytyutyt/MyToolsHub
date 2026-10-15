@@ -25,6 +25,28 @@ $ExeName = "$AppName.exe"
 $Source = $PSScriptRoot
 $RegKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
 
+# 版本号比较（★ 自包含拷贝，口径真源见 tools\_shared.psm1 的 Compare-SemVer 上方注释；
+# 本脚本随组件包分发到无仓库的目标机，只能自带实现。改一处必须同步四处）。
+# 依赖组件的 min_app_version 只看**数字核**，release/nightly 通道后缀不参与兼容性判定。
+function Split-VerKey {
+    param([string]$V)
+    if ($V -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
+    $core = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    $tail = $V.Substring($Matches[0].Length)
+    $rank = if ($tail -match '^[ _-]?nightly\b') { 0 } else { 1 }
+    return , ($core + $rank)
+}
+function Compare-SemVerCore {
+    param([string]$A, [string]$B)
+    $pa = Split-VerKey $A
+    $pb = Split-VerKey $B
+    if ($null -eq $pa -or $null -eq $pb) { return $null }
+    for ($i = 0; $i -lt 3; $i++) {
+        if ($pa[$i] -gt $pb[$i]) { return 1 }
+        if ($pa[$i] -lt $pb[$i]) { return -1 }
+    }
+    return 0
+}
 function Write-Utf8NoBom {
     # 清单必须是 UTF-8 **无 BOM**（带 BOM 会让部分 JSON 读取方解析失败）
     param([string]$Path, [string]$Text)
@@ -236,8 +258,13 @@ if ($meta -and $meta.min_app_version) {
     $vf = Join-Path $AppDir "version.json"
     if (Test-Path -LiteralPath $vf) {
         $appVer = [string]((Get-Content -LiteralPath $vf -Raw -Encoding UTF8 | ConvertFrom-Json).app)
-        if ($appVer -and ($appVer -lt [string]$meta.min_app_version)) {
-            Fail "本组件要求主程序 ≥ $($meta.min_app_version)（当前 $appVer），请先升级主包。"
+        if ($appVer) {
+            # 原实现是字符串比较（"1.10" 会被判成小于 "1.9"）——改为数字核比较，
+            # 无法解析的一侧按"不参与门控"处理（与 install-plugin.ps1 同口径）。
+            $c = Compare-SemVerCore $appVer ([string]$meta.min_app_version)
+            if ($null -ne $c -and $c -lt 0) {
+                Fail "本组件要求主程序 ≥ $($meta.min_app_version)（当前 $appVer），请先升级主包。"
+            }
         }
     }
 }

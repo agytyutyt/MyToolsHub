@@ -120,12 +120,37 @@ function Get-RelPath {
     }
     return $f -replace '\\', '/'
 }
+# ★ 双通道口径（2026-10-15 命名规则改造）：版本号 = 数字核 X.Y.Z + 可选通道后缀，
+#   数字核相同则 nightly < release（X.Y.Z_nightly 是 X.Y.Z 的前身）。本脚本随包分发到目标机、
+#   必须自包含，与 tools\_shared.psm1 / install.ps1 / plugin_admin.py 各留同口径拷贝——
+#   **改一处必须同步四处**。两类比较不要混用：
+#   Compare-SemVer     → 包版本 vs 已装版本（升级 / 降级 / 同版本判定，通道感知）
+#   Compare-SemVerCore → min_app_version / upgrade_from_* / 依赖版本（只看数字核；
+#                        否则主包出 1.0.0_nightly 会把声明「主程序 ≥ 1.0.0」的包全判为版本过低）
+function Split-VerKey {
+    param([string]$V)
+    if ($V -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
+    $core = @([int]$matches[1], [int]$matches[2], [int]$matches[3])
+    $tail = $V.Substring($matches[0].Length)
+    $rank = if ($tail -match '^[ _-]?nightly\b') { 0 } else { 1 }
+    return , ($core + $rank)
+}
 function Compare-SemVer {
     param([string]$A, [string]$B)
-    $pa = @(0, 0, 0); $pb = @(0, 0, 0); $oka = $false; $okb = $false
-    if ($A -match '^(\d+)\.(\d+)\.(\d+)') { $pa = @([int]$matches[1], [int]$matches[2], [int]$matches[3]); $oka = $true }
-    if ($B -match '^(\d+)\.(\d+)\.(\d+)') { $pb = @([int]$matches[1], [int]$matches[2], [int]$matches[3]); $okb = $true }
-    if (-not $oka -or -not $okb) { return $null }   # 任一不合法 → 交由调用方决定
+    $pa = Split-VerKey $A
+    $pb = Split-VerKey $B
+    if ($null -eq $pa -or $null -eq $pb) { return $null }   # 任一不合法 → 交由调用方决定
+    for ($i = 0; $i -lt 4; $i++) {
+        if ($pa[$i] -gt $pb[$i]) { return 1 }
+        if ($pa[$i] -lt $pb[$i]) { return -1 }
+    }
+    return 0
+}
+function Compare-SemVerCore {
+    param([string]$A, [string]$B)
+    $pa = Split-VerKey $A
+    $pb = Split-VerKey $B
+    if ($null -eq $pa -or $null -eq $pb) { return $null }
     for ($i = 0; $i -lt 3; $i++) {
         if ($pa[$i] -gt $pb[$i]) { return 1 }
         if ($pa[$i] -lt $pb[$i]) { return -1 }
@@ -771,7 +796,7 @@ if ($meta.min_app_version) {
         if (-not $Force) { Fail "无法读取主程序版本（缺 version.json.app），而本包声明了 min_app_version=$($meta.min_app_version)。确认无碍请加 -Force。" }
         Warn "无法读取主程序版本，已按 -Force 跳过 min_app_version 校验"
     } else {
-        $c = Compare-SemVer $appVer $meta.min_app_version
+        $c = Compare-SemVerCore $appVer $meta.min_app_version
         if ($null -eq $c) { Warn "版本号无法比较（app=$appVer，min=$($meta.min_app_version)），跳过该项校验" }
         elseif ($c -lt 0) { Fail "主程序版本过低：本机 $appVer < 本包要求的 $($meta.min_app_version)。`n         请先用整包安装脚本（一键安装.bat）升级主程序。" }
     }
@@ -800,13 +825,13 @@ if ($isFresh) {
 } else {
     if ($sameVer -and -not $Force) { Fail "同版本重装：包与已装版本都是 $installedVer。`n         确需重装请加 -Force（仍会校验哈希并备份）。" }
     if ($meta.upgrade_from_min) {
-        $c = Compare-SemVer $installedVer $meta.upgrade_from_min
+        $c = Compare-SemVerCore $installedVer $meta.upgrade_from_min
         if ($null -ne $c -and $c -lt 0 -and -not $Force) {
             Fail "不允许跳版升级：已装 $installedVer < 本包最低起升版本 $($meta.upgrade_from_min)。`n         请先升级到中间版本（见包发布记录），或加 -Force 强行越过。"
         }
     }
     if ($meta.upgrade_from_max) {
-        $c = Compare-SemVer $installedVer $meta.upgrade_from_max
+        $c = Compare-SemVerCore $installedVer $meta.upgrade_from_max
         if ($null -ne $c -and $c -gt 0 -and -not $Force) {
             Fail "已装版本 $installedVer 高于本包声明的最高起升版本 $($meta.upgrade_from_max)（属降级路径）。`n         确需如此请加 -Force。"
         }
@@ -854,7 +879,7 @@ if (-not $SkipDepCheck -and $meta.requires) {
         $ok = ($null -ne $actual)
         if ($ok -and $d.version) {
             $want = ([string]$d.version) -replace '^\s*>=?\s*', ''
-            $c = Compare-SemVer $actual $want
+            $c = Compare-SemVerCore $actual $want
             if ($null -ne $c -and $c -lt 0) { $ok = $false }
         }
         $depRows += [pscustomobject]@{ kind = "框架包"; name = $nm; require = [string]$d.version; actual = $actual; ok = $ok; required = ($d.required -ne $false); hint = [string]$d.hint }

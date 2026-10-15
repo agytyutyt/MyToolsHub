@@ -7,7 +7,12 @@
 #       可用 -Python 指定其他解释器（如 Python 3.8：C:\...\Python38\python.exe）、
 #       用 -DeployName 指定不同的部署目录名（如 py38 版输出到 deploy\JZToolsHub-py38）、
 #       用 -Version 指定版本号（写入 version.json，一键安装脚本据此判断更新）。
-#       未传 -Version 时自动在上一版基础上递增 patch；若最终版本号与上一版相同会直接报错中止
+# ★ 双通道命名规则（2026-10-15，口径真源 docs\guide\打包部署手册.md §2）：
+#       release（正式包）= 裸号 X.Y.Z，nightly（在研包）= X.Y.Z_nightly；数字核相同则
+#       nightly < release，所以 X.Y.Z_nightly 定版升 X.Y.Z 算合法递增。
+#       未传 -Version 时在上一版数字核上 patch+1、通道取 -Channel（缺省 nightly，即"在研线即 nightly"）；
+#       批次收尾定版时显式传 -Version "X.Y.Z"（或 -Channel release）。
+#       若最终版本号未大于上一版会直接报错中止
 #       （版本号不变 → 目标机 sync_templates() 判定未升级 → 全部配置模板同步被跳过），
 #       确需同号重打时加 -Force。
 #       -Python 默认取 PATH 上的 python；脚本会记录其版本到 version.json（组装阶段写入），
@@ -30,6 +35,8 @@ param(
     [string]$Python = "python",
     [string]$DeployName = "服务端\JZToolsHub",
     [string]$Version = "",
+    [ValidateSet("", "release", "nightly")]
+    [string]$Channel = "",            # 自动递增时的通道（缺省 nightly）；显式 -Version 时忽略
     [switch]$Force,
     [switch]$WithOfflineRuntime,   # 随包携带离线运行组件（Chrome / LibreOffice）；默认不带
     [switch]$SkipOfflineRuntime,   # 旧开关：等价于默认行为，保留以免旧命令行报错
@@ -80,15 +87,31 @@ if ($ZipOnly) {
     exit 0
 }
 
-# 版本号：-Version 未指定时自动递增 patch（1.6 → 1.7）
+# 版本号（双通道口径见本脚本头部注释与 docs\guide\打包部署手册.md §2）：
+#   -Version 显式给出 → 原样使用（自带通道后缀时以它为准）；
+#   未给出 → 上一版**数字核** patch+1，通道取 -Channel（缺省 nightly，即"在研线即 nightly"）。
+#   上一版读不到 / 数字核打不出（含历史两段式如 1.6）→ 落基线 1.0.0（两段式已不再兼容）。
 if (-not $Version) {
-    if     ($PrevVer -match '^(\d+)\.(\d+)$')        { $Version = "{0}.{1}"     -f $matches[1], ([int]$matches[2] + 1) }
-    elseif ($PrevVer -match '^(\d+)\.(\d+)\.(\d+)$') { $Version = "{0}.{1}.{2}" -f $matches[1], $matches[2], ([int]$matches[3] + 1) }
-    else                                             { $Version = "1.0.0" }
-    Write-Host "  [版本] 未指定 -Version，自动递增为 $Version（上一版：$($PrevVer)）"
+    $prevKey = Split-VerKey $PrevVer
+    if ($prevKey) { $Version = "{0}.{1}.{2}" -f $prevKey[0], $prevKey[1], ($prevKey[2] + 1) }
+    else          { $Version = "1.0.0" }
+    $verChan = if ($Channel) { $Channel } else { "nightly" }
+    if ($verChan -eq "nightly") { $Version += "_nightly" }
+    Write-Host "  [版本] 未指定 -Version，自动递增为 $Version（上一版：$($PrevVer)，通道：$verChan）"
 }
-if ($PrevVer -and $Version -eq $PrevVer -and -not $Force) {
-    throw "版本号与上一版相同（$Version）→ 目标机模板同步不会触发。请指定更大的 -Version，或加 -Force 强制同号重打。"
+if ($Version -notmatch '^\d+\.\d+\.\d+(?:[ _-](?:release|nightly))?$') {
+    throw "版本号不合法：$Version（须为数字核 X.Y.Z，可带 _release / _nightly 通道后缀）"
+}
+# 递增闸门改为通道感知：同号**和降级**都拦（原实现只拦同号，回退到更旧的号会无声放行）。
+# X.Y.Z_nightly → X.Y.Z 属合法递增（定版），反向属降级。
+if ($PrevVer) {
+    $verCmp = Compare-SemVer $Version $PrevVer
+    if ($null -eq $verCmp) {
+        throw "版本号无法与上一版比较（上一版 $PrevVer，本次 $Version）→ 上一版 version.json.app 非法或本次号不合法。"
+    }
+    if ($verCmp -le 0 -and -not $Force) {
+        throw "版本号未递增（本次 $Version，上一版 $PrevVer）→ 目标机模板同步不会触发或被判为降级。`n         请指定更大的版本号，或（仅只改了文档/工具时）加 -Force 同号重打。"
+    }
 }
 
 # 1. 清理旧产物（只清理本次目标，保留其他 DeployName 的旧版本共存）

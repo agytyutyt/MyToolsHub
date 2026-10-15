@@ -147,13 +147,25 @@ function Invoke-AppRollback {
 
 # ---------------- 语义化版本比较（插件版本防回退用） ----------------
 # 返回 -1 / 0 / 1；任一侧不是 主.次.修订 时返回 $null（调用方按"不参与比较"处理）
+# ★ 双通道口径（2026-10-15 命名规则改造）：数字核相同则 **nightly < release**，
+#   即 X.Y.Z_nightly 是 X.Y.Z 的前身（裸号与 _release 同属正式通道）。
+#   本脚本随包分发到无仓库的目标机、必须自包含，故与 tools\_shared.psm1、
+#   tools\plugin-upgrade\install-plugin.ps1、plugins\admin\backend\plugin_admin.py
+#   各留一份同口径拷贝——**改一处必须同步四处**。
+function Split-VerKey {
+    param([string]$V)
+    if ($V -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
+    $core = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    $tail = $V.Substring($Matches[0].Length)
+    $rank = if ($tail -match '^[ _-]?nightly\b') { 0 } else { 1 }
+    return , ($core + $rank)
+}
 function Compare-SemVer {
     param([string]$A, [string]$B)
-    if ($A -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
-    $pa = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
-    if ($B -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
-    $pb = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
-    for ($i = 0; $i -lt 3; $i++) {
+    $pa = Split-VerKey $A
+    $pb = Split-VerKey $B
+    if ($null -eq $pa -or $null -eq $pb) { return $null }
+    for ($i = 0; $i -lt 4; $i++) {
         if ($pa[$i] -gt $pb[$i]) { return 1 }
         if ($pa[$i] -lt $pb[$i]) { return -1 }
     }

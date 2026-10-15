@@ -142,7 +142,9 @@ if ($toolsCfg) {
 # ---------------- C-2：版本 ----------------
 $manVer = $manifest.version
 if ([string]::IsNullOrWhiteSpace($manVer)) { Die "manifest.json 缺少 version（规范 V-1）" }
-if ($manVer -notmatch '^\d+\.\d+\.\d+$') { Die "manifest.json.version 不是语义化版本：$manVer" }
+if ($manVer -notmatch '^\d+\.\d+\.\d+(?:[ _-](?:release|nightly))?$') {
+    Die "manifest.json.version 不合法：$manVer（须为 X.Y.Z，可带 release / nightly 通道后缀，规范 V-1）"
+}
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = $manVer }
 if ($Version -ne $manVer) {
     Die "版本不一致：-Version=$Version，manifest.json.version=$manVer（两处必须相等，见 §4.5）"

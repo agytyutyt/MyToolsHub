@@ -270,7 +270,8 @@ def main():
         check(False, "version.json 可解析", str(e))
     for k in ("app", "schema", "commit", "built_at", "python", "offline", "plugin_api"):
         check(k in v, "version.json 含字段 %s" % k)
-    check(bool(re.match(r"^\d+\.\d+\.\d+$", str(v.get("app", "")))), "app 为三段式版本号", str(v.get("app")))
+    check(bool(re.match(r"^\d+\.\d+\.\d+(?:[ _-](?:release|nightly))?$", str(v.get("app", "")))),
+          "app 版本号合法（数字核 X.Y.Z + 可选 release/nightly 通道后缀）", str(v.get("app")))
     check(isinstance(v.get("plugin_api"), int) and v["plugin_api"] >= 1,
           "plugin_api 为 >=1 的整数（插件 API 版本，真源 jz_deps.PLUGIN_API）", str(v.get("plugin_api")))
     check("-dirty" not in str(v.get("commit", "")), "commit 无 -dirty 干净戳", str(v.get("commit")))

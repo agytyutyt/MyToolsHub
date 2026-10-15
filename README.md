@@ -192,14 +192,20 @@ python app.py
 > 本节以下内容是构建脚本的全貌，只在**要改构建口径**时才需要细读。
 
 ```powershell
-# 递增版本号并打包（版本号写入 version.json，是目标机配置模板同步的触发依据）
-powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "1.7.0"
+# 出正式包（批次收尾定版）：显式给三段式数字核，裸号即 release 通道
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1 -Version "X.Y.Z"
+# 出在研包（日常构建）：不传 -Version → 在上一版数字核上 patch+1，并自动落 _nightly 通道后缀
+powershell -ExecutionPolicy Bypass -File build-deploy.ps1
+#   版本号形态 = 数字核 X.Y.Z + 通道（release 裸号 / nightly 带 _nightly）；
+#   数字核相同则 nightly < release。口径真源：docs/guide/打包部署手册.md §2、《插件设计规范.md》V-10
 
 # 可选参数
 #   -Python "C:\Python314\python.exe"   指定打包解释器（基线 3.14；不传则取 PATH 上的 python，
 #                                        脚本会校验并在与基线不符时告警）
 #   -DeployName "JZToolsHub-py38"       输出目录名（多版本部署目录共存）
-#   -Force                              允许版本号与上一版相同（默认会报错中止）
+#   -Channel "release"                  自动递增时的通道（缺省 nightly；显式 -Version 时忽略）
+#   -Force                              允许版本号与上一版同号或更低（默认报错中止：同号不触发模板同步、
+#                                        低版会被目标机安装器按 V-9 跳过覆盖）
 #   -WithOfflineRuntime                 随包携带离线组件（出胖包；默认**不带**）
 #   -SkipOfflineRuntime                 旧开关，已等价于默认行为（仅为兼容旧命令行保留）
 #   -KeepFullLibreOffice                随包时**同时保留**完整 LibreOffice MSI（默认仅留裁剪核心包；两者都在时包体积约 682 MB）
@@ -282,7 +288,9 @@ deploy\JZToolsHub\
 
 > **主包默认瘦身**：不含 Chrome / LibreOffice，需要高保真 Office 预览的目标机，**另外解压组件包双击一次**即可（免管理员、对目标机隐身、装完即生效、不影响 Office/WPS 与默认应用）。浏览器缺失时优先用目标机自带的 Chrome/Edge。
 
-> **发版务必递增 `-Version`**：版本号不变时模板同步不触发，新版提示词等配置不会生效。
+> **发版务必递增 `-Version`**：版本号不变时模板同步不触发，新版提示词等配置不会生效；
+> 版本号更低时安装器按 V-9 直接跳过覆盖。递增判定**通道感知**（V-10）——`X.Y.Z_nightly` 升 `X.Y.Z`
+> 算递增，反向算降级。
 
 > 离线组件失败不会让安装失败（与"缺依赖插件优雅降级"同一原则）。**LibreOffice 组件为免管理员**
 > 的便携解包，**Chrome 组件**才需要提权；没提权时脚本只打印指引，事后单独重跑组件包里的对应 bat 即可。
@@ -301,8 +309,9 @@ deploy\JZToolsHub\
 powershell -ExecutionPolicy Bypass -File tools\build-plugin-package.ps1 -Id admin
 
 # 常用参数
-#   -Version 1.3.1            覆盖版本号（缺省取 manifest.json，且必须大于上一发布版本）
-#   -MinApp 1.9.0             要求的目标机主程序最低版本（写入 min_app_version）
+#   -Version 1.3.1            覆盖版本号（缺省取 manifest.json，且必须大于上一发布版本；
+#                             可带 release / nightly 通道后缀，V-10）
+#   -MinApp 1.9.0             要求的目标机主程序最低版本（写入 min_app_version；**只写数字核，不带通道**）
 #   -FromMin 1.2.0 -FromMax 1.3.0    允许的起升版本区间
 #   -Notes docs\变更说明.md    人工变更说明（缺省用 git 提交记录自动生成）
 #   -Publish \\fileserver\JZToolsHub\插件包   出包后直接投递共享盘（含 index.json，供阶段三批量更新）

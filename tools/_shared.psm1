@@ -7,8 +7,9 @@
 #
 # 收口清单（此前 N 份手抄、语义还漂移过）：
 #   Say/Warn/Die、Write-Utf8NoBom、Get-RelPath、Get-Sha256、Get-Hash16、
-#   Compare-SemVer（★ 统一语义：任一侧非法 → $null，由调用方决定；此前
-#   build-plugin-package 那份把非法按 (0,0,0) 处理，与其余三份结论相反）、
+#   Compare-SemVer / Compare-SemVerCore / Split-VerKey（★ 统一语义：任一侧非法 → $null，由调用方决定；此前
+#   build-plugin-package 那份把非法按 (0,0,0) 处理，与其余三份结论相反。
+#   2026-10-15 起认 release/nightly 双通道后缀，见 Compare-SemVer 上方口径注释）、
 #   Get-TempStagingPath、Get-IsoTimestamp、Compress-DirectoryToZip、
 #   Get-SpecPackageList（JZToolsHub.spec 的 PACKAGES / DEP_COMPONENT_PACKAGES 解析）、
 #   Test-LibreOfficeCoreBundle、Get-PyBaseline、Get-PythonRuntimeInfo。
@@ -59,11 +60,37 @@ function Get-Hash16 {
 # 语义化版本比较：返回 1 / 0 / -1；任一侧不是 主.次.修订 开头 → $null（调用方决定口径）。
 # ★ 统一语义（P2-2）：非法一侧一律 $null——需要"非法按 0.0.0"的调用方自行转换，
 #   不要在本函数里替调用方拍板（此前两套语义并存，同一比较两处结论不同）。
+# ★ 双通道口径（2026-10-15 命名规则改造）：版本号 = 数字核 X.Y.Z + 可选通道后缀。
+#   数字核相同则 **nightly < release**（X.Y.Z_nightly 是 X.Y.Z 的前身，升正式号算递增）；
+#   裸号与 _release / -release 同属正式通道。与 plugin_admin.ver_key() / install.ps1 /
+#   install-plugin.ps1 三处自包含拷贝**必须同一口径**（拷贝原因见本文件头部）。
+#   ★ 两类比较不要混用：
+#     Compare-SemVer     → 递增 / 发布 / 是否有更新（通道感知）
+#     Compare-SemVerCore → 兼容性门控 min_app_version / upgrade_from_*（只看数字核，
+#                          否则主包出 1.0.0_nightly 会把声明「主程序 ≥ 1.0.0」的插件全判为版本过低）
+function Split-VerKey {
+    param([string]$V)
+    if ($V -notmatch '^(\d+)\.(\d+)\.(\d+)') { return $null }
+    $core = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3])
+    $tail = $V.Substring($Matches[0].Length)
+    $rank = if ($tail -match '^[ _-]?nightly\b') { 0 } else { 1 }
+    return , ($core + $rank)
+}
 function Compare-SemVer {
     param([string]$A, [string]$B)
-    $pa = $null; $pb = $null
-    if ($A -match '^(\d+)\.(\d+)\.(\d+)') { $pa = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3]) }
-    if ($B -match '^(\d+)\.(\d+)\.(\d+)') { $pb = @([int]$Matches[1], [int]$Matches[2], [int]$Matches[3]) }
+    $pa = Split-VerKey $A
+    $pb = Split-VerKey $B
+    if ($null -eq $pa -or $null -eq $pb) { return $null }
+    for ($i = 0; $i -lt 4; $i++) {
+        if ($pa[$i] -gt $pb[$i]) { return 1 }
+        if ($pa[$i] -lt $pb[$i]) { return -1 }
+    }
+    return 0
+}
+function Compare-SemVerCore {
+    param([string]$A, [string]$B)
+    $pa = Split-VerKey $A
+    $pb = Split-VerKey $B
     if ($null -eq $pa -or $null -eq $pb) { return $null }
     for ($i = 0; $i -lt 3; $i++) {
         if ($pa[$i] -gt $pb[$i]) { return 1 }
@@ -168,6 +195,6 @@ function Get-PythonRuntimeInfo {
 }
 
 Export-ModuleMember -Function Say, Warn, Die, Write-Utf8NoBom, Get-RelPath, Get-Sha256, Get-Hash16,
-    Compare-SemVer, Get-TempStagingPath, Get-IsoTimestamp, Compress-DirectoryToZip,
+    Compare-SemVer, Compare-SemVerCore, Split-VerKey, Get-TempStagingPath, Get-IsoTimestamp, Compress-DirectoryToZip,
     Get-SpecPackageList, Get-SpecPackages, Get-SpecDepComponentPackages,
     Test-LibreOfficeCoreBundle, Get-PyBaseline, Get-PythonRuntimeInfo

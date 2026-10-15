@@ -50,6 +50,8 @@ DEPS_COMPONENT_REL = os.path.join("runtime", "pylibs", "manifest.json")
 # 不再有"包 → 组件"的映射（2026-09-20 取消）；缺依赖时的提示由插件自己声明（declared_hint）。
 # 版本号写法：>=x.y.z 或 x.y.z
 _REQ_RE = re.compile(r"^\s*(>=)?\s*(\d+(?:\.\d+){0,3})\s*$")
+# 实际版本号：数字核后可带**通道后缀**（release / nightly，出包命名规则双通道）
+_VERSION_RE = re.compile(r"^\s*(\d+(?:\.\d+){0,3})(?:[ _-](?:release|nightly))?\s*$")
 
 _VENDOR_REL = os.path.join("backend", "vendor")
 
@@ -59,10 +61,15 @@ _VENDOR_REL = os.path.join("backend", "vendor")
 # --------------------------------------------------------------------------- #
 
 def parse_version(text):
-    """把 '1.2.3' 解析为 (1, 2, 3)；非法返回 None。"""
+    """把 '1.2.3' / '1.2.3_nightly' 解析为 (1, 2, 3)；非法返回 None。
+
+    通道后缀（release / nightly）**不参与**依赖兼容性比较：`min_app_version` 只看数字核，
+    故 `1.0.0_nightly` 满足 `>=1.0.0`。通道的先后与递增判定归 `plugin_admin.semver_cmp`
+    那层的通道序管，两边口径不要混。
+    """
     if not isinstance(text, str):
         return None
-    m = re.match(r"^\s*(\d+(?:\.\d+){0,3})\s*$", text)
+    m = _VERSION_RE.match(text)
     if not m:
         return None
     return tuple(int(x) for x in m.group(1).split("."))

@@ -39,7 +39,9 @@ API_PREFIX = "/plugin/store/api"
 
 CATALOG_SCHEMA = 2
 ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
-VERSION_RE = re.compile(r"^\d+(\.\d+)*$")
+# 版本号形态：数字核（至少两段，dep-slot 组件包会用四段）+ 可选 release / nightly 通道后缀。
+# 目录过滤（catalog）与下载 URL 校验共用它——漏掉通道后缀会让 nightly 包在商店里静默消失。
+VERSION_RE = re.compile(r"^\d+(\.\d+)*(?:[ _-](?:release|nightly))?$")
 STATS_LOCK = threading.Lock()
 INSTALLS_LOCK = threading.Lock()
 
