@@ -71,10 +71,13 @@
 - **主干只有 `main`（单主干）**。2026-10-03 起开发一度落在 `desktop`，2026-10-15 快进并回 `main` 后
   该 ref 已删（本地+远程；删前核过树逐字节同一、且提交已在 `origin/main` 上，零丢失）。分支现状现取、
   **不要固化**：`git for-each-ref --format='%(refname:short)' refs/heads refs/remotes`。
-  历史功能分支 ref 已删、内容未并入主干、打包也不含；唯一一件是 G2 圆角引擎 jz-radius v1.2
-  （尖端 `a8c9834`，+1283 行：static/js/jz-radius.js + 基准页 + 设计文档），
-  需要时 `git branch G2改造 a8c9834` 或 `git cherry-pick a8c9834` 找回。
-  ⚠ 该 commit 现在**不在任何 ref 上**（不可达），`git gc --prune` 后即永久消失——想保留要先钉 ref。
+  历史功能分支 ref 已删、内容未并入主干、打包也不含。其中 **G2 圆角引擎 jz-radius v1.2**
+  （尖端 `a8c9834`，+1283 行：static/js/jz-radius.js + g2-bench.html + 设计文档）
+  **2026-10-15 需求方裁定放弃**——不再钉 ref 找回，本条原先写的「需要时 `git branch G2改造 a8c9834` 找回」
+  **作废**；该 commit 不在任何 ref 上（不可达），随自然 gc 消解即为终态，**别为它主动 `git gc --prune`**。
+  其余八条（PluginDesign / 共享文档 / 功能优化 / 压力测试 / 战果录入 / 插件位置编辑 / 界面滑块 / 登录改造）
+  的**尖端 commit 号从未记录在任何文档里**，ref 一删就无从指名——只能 `git fsck --lost-found` 逐个开包辨认
+  （2026-10-15 实测仓内仍有 17 个悬空 commit），且同样随时随 gc 消失；一律按**已弃**处理。
 
 ## G 文档体系
 

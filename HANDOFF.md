@@ -168,7 +168,7 @@ ls -1t deploy/JZToolsHub-v*.zip | head -3     # 最近 3 个主包产物
 | 主干 | `main`（**单主干**）。2026-10-03 起开发一度落到 `desktop` 分支，2026-10-15 快进并回 `main`、`desktop` ref 已删（本地与远程；删前核过 `main^{tree}` == `desktop^{tree}` 且提交已在 `origin/main` 上，零丢失） |
 | 分支自检 | 现存分支应只有 `main`：`git for-each-ref --format='%(refname:short)' refs/heads refs/remotes` —— 分支清单**不要固化进本表**（本轮就吃了「上午写 desktop、下午就作废」的回头账） |
 | 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git` |
-| 已删待找回的历史分支 | `G2改造`（连续曲率圆角引擎 jz-radius v1.2 + 基准页 + 设计文档）、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造` —— ref 已删、内容**未并入主干、打包不含**，找回方法见 `.workbuddy/memory/MEMORY.md` §F。⚠ 其尖端 `a8c9834` 现为**不可达对象**（不在任何 ref 上，`git cat-file -t` 仍返 commit 只是尚未 gc），`git gc --prune` 之后就找不回来——想保留必须先 `git branch G2改造 a8c9834` 钉一个 ref |
+| 已删的历史分支（均不保留） | `PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造` —— ref 已删、内容**未并入主干、打包不含**；其尖端 commit 号**从未记录在文档里**，ref 一删即无从指名，只能 `git fsck --lost-found` 逐个辨认（2026-10-15 实测仍有 17 个悬空 commit，同样随 gc 消失），一律按**已弃**处理。`G2改造`（连续曲率圆角引擎 jz-radius v1.2，尖端 `a8c9834`，7 文件 +1283 行：`static/js/jz-radius.js` + `static/dev/g2-bench.html` + 设计文档）**2026-10-15 需求方裁定放弃**：不再钉 ref 找回，`.workbuddy/memory/MEMORY.md` §F 原「`git branch G2改造 a8c9834` 找回」那条方法作废；该对象保持不可达、随自然 gc 消解即为终态。**不要为它主动跑 `git gc --prune`**（会波及全仓不可达对象） |
 | 出包前置 | 先 commit（含仓库根文档与 `docs/` 分层结构）；`deploy/`、`dist/`、`build/`、`runtime/` 均已 gitignore |
 
 ### 2.2 产物状态（**只留口径，不固化版本号**）
