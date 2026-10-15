@@ -9,7 +9,7 @@
 | 后端 | Python **3.14**（打包与生产基线）· Flask |
 | 前端 | 原生 HTML / CSS / JS，无构建步骤（浏览器基线 Chrome ≥ 72） |
 | 插件机制 | 目录扫描 + 配置驱动 + iframe 隔离 + 后端动态加载 |
-| 交付形态 | 源码直跑，或 PyInstaller 打包为 Windows 可执行程序（含一键安装/卸载） |
+| 交付形态 | 源码直跑，或 PyInstaller 打包为 Windows 可执行程序（含一键安装/卸载）；另有**桌面客户端**（`client/`，独立 exe，拓扑见 §4.3） |
 | 目标环境 | **Windows 10 及以上**（不支持 Windows 7，见 §2.1） |
 | 移动端 | 配套 Android 离线接收端 `android-app/InfoParse/`（Kotlin） |
 
@@ -20,7 +20,7 @@
 1. [项目简介](#1-项目简介)
 2. [环境搭建](#2-环境搭建)
 3. [运行与构建](#3-运行与构建)
-4. [目录结构](#4-目录结构)
+4. [目录结构](#4-目录结构)（含 [桌面客户端拓扑](#43-桌面客户端拓扑client)）
 5. [核心模块解析](#5-核心模块解析)
 6. [使用示例](#6-使用示例)
 7. [HTTP API](#7-http-api)
@@ -383,10 +383,31 @@ JZToolsHub/
 │   ├── map-marker/            #   地图标点（纯前端）
 │   └── base64/ json-formatter/ color-picker/ md5-generator/   # 基础示例插件（纯前端）
 ├── static/                    # 框架前端（首页 / 外壳页 / 主题 / SVG 图标回退）
-│   ├── index.html  tool.html
+│   ├── index.html  tool.html  shell-required.html
 │   ├── css/style.css
 │   ├── icons/                 # Twemoji SVG（无彩色 emoji 字体环境的回退）
-│   └── js/  main.js  tool.js  jz-icon.js  llm-settings.js（首页 ⋯ → 大模型设置对话框）
+│   └── js/  main.js  tool.js  sidebar.js  shell-bridge.js  jz-icon.js  jz-dialog.js
+│       jz-copy.js  llm-settings.js（首页 ⋯ → 大模型设置对话框）
+├── client/                    # ★ 桌面客户端（Windows 桌面壳；拓扑见 §4.3）
+│   ├── client_main.py         #   启动序列编排（单实例互斥 → 配置 → 地址 → 起服务 → 开窗）
+│   ├── shell_window.py        #   壳层：pywebview 窗口 + pystray 托盘 + 几何记忆 + 导航锁定
+│   ├── capability_app.py      #   能力层：路由六分区 + 会话镜像 + 账号上下文 + 插件承载（最重模块）
+│   ├── session_mirror.py      #   会话镜像（中继观察到的远程 Cookie）
+│   ├── secure_store.py        #   DPAPI 加密存取（会话镜像落盘；凭据不落盘）
+│   ├── jz_relay.py            #   jz_relay 门面（白名单内访问服务器数据的唯一通道）
+│   ├── local_registry.py      #   本地插件注册表（manifest 扫描 → /api/tools 同构条目）
+│   ├── plugin_executor.py     #   子进程执行器（worker 生命周期 / 超时 / 空闲回收 / 审计）
+│   ├── plugin_host.py         #   子进程侧引导器（stdio-json-v1 + mini-WSGI 派发）
+│   ├── pkg_install.py         #   三类包安装唯一入口（本地插件 / server 前端 / 依赖组件）
+│   ├── plugin_source.py       #   更新源抽象（商店 server 源 / 共享盘 share 源，切换免重启）
+│   ├── client_config.py       #   配置与路径口径（构建配置 + 客户端配置、地址与密钥解析）
+│   ├── single_instance.py     #   命名互斥（防重复启动 / PID 复用误杀）
+│   ├── relay_whitelist.json   #   jz_relay 白名单
+│   └── fallback.html  local_admin.html     # 兜底页 / 本地插件管理页
+├── client-plugins/            # ★ 类 C 客户端工件（local-<id>/，与服务器插件同源派生）
+├── supervisor/                # 服务端进程托管（E 架构：主应用 + 插件后端包 worker）
+├── jz_worker.py               # 服务端插件后端包 worker 宿主
+├── jz_plugin_host.py          # 插件后端加载与依赖组件注入（同源双包，客户端亦复用）
 ├── android-app/InfoParse/     # 移动端 APP（Kotlin，信息传输的 Android 离线接收端）
 ├── wheels/                    # ★ 第三方预编译 wheel（zfec，见 §2.3 与 wheels/README.md）
 ├── runtime/                   # 离线运行组件下载目录（Chrome MSI + LibreOffice MSI/裁剪核心包，已 gitignore；体积 517–682 MB 随口径不同，以 HANDOFF §4 实测记录为准）
@@ -477,6 +498,68 @@ JZToolsHub/
 ```
 
 程序目录与数据目录的对应关系由 `jztools_data.py` 维护，**插件一律通过 `jztools_data.get_data_root_dir()/get_data_root_file()` 定位自己的数据，禁止拼接绝对路径**。
+
+### 4.3 桌面客户端拓扑（`client/`）
+
+桌面客户端是**独立于主包的第二个可执行程序**（`YFJZ_Client.exe`），与主包同源、共用一份宿主内核，
+但**自带一套 static 副本与插件体系**，可在无浏览器环境下独立运行。
+
+> **架构权威落点** → `docs/design/桌面客户端与本地插件-设计文档.md`（三层拓扑 + 路由分区表 + 契约）。
+> 本节只给一眼看懂的骨架，**分区清单、契约字段、决策留痕一律看那份**，此处不复述。
+
+**① 单进程整体拓扑**
+
+```
+远程主包服务器（业务权威：类 A 插件、鉴权、数据、统一大模型配置）
+   ▲ HTTP 中继（纯 REST，无 WS/SSE；会话镜像 Cookie + 壳标识头；401 = 会话统一失效信号）
+   │
+桌面客户端进程（★ 单进程，内嵌 Python 运行时）
+├─ 壳 / UI 层：pywebview 窗口（WebView2，占主线程）+ pystray 托盘（后台线程）
+│    仅放行 127.0.0.1、外链转系统浏览器；窗口几何记忆落数据目录；关窗=隐藏到托盘
+├─ 客户端能力层：Flask + waitress（后台线程，127.0.0.1 随机端口）
+│    ★ 路由分区的唯一裁决点——业务逻辑禁入本层；会话镜像 / 账号上下文 / 插件承载
+├─ 内置 Python 运行时：runtime\python——worker 子进程的解释器
+└─ 子进程（按需拉起）：worker（stdio-json；超时即杀 / resident 常驻 / idle_ttl 空闲回收）
+
+客户端数据目录（%LOCALAPPDATA%\<数据目录名>\，与程序目录分离）
+├─ config.json          # 远程地址、接入密钥、本地插件启停、更新源配置
+├─ session.bin          # 会话镜像（DPAPI 加密；仅会话 Cookie，凭据不落盘）
+├─ account-state.json   # 离线快照（账号 + 安装登记），联网后被刷新覆盖
+├─ geometry.json        # 窗口几何 / webview2-profile（会话跨重启持久）
+├─ users\<账号>\        # ★ 按账号隔离的插件数据根（未登录 = _anonymous）
+└─ plugin-audit.log     # 插件调用审计（落真实登录身份）
+```
+
+启动序列（`client/client_main.py`）：单实例互斥 → 读构建配置（单源）与客户端配置 → 解析远程地址 →
+设 `JZTOOLS_DATA_ROOT` → **waitress 起后台线程** → `webview.start()` 占主线程。
+`--stop`（带镜像名校验防误杀）与 `--await-pid`（重启接棒，等旧进程**真实退出**再抢互斥）是运维/自升级入口。
+
+**② 能力层路由分区（唯一裁决点）**
+
+壳自证门（校验进程内随机 run token 的 Cookie，防浏览器直开本机端口）之后，请求按路径落入互斥的分区：
+
+| 分区 | 落点 |
+| --- | --- |
+| `/local-api/*` | **客户端自有接口，永不中继**（配置 / 健康 / 本地插件管理 / 商店预检·安装·下载）；未命中端点返回明确的 404，不落中继兜底 |
+| `/`、`/tool/<id>`、`/local-admin`、`/plugin/local-*/…` | **本地直出**（客户端自带 static 副本、本地插件前端）；远程不可达 → 兜底页 |
+| `GET /plugin/<id>/<file>` 命中已装 server 前端包清单 | **本地伺服**；未装 / 停用 / 清单外 / 非 GET → 照旧中继 |
+| `/api/tools*` | **清单合并**：远端清单 + 本地条目 + 账号安装登记投影；远程不可达 → 降级为仅本地条目（`degraded`） |
+| `/api/local/<id>/*` | **本地插件派发**：hybrid 走进程内子应用，worker 走子进程执行器 |
+| 其余 `/api/*` 与类 A 页面资产 | **中继远程**（头透传、会话镜像维护、上传 spool 按确切 CL 转发、响应流式回传） |
+
+**③ 模块依赖分层**
+
+| 层 | 模块 | 触发时机 |
+| --- | --- | --- |
+| 启动层 | `client_main` / `shell_window` / `single_instance` | 进程启动一次 |
+| 能力层核心 | `capability_app`（最重模块）+ `session_mirror` / `secure_store` | **每请求都碰** |
+| 支撑层 | `client_config` / `local_registry` / `jz_relay` / `plugin_executor` / `plugin_source` / `pkg_install` | 按路径触发 |
+| 子进程侧 | `plugin_host` | worker 进程内 |
+| 复用主包内核 | `jz_deps` / `jz_api` / `jz_plugin_host` / `jztools_data` | 同源双包，**禁带业务插件** |
+
+> 客户端与主包的关系、存量插件的 A/B/C 三类分法、商店分发口径、依赖槽设计：
+> 分别见 `docs/design/桌面客户端与本地插件-设计文档.md`、`存量插件三类适配-设计文档.md`、
+> `桌面端插件商店-设计文档.md`、`桌面端依赖版本槽-设计文档.md`。
 
 ---
 
