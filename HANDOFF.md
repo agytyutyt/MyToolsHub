@@ -165,10 +165,10 @@ ls -1t deploy/JZToolsHub-v*.zip | head -3     # 最近 3 个主包产物
 
 | 项 | 值（**相对稳定，可以固化**） |
 | --- | --- |
-| 主干 | `desktop`（2026-10-03 起的事实主干，远程同名；日常开发与出包均在此线） |
-| `main` | 2026-10-02「分支收敛」留下的遗留 ref，此后未推进，**不是发布源**；滞后量与可快进性现取，勿在此固化：`git rev-list --count main..desktop`、`git merge-base --is-ancestor main desktop && echo 纯快进` |
+| 主干 | `main`（**单主干**）。2026-10-03 起开发一度落到 `desktop` 分支，2026-10-15 快进并回 `main`、`desktop` ref 已删（本地与远程；删前核过 `main^{tree}` == `desktop^{tree}` 且提交已在 `origin/main` 上，零丢失） |
+| 分支自检 | 现存分支应只有 `main`：`git for-each-ref --format='%(refname:short)' refs/heads refs/remotes` —— 分支清单**不要固化进本表**（本轮就吃了「上午写 desktop、下午就作废」的回头账） |
 | 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git` |
-| 已删待找回的历史分支 | `G2改造`（连续曲率圆角引擎 jz-radius v1.2 + 基准页 + 设计文档）、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造` —— ref 已删（现存分支只有 `desktop` 与 `main`），内容**未并入主干、打包不含**，找回方法见 `.workbuddy/memory/MEMORY.md` §F |
+| 已删待找回的历史分支 | `G2改造`（连续曲率圆角引擎 jz-radius v1.2 + 基准页 + 设计文档）、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造` —— ref 已删、内容**未并入主干、打包不含**，找回方法见 `.workbuddy/memory/MEMORY.md` §F。⚠ 其尖端 `a8c9834` 现为**不可达对象**（不在任何 ref 上，`git cat-file -t` 仍返 commit 只是尚未 gc），`git gc --prune` 之后就找不回来——想保留必须先 `git branch G2改造 a8c9834` 钉一个 ref |
 | 出包前置 | 先 commit（含仓库根文档与 `docs/` 分层结构）；`deploy/`、`dist/`、`build/`、`runtime/` 均已 gitignore |
 
 ### 2.2 产物状态（**只留口径，不固化版本号**）

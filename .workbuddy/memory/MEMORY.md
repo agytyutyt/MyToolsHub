@@ -68,11 +68,13 @@
 
 - 后端跨模块 import 用两步式兜底（relative → absolute → None）。
 - 前端图标别依赖 emoji 字体。
-- **主干是 `desktop`**（2026-10-03 起，开发与出包均在此线）。`main` 是 2026-10-02「分支收敛」
-  留下的遗留 ref，此后未推进、**不是发布源**；两者滞后量现取（`git rev-list --count main..desktop`），
-  不要在文档里固化。历史功能分支 ref 已删（现存分支只有 `desktop` / `main`），内容未并入主干、打包也不含；
-  唯一一件是 G2 圆角引擎 jz-radius v1.2（尖端 `a8c9834`，+1283 行：static/js/jz-radius.js
-  + 基准页 + 设计文档），需要时 `git branch G2改造 a8c9834` 或 `git cherry-pick a8c9834` 找回。
+- **主干只有 `main`（单主干）**。2026-10-03 起开发一度落在 `desktop`，2026-10-15 快进并回 `main` 后
+  该 ref 已删（本地+远程；删前核过树逐字节同一、且提交已在 `origin/main` 上，零丢失）。分支现状现取、
+  **不要固化**：`git for-each-ref --format='%(refname:short)' refs/heads refs/remotes`。
+  历史功能分支 ref 已删、内容未并入主干、打包也不含；唯一一件是 G2 圆角引擎 jz-radius v1.2
+  （尖端 `a8c9834`，+1283 行：static/js/jz-radius.js + 基准页 + 设计文档），
+  需要时 `git branch G2改造 a8c9834` 或 `git cherry-pick a8c9834` 找回。
+  ⚠ 该 commit 现在**不在任何 ref 上**（不可达），`git gc --prune` 后即永久消失——想保留要先钉 ref。
 
 ## G 文档体系
 
