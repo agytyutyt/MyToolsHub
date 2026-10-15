@@ -165,9 +165,10 @@ ls -1t deploy/JZToolsHub-v*.zip | head -3     # 最近 3 个主包产物
 
 | 项 | 值（**相对稳定，可以固化**） |
 | --- | --- |
-| 主干 | `main` |
+| 主干 | `desktop`（2026-10-03 起的事实主干，远程同名；日常开发与出包均在此线） |
+| `main` | 2026-10-02「分支收敛」留下的遗留 ref，此后未推进，**不是发布源**；滞后量与可快进性现取，勿在此固化：`git rev-list --count main..desktop`、`git merge-base --is-ancestor main desktop && echo 纯快进` |
 | 远程 | `origin = https://github.com/agytyutyt/MyToolsHub.git` |
-| 未并入 main 的分支 | `G2改造`（连续曲率圆角引擎 jz-radius v1.2 + 基准页 + 设计文档）、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造` —— 均为历史功能分支，**打包不含** |
+| 已删待找回的历史分支 | `G2改造`（连续曲率圆角引擎 jz-radius v1.2 + 基准页 + 设计文档）、`PluginDesign`、`共享文档`、`功能优化`、`压力测试`、`战果录入`、`插件位置编辑`、`界面滑块`、`登录改造` —— ref 已删（现存分支只有 `desktop` 与 `main`），内容**未并入主干、打包不含**，找回方法见 `.workbuddy/memory/MEMORY.md` §F |
 | 出包前置 | 先 commit（含仓库根文档与 `docs/` 分层结构）；`deploy/`、`dist/`、`build/`、`runtime/` 均已 gitignore |
 
 ### 2.2 产物状态（**只留口径，不固化版本号**）
