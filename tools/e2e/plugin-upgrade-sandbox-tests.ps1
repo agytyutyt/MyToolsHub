@@ -127,6 +127,14 @@ if (-not (Test-Path -LiteralPath $AppSrc)) {
     throw "找不到部署目录（deploy\服务端\JZToolsHub\ 与 deploy\JZToolsHub\ 均不存在）——先出一次主包（tools\build-deploy-local.py 或 build-deploy.ps1）再跑本台架"
 }
 Copy-Item -LiteralPath (Join-Path $AppSrc "version.json") -Destination $App -Force
+# 夹具的 min_app_version 取「沙箱主包的数字核」而不是写死具体版本：2026-10-15 版本号重置到
+# 1.0.0 基线后，原先硬编码的 1.9.0 会让安装器**正确地**判成「主程序版本过低」并拒绝，
+# 连带把升级/状态登记/同版本重装那几条断言整链打红（产品无 bug，是夹具期望过期）。
+# min_app_version 声明只写数字核、不带 release/nightly 通道后缀（规范 V-10）。
+$AppCoreVer = "1.0.0"
+$_av = [string]((Get-Content -LiteralPath (Join-Path $App "version.json") -Raw -Encoding UTF8 | ConvertFrom-Json).app)
+if ($_av -match '^(\d+\.\d+\.\d+)') { $AppCoreVer = $matches[1] }
+Say "  夹具 min_app_version 取沙箱主包数字核：$AppCoreVer（app=$_av）"
 Copy-Item -LiteralPath (Join-Path $AppSrc "config") -Destination $App -Recurse -Force
 Copy-PluginsSeed (Join-Path $App "plugins")
 [System.IO.File]::WriteAllText((Join-Path $App "JZToolsHub.exe"), "", (New-Object System.Text.UTF8Encoding($false)))
@@ -188,7 +196,7 @@ if (-not $m.Success) { throw "夹具 index.html 未找到 app.js?v=N，无法执
 $curV = [int]$m.Groups[1].Value
 $html = $html -replace ('app\.js\?v=' + $curV), ('app.js?v=' + ($curV + 1))
 [System.IO.File]::WriteAllText((Join-Path $fixKb "frontend\index.html"), $html, (New-Object System.Text.UTF8Encoding($false)))
-$r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir, "-MinApp", "1.9.0", "-FromMin", "0.9.0")
+$r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir, "-MinApp", $AppCoreVer, "-FromMin", "0.9.0")
 Check "③ C-3：递增 ?v=$curV→$($curV + 1) 后构建成功（v1.0.1）" ($r.Code -eq 0) $r.Text
 $pkg = Join-Path $OutDir "JZToolsHub-knowledge-base-后端-v1.0.1.zip"   # 命名族方案 A（2026-10-08）：JZToolsHub-<id>-后端-v<版本>.zip
 Check "   包已产出" (Test-Path -LiteralPath $pkg)
@@ -197,7 +205,7 @@ $r = Run-Builder @("-Id", "knowledge-base", "-From", $fixKb, "-OutDir", $OutDir)
 Check "④ C-2：同版本重复发布 → 构建被拒（版本未递增）" ($r.Code -ne 0 -and $r.Text -match "版本未递增") $r.Text
 $meta = Read-ZipJson $pkg "plugin-package.json"
 Check "   包声明 requires_restart=true（后端有改动）" ($meta.requires_restart -eq $true)
-Check "   包声明 min_app_version=1.9.0 / upgrade_from_min=0.9.0" ($meta.min_app_version -eq "1.9.0" -and $meta.upgrade_from_min -eq "0.9.0")
+Check "   包声明 min_app_version=$AppCoreVer（=沙箱主包数字核）/ upgrade_from_min=0.9.0" ($meta.min_app_version -eq $AppCoreVer -and $meta.upgrade_from_min -eq "0.9.0")
 Check "   依赖声明：vendor 含 dhr/xhr；框架库含 flask" (($meta.deps.vendored -contains "dhr") -and ($meta.deps.vendored -contains "xhr") -and ($meta.deps.framework_packages -contains "flask"))
 $entries = @()
 $zip = [IO.Compression.ZipFile]::OpenRead($pkg)
