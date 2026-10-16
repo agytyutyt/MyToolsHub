@@ -35,8 +35,11 @@ __all__ = [
 class NormalizeOptions(ParseOptions):
     #: 强制跳过 LibreOffice，直接走 xlrd 兜底
     force_fallback: bool = False
-    #: LibreOffice 转换超时毫秒（默认 60s）
-    soffice_timeout_ms: int = 60_000
+    #: LibreOffice 转换超时毫秒（默认 120s）
+    #: 2026-10-16 拍板上调：本机全冷首跑实测 39.3~76.8s（跨多次波动），60s 会周期性踩线；
+    #: 超时是硬失败、用户无从补救，放宽几乎无副作用（前端轮询上限 180s 仍大于此值）。
+    #: 背景与候选二段式方案见 docs/design/知识库Office预览-设计文档.md §19。
+    soffice_timeout_ms: int = 120_000
     #: 显式 soffice 路径（也可用环境变量 XHR_SOFFICE）
     soffice_path: Optional[str] = None
 

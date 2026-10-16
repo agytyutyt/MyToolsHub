@@ -572,6 +572,6 @@ def _pdf_task(fid):
   - 并发 2 路（验收②）：预热轮含一次性「第二槽冷启动」41.3s；两槽皆热后串行基线 16.6/15.8s、并发 16.0/16.0s（墙钟 16.0 ≈ max，真并行；并发/串行 = 0.97x/1.01x ≤ 1.5x 判定阈值）；产物 HTML 逐字一致（不串扰）。
   - 判定口径：不退化按「病态退化」定义阈值（两路撞同一 profile 的锁等待/共享锁序列化会到 ≥2×），正常 CPU 竞争波动（本机复测 ±1~3s）不判退化；另加「墙钟 ≈ max(A,B) 而非 A+B」的真并行检查。
 - 已知边界（留痕，未改口径）：
-  - 生产默认转换超时 60s（xhr `soffice_timeout_ms`）：本机全冷首跑 39.3~76.8s（跨多次运行波动），慢机冷路径可能 TIMEOUT → 前端自动回退降级渲染（B-4），profile 预热后正常。**【2026-10-16 拍板：上调默认超时】** 候选值 120s（或「首次宽限 + 后续收紧」二段式）——超时是硬失败、用户无从补救，放宽几乎无副作用；具体值随实施定，落点 `plugins/knowledge-base/backend/vendor/xhr/normalize/__init__.py` 的 `soffice_timeout_ms`。
+  - 生产默认转换超时 60s（xhr `soffice_timeout_ms`）：本机全冷首跑 39.3~76.8s（跨多次运行波动），慢机冷路径可能 TIMEOUT → 前端自动回退降级渲染（B-4），profile 预热后正常。**✅ 已实施（2026-10-17）**：`soffice_timeout_ms` **60_000 → 120_000**（单段式；「首次宽限 + 后续收紧」二段式留作后续可选）。落点 `plugins/knowledge-base/backend/vendor/xhr/normalize/__init__.py`；前端轮询上限 180s 仍大于此值，无需同步改。
   - 池状态为进程内单例（与「单 Flask 进程」部署形态一致）；同机多进程共指同一数据根时，最坏为槽位复用冲突 → 输出存在性校验兜底 → B-4 降级，不静默。
 - 回归锁：`backend/test_office_profile_pool.py`（9 组 51 断言：接缝默认/租用/降级、dhr 接缝、池 LIFO/清扫/失败降级/并发/接线；不依赖真实 LibreOffice——假 soffice + 注入 runner）；`backend/bench_office_profile_pool.py`（本表数据来源：改动前/后两臂 + 并发对照 + 槽位体积）。两脚本按 payload 规则（`test_*.py`/`bench_*.py`）剔除，不入插件包。

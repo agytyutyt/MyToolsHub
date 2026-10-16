@@ -45,7 +45,7 @@ import xhr as _xhr  # noqa: E402
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3
 
-# 测量用超时：生产默认 60_000（xhr/normalize 的 soffice_timeout_ms），实测环境首冷
+# 测量用超时：生产默认 120_000（2026-10-16 起；xhr/normalize 的 soffice_timeout_ms），实测环境首冷
 # 可能超过 60s——测量脚本必须让冷跑跑完，否则拿不到冷/热对照数据。
 _TIMEOUT_MS = 300_000
 
