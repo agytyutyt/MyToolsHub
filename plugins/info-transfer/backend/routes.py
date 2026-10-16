@@ -3307,9 +3307,12 @@ def _run_build_video(task_id):
         set_task(task_id, video_status="error", video_progress=0.0,
                  video_detail=detail, code=code)
     except Exception as e:
+        # SEC-5（P2-3①/2026-10-17）：兜底分支同样走脱敏，与主路径同一错误码，
+        # 不再把异常类名（type(e).__name__）暴露给前端。
+        code, detail = _error_of(e, "VIDEO_BUILD_FAILED", "生成视频文件失败")
         _remove_video_file(task_id)
         set_task(task_id, video_status="error", video_progress=0.0,
-                 video_detail=f"视频生成失败（{type(e).__name__}）")
+                 video_detail=detail, code=code)
 
 
 # ===================== 后台解析任务 =====================
