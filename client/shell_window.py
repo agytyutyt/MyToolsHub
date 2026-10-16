@@ -272,6 +272,12 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=""):
                 pystray.MenuItem("刷新页面", on_refresh),
                 pystray.MenuItem("打开窗口", on_open, default=True),
                 pystray.MenuItem("本地插件管理", on_local_admin),
+                pystray.Menu.SEPARATOR,
+                # 版本行只读展示（enabled=False 置灰不可点）；版本号单源构建配置
+                pystray.MenuItem("%s v%s" % (product.get("display_name")
+                                             or product.get("name", "JZClient"),
+                                             product.get("version") or "-"),
+                                 None, enabled=False),
                 pystray.MenuItem("退出", on_exit),
             ),
         )
