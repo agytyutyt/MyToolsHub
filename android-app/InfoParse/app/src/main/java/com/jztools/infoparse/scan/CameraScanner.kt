@@ -25,7 +25,6 @@ import java.util.concurrent.Executors
 class CameraScanner(
     context: Context,
     private val onQrBytes: (ByteArray) -> Unit,
-    private val onBrightness: ((Int) -> Unit)? = null,
 ) {
     private val appContext = context.applicationContext
     private val scanner = BarcodeScanning.getClient(
@@ -36,7 +35,6 @@ class CameraScanner(
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private var lastBytes: ByteArray? = null
     private var stopped = false
-    private var frameCount = 0
     private var camera: Camera? = null
 
     /** 相机变焦参数（绑定成功后可用；null 表示未绑定或设备不支持变焦） */
@@ -110,11 +108,6 @@ class CameraScanner(
             proxy.close()
             return
         }
-        // 低频亮度采样（每 12 帧一次）：供 UI 按背景明暗切换高反差文字颜色
-        frameCount++
-        if (onBrightness != null && frameCount % 12 == 0) {
-            onBrightness?.invoke(averageLuminance(proxy))
-        }
         val input = InputImage.fromMediaImage(media, proxy.imageInfo.rotationDegrees)
         scanner.process(input)
             .addOnSuccessListener { codes ->
@@ -134,33 +127,6 @@ class CameraScanner(
     /** 生命周期恢复后清除去重状态：重新对准同一码面可再次触发（如返回主页重扫同一信封） */
     fun resetDedupe() {
         lastBytes = null
-    }
-
-    /** Y 平面抽样均值亮度（0-255）。绝对索引读取，不移动 buffer 位置，不影响 ML Kit 解码 */
-    private fun averageLuminance(proxy: ImageProxy): Int {
-        return try {
-            val plane = proxy.planes[0]
-            val buf = plane.buffer
-            val rowStride = plane.rowStride
-            val pixelStride = plane.pixelStride
-            val step = 16 // 采样步长：足够估计均值且开销可忽略
-            var total = 0L
-            var count = 0
-            var y = 0
-            while (y < proxy.height) {
-                var x = 0
-                val rowStart = y * rowStride
-                while (x < proxy.width) {
-                    total += buf.get(rowStart + x * pixelStride).toInt() and 0xFF
-                    count++
-                    x += step
-                }
-                y += step
-            }
-            if (count == 0) 128 else (total / count).toInt()
-        } catch (e: Exception) {
-            128
-        }
     }
 
     fun stop() {

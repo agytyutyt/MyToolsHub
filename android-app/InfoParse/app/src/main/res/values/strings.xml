@@ -5,8 +5,6 @@
     <!-- 识别页底部按钮 -->
     <string name="btn_import_image">导入图片</string>
     <string name="btn_import_video">导入视频</string>
-    <string name="btn_reset">重置</string>
-    <string name="toast_reset">已重置，可重新识别</string>
     <string name="stream_progress">已收集 %1$d/%2$d 帧</string>
 
     <!-- 主页（识别历史） -->
