@@ -23,7 +23,6 @@
 import http.server
 import json
 import os
-import shutil
 import sys
 import threading
 import time
@@ -792,76 +791,6 @@ class TestRoutesAndPlugins(unittest.TestCase):
         import jz_api
         self.assertEqual(jz_api.get_user_llm("u_sync3")["api_key"], "sk-new")
         self.assertEqual(jz_api.get_user_llm("u_sync3")["url"], "http://new2/chat/completions")
-
-    def test_plugin_legacy_llm_flag_skips_scan(self):
-        """退场标记存在 → 跳过扫描：插件侧明文 llm 段原样保留、不收编（C1 步骤②）。
-
-        清理已上移主体（app.migrate_plugin_legacy_llm，2026-10-09 决策 7）。
-        """
-        import json as _json
-        plugin_id = "flag-demo"
-        pdir = os.path.join(self.tmp, "plugins", plugin_id)
-        os.makedirs(pdir, exist_ok=True)
-        cfg_path = os.path.join(pdir, "config.json")
-        with open(cfg_path, "w", encoding="utf-8") as f:
-            _json.dump({"llm": {"base_url": "https://api.example.com/v1",
-                                "api_key": "sk-flag-should-not-migrate",
-                                "model": "flag-model"}}, f)
-        flag = os.path.join(self.tmp, "config", "llm_migrated.flag")
-        os.makedirs(os.path.dirname(flag), exist_ok=True)
-        with open(flag, "w", encoding="utf-8") as f:
-            f.write("done\n")
-        try:
-            jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {}})
-            self.assertIsNone(self.A.migrate_plugin_legacy_llm())
-            with open(cfg_path, encoding="utf-8") as f:
-                data = _json.load(f)
-            self.assertIn("llm", data)                 # 未被清除 = 扫描被跳过
-            self.assertEqual(data["llm"]["api_key"], "sk-flag-should-not-migrate")
-            self.assertEqual(jz_llm.load_global()["provider"]["api_key"], "")  # 未收编
-        finally:
-            os.remove(flag)
-            shutil.rmtree(pdir, ignore_errors=True)
-            jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {}})
-
-    def test_plugin_legacy_llm_migration(self):
-        """插件历史 llm 段：**先收编进统一配置（加密）再清除插件侧明文副本**，且幂等。
-
-        归属已上移主体（app.migrate_plugin_legacy_llm，2026-10-09 决策 7，C1 步骤①）：
-        完整通过后写退场标记 llm_migrated.flag，后续启动先查标记、存在即跳过扫描。
-        """
-        import json as _json
-        pdir = os.path.join(self.tmp, "plugins", "case-report")
-        os.makedirs(pdir, exist_ok=True)
-        cfg_path = os.path.join(pdir, "config.json")
-        with open(cfg_path, "w", encoding="utf-8") as f:
-            _json.dump({"llm": {"base_url": "https://api.deepseek.com/v1/chat/completions",
-                                "api_key": "sk-legacy-plaintext-0001",
-                                "model": "deepseek-v4-flash"}}, f)
-        # 统一配置清空，模拟"还没配过"的现场
-        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {}})
-        rep = self.A.migrate_plugin_legacy_llm()
-        self.assertEqual(rep["adopted_from"], "case-report")
-        self.assertIn("case-report", rep["cleared"])
-        # ① 收编：统一配置可用，且**落盘是密文**
-        provider = jz_llm.load_global()["provider"]
-        self.assertTrue(jz_llm.provider_usable(provider))
-        self.assertEqual(provider["url"], "https://api.deepseek.com/v1/chat/completions")
-        self.assertEqual(provider["model"], "deepseek-v4-flash")
-        self.assertEqual(provider["api_key"], "sk-legacy-plaintext-0001")
-        with open(jz_llm.config_path(), encoding="utf-8") as f:
-            self.assertNotIn("sk-legacy-plaintext-0001", f.read())
-        # ② 清除：插件侧不再有 llm 段，也没有明文 Key
-        with open(cfg_path, encoding="utf-8") as f:
-            raw = f.read()
-        self.assertNotIn("llm", _json.loads(raw))
-        self.assertNotIn("sk-legacy-plaintext-0001", raw)
-        # ③ 退场标记：完整通过后写入；重复执行因标记直接跳过（幂等）
-        flag = os.path.join(self.tmp, "config", "llm_migrated.flag")
-        self.assertTrue(os.path.isfile(flag))
-        self.assertIsNone(self.A.migrate_plugin_legacy_llm())
-        # 复原统一配置，避免影响同类其它用例
-        jz_llm.save_global({"mode": "admin", "fallback": True, "provider": {}})
 
     def test_plugin_config_reports_unified_status_without_credentials(self):
         admin = self._client()

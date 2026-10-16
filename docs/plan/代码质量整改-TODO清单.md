@@ -2,7 +2,7 @@
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 状态 | 现行（活清单；2026-10-09 Q6 批次后：P0 C1/C2/C3/C4 已销项（C1b 删除窗口仍待 flag 全覆盖），P1 D3/D4/D7 已修、D1/D2 部分完成（跨处理器读改写锁需人工），D5 需拍板、D6/D8 已完成（8105ae9）、L-13 债·admin 已完成（fcae857）；**P2 四件已完成（2026-10-10，见 §3.1）**；P3 未开始） |
+| 状态 | 现行（活清单；2026-10-09 Q6 批次后：P0 C1/C2/C3/C4 已销项（C1b 删除窗口 2026-10-16 按"空集满足"口径销项），P1 D3/D4/D7 已修、D1/D2 部分完成（跨处理器读改写锁需人工），D5 需拍板、D6/D8 已完成（8105ae9）、L-13 债·admin 已完成（fcae857）；**P2 四件已完成（2026-10-10，见 §3.1）**；P3 未开始） |
 | 最后核对 | 2026-10-10（P2 四件完成后对照 `docs/eval/20260929代码质量分析报告.md` v2 与 `git log` 实况） |
 | 作用域 | 框架 + 跨插件 + 插件内部（宿主 / 构建 / 测试 / 各插件） |
 | 随包 | 否（`docs/plan/` 层，见 `docs/README.md` §8） |
@@ -27,7 +27,7 @@
 | # | 现状证据（报告 §） | 修法摘要 | 状态 |
 | --- | --- | --- | --- |
 | C1 | §2.2 C1：admin 启动迁移改写其他插件数据文件（原 `plugins/admin/backend/routes.py:308/:959`） | 迁移上移主体 `app.py:100`（行为逐字保留）+ 退场标记 `config/llm_migrated.flag`（`app.py:130`）；admin 侧函数与调用点删除 | ✅ **已完成（2026-10-09，commit 747412d）** |
-| C1b | 同 C1，报告建议 3「迁移完成、目标版本全覆盖后**整段删除**」 | **迁移函数删除窗口**：flag 覆盖率 100%（所有目标数据根均出现 `config/llm_migrated.flag`）后，删除 `app.py` 的 `migrate_plugin_legacy_llm()` 与启动调用 | 未开始（依赖 flag 全覆盖，判定口径见 `app.py:125` 注释） |
+| C1b | 同 C1，报告建议 3「迁移完成、目标版本全覆盖后**整段删除**」 | **迁移函数删除窗口** | ✅ **已完成（2026-10-16）**：项目未正式上线、无存量数据根 → 「flag 全覆盖」条件空集满足，`migrate_plugin_legacy_llm()` + `_write_llm_migration_flag()` + 启动调用 + flag 机制整段删除；能力由 `tools/dev/purge-legacy-llm-config.py` 独立保留 |
 | C2 | §2.2 C2：`plugins/trajectory-sketch/backend/filter_bridge.py:44-52` 恒真函数与废弃形参；死键 `use_filter_plugin_rules`（`config_store.py:38/:130`、`routes.py:274-275`）；孤儿 `_probe_fix.cpython-314.pyc` | 删恒真函数与废弃形参（同步修调用方）、删死键三处读写、清孤儿 pyc——这是完成解耦，不是卫生清理 | ✅ 已完成（commit `7a14e96`）：恒真函数与废弃形参删除、调用方同修、死键三处读写与模板/注释清理、孤儿 pyc 删除；`file-filter-c-tests` 11/11、`test_filter_llm` 31/31 全绿 |
 | C3 | §2.2 C3：帧头常量三份人肉同步（`trajectory-convert:48-51` ↔ `info-transfer:175-178` ↔ `qr-video-decode:38-40`）；编码实现四份 | 协议契约文档（`docs/design/`）+ `testdata/protocol/` 跨实现测试向量；**代码不合并**（四插件各自保留实现） | ✅ 已完成（commit 本次）：契约 `docs/design/二维码传输协议-契约文档.md` + 向量 `testdata/protocol/`（含 `generate.py` 与来源说明）+ 台架 `tools/e2e/qr-protocol-consistency.py`（32/32 通过、1 项如实 skip）；**两处新互操作缺陷均已修复**（§6.1 m=256 申报溢出=L1-1 `fe37997`；§6.2 map-marker 跨步分组=2026-10-09 修复 `generate_qr_stream.py:95-96`——2026-10-11 核验回销） |
 | C4 | §2.2 C4：同源副本无台账——`bg_image.py`×2 未声明（file-filter ≡ trajectory-sketch）、`jsqr.min.js`×2 未登记、QR 编解码×4 含未声明分叉（`PAYLOAD_SAFETY`） | 增设**同源副本台账**一节（副本对 / 同源日期 / 演进策略 / 漂移时以谁为准）+ 构建期 md5 漂移提示（warning 不阻断，宿主同 C-11 脚本） | ✅ 已完成（commit 本次）：`docs/design/同源副本台账.md` 覆盖报告 C4 全部副本对（并纠正份数：`bg_image` 实为 ×4、`_viewer` 实为 ×11），逐条给路径对/md5 基准/校验口径/漂移处置；**构建期 md5 漂移提示已落 C-15**（`ledger-drift-check.py` 接出包链、只 Warn 不 Die——2026-10-10 S3/§B-28；2026-10-11 回销） |

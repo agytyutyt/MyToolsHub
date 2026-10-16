@@ -50,7 +50,7 @@ TASK_TTL_SECONDS = 30 * 60  # 任务结果保留 30 分钟
 
 # 本插件已无自有配置项：提示词由 prompt.json 管理（经 jz_llm），大模型接入信息归
 # 统一大模型模块。历史 config.json 里的 llm 段与 ui.api_source（"网页填 Key"开关）
-# 由 admin 插件的启动迁移收编/清除（见 migrate_plugin_legacy_llm）。
+# 曾由主体启动迁移收编/清除（该迁移已于 2026-10-16 删除，项目未上线无存量）。
 DEFAULT_CONFIG = {}
 
 DEFAULT_PROMPT = {
@@ -218,7 +218,7 @@ def register(app) -> None:
         """兼容占位：统一大模型落地后本插件已无可写配置项。
 
         不覆盖 config.json 里的历史 llm 段——那段是升级前的旧 Key，**已不再被读取**：
-        该段由启动迁移（migrate_plugin_legacy_llm）收编进统一配置后清除副本；
+        该段曾由主体启动迁移收编进统一配置后清除副本（迁移已于 2026-10-16 删除）；
         jz_llm.resolve() 的 plugin_id 只用于日志定位、不参与解析
         （兼容桥已于 2026-09-23 移除）。
         """

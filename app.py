@@ -23,7 +23,7 @@ from jz_host import access_log, dep_bootstrap, llm_routes, plugin_loader, shell_
 # ★ 以下名字经 from-import 进入本模块命名空间（**勿改为 plugin_loader.xxx 模块限定调用**）：
 #   台架（admin-config-lock 等）在进程内对 app 模块的同名属性打桩（如 load_registry、
 #   REGISTRY_LOCK）来放大竞态，模块限定调用会绕过打桩。
-from jz_host.dep_bootstrap import dep_components_status, migrate_plugin_legacy_llm
+from jz_host.dep_bootstrap import dep_components_status
 from jz_host.plugin_loader import (
     REGISTRY_LOCK,
     _refresh_plugin_states,
@@ -527,22 +527,6 @@ if __name__ == "__main__":
 
     init_data_root()  # 迁移旧版程序目录数据 + 解析数据根目录（决定日志/配置位置）
     access_log.setup_access_logging(app)
-    # 插件历史大模型配置清理（C1 归属上移，2026-10-09 决策 7）：主体在插件加载前对插件
-    # 数据根做一次性清理——先收编历史明文 Key（加密落盘）、再清除插件侧副本、最后写退场
-    # 标记（llm_migrated.flag，存在即跳过扫描）。不依赖任何插件注册；删除窗口见函数注释。
-    _legacy_llm = migrate_plugin_legacy_llm()
-    if _legacy_llm:
-        if _legacy_llm["adopted_from"]:
-            app.logger.info("插件 %s 的历史大模型配置已收编进统一配置（加密存储）",
-                            _legacy_llm["adopted_from"])
-        if _legacy_llm["cleared"]:
-            app.logger.info("已清除 %d 个插件 config.json 中的历史 llm 段：%s",
-                            len(_legacy_llm["cleared"]), "、".join(_legacy_llm["cleared"]))
-        if _legacy_llm["dropped_duplicates"]:
-            app.logger.info("其余插件的历史 llm 段（重复副本）已丢弃：%s",
-                            "、".join(_legacy_llm["dropped_duplicates"]))
-        for bad in _legacy_llm["failed"]:
-            app.logger.warning("清除插件历史大模型配置失败：%s", bad)
     # 会话密钥 / 登录鉴权 / 后台接口均由 admin 插件在 register() 中初始化
     register_plugin_backends(app)
     warn_missing_plugin_dirs(app)

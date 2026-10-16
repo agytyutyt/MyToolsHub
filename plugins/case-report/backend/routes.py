@@ -99,7 +99,7 @@ def _case_sort_key(name):
 
 # 本插件已无自有配置项：提示词由 prompt.json 管理（经 jz_llm），
 # 大模型接入信息归统一大模型模块（jz_llm）。历史 config.json 里的 llm 段
-# 由 admin 插件的启动迁移收编到统一配置后清除（见 migrate_plugin_legacy_llm）。
+# 曾由主体启动迁移收编到统一配置后清除（该迁移已于 2026-10-16 删除，项目未上线无存量）。
 FIELD_KEYS = parser.FIELD_KEYS
 
 
@@ -572,7 +572,7 @@ def _register_config_cluster(app) -> None:
 
         注：历史 `config.json` 里的 llm 段**已不再被读取**——jz_llm.resolve() 的
         plugin_id 只用于日志定位、不参与解析（兼容桥已于 2026-09-23 移除；
-        历史 Key 由 admin 的 migrate_plugin_legacy_llm 收编进统一配置后清除副本）。
+        历史 Key 的收编/清除曾由主体启动迁移承担，该迁移已于 2026-10-16 删除）。
         """
         _set_operation("保存战果录入配置")
         session = jz_llm.resolve(PLUGIN_ID)
