@@ -224,7 +224,7 @@ JZToolsHub 离线组件：Google Chrome 企业版（$($chrome.version)）
 
 用途
   目标机没有可用浏览器时，离线安装 Chrome。主程序包已不再携带本组件。
-  Chrome 是「浏览器基线 >= 72」的推荐浏览器；目标机已有 Chrome / Edge 时无需安装。
+  Chrome 仅用于管理后台的浏览器访问（业务面无浏览器基线，2026-10-16 取消）；目标机已有 Chrome / Edge 时无需安装。
 
 安装
   右键「安装Chrome浏览器.bat」→「以管理员身份运行」（全机安装需要管理员）。

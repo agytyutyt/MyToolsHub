@@ -298,7 +298,7 @@ Windows 的「默认应用」与文件类型图标由 `HKCR\<扩展名>` / `User
 | `JZToolsHub-离线组件-LibreOffice核心-<版本>.zip` | **≈163 MB** | 解压后双击「安装LibreOffice核心组件.bat」（**免管理员**） |
 | `JZToolsHub-离线组件-Chrome-<版本>.zip`（可选） | ≈160 MB | 解压后**以管理员身份**运行「安装Chrome浏览器.bat」 |
 
-- **浏览器**：主包不再带 Chrome。目标机有 Chrome / Edge 即可（应用是 Web UI，浏览器基线 Chrome ≥ 72）。
+- **浏览器**：主包不再带 Chrome。业务面由桌面客户端固定版 WebView2 内核渲染（钉 109.0.1518.78），**无浏览器基线**（2026-10-16 取消）；浏览器仅用于管理后台，系统自带 Chrome / Edge 即可。
 - **旧式「组件随包」胖包**仍可出：`build-deploy.ps1 -WithOfflineRuntime`
   （`-SkipOfflineRuntime` 已等价于默认行为，仅为兼容旧命令行保留）。
 - 组件包构建：`powershell -ExecutionPolicy Bypass -File tools\build-offline-component.ps1`

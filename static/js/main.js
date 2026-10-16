@@ -133,7 +133,7 @@ async function render() {
     const data = await res.json();
 
     // 站点信息（标题 / 副标题 / 页脚）均来自 config/tools.json
-    // 注意：兼容 Chrome 72（不支持可选链 ?.，使用显式判空）
+    // 显式判空写法沿用自旧浏览器兼容期（Chrome 72）；浏览器基线 2026-10-16 取消，保留无害
     const site = data.site || {};
     document.title = site.title || document.title;
     document.getElementById('site-title').textContent = site.title || '';
@@ -143,7 +143,7 @@ async function render() {
 
     // 壳门提示（2026-10-11 需求①）：接入密钥缺失/变更时服务器业务面 403，
     // 能力层降级为仅本地清单并带 gate_blocked 标记——顶部给可执行指引（仅客户端会出现；
-    // 浏览器路径进不了本页）。注意兼容 Chrome 72（无可选链）。
+    // 浏览器路径进不了本页）。沿用的显式判空写法同上（旧 Chrome 72 兼容期遗留，保留无害）。
     if (data.gate_blocked) {
       const banner = document.createElement('div');
       banner.className = 'loading';

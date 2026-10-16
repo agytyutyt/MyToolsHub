@@ -7,7 +7,7 @@
 | 项目 | 说明 |
 | --- | --- |
 | 后端 | Python **3.14**（打包与生产基线）· Flask |
-| 前端 | 原生 HTML / CSS / JS，无构建步骤（浏览器基线 Chrome ≥ 72） |
+| 前端 | 原生 HTML / CSS / JS，无构建步骤（业务面渲染=客户端固定版 WebView2 内核，非浏览器） |
 | 插件机制 | 目录扫描 + 配置驱动 + iframe 隔离 + 后端动态加载 |
 | 交付形态 | 源码直跑，或 PyInstaller 打包为 Windows 可执行程序（含一键安装/卸载）；另有**桌面客户端**（`client/`，独立 exe，拓扑见 §4.3） |
 | 目标环境 | **Windows 10 及以上**（不支持 Windows 7，见 §2.1） |
@@ -79,23 +79,18 @@
 | --- | --- | --- |
 | **服务器/目标机操作系统** | **Windows 10 及以上**（x64） | Python 3.14 官方要求 Windows 10+。**不支持 Windows 7**：自 2026-09-14 起正式取消 Win7 兼容，不再维护 Python 3.8 打包支线（原因与影响见 `docs/eval/Python版本选型评估.md` §4） |
 | **服务端 Python** | **3.14**（打包基线，唯一） | 开发机最低 3.12；详见 §2.2 |
-| **浏览器** | **Chrome ≥ 72**（含 Edge ≥ 79、同内核国产浏览器） | 内网既有环境基线。**低于此版本不保证可用**；页面代码因此保留了若干兼容措施（见下方说明） |
+| **渲染内核（业务面）** | **客户端内嵌固定版 WebView2，钉 `109.0.1518.78`** | 业务面**不再依赖目标机浏览器**（浏览器直连业务面返回 403，见 §3.1）。版本真源：`tools/client/client-build-config.json`；内核缺失时回落系统常青 WebView2（同为现代版本） |
+| **浏览器（管理后台）** | 任意现代浏览器（系统自带 Edge / Chrome 即可） | 仅管理后台 `/admin` 走浏览器；**无最低版本承诺** |
 | **服务端其他** | 无 | 纯 Python + 前端源码，无容器/IIS/数据库依赖 |
 
-#### 为什么浏览器基线不能跟着 OS 一起放宽
+#### 关于历史"浏览器基线"（2026-10-16 取消）
 
-取消 Win7 后，仓库里这几处"兼容旧浏览器"的代码**必须保留**，它们的触发条件是
-"浏览器版本低 / 缺彩色 emoji 字体"，与操作系统无关：
+早期曾以「Chrome ≥72」作为前端承诺，并据此在 `static/js/main.js` 等处以规避可选链 `?.` / 空值合并 `??`。
+该基线**已取消**：业务面渲染内核由客户端固定版 WebView2 自控（钉 109），业务面浏览器直连也已退役，
+上述措施**降为历史防御，不再是不删的硬约束**。
 
-| 位置 | 兼容措施 | 触发条件 |
-| --- | --- | --- |
-| `static/js/main.js` | 不用可选链 `?.`，改显式判空 | Chrome < 80 |
-| `static/js/jz-icon.js` + `static/icons/` | emoji 渲染不出来时回退 Twemoji SVG | 缺彩色 emoji 字体的系统（Windows Server、精简版镜像）/ 旧浏览器字形退化 |
-| `plugins/knowledge-base/frontend/vendor/` | pdf.js 用 legacy 构建；避免 `??`、CSS `gap` 等 | Chrome < 84 / 老内核 |
-| `plugins/trajectory-sketch/frontend/icons/` | 页内图标一律自带内联 SVG，不用 emoji 字符 | 同第二行 |
-
-> 简单说：**"支持 Win10+" 和 "支持 Chrome ≥72" 是两个独立承诺**。要提浏览器基线，
-> 必须另外确认内网老浏览器已升级，否则会出现"在 Win10 机器上照样白屏"的误判。
+> ⚠️ 唯一**必须保留**的是 **emoji → SVG 回退**（`static/js/jz-icon.js` + `static/icons/`，42 个 Twemoji SVG）——
+> 它的触发条件是"系统缺彩色 emoji 字体"（Windows Server / 精简版镜像），**与浏览器版本无关**。
 
 ### 2.2 Python 版本
 
@@ -1079,7 +1074,7 @@ Excel 轨迹表 ──▶ [trajectory-convert] ──▶ 二维码视频流 / �
 9. **敏感配置外置**：API Key 写 `backend/config.json`（gitignore）或由用户在页面录入，禁止硬编码入库。**大模型 API Key 例外**：一律交 `jz_llm` 统一配置，插件不得自持（见 §5.5 与《插件设计规范.md》SEC-2）。
 10. **前端资源用相对路径**；`data/` 与含密钥的 `config.json` 必须 gitignore；**随版本下发的配置模板必须命名 `config.template.json`**（不得叫 `config.json`，否则会被打包清理规则删掉）。
 11. **自包含验收**：把插件目录 + 一段 `tools.json` 注册片段复制到全新部署即可完整工作。
-12. **别删"旧浏览器兼容"代码**：目标机基线与浏览器基线是两件事（§2.1）。`main.js` 的 `?.` 规避、`jz-icon.js` + `static/icons/` 的 SVG emoji 回退、knowledge-base 的 pdf.js legacy 构建、插件自带 SVG 图标——触发条件都是"浏览器版本低 / 缺彩色 emoji 字体"，与 Windows 版本无关，**取消 Win7 支持之后仍然必须保留**。
+12. **"旧浏览器兼容"代码已随浏览器基线取消而分化**（§2.1，2026-10-16）：`main.js` 的 `?.` 规避、knowledge-base 的 pdf.js legacy 构建原为旧 Chrome 保留，**现无触发场景**，可按普通代码演进；但 `jz-icon.js` + `static/icons/` 的 SVG emoji 回退、插件自带 SVG 图标**仍必须保留**——触发条件是"缺彩色 emoji 字体"，与浏览器、Windows 版本均无关。
 13. **新增 C 扩展依赖前先查 wheel**：`zfec` / `numpy` / `pillow` 是版本锁定型（`cpXX-cpXX`），每个 Python 小版本都要等新 wheel；`opencv-python`（`cp37-abi3`）与 `cryptography`（`cp311-abi3`）是稳定 ABI，跨版本可用。新增锁定型依赖时用 `pip download <包> --only-binary :all:` 先验证，必要时补进 `wheels/`（见 `wheels/README.md`）。
 14. **卸载顺序**：先删 `tools.json` 条目 → 备份数据 → 再删目录（顺序反了会留下悬空引用）。
 

@@ -531,7 +531,7 @@ def _probe_external(dep_id, app_dir, plugin_id=None):
 
     - libreoffice：复用知识库插件的候选路径约定（runtime/libreoffice/program/soffice.exe
       + 有限深度 glob；环境变量 XHR_SOFFICE 优先），只做存在性判断，不启动程序；
-    - chrome：浏览器基线，按常见安装路径探测（尽力而为）；
+    - chrome：管理后台浏览器可达性探测（业务面用客户端内嵌 WebView2，无浏览器基线），按常见安装路径探测（尽力而为）；
     - 其它 id：回退为"程序目录 runtime/<id>/ 存在且非空"。
     """
     dep_id = (dep_id or "").lower()
