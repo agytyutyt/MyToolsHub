@@ -3,3 +3,7 @@
 *.ps1 text eol=crlf
 *.psm1 text eol=crlf
 *.cmd text eol=crlf
+
+# Python 源码行尾统一 LF（跨目录副本按原始字节比对的前提）
+# 2026-10-16 决策「B 方案」，见 docs/design/同源副本台账.md §1；范围只声明 *.py
+*.py text eol=lf
