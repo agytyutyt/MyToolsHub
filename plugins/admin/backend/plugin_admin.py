@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import zipfile
 
@@ -1129,15 +1130,97 @@ def list_plugins(base_dir, data_root, tools_cfg=None):
 
 # ======================== 阶段三：共享盘索引 / 检查更新 / 批量升级 ========================
 
+# ---------------- 共享盘（UNC）加固（2026-10-17） ----------------
+#: 共享盘索引/包文件的读取等待上限（秒）；口径与 client/plugin_source.py 的同名常量一致。
+_SHARE_IO_TIMEOUT = float(os.environ.get("JZ_SHARE_IO_TIMEOUT") or 20)
+
+
+def normalize_share_path(path):
+    r"""共享盘路径归一化：长路径前缀 → 普通形态（UNC 两形态统一）。
+
+    - ``\\?\UNC\server\share\...`` → ``\\server\share\...``
+    - ``\\?\C:\...``                → ``C:\...``
+    其余（盘符 / 映射盘 / 普通 UNC / 含空格与中文的路径）原样返回——这些由 ``os.path``
+    与 ``open`` 原生支持，无需特殊处理。
+
+    为什么要去掉 ``\\?\``：该前缀绕过 Win32 的路径规范化，与 ``os.path.abspath`` /
+    ``normpath`` / ``join`` 混用时行为分叉（abspath 可能吃掉前缀或折叠成非法形态），
+    故内部一律用普通形态；原始值保留在报错文案里。
+
+    ⚠ 本函数在 `client/plugin_source.py` 有**逐字一致的兄弟副本**（client 与插件分属
+      不同代码树，且插件间禁止互相 import —— C-11）。改这里请同步改那边。
+    """
+    if not path:
+        return path
+    p = str(path)
+    # 前缀识别在「把 / 视作路径分隔符」的副本上做；命中后一并统一分隔符，
+    # 未命中前缀的路径原样返回（不做任何改写）。
+    up = p.replace("/", "\\")
+    if up.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + up[len("\\\\?\\UNC\\"):]
+    if up.startswith("\\\\?\\"):
+        return up[4:]
+    return p
+
+
+def _share_timed(fn, timeout=None):
+    """限时执行一次可能阻塞的共享盘 IO → (True, 值) / (False, 异常) / (False, "timeout")。"""
+    box = {}
+
+    def run():
+        try:
+            box["v"] = fn()
+        except BaseException as exc:          # noqa: BLE001
+            box["e"] = exc
+
+    th = threading.Thread(target=run, daemon=True, name="share-io")
+    th.start()
+    th.join(_SHARE_IO_TIMEOUT if timeout is None else timeout)
+    if th.is_alive():
+        return False, "timeout"
+    if "e" in box:
+        return False, box["e"]
+    return True, box.get("v")
+
+
+def _share_io_reason(what, path, err, timeout=None):
+    """共享盘 IO 失败 → 四类可区分文案（不存在 / 不可达 / 超时 / 解析失败）。"""
+    to = _SHARE_IO_TIMEOUT if timeout is None else timeout
+    if err == "timeout":
+        return "共享盘%s读取超时（%.0fs 无响应）：%s —— 共享盘不可达或响应过慢" % (what, to, path)
+    if isinstance(err, FileNotFoundError):
+        return "共享盘%s不存在：%s" % (what, path)
+    if isinstance(err, json.JSONDecodeError):
+        return "共享盘%s不是合法 JSON：%s（%s）" % (what, path, err)
+    if isinstance(err, OSError):
+        return "共享盘%s不可达：%s（%s）" % (what, path, err)
+    return "共享盘%s读取失败：%s（%s）" % (what, path, err)
+
+
 def read_index(index_path, verify_hash=True):
     """读取共享盘索引（index.json）；返回 {ok, error, base_dir, packages[]}。
 
     每个包条目：{id, version, file, sha256, size, requires_restart, min_app_version,
                changelog, path, exists, hash_ok}
     """
-    obj = read_json(index_path)
+    index_path = normalize_share_path(index_path)
+    if not index_path:
+        return {"ok": False, "error": "未配置共享盘索引路径", "packages": []}
+
+    def _read_text():
+        with open(index_path, "r", encoding="utf-8") as f:
+            return f.read()
+
+    ok, val = _share_timed(_read_text)
+    if not ok:
+        return {"ok": False, "error": _share_io_reason("索引", index_path, val), "packages": []}
+    try:
+        obj = json.loads(val)
+    except Exception as exc:
+        return {"ok": False,
+                "error": _share_io_reason("索引", index_path, exc), "packages": []}
     if not isinstance(obj, dict):
-        return {"ok": False, "error": "索引文件不存在或不是合法 JSON：%s" % index_path, "packages": []}
+        return {"ok": False, "error": "索引结构不符（顶层不是对象）：%s" % index_path, "packages": []}
     if obj.get("schema") != 1:
         return {"ok": False, "error": "索引 schema 不受支持：%r" % obj.get("schema"), "packages": []}
     base = os.path.dirname(os.path.abspath(index_path))
@@ -1151,13 +1234,14 @@ def read_index(index_path, verify_hash=True):
         item = dict(raw)
         rel = str(raw.get("file") or "")
         item["path"] = os.path.join(base, *rel.replace("/", os.sep).split(os.sep)) if rel else ""
-        item["exists"] = bool(item["path"]) and os.path.isfile(item["path"])
+        # 每个包文件的探测与校验同样限时：不可达共享盘上逐包阻塞会把 admin 请求挂住
+        _ok_e, _val_e = _share_timed(lambda p=item["path"]: os.path.isfile(p)) if item["path"] else (True, False)
+        item["exists"] = bool(_ok_e and _val_e)
         item["hash_ok"] = None
         if item["exists"] and verify_hash and raw.get("sha256"):
-            try:
-                item["hash_ok"] = (sha256_file(item["path"]).lower() == str(raw["sha256"]).lower())
-            except Exception:
-                item["hash_ok"] = False
+            _ok_h, _val_h = _share_timed(lambda p=item["path"]: sha256_file(p))
+            item["hash_ok"] = bool(_ok_h) and (
+                str(_val_h).lower() == str(raw["sha256"]).lower())
         packages.append(item)
     return {"ok": True, "error": "", "base_dir": base, "packages": packages}
 
