@@ -620,6 +620,34 @@ Write-Host "    默认管理员：admin / admin123（首启自动生成，请登
 Write-Host "    用户数据保存在：$DataRoot"
 Write-Host "    如需卸载：双击「一键卸载.bat」（将同时删除用户数据，可用 -KeepData 保留）"
 
+# ---- 出包后冒烟探测（P2-3③/2026-10-17）：**非阻断** ----
+# 口径同「装离线组件失败不影响安装」：探测失败只给指引，绝不改变退出码 / 不中断安装。
+# 说明：主安装路径**不自动启动**程序（只有回滚分支会拉起），故"未探测到服务"是常见情形
+# 而非安装失败——覆盖场景是在运行中的实例上做更新、或装完组件后重跑本脚本。
+try {
+    $smokePort = 5000
+    if ($env:JZTOOLS_PORT) { try { $smokePort = [int]$env:JZTOOLS_PORT } catch { } }
+    $smokeOk = $false
+    for ($i = 0; $i -lt 8; $i++) {
+        try {
+            # /api/site 属公开端点（壳门白名单内），无需接入密钥即可探测
+            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$smokePort/api/site" `
+                                      -TimeoutSec 3 -UseBasicParsing
+            if ($resp.StatusCode -eq 200) { $smokeOk = $true; break }
+        } catch { }
+        Start-Sleep -Milliseconds 400
+    }
+    if ($smokeOk) {
+        Write-Host "  [冒烟] 已探测到运行中的服务（http://127.0.0.1:$smokePort/api/site → 200）"
+    } else {
+        Write-Host "  [冒烟] 未在 127.0.0.1:$smokePort 探测到运行中的服务（这只表示当前没有实例在跑，不影响安装结果）。"
+        Write-Host "         启动后再核对：双击桌面「$AppName」，然后浏览器开 http://127.0.0.1:$smokePort/api/site 应返回 JSON。"
+        Write-Host "         排障：看 $DataRoot\logs\access.log 与程序目录下的启动日志。"
+    }
+} catch {
+    Write-Host "  [冒烟] 探测跳过（$($_.Exception.Message)）—— 不影响安装结果。"
+}
+
 # 首装引导（主体与插件解耦后，主包只带核心插件 admin；业务插件走插件集 / 插件包）
 $bizPlugins = @()
 if (Test-Path -LiteralPath (Join-Path $Target "plugins")) {
