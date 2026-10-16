@@ -8,12 +8,19 @@
  *
  * 两步导入（解析预览 → 确认导入）之间不重复要口令：口令派生的信封密钥在服务端内存里
  * 活 30 分钟（见 routes.py 的 _MIGRATE_STAGE）；服务重启则该 token 失效，重新解析即可。
+ *
+ * 桌面端（壳内）适配：壳内浏览器式下载会被静默取消（客户端 ALLOW_DOWNLOADS=False），
+ * 导出改为 fetch 到 blob 后交本地能力层 /local-api/fs/* 落盘（同商店页下载的口径）。
+ * 壳内与否用"探测即检测"：save-dir 端点 200=壳内；403/404/断网=浏览器（本地端口
+ * 永不中继，直连服务器访问时该路径不存在），页面维持纯浏览器行为不变。
  */
 (function () {
   const { api, showToast, getSession, esc } = window.AdminCommon;
 
   let token = '';        // 最近一次解析成功的迁移包 token
   let sections = [];     // 最近一次盘点/预览的分段
+  let inShell = false;   // 桌面客户端壳内（探测 /local-api/fs/save-dir 而定）
+  let savedPath = '';    // 壳内最近一次落盘的绝对路径（"打开所在文件夹"用）
 
   function el(id) { return document.getElementById(id); }
 
@@ -51,6 +58,72 @@
     box.hidden = false;
     box.innerHTML = html;
   }
+
+  // ===================== 桌面端（壳内）适配 =====================
+
+  async function probeShell() {
+    try {
+      const res = await fetch('/local-api/fs/save-dir', { credentials: 'same-origin' });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      return null;   // 浏览器直开：无本地端口或无壳 Cookie
+    }
+  }
+
+  function renderSaveDir(info) {
+    el('mg-savedir').hidden = false;
+    el('mg-savedir-path').textContent = info.effective_dir || '';
+    el('mg-savedir-note').textContent = info.dir
+      ? '已由你手动设置，导出的数据包会直接保存到这里。'
+      : '默认为客户端下载目录，可点「修改…」换成其他位置。';
+  }
+
+  async function setSaveDir(dir) {
+    const res = await fetch('/local-api/fs/save-dir', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir: dir }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    renderSaveDir(data);
+    showToast(dir ? '已更新保存目录' : '已恢复默认保存目录');
+  }
+
+  async function pickSaveDir() {
+    try {
+      const res = await fetch('/local-api/fs/pick-dir', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed: el('mg-savedir-path').textContent }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      if (!data.dir) return;   // 用户取消
+      try { await setSaveDir(data.dir); }
+      catch (err) { showToast(err.message, true); }
+    } catch (err) {
+      showToast('无法打开目录选择框：' + err.message, true);
+    }
+  }
+
+  async function saveLocalFile(blob, fname) {
+    const fd = new FormData();
+    fd.append('filename', fname);
+    fd.append('file', blob, fname);
+    const res = await fetch('/local-api/fs/save-file', {
+      method: 'POST', credentials: 'same-origin', body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status === 404) throw new Error('客户端能力不可用（版本过旧），请升级桌面客户端');
+      throw new Error(data.error || ('HTTP ' + res.status));
+    }
+    return data;
+  }
+
+  function exportBtnLabel() { return inShell ? '导出并保存' : '导出并下载'; }
 
   // ===================== 导出 =====================
 
@@ -103,24 +176,35 @@
       } else if (plain) {
         fname = plain[1];
       }
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = fname;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-      report('mg-export-report', '<span class="ok">✓ 已导出</span>：' + esc(a.download)
-        + '　体积 ' + fmtSize(blob.size) + '（' + pickedSections.length + ' 个数据段）'
-        + '<br><b>请牢记导出口令</b>：包内数据（含账号与大模型 Key）只认这一个口令，遗失后无法恢复。');
+      const passNote = '<br><b>请牢记导出口令</b>：包内数据（含账号与大模型 Key）只认这一个口令，遗失后无法恢复。';
+      if (inShell) {
+        const saved = await saveLocalFile(blob, fname);
+        savedPath = saved.path;
+        report('mg-export-report', '<span class="ok">✓ 已保存</span>：' + esc(saved.path)
+          + '　体积 ' + fmtSize(saved.size || blob.size) + '（' + pickedSections.length + ' 个数据段）'
+          + '<br><button type="button" class="admin-btn" id="mg-open-dir">打开所在文件夹</button>'
+          + passNote);
+        showToast('数据包已保存：' + (saved.filename || fname));
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fname;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+        report('mg-export-report', '<span class="ok">✓ 已导出</span>：' + esc(fname)
+          + '　体积 ' + fmtSize(blob.size) + '（' + pickedSections.length + ' 个数据段）'
+          + passNote);
+        showToast('已导出数据包');
+      }
       el('mg-pass').value = '';
       el('mg-pass2').value = '';
-      showToast('已导出数据包');
     } catch (err) {
       showToast('导出失败：' + err.message, true);
     } finally {
       btn.disabled = false;
-      btn.textContent = '导出并下载';
+      btn.textContent = exportBtnLabel();
     }
   }
 
@@ -220,8 +304,33 @@
     el('mg-reload').addEventListener('click', loadPlan);
     el('mg-inspect').addEventListener('click', doInspect);
     el('mg-import').addEventListener('click', doImport);
+    el('mg-savedir-pick').addEventListener('click', pickSaveDir);
+    el('mg-savedir-reset').addEventListener('click', () => {
+      setSaveDir(null).catch(err => showToast(err.message, true));
+    });
+    // 报告区是 innerHTML 动态生成的，「打开所在文件夹」用事件委托接住
+    el('mg-export-report').addEventListener('click', async (ev) => {
+      if (!ev.target || ev.target.id !== 'mg-open-dir' || !savedPath) return;
+      try {
+        const res = await fetch('/local-api/fs/reveal', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: savedPath }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      } catch (err) {
+        showToast('打开文件夹失败：' + err.message, true);
+      }
+    });
     getSession().then(user => { if (!user) location.href = '/login?next=/admin/migrate'; });
     loadPlan();
+    probeShell().then(info => {
+      if (!info) return;
+      inShell = true;
+      renderSaveDir(info);
+      el('mg-export').textContent = exportBtnLabel();
+    });
   }
 
   document.addEventListener('DOMContentLoaded', init);

@@ -40,7 +40,7 @@ a = Analysis(
         # （冻结 app 走 PYZ 够用）——随包落 kernel/（2026-10-08 T07 遗留销项）
         (os.path.join(ROOT, "jz_plugin_host.py"), "kernel"),
     ] + _w_datas + _p_datas,
-    hiddenimports=["waitress"] + _w_hidden + _p_hidden,
+    hiddenimports=["waitress", "native_dialog"] + _w_hidden + _p_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

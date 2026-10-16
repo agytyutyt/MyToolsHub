@@ -34,6 +34,11 @@
     .mg-file { font-size: 13px; color: var(--md-on-surface-variant); }
     .mg-actions { margin-top: 14px; display: flex; align-items: center; }
     .mg-actions > * + * { margin-left: 10px; }
+    /* 数据保存目录行：仅桌面端壳内显示（js 探测 /local-api/fs/save-dir 后解除 hidden） */
+    .mg-savedir { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--md-outline);
+      border-radius: var(--md-radius-s); background: var(--md-surface-container); font-size: 13px; line-height: 1.9; }
+    .mg-savedir-path { word-break: break-all; }
+    .mg-savedir .admin-btn { padding: 1px 10px; font-size: 12px; margin-left: 8px; }
   </style>
 </head>
 <body data-page="admin" data-side-suffix=" · 管理后台">
@@ -66,6 +71,12 @@
                  placeholder="再输一次">
         </div>
         <div class="mg-hint" id="mg-export-hint"></div>
+      </div>
+      <div class="mg-savedir" id="mg-savedir" hidden>
+        <b>数据保存目录</b>：<code class="mg-savedir-path" id="mg-savedir-path"></code>
+        <button type="button" class="admin-btn" id="mg-savedir-pick">修改…</button>
+        <button type="button" class="admin-btn" id="mg-savedir-reset">恢复默认</button>
+        <div class="mg-hint" id="mg-savedir-note"></div>
       </div>
       <div class="mg-actions">
         <button type="button" class="admin-btn primary" id="mg-export">导出并下载</button>
@@ -105,7 +116,7 @@
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script src="/plugin/admin/js/admin-common.js?v=11"></script>
   <script src="/static/js/sidebar.js?v=5"></script>
-  <script src="/plugin/admin/js/admin-migrate.js?v=1"></script>
+  <script src="/plugin/admin/js/admin-migrate.js?v=2"></script>
   <script src="/static/js/llm-settings.js?v=4"></script>
 </body>
 </html>

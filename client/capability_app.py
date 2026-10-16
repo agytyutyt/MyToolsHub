@@ -1961,6 +1961,126 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         return jsonify({"ok": True, "plugin_source": cfg["plugin_source"],
                         "note": "已写入客户端配置，立即生效（免重启）"})
 
+    # ---------------- 本地文件能力（fs）：保存目录 / 落盘 / 定位 ----------------
+    # 供壳内插件页面把"下载"落到本机（例：admin 数据迁移导出）。壳内浏览器式下载
+    # 被 ALLOW_DOWNLOADS=False 静默取消，页面侧切勿依赖 <a download>（同商店页下载）。
+
+    def _fs_default_save_dir():
+        return os.path.join(_data_dir, "downloads")     # 客户端默认下载目录（同商店落盘）
+
+    def _fs_configured_save_dir():
+        from client_config import load_client_config
+        d = (load_client_config(build_cfg) or {}).get("data_save_dir")
+        return str(d) if d else None
+
+    def _fs_effective_save_dir():
+        return _fs_configured_save_dir() or _fs_default_save_dir()
+
+    @app.get("/local-api/fs/save-dir")
+    def fs_save_dir_get():
+        return jsonify({"ok": True, "dir": _fs_configured_save_dir(),
+                        "default_dir": _fs_default_save_dir(),
+                        "effective_dir": _fs_effective_save_dir()})
+
+    @app.post("/local-api/fs/save-dir")
+    def fs_save_dir_set():
+        """dir=null/空 → 清除配置回默认；否则必须为本机已存在的绝对路径。"""
+        from client_config import load_client_config, save_client_config
+        data = request.get_json(force=True, silent=True) or {}
+        d = data.get("dir")
+        cfg = dict(load_client_config(build_cfg) or {})
+        if d is None or not str(d).strip():
+            cfg.pop("data_save_dir", None)
+            save_client_config(build_cfg, cfg)
+            return jsonify({"ok": True, "dir": None,
+                            "effective_dir": _fs_default_save_dir(),
+                            "note": "已恢复默认（客户端下载目录）"})
+        d = str(d).strip()
+        if not os.path.isabs(d) or not os.path.isdir(d):
+            return jsonify({"error": "保存目录必须是本机已存在的绝对路径"}), 400
+        cfg["data_save_dir"] = d
+        save_client_config(build_cfg, cfg)
+        return jsonify({"ok": True, "dir": d, "effective_dir": d})
+
+    @app.post("/local-api/fs/pick-dir")
+    def fs_pick_dir():
+        """原生目录选择对话框；只返回所选路径，持久化由 save-dir 负责。"""
+        data = request.get_json(force=True, silent=True) or {}
+        seed = str(data.get("seed") or "").strip() or _fs_effective_save_dir()
+        try:
+            from native_dialog import DialogUnavailable, pick_folder
+            chosen = pick_folder("选择数据保存目录", seed)
+        except DialogUnavailable as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 503
+        except Exception as exc:
+            return jsonify({"ok": False, "error": "对话框异常：%s" % exc}), 500
+        return jsonify({"ok": True, "dir": chosen})     # null = 用户取消
+
+    _FS_MAX_BYTES = 512 * 1024 * 1024    # 服务端迁移包上限 300MB，留出余量
+
+    def _fs_safe_filename(raw):
+        """一律取 basename 并去控制字符——能力层不信任页面传来的任何路径成分。"""
+        name = str(raw or "").replace("\\", "/").split("/")[-1]
+        name = "".join(ch for ch in name if ord(ch) >= 32 and ch != "\x7f")
+        return name.strip().strip(".")[:160]
+
+    def _fs_unique_path(directory, filename):
+        base, ext = os.path.splitext(filename)
+        candidate = os.path.join(directory, filename)
+        n = 1
+        while os.path.exists(candidate):
+            candidate = os.path.join(directory, "%s (%d)%s" % (base, n, ext))
+            n += 1
+        return candidate
+
+    @app.post("/local-api/fs/save-file")
+    def fs_save_file():
+        if request.content_length and request.content_length > _FS_MAX_BYTES:
+            return jsonify({"error": "文件超过大小上限（512MB）"}), 413
+        part = request.files.get("file")
+        if part is None:
+            return jsonify({"error": "缺少 file 字段（multipart）"}), 400
+        filename = _fs_safe_filename(request.form.get("filename") or part.filename)
+        if not filename:
+            return jsonify({"error": "文件名无效"}), 400
+        target_dir = _fs_effective_save_dir()
+        if not os.path.isdir(target_dir):
+            if _fs_configured_save_dir():
+                return jsonify({"error": "保存目录已被移动或删除，请重新设置"}), 400
+            os.makedirs(target_dir, exist_ok=True)      # 默认目录缺席则补建
+        final = _fs_unique_path(target_dir, filename)
+        tmp = final + ".part"                            # 同目录暂存，os.replace 原子改名
+        try:
+            part.save(tmp)                               # werkzeug 落盘，跨卷亦可
+            os.replace(tmp, final)
+        except Exception as exc:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return jsonify({"error": "写入失败：%s" % exc}), 500
+        _log("fs/save-file：%s → %s" % (filename, final))
+        return jsonify({"ok": True, "path": final, "filename": os.path.basename(final),
+                        "size": os.path.getsize(final)})
+
+    @app.post("/local-api/fs/reveal")
+    def fs_reveal():
+        """资源管理器定位刚保存的文件（explorer /select 置前选中，口径同 store/reveal）。
+        只放行当前保存目录与客户端下载目录之下的已存在文件——不给页面在任意位置开窗的能力。"""
+        import subprocess as _sp
+        data = request.get_json(force=True, silent=True) or {}
+        p = os.path.abspath(str(data.get("path") or ""))
+        allowed = [os.path.abspath(_fs_effective_save_dir()),
+                   os.path.abspath(_fs_default_save_dir())]
+        inside = any(p.lower().startswith(a.lower().rstrip(os.sep) + os.sep) for a in allowed)
+        if not inside or not os.path.isfile(p):
+            return jsonify({"ok": False, "error": "路径不在允许的保存目录内"}), 400
+        try:
+            _sp.Popen('explorer /select,"%s"' % p)
+            return jsonify({"ok": True})
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 500
+
     def _rescan():
         nonlocal local_manifests
         local_manifests[:] = local_registry.scan_local_plugins(local_plugins_dir, _log)
