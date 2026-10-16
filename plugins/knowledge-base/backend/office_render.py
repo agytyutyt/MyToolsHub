@@ -544,11 +544,16 @@ def _polish_word_html(html):
     return html
 
 
-def render_word(data):
+def render_word(data, mode="flow", revision_mode="final"):
     """Word（docx/docm/doc 字节）→ {"kind","html","warnings"}。
 
-    - mode="flow"：流式连续排版（无打印分页，阅读动线与网页一致；.doc 归一化
-      场景上游也推荐 flow）；
+    - mode：渲染模式 `flow`（默认，流式连续排版，无打印分页；`.doc` 归一化场景
+      上游也推荐 flow）/ `paged` / `print`——**引擎 dhr 既有能力**，2026-10-17
+      （阶段 8② / P2-3②）经 `GET /preview?mode=` 暴露。⚠ `.doc` 经 LibreOffice
+      归一化后无 `w:lastRenderedPageBreak`，paged 分页不准（引擎会自带提示条，
+      见 `vendor/dhr/normalize.py`）；
+    - revision_mode：修订显示 `final`（默认，接受全部修订）/ `original`（拒绝
+      全部）/ `markup`（带标记）——同一批经 `GET /preview?revisions=` 暴露；
     - output="fragment"：`<style>` + `<div class="kbdoc">` 片段，便于嵌入宿主容器；
     - 图片内联 base64（离线内网无外链可图床）；
     - 产物经 `_polish_word_html` 修正三处已知显示缺陷（字体回退/表格穿模），
@@ -560,7 +565,8 @@ def render_word(data):
     if not data:
         raise OfficeRenderError("文件内容为空，无法生成预览")
     opts = _dhr.ConvertOptions(
-        mode="flow",
+        mode=mode,
+        revision_mode=revision_mode,
         output="fragment",
         css_prefix=WORD_CSS_PREFIX,
         media_mode="base64",

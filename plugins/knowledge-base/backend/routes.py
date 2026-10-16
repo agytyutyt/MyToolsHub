@@ -506,8 +506,14 @@ def _migrate_categories():
 
 # 预览缓存格式版本：**引擎渲染行为发生变化时递增**（vendor 补丁/升级），
 # 读取时版本不符即视为无缓存重新渲染 —— 否则升级引擎后旧缓存会让修复"不生效"。
-PREVIEW_CACHE_VERSION = 4   # v4：Word 产物经 office_render 后处理（字体回退补链 + 表格穿模修正）
+PREVIEW_CACHE_VERSION = 5   # v5：Word 渲染模式/修订模式可经 URL 参数选择（阶段 8②；payload 增字段）
+# v4：Word 产物经 office_render 后处理（字体回退补链 + 表格穿模修正）
 # v3：.doc 归一化警告文案按 flow 模式分流（旧缓存警告横幅需重新生成）
+
+# Word 渲染 / 修订显示模式白名单（阶段 8②，P2-3②）：引擎 dhr 既有能力，经 URL 参数暴露。
+# 缓存是**单文件** `<id>.preview.json`、键里不含参数 → 非默认参数不读也不写缓存。
+KB_WORD_MODES = frozenset({"flow", "paged", "print"})
+KB_WORD_REVISIONS = frozenset({"final", "original", "markup"})
 
 
 def _preview_cache_path(fid):
@@ -522,8 +528,11 @@ def _needs_office_preview(rec):
     return (rec.get("ext") or "") in OFFICE_SOURCE_EXTS
 
 
-def _render_office_record(rec):
-    """渲染件字节 → 预览 payload dict；失败抛 OfficeRenderError（用户可读文案）。"""
+def _render_office_record(rec, word_mode="flow", word_revisions="final"):
+    """渲染件字节 → 预览 payload dict；失败抛 OfficeRenderError（用户可读文案）。
+
+    word_mode / word_revisions：仅 Word 生效（阶段 8②，P2-3②）；Excel 忽略。
+    """
     ext = rec.get("ext") or ""
     path = _file_path(rec.get("id") or "", ext)
     if not path or not os.path.isfile(path):
@@ -531,7 +540,8 @@ def _render_office_record(rec):
     with open(path, "rb") as f:
         data = f.read()
     if ext in ("doc", "docx"):
-        return _office_render.render_word(data)
+        return _office_render.render_word(data, mode=word_mode,
+                                          revision_mode=word_revisions)
     return _office_render.render_sheet(data)
 
 
@@ -1290,7 +1300,22 @@ def register(app) -> None:
             rec = _find_visible_file(fstore, cstore, fid, user)
         if not rec or not _needs_office_preview(rec):
             return jsonify({"ok": False, "error": "文件不存在或不支持预览"}), 404
-        cache = _preview_cache_path(fid)
+        # Word 渲染模式 / 修订显示模式（阶段 8②，P2-3②）：URL 参数暴露引擎既有能力。
+        # 缓存是单文件且键里不含参数 → 非默认参数一律**不读也不写**缓存
+        # （否则请求 paged 会拿到 flow 的旧缓存）。默认口径仍走缓存，行为与旧版一致。
+        _q = request.args or {}
+        w_mode = (_q.get("mode") or "").strip().lower()
+        w_rev = (_q.get("revisions") or "").strip().lower()
+        if w_mode and w_mode not in KB_WORD_MODES:
+            return jsonify({"ok": False, "error": "不支持的渲染模式：%s（可选 %s）"
+                            % (w_mode, " / ".join(sorted(KB_WORD_MODES)))}), 400
+        if w_rev and w_rev not in KB_WORD_REVISIONS:
+            return jsonify({"ok": False, "error": "不支持的修订显示模式：%s（可选 %s）"
+                            % (w_rev, " / ".join(sorted(KB_WORD_REVISIONS)))}), 400
+        w_mode = w_mode or "flow"
+        w_rev = w_rev or "final"
+        _use_cache = (w_mode == "flow" and w_rev == "final")
+        cache = _preview_cache_path(fid) if _use_cache else None
         if cache and os.path.isfile(cache):
             try:
                 with open(cache, "r", encoding="utf-8") as f:
@@ -1304,7 +1329,7 @@ def register(app) -> None:
         if _office_render is None:
             return jsonify({"ok": False, "error": "服务器渲染引擎未加载"}), 404
         try:
-            result = _render_office_record(rec)
+            result = _render_office_record(rec, w_mode, w_rev)
         except _office_render.OfficeRenderError as e:
             return jsonify({"ok": False, "error": str(e)}), 404
         except Exception:
@@ -1318,6 +1343,10 @@ def register(app) -> None:
             "truncated": bool(result.get("truncated")),
             "generated_at": _now(),
         }
+        if result["kind"] == "word":
+            # 回显生效口径（前端可据此显示当前模式；Excel 无此两项）
+            payload["word_mode"] = w_mode
+            payload["word_revisions"] = w_rev
         if cache:
             try:
                 dst_dir = os.path.dirname(cache)

@@ -58,7 +58,11 @@ async function loadTool() {
     const tool = await res.json();
     document.title = (tool.name || toolId) + ' · ' + siteName;
     // iframe 指向插件前端入口（插件间互不污染）
-    frame.src = `/plugin/${encodeURIComponent(tool.id)}/${tool.entry || 'index.html'}`;
+    // 透传外层查询串（2026-10-17，P2-3②）：插件页此前拿不到导航时的 URL 参数，
+    // 使「用 URL 参数驱动插件视图」类能力（如知识库 Word 渲染模式 flow/paged）无法触达。
+    // 已核实：现有插件均不读自身 location.search，故透传不会改变既有行为。
+    frame.src = `/plugin/${encodeURIComponent(tool.id)}/${tool.entry || 'index.html'}`
+                + (location.search || '');
   } catch (err) {
     document.title = '无法加载工具 · ' + siteName;
     showError('无法加载工具', err.message);

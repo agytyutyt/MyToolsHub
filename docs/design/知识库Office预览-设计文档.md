@@ -464,7 +464,7 @@ def _pdf_task(fid):
 - [ ] `.doc` LibreOffice 归一化对微型表格的退化（本会话实测：合成 1 行表格经
   doc→docx 回环退化为制表符段落，内容保留）——真实链路 .doc 走 doc_convert
   转换件不经过此通道，仅历史失败记录会踩到；如需彻底解决需上游排查。
-- [ ] Word 渲染模式（flow/paged）、修订显示模式暴露为 URL 参数（引擎已支持）。
+- [x] Word 渲染模式（flow/paged/print）、修订显示模式（final/original/markup）暴露为 URL 参数（引擎已支持）。**✅ 已实施（2026-10-17，P2-3②）**：`GET /files/<id>/preview?mode=&revisions=`——白名单校验（非法值 400）、非默认参数**不读也不写**缓存（单文件缓存键不含参数）、响应回显 `word_mode`/`word_revisions`（仅 word）；框架 `static/js/tool.js` 改为把外层查询串透传进插件 iframe（此前插件页拿不到导航参数），阅读器 `reader.js` 据此透传；`PREVIEW_CACHE_VERSION` 4→5。⚠ `.doc` 经归一化后 paged 分页不准（引擎自带提示条，见 `vendor/dhr/normalize.py`）。
 - [ ] 引擎上游升级通道（vendor 目录整替换 + 上游 pytest 回归）。
 
 ---

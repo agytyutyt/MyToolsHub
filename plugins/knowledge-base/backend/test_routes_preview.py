@@ -241,6 +241,33 @@ def upload_and_preview(name, blob, expect_kind, expect_text):
 fid_x = upload_and_preview("报表.xlsx", xlsx_bytes, "sheet", "1,234,567.89")
 fid_d = upload_and_preview("文档.docx", docx_bytes, "word", "集成测试文档")
 
+# ---------- 2b) Word 渲染模式 / 修订显示模式（阶段 8②，P2-3②）----------
+# 默认口径 flow/final 走单文件缓存；非默认参数不读也不写缓存（缓存键不含参数）
+r = client.get(f"/api/knowledge-base/files/{fid_d}/preview")
+pv = r.get_json() or {}
+assert r.status_code == 200, r.data
+assert pv.get("word_mode") == "flow" and pv.get("word_revisions") == "final", pv
+print("word view default OK | flow/final cached=%s" % pv.get("cached"))
+
+r = client.get(f"/api/knowledge-base/files/{fid_d}/preview?mode=paged&revisions=markup")
+pv = r.get_json() or {}
+assert r.status_code == 200, r.data
+assert pv.get("word_mode") == "paged" and pv.get("word_revisions") == "markup", pv
+assert pv.get("cached") is not True, "非默认参数不应命中缓存（缓存键不含参数）"
+print("word view params OK | mode=%s revisions=%s"
+      % (pv.get("word_mode"), pv.get("word_revisions")))
+
+for _bad in ("?mode=bogus", "?revisions=bogus"):
+    r = client.get(f"/api/knowledge-base/files/{fid_d}/preview{_bad}")
+    assert r.status_code == 400, (_bad, r.status_code, r.data[:120])
+print("word view invalid params -> 400 OK")
+
+# Excel 不受这两个参数影响（响应不带 word_* 字段）
+r = client.get(f"/api/knowledge-base/files/{fid_x}/preview?mode=paged")
+pv = r.get_json() or {}
+assert r.status_code == 200 and "word_mode" not in pv, pv
+print("sheet ignores word view params OK")
+
 # ---------- 3) 非 Office 类 404 ----------
 r = client.post("/api/knowledge-base/files", data={
     "file": (io.BytesIO("# md\n正文".encode("utf-8")), "note.md"), "name": "note",

@@ -104,8 +104,25 @@
 
   function fetchRaw(file) { return fetchUrl(file, null); }
 
+  // Word 渲染模式 / 修订显示模式（阶段 8②，P2-3②）：从本页 URL 读白名单内的参数并透传。
+  // 例：打开阅读器时带 ?mode=paged&revisions=markup。注意框架 tool.html 目前**不**把
+  // 外层查询串传进插件 iframe（static/js/tool.js 已改为透传，见该处注释）。
+  var WORD_MODES = { flow: 1, paged: 1, print: 1 };
+  var WORD_REVS = { final: 1, original: 1, markup: 1 };
+
+  function wordViewQuery() {
+    var q = new URLSearchParams(location.search || "");
+    var mode = (q.get("mode") || "").toLowerCase();
+    var rev = (q.get("revisions") || "").toLowerCase();
+    var parts = [];
+    if (WORD_MODES[mode]) parts.push("mode=" + encodeURIComponent(mode));
+    if (WORD_REVS[rev]) parts.push("revisions=" + encodeURIComponent(rev));
+    return parts.length ? "?" + parts.join("&") : "";
+  }
+
   function officePreviewUrl(file) {
-    return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/preview";
+    return "/api/knowledge-base/files/" + encodeURIComponent(file.id) + "/preview"
+           + wordViewQuery();
   }
 
   // ==================== 通用 HTML 内容缩放（Word/Excel/MD/文本等） ====================
