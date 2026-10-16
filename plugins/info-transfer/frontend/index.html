@@ -148,6 +148,13 @@
   .job-row .job-status { font-size: 12px; margin-top: 4px; }
   .job-row.done .progress-fill { background: #2e7d32; }
   .job-row.error .job-status, .job-row.canceled .job-status { color: var(--error); }
+  /* S3：发码前拦截 / 长时长提示（黄） */
+  .job-warn { background: #FEF7E0; border: 1px solid #F9AB00; color: #7A4F01;
+              font-size: 12px; padding: 6px 8px; border-radius: 4px; margin-top: 6px;
+              display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .job-warn button { font-size: 12px; padding: 3px 8px; background: #F9AB00;
+                     color: #3d2800; border: 0; border-radius: 3px; cursor: pointer; }
+  .job-warn button:hover { background: #e09600; }
   .job-row.done .job-status { color: #2e7d32; }
   /* 多文件封装:逐文件结果块 */
   .result-item {
@@ -896,6 +903,8 @@
     state.jobs = tasks.map((t, i) => ({
       ...t, idx: i, taskId: null, status: "pending",
       progress: 0, stage: "等待提交…", done: false, failed: false,
+      // S3：留档本次提交参数，供「改用视频流」一键重投
+      _opts: { version: version, raw: raw, rebuild: rebuild, repeat: repeat },
     }));
     renderJobRows();
 
@@ -953,6 +962,8 @@
           } else {
             job.status = s.status;   // done / error / canceled
             job.done = true; dirty = true;
+            // S3：失败分支同样要取 estimate——「静态超 200 页」的引导信息就在其中
+            if (s.estimate && !job.estimate) job.estimate = s.estimate;
             if (s.status === "done") {
               job.result = s;
             } else {
@@ -1003,6 +1014,23 @@
     }
   }
 
+  /* S3：静态超限被拦截后，一键改用视频流重投本任务 */
+  async function retryAsVideo(job) {
+    const opts = job._opts || {};
+    const version = opts.version != null ? opts.version : Number($("qrVersion").value);
+    const raw = opts.raw != null ? opts.raw : (state.srcMode === "file" && state.rawMode);
+    const rebuild = opts.rebuild != null ? opts.rebuild
+                    : (raw && $("rebuildMode") && $("rebuildMode").checked);
+    const rv = Number($("qrRepeat") && $("qrRepeat").value);
+    const repeat = (isFinite(rv) && rv >= 1 && rv <= 30) ? Math.round(rv) : 5;
+    job.taskId = null; job.done = false; job.failed = false;
+    job.result = null; job.estimate = null; job.progress = 0;
+    job.status = "pending"; job.stage = "已切换为视频流，重新提交…";
+    renderJobRows();
+    await submitJob(job, "video", version, raw, rebuild, repeat);
+    pollAll();
+  }
+
   /* 渲染逐文件进度行 */
   function renderJobRows() {
     const wrap = $("progressList");
@@ -1022,10 +1050,32 @@
         <p class="job-status">${job.status === "done" ? "封装完成" : (job.stage || "")}</p>`;
       row.querySelector(".job-name").textContent = job.name;
       row.querySelector(".job-name").title = job.name;
-      const estText = fmtEstimate(job.estimate || (job.result && job.result.estimate));
+      const est = job.estimate || (job.result && job.result.estimate);
+      const estText = fmtEstimate(est);
       row.querySelector(".job-status").textContent =
         (job.status === "done" ? "封装完成" : (job.stage || ""))
         + (estText ? "（" + estText + "）" : "");
+      // S3：静态超上限 → 给「改用视频流」动作；>60s → 黄色时长提示
+      if (est && est.too_many) {
+        const box = document.createElement("div");
+        box.className = "job-warn";
+        const span = document.createElement("span");
+        span.textContent = "静态分页需 " + est.pages_needed + " 页，超过上限 "
+                         + est.max_pages + " 页，未开始生成。";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "改用视频流";
+        btn.addEventListener("click", () => retryAsVideo(job));
+        box.appendChild(span);
+        box.appendChild(btn);
+        row.appendChild(box);
+      } else if (est && est.kind === "video" && (est.seconds || 0) > 60) {
+        const box = document.createElement("div");
+        box.className = "job-warn";
+        box.textContent = "预计播放时长 " + fmtDuration(est.seconds)
+                        + "，超过 1 分钟，收码耗时较长。";
+        row.appendChild(box);
+      }
       wrap.appendChild(row);
     }
   }

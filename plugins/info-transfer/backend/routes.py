@@ -1837,6 +1837,21 @@ def reassemble_qrtransfer_v2(codes):
     return joined[SIZE_DATASIZE:SIZE_DATASIZE + data_size]
 
 
+class StaticTooManyPages(ValueError):
+    """静态分页超出上限（发码前拦截用：携带所需页数与上限，供前端给「改用视频流」引导）。
+
+    继承 ValueError 以保持既有调用方（含 test_roundtrip 的断言）语义不变。
+    """
+
+    def __init__(self, pages, max_pages):
+        self.pages = pages
+        self.max_pages = max_pages
+        super().__init__(
+            f"数据量过大，需拆分 {pages} 张静态二维码，超过上限 {max_pages} 张，"
+            "请调大二维码版本或改用「二维码视频流」模式"
+        )
+
+
 def _build_static_pages_v2(env_frame, version, err, max_pages=200):
     """把 v2 信封帧按容量拆分为多页 JZ2 帧（meta 每页重复，payload 切片）。
 
@@ -1850,10 +1865,7 @@ def _build_static_pages_v2(env_frame, version, err, max_pages=200):
         return [env_frame]
     n = math.ceil(len(payload) / cap)
     if n > max_pages:
-        raise ValueError(
-            f"数据量过大，需拆分超过 {max_pages} 张静态二维码，"
-            "请调大二维码版本或改用「二维码视频流」模式"
-        )
+        raise StaticTooManyPages(n, max_pages)
     pages = []
     for i in range(n):
         pages.append(_jz2_frame("env", i, n, f["meta"],
@@ -2502,10 +2514,7 @@ def _build_static_pages(fmt, name, env_bytes, version, err, max_pages=200):
         chunks.append((chunk, pos == 0))
         pos += used
         if len(chunks) > max_pages:
-            raise ValueError(
-                f"数据量过大，需拆分超过 {max_pages} 张静态二维码，"
-                "请调大二维码版本或改用「二维码视频流」模式"
-            )
+            raise StaticTooManyPages(len(chunks), max_pages)
     total = len(chunks)
     pages = []
     for i, (chunk, is_head) in enumerate(chunks, 1):
@@ -2588,6 +2597,12 @@ def estimate_output(mode, fmt, name, env_bytes, version, frame_repeat):
                 pages = len(_build_static_pages_v2(env_bytes, version, err))
             else:
                 pages = len(_build_static_pages(fmt, name, env_bytes, version, err))
+        except StaticTooManyPages as e:
+            # 发码前拦截（S3/T04）：把「所需页数 / 上限 / 建议」结构化带回任务，
+            # 前端据此给「改用视频流」动作，而不是只丢一句错误文案。
+            return {"kind": "static", "pages": None, "codes": 0, "seconds": 0,
+                    "too_many": True, "pages_needed": e.pages,
+                    "max_pages": e.max_pages, "suggest": "video", "error": str(e)}
         except ValueError as e:
             return {"kind": "static", "pages": None, "codes": 0,
                     "seconds": 0, "error": str(e)}

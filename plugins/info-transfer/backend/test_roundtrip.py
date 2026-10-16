@@ -268,6 +268,13 @@ def run():
     est = it.estimate_output("static", "file", "big.bin",
                              base64.b64encode(big), 15, 5)
     check("静态超 200 页前置引导", est.get("pages") is None and "视频" in (est.get("error") or ""))
+    # S3/T04 发码前拦截：结构化字段供前端渲染「改用视频流」动作
+    check("静态超限带结构化拦截信息",
+          est.get("too_many") is True and est.get("suggest") == "video"
+          and est.get("max_pages") == 200
+          and isinstance(est.get("pages_needed"), int)
+          and est["pages_needed"] > 200,
+          "est=%r" % (est,))
     # 视频估算口径：秒数与帧数一致
     est = it.estimate_output("video", "file", "x.bin",
                              base64.b64encode(b"B" * 50_000).decode("ascii"), 15, 5)
