@@ -6,6 +6,7 @@ r"""试点迁移演练（T-O2-12d）：真实主应用 + 真实插件（notice-b
     2. 主应用重启（源码态=重新装配；notice-board 跳过进程内加载 → 反代桥接管）
     3. supervisor 启动编排拉起 notice-board worker（jz_worker 引导件）
     4. 真实登录（admin/admin123，临时数据根自动初始化）→ 经主应用反代访问公告板 API：
+       （壳门接入密钥由其"首个非公开路径请求"惰性生成，见 _shell_token 注释）
        主应用鉴权管线（会话/权限点）→ 反代 → worker 两级会话（回环 /api/session
        取**真实**身份 dict）→ notice-board register(app) 原样路由
     5. 隔离验证：停 worker → 该插件 503 兜底、主应用与其余路由照常、登录态不丢
@@ -41,6 +42,30 @@ def free_port():
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+def _shell_token(requests, base, data_root, tries=20):
+    """取壳门接入密钥：先打一个**非公开**路径触发惰性生成，再读文件。
+
+    背景（D8 修复，2026-10-17）：密钥由 `jz_host.shell_gate._load_state()` 在**首个非公开
+    路径请求**时生成（文件缺失即写入）。而本台架的启动就绪探测打的是 `GET /login`——它在
+    `shell_gate.PUBLIC_EXACT` 白名单内，走 `is_public()` 提前返回，**不会**触发生成。
+    旧实现只轮询等文件出现，故必然 FileNotFoundError（2026-10-11 壳门批次引入的时序缺口）。
+    `/api/tools` 的 403 属预期：目的只是让门走到"读/生成密钥"那一步。
+    """
+    path = os.path.join(data_root, "config", "shell-token.json")
+    try:
+        requests.get(base + "/api/tools", timeout=5)
+    except Exception:
+        pass
+    for _ in range(tries):
+        if os.path.isfile(path):
+            try:
+                return json.loads(open(path, encoding="utf-8").read())["token"]
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return ""
 
 
 def main():
@@ -119,11 +144,15 @@ def main():
     # 壳身份门（2026-10-11 需求①）：业务面 API 现要求壳标识——台架以"壳"身份带密钥
     # （密钥由主应用在隔离数据根首请求时生成；管理面不受影响）。
     _tok_path = os.path.join(data_root, "config", "shell-token.json")
-    for _ in range(20):
-        if os.path.isfile(_tok_path):
-            break
-        time.sleep(0.5)
-    s.headers["X-JZ-Shell"] = json.loads(open(_tok_path, encoding="utf-8").read())["token"]
+    tok = _shell_token(requests, base, data_root)
+    check("S2 壳密钥 shell-token.json 惰性生成（首个非公开路径请求触发）", bool(tok),
+          "" if tok else "非公开路径请求后仍未生成：%s（壳门惰性生成行为可能已变）" % _tok_path)
+    if not tok:
+        sup.shutdown()
+        srv.shutdown()
+        shutil.rmtree(work, ignore_errors=True)
+        return 1
+    s.headers["X-JZ-Shell"] = tok
     r_login = s.post(base + "/api/login",
                      json={"username": "admin", "password": "admin123"}, timeout=10)
     check("S2 真实登录成功（默认 admin 账号）",
