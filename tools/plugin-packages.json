@@ -1,118 +1,6 @@
 {
     "schema":  1,
     "packages":  {
-                     "admin":  {
-                                   "version":  "1.0.0",
-                                   "api_version":  1,
-                                   "file":  "JZToolsHub-admin-后端-v1.0.0.zip",
-                                   "sha256":  "b7f7f8e4f395a7c2d52b2372054f6cc95106270dc3e715971dc8bd399010406e",
-                                   "size":  221164,
-                                   "built_at":  "2026-10-15T23:56:33+08:00",
-                                   "code_sha256":  "03f9f5d661dcf99ee1d0c463dce81c4ab6b0fbee1731c7e377e15f85c711f17e",
-                                   "file_count":  34,
-                                   "requires_restart":  true,
-                                   "file_hashes":  {
-                                                       "plugins/admin/backend/__init__.py":  "26b7bb556a0aac8f",
-                                                       "plugins/admin/backend/admin_org.py":  "68068804d56c99f3",
-                                                       "plugins/admin/backend/admin_plugins_api.py":  "832e736b56fa6453",
-                                                       "plugins/admin/backend/admin_store_api.py":  "3b32d8212259f0bf",
-                                                       "plugins/admin/backend/batch_io.py":  "6ade9e38f145a2be",
-                                                       "plugins/admin/backend/data_migrate.py":  "bc5d1caefe8a2c16",
-                                                       "plugins/admin/backend/plugin_admin.py":  "c1f12f0f6fde9fca",
-                                                       "plugins/admin/backend/requirements.txt":  "61b243a19f403736",
-                                                       "plugins/admin/backend/routes.py":  "71a42e0e181fa46c",
-                                                       "plugins/admin/backend/store_admin.py":  "cded8dfce0934008",
-                                                       "plugins/admin/frontend/admin.html":  "a6c4a4b0ce9cf958",
-                                                       "plugins/admin/frontend/admin-department.html":  "8dcacc749ff5978f",
-                                                       "plugins/admin/frontend/admin-llm.html":  "c4fa718358617e31",
-                                                       "plugins/admin/frontend/admin-migrate.html":  "d2dc7318ac4f1c92",
-                                                       "plugins/admin/frontend/admin-plugins.html":  "8a17abacbff1607f",
-                                                       "plugins/admin/frontend/admin-settings.html":  "e5fa77653bc11581",
-                                                       "plugins/admin/frontend/admin-store.html":  "72e221213ddafd5e",
-                                                       "plugins/admin/frontend/admin-unit.html":  "d8916448b7dc0bd2",
-                                                       "plugins/admin/frontend/admin-user.html":  "edc910e073984963",
-                                                       "plugins/admin/frontend/css/admin.css":  "b43983a5594980e2",
-                                                       "plugins/admin/frontend/js/admin.js":  "115957f7d7667f19",
-                                                       "plugins/admin/frontend/js/admin-common.js":  "1d7c4e50e3a0c30e",
-                                                       "plugins/admin/frontend/js/admin-dept.js":  "5af3fe30fbb6296a",
-                                                       "plugins/admin/frontend/js/admin-llm.js":  "102912d29cff7f89",
-                                                       "plugins/admin/frontend/js/admin-migrate.js":  "cd1c4132335b7ba0",
-                                                       "plugins/admin/frontend/js/admin-plugins.js":  "221ee6aeb50716eb",
-                                                       "plugins/admin/frontend/js/admin-settings.js":  "16ff1617945a9197",
-                                                       "plugins/admin/frontend/js/admin-store.js":  "e8e369849ecea552",
-                                                       "plugins/admin/frontend/js/admin-unit.js":  "e9a2ec3bd7a9e0a5",
-                                                       "plugins/admin/frontend/js/admin-user.js":  "611618896cf6fa04",
-                                                       "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
-                                                       "plugins/admin/frontend/login.html":  "b75cfe86491ee473",
-                                                       "plugins/admin/manifest.json":  "013af347be601c11",
-                                                       "plugins/admin/README.md":  "f5e452998bc2e9ef"
-                                                   },
-                                   "assets":  {
-                                                  "frontend/css/admin.css":  {
-                                                                                 "h":  "b43983a5594980e2",
-                                                                                 "v":  27,
-                                                                                 "referenced":  true
-                                                                             },
-                                                  "frontend/js/admin.js":  {
-                                                                               "h":  "115957f7d7667f19",
-                                                                               "v":  10,
-                                                                               "referenced":  true
-                                                                           },
-                                                  "frontend/js/admin-common.js":  {
-                                                                                      "h":  "1d7c4e50e3a0c30e",
-                                                                                      "v":  11,
-                                                                                      "referenced":  true
-                                                                                  },
-                                                  "frontend/js/admin-dept.js":  {
-                                                                                    "h":  "5af3fe30fbb6296a",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/admin-llm.js":  {
-                                                                                   "h":  "102912d29cff7f89",
-                                                                                   "v":  null,
-                                                                                   "referenced":  false
-                                                                               },
-                                                  "frontend/js/admin-migrate.js":  {
-                                                                                       "h":  "cd1c4132335b7ba0",
-                                                                                       "v":  null,
-                                                                                       "referenced":  false
-                                                                                   },
-                                                  "frontend/js/admin-plugins.js":  {
-                                                                                       "h":  "221ee6aeb50716eb",
-                                                                                       "v":  null,
-                                                                                       "referenced":  false
-                                                                                   },
-                                                  "frontend/js/admin-settings.js":  {
-                                                                                        "h":  "16ff1617945a9197",
-                                                                                        "v":  null,
-                                                                                        "referenced":  false
-                                                                                    },
-                                                  "frontend/js/admin-store.js":  {
-                                                                                     "h":  "e8e369849ecea552",
-                                                                                     "v":  null,
-                                                                                     "referenced":  false
-                                                                                 },
-                                                  "frontend/js/admin-unit.js":  {
-                                                                                    "h":  "e9a2ec3bd7a9e0a5",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/admin-user.js":  {
-                                                                                    "h":  "611618896cf6fa04",
-                                                                                    "v":  null,
-                                                                                    "referenced":  false
-                                                                                },
-                                                  "frontend/js/login.js":  {
-                                                                               "h":  "3548af57b801173b",
-                                                                               "v":  null,
-                                                                               "referenced":  false
-                                                                           }
-                                              },
-                                   "frontend_file":  "JZToolsHub-admin-前端-v1.0.0.zip",
-                                   "frontend_sha256":  "58b67beeb0305e6649e53206a2d1177b5f5f213b0d1ef441687e80932e30d006",
-                                   "frontend_size":  89629
-                               },
                      "base64":  {
                                     "version":  "1.0.0",
                                     "api_version":  1,
@@ -826,6 +714,118 @@
                                                "frontend_file":  "JZToolsHub-trajectory-sketch-前端-v1.0.0.zip",
                                                "frontend_sha256":  "dabdb8b4c19e8fd0c19dbbfd2414bbac18a86930e97dbfa9eb5c5f615d64dce1",
                                                "frontend_size":  27283
-                                           }
+                                           },
+                     "admin":  {
+                                   "version":  "1.0.0",
+                                   "api_version":  1,
+                                   "file":  "JZToolsHub-admin-后端-v1.0.0.zip",
+                                   "sha256":  "46d8833b5a534df6fc5cfc0c844e71af82da232d95f10c6c705ebc8bf0cdd9df",
+                                   "size":  222721,
+                                   "built_at":  "2026-10-16T11:38:29+08:00",
+                                   "code_sha256":  "14f56c3fca7811731d50ac5787972dced17aeac85cfd6ebc54945b9d5de8602c",
+                                   "file_count":  34,
+                                   "requires_restart":  false,
+                                   "file_hashes":  {
+                                                       "plugins/admin/backend/__init__.py":  "26b7bb556a0aac8f",
+                                                       "plugins/admin/backend/admin_org.py":  "68068804d56c99f3",
+                                                       "plugins/admin/backend/admin_plugins_api.py":  "832e736b56fa6453",
+                                                       "plugins/admin/backend/admin_store_api.py":  "3b32d8212259f0bf",
+                                                       "plugins/admin/backend/batch_io.py":  "6ade9e38f145a2be",
+                                                       "plugins/admin/backend/data_migrate.py":  "bc5d1caefe8a2c16",
+                                                       "plugins/admin/backend/plugin_admin.py":  "c1f12f0f6fde9fca",
+                                                       "plugins/admin/backend/requirements.txt":  "61b243a19f403736",
+                                                       "plugins/admin/backend/routes.py":  "71a42e0e181fa46c",
+                                                       "plugins/admin/backend/store_admin.py":  "cded8dfce0934008",
+                                                       "plugins/admin/frontend/admin.html":  "a6c4a4b0ce9cf958",
+                                                       "plugins/admin/frontend/admin-department.html":  "8dcacc749ff5978f",
+                                                       "plugins/admin/frontend/admin-llm.html":  "c4fa718358617e31",
+                                                       "plugins/admin/frontend/admin-migrate.html":  "f0088a7a6b8ee7cc",
+                                                       "plugins/admin/frontend/admin-plugins.html":  "8a17abacbff1607f",
+                                                       "plugins/admin/frontend/admin-settings.html":  "e5fa77653bc11581",
+                                                       "plugins/admin/frontend/admin-store.html":  "72e221213ddafd5e",
+                                                       "plugins/admin/frontend/admin-unit.html":  "d8916448b7dc0bd2",
+                                                       "plugins/admin/frontend/admin-user.html":  "edc910e073984963",
+                                                       "plugins/admin/frontend/css/admin.css":  "b43983a5594980e2",
+                                                       "plugins/admin/frontend/js/admin.js":  "115957f7d7667f19",
+                                                       "plugins/admin/frontend/js/admin-common.js":  "1d7c4e50e3a0c30e",
+                                                       "plugins/admin/frontend/js/admin-dept.js":  "5af3fe30fbb6296a",
+                                                       "plugins/admin/frontend/js/admin-llm.js":  "102912d29cff7f89",
+                                                       "plugins/admin/frontend/js/admin-migrate.js":  "8f1f254dc0af22cd",
+                                                       "plugins/admin/frontend/js/admin-plugins.js":  "221ee6aeb50716eb",
+                                                       "plugins/admin/frontend/js/admin-settings.js":  "16ff1617945a9197",
+                                                       "plugins/admin/frontend/js/admin-store.js":  "e8e369849ecea552",
+                                                       "plugins/admin/frontend/js/admin-unit.js":  "e9a2ec3bd7a9e0a5",
+                                                       "plugins/admin/frontend/js/admin-user.js":  "611618896cf6fa04",
+                                                       "plugins/admin/frontend/js/login.js":  "3548af57b801173b",
+                                                       "plugins/admin/frontend/login.html":  "b75cfe86491ee473",
+                                                       "plugins/admin/manifest.json":  "013af347be601c11",
+                                                       "plugins/admin/README.md":  "f5e452998bc2e9ef"
+                                                   },
+                                   "assets":  {
+                                                  "frontend/css/admin.css":  {
+                                                                                 "h":  "b43983a5594980e2",
+                                                                                 "v":  27,
+                                                                                 "referenced":  true
+                                                                             },
+                                                  "frontend/js/admin.js":  {
+                                                                               "h":  "115957f7d7667f19",
+                                                                               "v":  10,
+                                                                               "referenced":  true
+                                                                           },
+                                                  "frontend/js/admin-common.js":  {
+                                                                                      "h":  "1d7c4e50e3a0c30e",
+                                                                                      "v":  11,
+                                                                                      "referenced":  true
+                                                                                  },
+                                                  "frontend/js/admin-dept.js":  {
+                                                                                    "h":  "5af3fe30fbb6296a",
+                                                                                    "v":  null,
+                                                                                    "referenced":  false
+                                                                                },
+                                                  "frontend/js/admin-llm.js":  {
+                                                                                   "h":  "102912d29cff7f89",
+                                                                                   "v":  null,
+                                                                                   "referenced":  false
+                                                                               },
+                                                  "frontend/js/admin-migrate.js":  {
+                                                                                       "h":  "8f1f254dc0af22cd",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   },
+                                                  "frontend/js/admin-plugins.js":  {
+                                                                                       "h":  "221ee6aeb50716eb",
+                                                                                       "v":  null,
+                                                                                       "referenced":  false
+                                                                                   },
+                                                  "frontend/js/admin-settings.js":  {
+                                                                                        "h":  "16ff1617945a9197",
+                                                                                        "v":  null,
+                                                                                        "referenced":  false
+                                                                                    },
+                                                  "frontend/js/admin-store.js":  {
+                                                                                     "h":  "e8e369849ecea552",
+                                                                                     "v":  null,
+                                                                                     "referenced":  false
+                                                                                 },
+                                                  "frontend/js/admin-unit.js":  {
+                                                                                    "h":  "e9a2ec3bd7a9e0a5",
+                                                                                    "v":  null,
+                                                                                    "referenced":  false
+                                                                                },
+                                                  "frontend/js/admin-user.js":  {
+                                                                                    "h":  "611618896cf6fa04",
+                                                                                    "v":  null,
+                                                                                    "referenced":  false
+                                                                                },
+                                                  "frontend/js/login.js":  {
+                                                                               "h":  "3548af57b801173b",
+                                                                               "v":  null,
+                                                                               "referenced":  false
+                                                                           }
+                                              },
+                                   "frontend_file":  "JZToolsHub-admin-前端-v1.0.0.zip",
+                                   "frontend_sha256":  "1db10d5cdee2dc631b0c02840d185c14af20f94f496058b3c72d554f707ba326",
+                                   "frontend_size":  91150
+                               }
                  }
 }
