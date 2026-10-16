@@ -1144,6 +1144,12 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
         def _reexec():
             time.sleep(0.5)
+            # D-3（2026-10-17）：重启退出前也显式收割常驻 worker（新实例按需重新拉起）
+            try:
+                if executor is not None:
+                    executor.shutdown()
+            except Exception as exc:
+                _log("restart：收割常驻 worker 失败：%r" % exc)
             _log("restart：旧进程退出（os._exit 0）")
             os._exit(0)
 

@@ -132,11 +132,14 @@ def _tray_image():
     return img
 
 
-def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=""):
+def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token="", reap_workers=None):
     """开窗并阻塞主线程（webview.start 占主线程；能力层 waitress 已在后台线程）。
 
     shell_token：本地端口壳自证 run token（client_main 同值传能力层，G2-6）——
     首导航经 /shell-boot?_shell=<token> 种 Cookie 后再 302 进主页面。
+
+    reap_workers：托盘退出前的常驻 worker 收割口（D-3，2026-10-17），由组合根
+    `client_main` 注入 `executor.shutdown` —— UI 层不 import 能力层（分层解耦）。
     """
     from client_config import webview2_runtime_dir, geometry_path, webview2_profile_dir
 
@@ -263,6 +266,13 @@ def run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=""):
         def on_exit(icon, item):
             log("exit from tray")
             geo._flush()
+            # D-3（2026-10-17）：托盘退出 = 显式收割常驻 worker 后再结束进程。
+            # 必须先收割再 os._exit —— os._exit 会跳过 finally，组合根兜底永不执行。
+            if reap_workers is not None:
+                try:
+                    reap_workers()
+                except Exception:
+                    log("托盘退出收割常驻 worker 失败：\n" + traceback.format_exc())
             icon.stop()
             os._exit(0)                   # 同主包口径：托盘退出立即结束进程
 

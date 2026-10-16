@@ -45,7 +45,7 @@ DAEMON_EXEMPT = {
 }
 EXIT_WHITELIST = {
     ("client/capability_app.py", "restart-exit 通道：重启前延迟 os._exit 是唯一退出口（批次 2 T09 设计）"),
-    ("client/shell_window.py", "on_exit：托盘「退出」菜单项，先 geo._flush() + icon.stop() 再结束进程（GD5 拍板口径）"),
+    ("client/shell_window.py", "on_exit：托盘「退出」菜单项，先 geo._flush() + 收割常驻 worker（reap_workers，D-3 2026-10-17）+ icon.stop() 再结束进程（GD5 拍板口径）"),
 }
 
 
@@ -99,6 +99,21 @@ def section_a():
           not naked_join, naked_join)
     bad_exit = [x for x in exits if not any(x[0] == p for p, _ in EXIT_WHITELIST)]
     check("A3 os._exit 只出现在登记的退出通道（其余位置=绕过收割线程的硬退出）", not bad_exit, bad_exit)
+
+    # A4（D-3，2026-10-17）：托盘退出通道必须显式收割常驻 worker，且组合根要注入该收割口。
+    # 旧缺口：全仓唯一调用 PluginExecutor.shutdown() 的是本台架 B2 —— 台架在替生产演练一个
+    # 生产没实现的动作。此处把它钉成静态契约，防回归。
+    sw = open(os.path.join(ROOT, "client", "shell_window.py"), encoding="utf-8").read()
+    cm = open(os.path.join(ROOT, "client", "client_main.py"), encoding="utf-8").read()
+    sig = re.search(r"def run_shell\(([^)]*)\)", sw, re.S)
+    ok_sig = bool(sig) and "reap_workers" in sig.group(1)
+    body = sw[sw.find("def on_exit"):]
+    ok_call = "reap_workers()" in body
+    ok_before = ok_call and body.find("reap_workers()") < body.find("os._exit(0)")
+    ok_wired = bool(re.search(r"reap_workers\s*=\s*executor\.shutdown", cm))
+    check("A4 托盘退出显式收割常驻 worker（shell_window 调用 + client_main 注入，D-3）",
+          ok_sig and ok_call and ok_before and ok_wired,
+          "sig=%s call=%s before_exit=%s wired=%s" % (ok_sig, ok_call, ok_before, ok_wired))
 
 
 # ---------------------------------------------------------------- B/C/D 段（运行时）

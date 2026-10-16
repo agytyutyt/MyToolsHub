@@ -63,7 +63,8 @@ def handle_stop(build_cfg):
         except OSError:
             pass
         return 0
-    subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+    # D-3（2026-10-17）：/T 连进程树一起收，防常驻 worker 卡死时成孤儿（旧实现无 /T）
+    subprocess.run(["taskkill", "/PID", pid, "/T", "/F"], capture_output=True)
     print("已结束实例 PID=%s（%s）" % (pid, image))
     try:
         os.remove(pf)
@@ -181,7 +182,10 @@ def main():
 
     try:
         from shell_window import run_shell
-        run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=shell_token)
+        # D-3（2026-10-17）：组合根把「托盘退出的常驻 worker 收割口」注入 UI 层。
+        # 否则退出只靠子进程 stdin EOF 自杀，在途长任务不被即时收割（旧缺口）。
+        run_shell(build_cfg, client_cfg, port, data_dir, log, shell_token=shell_token,
+                  reap_workers=executor.shutdown)
     except Exception:
         log("UI 层异常退出：\n" + traceback.format_exc())
         return 1
