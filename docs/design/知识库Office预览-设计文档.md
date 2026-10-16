@@ -430,7 +430,7 @@ def _pdf_task(fid):
 | 旧数据无原件（doc/xls 历史记录原件已被转换件覆盖） | 迁移回填 `original_ext=ext`，下载给现有落盘件（docx/xlsx）——接受此为已知折衷，文档中注明 |
 | Excel 空白页（残留格式撑大使用区域） | 遗留增强：openpyxl 预修剪副本（§7.4） |
 | PyInstaller 打包 | 不新增 Python 依赖（subprocess/winreg/tempfile 均标准库），spec 零改动 |
-| 内网老 Chrome（浏览器基线 Chrome ≥72） | 前端新增代码保持 ES5 风格（var/无 ?.），图标内联 SVG 不用 emoji |
+| ~~内网老 Chrome~~（浏览器基线 2026-10-16 取消） | 内联 SVG 不用 emoji **仍保留**（触发=缺彩色 emoji 字体，与浏览器无关）；ES5 风格要求已随基线取消解除 |
 
 ---
 
@@ -572,6 +572,6 @@ def _pdf_task(fid):
   - 并发 2 路（验收②）：预热轮含一次性「第二槽冷启动」41.3s；两槽皆热后串行基线 16.6/15.8s、并发 16.0/16.0s（墙钟 16.0 ≈ max，真并行；并发/串行 = 0.97x/1.01x ≤ 1.5x 判定阈值）；产物 HTML 逐字一致（不串扰）。
   - 判定口径：不退化按「病态退化」定义阈值（两路撞同一 profile 的锁等待/共享锁序列化会到 ≥2×），正常 CPU 竞争波动（本机复测 ±1~3s）不判退化；另加「墙钟 ≈ max(A,B) 而非 A+B」的真并行检查。
 - 已知边界（留痕，未改口径）：
-  - 生产默认转换超时 60s（xhr `soffice_timeout_ms`）：本机全冷首跑 39.3~76.8s（跨多次运行波动），慢机冷路径可能 TIMEOUT → 前端自动回退降级渲染（B-4），profile 预热后正常；**未改默认超时（超出裁定范围，留观察）**。
+  - 生产默认转换超时 60s（xhr `soffice_timeout_ms`）：本机全冷首跑 39.3~76.8s（跨多次运行波动），慢机冷路径可能 TIMEOUT → 前端自动回退降级渲染（B-4），profile 预热后正常。**【2026-10-16 拍板：上调默认超时】** 候选值 120s（或「首次宽限 + 后续收紧」二段式）——超时是硬失败、用户无从补救，放宽几乎无副作用；具体值随实施定，落点 `plugins/knowledge-base/backend/vendor/xhr/normalize/__init__.py` 的 `soffice_timeout_ms`。
   - 池状态为进程内单例（与「单 Flask 进程」部署形态一致）；同机多进程共指同一数据根时，最坏为槽位复用冲突 → 输出存在性校验兜底 → B-4 降级，不静默。
 - 回归锁：`backend/test_office_profile_pool.py`（9 组 51 断言：接缝默认/租用/降级、dhr 接缝、池 LIFO/清扫/失败降级/并发/接线；不依赖真实 LibreOffice——假 soffice + 注入 runner）；`backend/bench_office_profile_pool.py`（本表数据来源：改动前/后两臂 + 并发对照 + 槽位体积）。两脚本按 payload 规则（`test_*.py`/`bench_*.py`）剔除，不入插件包。

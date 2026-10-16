@@ -64,7 +64,7 @@ HTTP 全链路（含**导出账号→改密码→导入还原→原密码仍能�
 ③ 三个业务插件的 `llm_client.py` 改为**薄适配层**（HTTP 调用/Key/连通测试全部上交），
 插件配置接口不再回传凭据、前端配置卡片改为状态行；提示词文件位置不变（**无数据迁移**）；
 ④ **插件侧历史配置已彻底清除**（2026-09-23 收尾）：`jz_llm` 不再回退读插件 `config.json` 的 `llm` 段；
-启动迁移 `migrate_plugin_legacy_llm()`（2026-10-09 起上移主体 `app.py:100`，带 `llm_migrated.flag` 退场标记，commit 747412d）**先收编、再清除**——统一配置为空时把插件那份明文 Key
+启动迁移 `migrate_plugin_legacy_llm()`（2026-10-09 起上移主体 `app.py:100`，带 `llm_migrated.flag` 退场标记，commit 747412d）**先收编、再清除**〔2026-10-16 更新：该启动迁移与 `llm_migrated.flag` 机制已**整段删除**——项目未正式上线、无存量数据根，条件空集满足；遗留数据根如需清理改用 `tools/dev/purge-legacy-llm-config.py`，自带 dry-run 与逐文件备份〕——统一配置为空时把插件那份明文 Key
 搬进 `<数据根>/config/llm.json`（加密落盘），随后删除插件侧 `llm` 段，老部署升级后功能不失效
 而明文副本消失（幂等；见设计文档 §8.1）；
 ⑤ 新增 `test_llm_module.py`（45 例）覆盖配置/格式/解析/真实调用（本地桩）/线程纪律/路由/插件联调。
@@ -106,12 +106,14 @@ HTTP 全链路（含**导出账号→改密码→导入还原→原密码仍能�
 | --- | --- | --- |
 | 操作系统 | **Windows 10 及以上（x64）** | **不支持 Windows 7**（2026-09-14 起取消，3.8 打包支线已删除） |
 | Python | **3.14**（打包与生产唯一基线） | 开发机最低 3.12；3.15 发布后不急于跟进（见 `docs/eval/Python版本选型评估.md` §6） |
-| 浏览器 | **Chrome ≥ 72**（Edge ≥ 79、同内核国产浏览器） | 与 OS 基线**互相独立**：§7.3 的旧浏览器兼容措施不能删 |
+| 渲染内核 / 浏览器 | **业务面：客户端内嵌固定版 WebView2 内核（钉 `109.0.1518.78`）**，不依赖目标机浏览器版本（`tools/client/client-build-config.json`；内核缺失时回落系统常青 WebView2，同为现代版本）。**管理后台：任意现代浏览器**（系统自带 Edge / Chrome 即可） | 业务面浏览器直连**已退役**（壳身份门，2026-10-11，`README.md` §3.1 返回 403）→ **不存在浏览器版本基线**；§7.3 第 15 条的历史兼容措施说明已同步 |
 | 网络 | 目标机**可完全无外网** | 主包**默认瘦身**（不含组件；体积以出包产物为准，见 §2.2）；Chrome / LibreOffice 以**独立组件包**按需分发，LibreOffice 组件免管理员、对目标机隐身。见 `docs/guide/离线部署包说明.md` |
 | 许可证 | Chrome（专有）/ LibreOffice（MPL-2.0） | 再分发口径与替代方案见 `runtime/README.md` §6 |
 
-> ⚠️ **最容易犯的错：把"取消 Win7"理解成"可以删掉旧浏览器兼容代码"**。两者触发条件不同——
-> 前者是操作系统，后者是浏览器版本 / 缺少彩色 emoji 字体。详见 §7.3 第 17 条。
+> ⚠️ **浏览器版本基线已于 2026-10-16 取消**：业务面渲染内核由客户端固定版 WebView2 自控，
+> 不再依赖目标机浏览器版本。因此 §7.3 第 15 条里"为 Chrome 72/80/84 保留"的兼容措施
+> **已失去触发条件**（降为历史防御，不再是不删的硬约束）；但其中 **emoji → SVG 回退必须保留**
+> ——它的触发条件是"缺彩色 emoji 字体"（Windows Server / 精简版镜像），与浏览器版本无关。
 
 ### 1.2 启动时序
 
@@ -389,7 +391,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 >   - **P1-8** 前端资源版本号统一：现状三套并存（case-report 序号 v34、character-graph 日期戳、admin 同一份 CSS 被引用成 v1/v2/v5）。**F-2 闸门只要求"内容变了必须递增"**，不关心起点与步长，因此统一纯属风格收益，却会连带触发**所有插件的版本递增 + 重出 + 重上架**——建议随下一次"多插件共同出包"的窗口顺带做，不单独立项。
 >   - **P1-10** SVG 回退改按 codepoint 自动推导：映射表已收敛到 `jz-icon.js` 一处（P1-12 顺带完成），剩下的是"要不要为免维护而改文件名"——`#️⃣→23-20e3.svg`、`🗺️→1f5fa.svg` 这类带变体选择符的历史文件名并不严格等于 codepoint，改法会动到已分发资源的文件名。
 >   - **P2-19** 生产部署上限评估（≈300 并发，Flask/waitress 单进程线程模型 → 建议 Gunicorn + Nginx）：属**部署形态决策**，需甲方现场并发量输入，不是代码件。
->   - **P2-20** 移动端「重置」功能恢复或彻底移除 + `CameraScanner.averageLuminance` 无人调用：**在 APP 侧仓库**，本仓无法闭环。
+>   - **P2-20** 移动端「重置」功能恢复或彻底移除 + `CameraScanner.averageLuminance` 无人调用：~~**在 APP 侧仓库**，本仓无法闭环~~（**2026-10-16 归属更正**：`android-app/` 就在本仓）。**【拍板：彻底移除】** —— `strings.xml` 的 `btn_reset`/`toast_reset` 已零引用（孤儿字符串）；`averageLuminance` 有定义与调用点但 `onBrightness` 恒为 null（唯一实例化点不传）→ 删孤儿字符串 + 删死函数与参数。
 > - **需要真机 / 现场环境（已在 `docs/guide/桌面端与商店真机验收清单.md` 挂 R 项）**：P1-14（离线组件真机、Chrome 需提权）、P1-15（发版前离线组件 sha 校准）、P1-15.2（共享盘 UNC 实测）、T2/T3/M2/M3（大模型与数据迁移目标机验收）。
 > - ~~**性能件，建议单独立项**：P2-21（LibreOffice profile 复用，历史实测冷启动 37~40s → 15~18s）——改的是 vendor 适配层，与知识库四件（L4-4）同域，**建议并入 L4-4 一起做**，不夹带在本批小修里。~~ ✅ **2026-10-10 已随 L4-4 并入完成**（commit `0f6c53d`：vendor 接缝 + 持久 profile 池，实测/回归/留观察详见上表第 21 条与设计文档 §19）。
 > - **P2-18（清理 deploy/dist/build/runtime ≈1.2GB）**：**未执行**——这些目录是当前出包链的产物与验证依据（本批刚出的 1.2.21 双包、真机清单引用的物证都在里面），删除属破坏性且不可自动恢复，**留人工决定**。
@@ -412,7 +414,7 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 | A9 | **轨迹分析引擎做成零依赖可插拔包** | 算法独立演进、可独立自测，不动路由与前端 | 新增算法版本只需在 `engine/algorithms/` 下加目录并注册 |
 | A10 | **移动端完全离线**（仅 CAMERA 权限，禁止 INTERNET） | 业务数据通过二维码光学传输，不落公网 | 任何联网能力都不应被加入 |
 | A11 | **错误文案作为逐字契约** | 桌面端按文案做 e2e 断言 | 改文案 = 改《移动端APP.md》+ 桌面端 + APP 三处 |
-| A12 | **OS 基线与浏览器基线分开定义**（OS = Windows 10+；浏览器 = Chrome ≥72） | 两者触发不同的兼容措施，混在一起会导致"取消 Win7 顺手删掉旧浏览器兼容代码"的误伤 | 提浏览器基线必须先确认内网浏览器已升级；§7.3 第 15/17 条列明了不可删的 4 处兼容措施 |
+| A12 | **~~OS 基线与浏览器基线分开定义~~ → 已废（2026-10-16）** | 原决策前提「业务面在浏览器里跑、需兼容内网老 Chrome」已不成立：业务面浏览器直连退役，渲染内核=客户端固定版 WebView2（钉 109.0.1518.78） | 浏览器版本基线**取消**，无需拍板 72/80；emoji→SVG 回退仍须保留（触发条件=缺彩色 emoji 字体，与浏览器无关） |
 | A13 | **取消 Windows 7 支持，Python 基线冻结 3.14** | 实测项目自身代码 3.8 可用，唯一"必须 3.14"的原因是 vendor 引擎的一行 bug——**修 bug 后版本选择就不再被绑架**；而 3.8 已 EOL、3.10 也将 EOL，维持旧支线只有成本 | 目标机基线收窄到 Windows 10+；不再维护 3.8 打包支线；依据与实测见 `docs/eval/Python版本选型评估.md` |
 | A14 | **无官方 wheel 的 C 扩展由仓库随包提供预编译 wheel**（`wheels/`） | `zfec` 无 3.14 官方 wheel 会导致"换台机器打包就失败"；固化制品后打包可复现 | 需维护制品（升级 Python 小版本时重做）；注意 zfec 为 GPL-2+，再分发需确认合规口径（见 `wheels/README.md`） |
 | A15 | **知识库「异步下载源」= 可选增强件，失败一律降级** | 上传时可另提供一个下载文档（预览用一种格式、下载给另一种，如预览 PDF / 下载 DOC） | 落盘 `<id>.dl.<ext>`（不能与原件重名）；校验失败/文件丢失**均不阻断主上传、下载回落原件**；记录三字段未配置则不写键 |
@@ -494,20 +496,23 @@ ls -1 deploy/插件包/ 2>/dev/null | tail -5            # 已出的插件包
 12. **改了 JS/CSS 必须递增 `?v=N`**：`/plugin/` 下静态资源 1 天强缓存，`.html` 才是 no-cache。这是最常踩的坑。
 13. **DOMPurify 会整块丢弃 `<style>` 元素**。知识库 xhr/dhr 引擎是 class 型 CSS，`sanitize()` 之后 Excel 全裸、Word 表格无边框。解法：先正则摘取全部 `<style>`（**全局正则**，dhr 的表格内还有第二个 style 块）→ 正文过 DOMPurify → CSS 原样挂回。**改 `reader.js` 时别把这段摘取逻辑当冗余删掉。**
 14. **下载文件名从响应头解析**：Flask `send_file` 的 `download_name` 已处理 RFC 5987（中文名老浏览器可用），前端不要自己拼 `Content-Disposition`；前端走 fetch→blob 时从 `filename*=UTF-8''` 解析，回退 `filename=`。
-15. **旧浏览器兼容代码不是"Win7 遗产"，禁止当垃圾清理**（Chrome 72/78 是内网既有环境，OS 基线提到 Win10+ 也照样存在）：
-    - `static/js/main.js` 不用可选链 `?.`（Chrome < 80 会语法报错，整页白屏）；
-    - `static/js/jz-icon.js` + `static/icons/` 共 42 个 Twemoji SVG：emoji 渲染成方框时回退图片（触发条件是"缺彩色 emoji 字体"，Windows Server / 精简版系统同样命中）；
-    - `knowledge-base` 的 pdf.js 用 legacy 构建，避免 `??` 与 CSS `gap`（Chrome < 84）；
-    - 各插件页内图标优先自带 SVG（`plugins/trajectory-sketch/frontend/icons/`）。
+15. **浏览器版本驱动的兼容措施已随「浏览器基线取消」退为历史防御**（2026-10-16）：业务面渲染内核
+    = 客户端固定版 WebView2（钉 `109.0.1518.78`），业务面浏览器直连已退役，故下列原本为 Chrome 72/80/84
+    保留的措施**不再有触发场景**，可作为普通代码按需演进（删改前确认无其它触发条件即可）：
+    - `static/js/main.js` 不用可选链 `?.`（原触发 = Chrome < 80 语法报错）——**内核 109 下无此问题**；
+    - `knowledge-base` 的 pdf.js 用 legacy 构建、避免 `??` 与 CSS `gap`（原触发 = Chrome < 84）——同上；
+    - ⚠️ **`static/js/jz-icon.js` + `static/icons/` 共 42 个 Twemoji SVG 仍必须保留**：其触发条件是
+      "缺彩色 emoji 字体"（Windows Server / 精简版镜像），**与浏览器版本无关**；
+    - 各插件页内图标优先自带 SVG（`plugins/trajectory-sketch/frontend/icons/`）——同上，字体回退类，保留。
     新样式优先用纯文本或自绘 SVG；新增插件 emoji 图标只需在 `static/js/jz-icon.js` 的 MAP 补一条。
 16. **知识库「已转换」提示用 `sessionStorage` 记忆关闭状态**，不能用 `localStorage`（一个文件被多人先后打开，互不影响）。
 17. **前端通用 `api()` 抛错只取 `data.error`，后端用 `errors[]` 的 400 会被吞成"HTTP 400"**（2026-09-15 修）：插件包校验失败时后端返回 `{ok:false, errors:[…]}`，而 `admin-common.js` 的旧实现是 `throw new Error(data.error || 'HTTP ' + res.status)`——管理员只看到"校验未通过：HTTP 400"，真正的"同版本重装 / 主程序版本过低 / 哈希不符"全被丢掉，现场无法自助处理。修法两侧都要有：① 后端 `upload` / `apply` 的 400 响应**同时给 `error` 摘要**（`"；".join(errors)`）；② 前端 `api()` 兜底也拼 `errors`，并给 error 对象挂 `err.errors`，页面据此逐条渲染 + 按类型提示下一步。**凡是后端用数组给原因的接口，都必须保证 `error` 摘要存在。**
-18. **目标机 OS 基线与浏览器基线是两件独立的事**：OS 基线是 Windows 10+，浏览器基线是 Chrome ≥72。**取消 Win7 支持不等于可以放宽浏览器基线**——若要提浏览器基线，必须先确认内网老浏览器确实已升级，否则会出现"在 Win10 机器上照样白屏"的误判（详见 §1.1 与 README §2.1）。
+18. **~~目标机 OS 基线与浏览器基线是两件独立的事~~（2026-10-16 作废）**：原「浏览器基线 Chrome ≥72」已取消——业务面浏览器直连退役、渲染内核=客户端固定版 WebView2。OS 基线（Windows 10+）仍是唯一对外环境约束（详见 §1.1 与 README §2.1）；唯一与浏览器无关的遗留是 emoji→SVG 字体回退（见第 15 条）。
 19. **浏览器探针页放 `backend/out/` 时，引用 `frontend/` 要写 `../../frontend/`**（写 `../frontend/` 会静默 404）。症状有迷惑性：**该文件里的所有规则一起失效**（含本来就正确的旧规则），很容易误判成"新写的 CSS 语法错"。另外 `file://` 下 CSS 缓存很顽固，样式改动后要给 `<link>` 加 `?v=<mtime>` 破缓存，否则测的是旧文件（对比新旧规则的计算样式可一眼分辨：`getComputedStyle(el).width/backgroundColor` 全为初始值 ⇒ 整个样式表没加载）。
 20. **自定义开关（switch）必须让 `<label>` 直接包住 `<input>`**（2026-09-18 修）：知识库「异步下载源」开关曾"点不动"——滑块 `.slider` 是 `position:absolute;inset:0` 的覆盖层，它盖住了隐藏 `<input>`，而它自己既非 `<label>` 也不转发点击；只写 `<label for="x">` 指向被遮住的 input 也没用，**唯一可点的是左侧文字**。修法 = 整行 `<label class="switch-row">` 包住 input + slider。改动有静态契约回归（`test_routes_preview.py` 第 6 节）。
 21. **浏览器验证必须用真实指针点击，不能只用程序化 `.click()`**：本次缺陷首次自测时用 `slider.dispatchEvent(new MouseEvent('click'))` 和 `el.click()` 都"看起来通过"，只有真实点击（agent-browser 的 `click` 命令）才暴露"点滑块无效"。另外 agent-browser **会话不跨命令**——任何非浏览器命令（`echo`）或跨 `;` 的独立调用都会重置页面，必须把 `open → click → eval → screenshot` 放在同一次 `&&` 链内。
 
-22. **居中定宽容器 + 竖向滚动条出现 = 整个界面左移半个滚动条宽**（2026-09-22 修）：插件页里「`max-width: N px` + `margin: 0 auto`」的容器（过滤器/轨迹速写的 `.page`、案件报告的 `.view`、知识库的 `.paper`）在内容变高时（展开「⚙️ 管理配置」面板、文档比阅读区高）会出滚动条，视口宽度被吃掉 15px（自带 `::-webkit-scrollbar { width: 10px }` 的插件是 10px），居中容器**整体左移 8px**（实测 1280 视口：`pageLeft` 40 → 32）。框架外壳是 `body.tool-body { height:100vh; overflow:hidden }` + iframe，滚动条出在**插件自己的文档**里，框架侧无法代修——往 iframe 里注入样式会破坏 tool.html 承诺的"框架与插件互不污染"。修法在插件 CSS：`html { scrollbar-gutter: stable; }` 配 `@supports not (scrollbar-gutter: stable) { html { overflow-y: scroll; } }`（旧内核 < Chrome 94 回落为常显轨道，同样不左移；**不能只写 `scrollbar-gutter`**，会漏掉内网老浏览器基线）。滚动发生在**嵌套滚动容器**里时（知识库阅读器 `.reader-container` 内的 `.paper`）必须加在那个容器上，加在 `html` 上无效。已修 5 个插件：file-filter / trajectory-sketch / case-report / notice-board（根元素）+ knowledge-base（`.reader-container`）。**验证必须带对照组**：同一页面把预留关掉再量一次，位移应回到 8px——否则说明测法无效（踩过的两种假通过：视口太矮导致初始就已有滚动条；重建探针元素把内联覆盖丢了）。
+（`@supports` 回落在不支持 `scrollbar-gutter` 的旧内核下常显轨道、同样不左移。浏览器基线已于 2026-10-16 取消，此处回退降为防御性写法，保留无害）
 
 ### 7.4 打包 / 安装脚本与本地环境
 
