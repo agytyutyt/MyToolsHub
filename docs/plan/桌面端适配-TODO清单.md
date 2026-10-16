@@ -80,7 +80,7 @@
 | --- | --- | --- |
 | V1 | 纸面评审本清单（正面/禁带/档2 抽取推迟至 T19/T20） | 确认或改判；确认后清单状态改「已冻结」 |
 | V2 | `git diff app.py jz_deps.py jz_api.py jztools_data.py` | 空输出（主包零改动红线） |
-| V3 | `python tools/client/build-client.py` | `deploy/桌面端/JZClient/` 生成，~36MB，build-info.json 版本=0.0.1-preview |
+| V3 | `python tools/client/build-client.py` | `deploy/桌面端/JZClient/` 生成；`build-info.json` 版本须与 `tools/client/client-build-config.json` 的 `product.version` 一致（版本号现取现用，本文不复述数值） |
 | V4 | `python tools/client/verify-client.py` | 结构断言过（含禁带：无 plugins/ 目录） |
 | V5 | `python tools/client/verify-client.py --smoke` | 临时目录启动→兜底页 503→health→写地址落盘→退出码 0 |
 | V6 | 改 client-build-config.json 的 exe 名与版本 → 重出包 | 产物名/版本随之（单源验证），验完改回 |

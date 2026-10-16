@@ -13,8 +13,10 @@ android {
         applicationId = "com.jztools.infoparse"
         minSdk = 29
         targetSdk = 34
-        versionCode = 4
-        versionName = "2.0.1"
+        versionCode = 5          // 覆盖安装/升级只认它，必须比上一版大（打包手册 §43）
+        // 2026-10-16 全产品版本号归到 1.0.0 基线：versionName 回退到 1.0.0 不影响覆盖安装，
+        // 但 versionCode 不能跟着回退，否则安卓报「已存在同版本或更高版本」。
+        versionName = "1.0.0"
     }
 
     // full：全 ABI（含 x86 系，模拟器可用）；lite：仅 arm64-v8a + 中英文资源，真机分发用，体积约减半

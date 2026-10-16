@@ -2,7 +2,8 @@
 
 > **发版只读这一页。** 适用：`android-app\InfoParse`（扫码/解析 APP，离线分发到真机）。
 > 桌面端主包 / 插件包发版看根目录 `docs\guide\打包部署手册.md`；APP 功能与协议规格看根目录 `移动端APP.md`。
-> 最后核对：2026-09-21（v2.0.1，AGP 8.5.2 / Gradle 8.7 / JDK 21；full 35.1 MB，lite 19.0 MB；
+> 最后核对：2026-10-16（**版本号归到 1.0.0 基线**：`versionName = 1.0.0`、`versionCode = 5`；
+> AGP 8.5.2 / Gradle 8.7 / JDK 21 工具链口径未变。产物体积等数字**现取现用**，以重打实测为准，本文不固化；
 > 包结构与进一步瘦身的量化分析见 §3.1）。
 
 ---
@@ -17,8 +18,8 @@ $env:JAVA_HOME = "C:\Users\yfjz\.jdks\jbr-21.0.11"   # java 不在 PATH，命令
 
 | 变体 | 产物（自动带版本号命名） | 体积 | 用途 |
 | --- | --- | --- | --- |
-| full | `app\build\outputs\apk\full\release\InfoParse-2.0.1-release.apk` | 35.1 MB | 兼容包：含 x86 系 ABI，**模拟器可装** |
-| lite | `app\build\outputs\apk\lite\release\InfoParse-2.0.1-lite-release.apk` | 19.0 MB | **真机分发主推**：仅 arm64-v8a + 中英文资源 |
+| full | `app\build\outputs\apk\full\release\InfoParse-<versionName>-release.apk` | 35.1 MB（2.0.1 时点实测，重打后以产物为准） | 兼容包：含 x86 系 ABI，**模拟器可装** |
+| lite | `app\build\outputs\apk\lite\release\InfoParse-<versionName>-lite-release.apk` | 19.0 MB（同上口径） | **真机分发主推**：仅 arm64-v8a + 中英文资源 |
 
 只重出一个变体：`.\gradlew.bat assembleLiteRelease`（full 同理 `assembleFullRelease`）。
 
