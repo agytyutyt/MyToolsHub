@@ -330,7 +330,9 @@ class PluginExecutor:
             # 此前该上限只在规范里声明、链路无强制（批次 10 适配核对发现）。
             self._cold_note(manifest, _t_all)
             return 502, {"Content-Type": "application/json"}, json.dumps(
-                {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——大结果请写临时文件传路径"
+                {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——worker 插件的大结果不得经该协议"
+                                   "返回：请改为「返回引用（URL/相对路径）+ 调用方另发一次请求取件」，"
+                                   "或把该插件改为 hybrid 形态（进程内派发，无该协议上限）"
                           % (WORKER_BODY_LIMIT // 1048576)}).encode()
         self._cold_note(manifest, _t_all)
         return resp.get("status", 200), resp.get("headers", {}), body
@@ -416,7 +418,9 @@ class PluginExecutor:
         out = base64.b64decode(resp.get("body_b64") or "")
         if len(out) > WORKER_BODY_LIMIT:
             return 502, {"Content-Type": "application/json"}, json.dumps(
-                {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——大结果请写临时文件传路径"
+                {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——worker 插件的大结果不得经该协议"
+                                   "返回：请改为「返回引用（URL/相对路径）+ 调用方另发一次请求取件」，"
+                                   "或把该插件改为 hybrid 形态（进程内派发，无该协议上限）"
                           % (WORKER_BODY_LIMIT // 1048576)}).encode()
         return resp.get("status", 200), resp.get("headers", {}), out
 
