@@ -193,13 +193,19 @@ def boot(work, remote_addr):
     os.makedirs(build_cfg["_program_dir"], exist_ok=True)
     pylibs = os.path.join(work, "pylibs")
     os.makedirs(pylibs, exist_ok=True)
+    # 阶段 0（2026-10-17）：把 [perf] 里程碑（worker-spawn / worker-cold-roundtrip /
+    # plugins-load / first-tools）透出来，其余日志仍静默，避免台架输出被淹。
+    def _perf_log(m):
+        if "[perf]" in (m or ""):
+            print("  " + m)
+
     executor = PluginExecutor(sys.executable, os.path.join(ROOT, "client", "plugin_host.py"),
-                              pylibs, work, lambda m: None)
+                              pylibs, work, _perf_log)
     app = capability_app.create_capability_app(
         build_cfg, {"remote_address": remote_addr}, "http://127.0.0.1:1",
         os.path.join(work, "static"), lp_dir,
         os.path.join(ROOT, "client", "fallback.html"),
-        data_dir=os.path.join(work, "data"), executor=executor, log=lambda m: None,
+        data_dir=os.path.join(work, "data"), executor=executor, log=_perf_log,
         shell_token="bench-shell-1")
     c = app.test_client()
     # 壳自证（2026-10-11 需求① G2-6）：台架模拟壳——先 boot 种 Cookie 再探测

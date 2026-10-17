@@ -22,6 +22,16 @@ from single_instance import acquire_or_exit  # noqa: E402
 
 _LOG_LOCK = __import__("threading").Lock()
 
+# 阶段 0 计时基准（2026-10-17）：模块导入≈Python 侧进程入口。
+# 注意：**不含** PyInstaller 引导期（解包/加载 DLL），故 boot-* 之和小于用户感知的
+# 冷启总时长；口径用于各阶段横向对比与回归看护，不当作绝对冷启时间。
+_T0 = time.perf_counter()
+
+
+def _perf(stage):
+    """阶段 0 分段计时：只在启动里程碑打点，**不做**每请求 IO。"""
+    log("[perf] %s %.0fms" % (stage, (time.perf_counter() - _T0) * 1000.0))
+
 
 def log(msg):
     line = "[%s] %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
@@ -124,6 +134,7 @@ def main():
     local_plugins = os.path.join(data_dir, "local-plugins")
     os.makedirs(local_plugins, exist_ok=True)
 
+    _perf("boot-config")          # 构建配置 + 客户端配置 + 地址/数据目录解析完成
     os.environ["JZTOOLS_DATA_ROOT"] = data_dir        # jztools_data/jz_deps 口径统一
     from client_config import program_dir, runtime_python_exe, host_script_path
     build_cfg["_program_dir"] = program_dir()
@@ -141,6 +152,7 @@ def main():
         data_root_fn=lambda: os.environ.get("JZTOOLS_DATA_ROOT") or "")
     # 插件 worker 运行时留痕（打包态应为 runtime/python/python.exe；缺则回落本进程解释器=构建缺陷）
     log("插件 worker 运行时：%s" % worker_python)
+    _perf("boot-executor")
 
     from capability_app import create_capability_app
     # 本地端口壳自证 run token（G2-6）：进程内随机；JZCLIENT_SHELL_TOKEN 仅供台架/验收覆盖。
@@ -159,6 +171,7 @@ def main():
         log=log,
         shell_token=shell_token,
     )
+    _perf("boot-capability")      # 能力层 Flask 应用装配完成（含插件清单扫描）
 
     port = free_port()
     # 当前实例的端口/PID 落独立文件（client.log 是追加式，历史端口行会误导排障）
@@ -179,8 +192,10 @@ def main():
 
     threading.Thread(target=_serve, daemon=True, name="capability-http").start()
     log("CAPABILITY listening http://127.0.0.1:%d (pid=%d)" % (port, os.getpid()))
+    _perf("boot-listen")          # 端口已定、serve 线程已起（smoke 的探测锚点）
 
     try:
+        _perf("boot-ui")          # 进入 UI：此后的耗时属 webview 启动，不在本埋点内
         from shell_window import run_shell
         # D-3（2026-10-17）：组合根把「托盘退出的常驻 worker 收割口」注入 UI 层。
         # 否则退出只靠子进程 stdin EOF 自杀，在途长任务不被即时收割（旧缺口）。

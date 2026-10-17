@@ -14,6 +14,8 @@
 转发（直传 werkzeug 流会被 requests 判为未知长度转 chunked 而挂起）；响应流式回传；
 REST 无 WS（方案 §2.1 已核实）。
 """
+import gzip
+import io
 import json
 import os
 import re
@@ -153,6 +155,92 @@ def _rm_tree_tick(pth, tick):
     return clean
 
 
+# ==================== B5：响应外壳（gzip / 静态缓存 / 安全头，2026-10-17） ====================
+# 与主包 `jz_host/access_log.py` 的三个同名钩子互为**兄弟副本**：客户端不随包 jz_host
+# （`client/JZClient.spec` 的 kernel/ 清单只含 jz_deps/jz_api/jztools_data/jz_plugin_host），
+# 故本地实现；取值与判据口径与主包保持一致，改这里请同步核对主包那侧。
+COMPRESSIBLE_TYPES = (
+    "text/plain", "text/html", "text/css", "text/javascript",
+    "application/javascript", "application/json", "application/xml",
+    "image/svg+xml", "application/x-javascript",
+)
+CACHE_LONG_EXT = {".js", ".css", ".json", ".png", ".jpg", ".jpeg", ".gif",
+                  ".svg", ".webp", ".woff", ".woff2", ".ttf", ".ico", ".map"}
+CACHE_NOCACHE_EXT = {".html"}
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    # 必须 SAMEORIGIN：插件页由本页以同源 iframe 嵌入，DENY 会把插件页一并挡掉
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    # 保守：只禁 object/embed 与 <base> 劫持；不设 script-src/style-src（既有页面大量内联）
+    "Content-Security-Policy": "object-src 'none'; base-uri 'self'",
+}
+
+
+def _b5_should_compress(response):
+    """是否适合 gzip（判据同主包 access_log._should_compress）。"""
+    if response.status_code < 200 or response.status_code in (204, 304):
+        return False
+    if response.headers.get("Content-Encoding"):
+        return False          # 已压缩过
+    if response.direct_passthrough:
+        return False          # 流式（send_from_directory / 中继流）不压缩
+    if len(response.get_data()) < 256:
+        return False          # 小响应不值当
+    ct = response.content_type or ""
+    if not any(ct.startswith(t) for t in COMPRESSIBLE_TYPES):
+        return False
+    ae = (request.headers.get("Accept-Encoding", "") or "").lower()
+    return "gzip" in ae
+
+
+def _b5_compress(response):
+    if not _b5_should_compress(response):
+        return response
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+        gz.write(response.get_data())
+    response.set_data(buf.getvalue())
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Vary"] = "Accept-Encoding"
+    return response
+
+
+def _b5_security_headers(response):
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
+def _b5_static_cache(response):
+    """静态资源长缓存 / HTML 协商缓存（同主包口径；仅作用于 /static/ 与 /plugin/）。"""
+    path = request.path or ""
+    if not (path.startswith("/static/") or path.startswith("/plugin/")):
+        return response
+    ext = os.path.splitext(path)[1].lower()
+    if ext in CACHE_LONG_EXT:
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    elif ext in CACHE_NOCACHE_EXT or not ext:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+# ---- 阶段 0 计时埋点（2026-10-17）：只在里程碑打点，**不做**每请求 IO ----
+_PERF_T0 = time.perf_counter()
+_PERF_SEEN = set()
+
+
+def _perf(stage, log_fn=None):
+    """记录距离本模块导入的里程碑耗时（ms）；同名里程碑只记一次。"""
+    if stage in _PERF_SEEN:
+        return None
+    _PERF_SEEN.add(stage)
+    msg = "[perf] %s %.0fms" % (stage, (time.perf_counter() - _PERF_T0) * 1000.0)
+    if log_fn is not None:
+        log_fn(msg)
+    return msg
+
+
 def create_capability_app(build_cfg, client_cfg, address, static_dir,
                           local_plugins_dir, fallback_file, on_address_change=None,
                           data_dir=None, executor=None, log=None, shell_token=None):
@@ -167,6 +255,11 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         static_url_path="/static",
     )
     app.config["JSON_AS_ASCII"] = False
+    # B5（2026-10-17）：响应外壳。注册顺序同主包 access_log.install ——
+    # after_request 按注册**逆序**执行，故压缩最后生效（其余钩子已就位）。
+    app.after_request(_b5_compress)
+    app.after_request(_b5_security_headers)
+    app.after_request(_b5_static_cache)
     health = RemoteHealth()
     upstream = requests.Session()
     state = {"address": address}
@@ -739,7 +832,9 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     local_states[pid] = {"status": "ok"}
                     _log("本地插件 %s 依赖评估异常（按 ok 展示）：%s" % (pid, exc))
 
+    _t_pl = time.perf_counter()
     _refresh_local_states()
+    _log("[perf] plugins-load %.0fms" % ((time.perf_counter() - _t_pl) * 1000.0))
     _probe = {"ts": 0.0, "ok": False}
     _probe_lock = threading.Lock()
 
@@ -2252,6 +2347,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     @app.get("/api/tools")
     def api_tools_merged():
+        _perf("first-tools", _log)      # 阶段 0：首屏数据（仅首次）
         # 注意：本装饰器必须紧跟本函数——F5 曾把辅助函数插在两者之间，致 /api/tools
         # 全局误走降级分支（2026-10-08 台架抓出；插入带装饰器函数前一律锚定装饰器行）
         _refresh_local_verdicts()      # 每次加载主界面复评三态（依赖装卸后徽标即时翻转）

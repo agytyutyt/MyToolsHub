@@ -8,6 +8,7 @@
 import base64
 import http.cookiejar
 import json
+import requests
 import os
 import secrets
 import shutil
@@ -277,6 +278,48 @@ def smoke(out, cfg):
         if "hidden_tools" in d:
             fail("/local-api/plugins 仍回传 hidden_tools（应已退役）")
         print("smoke：本机显示状态退役回归通过（hidden 端点 404 / 键已移除）")
+
+        # B5（2026-10-17）：响应外壳——静态长缓存 / 安全头 / 文本响应压缩能力。
+        # 说明：静态大文件走 send_from_directory（direct_passthrough）**按设计不压缩**
+        # （压缩在此只针对 JSON/HTML 等内存响应，如知识库预览片段），故这里对静态只断言
+        # 缓存与安全头，压缩能力用 JSON 端点验（<256B 不压缩属预期阈值行为）。
+        try:
+            r = requests.get("http://127.0.0.1:%d/static/js/main.js" % port, timeout=5)
+            cc = r.headers.get("Cache-Control") or ""
+            if "max-age" not in cc:
+                fail("静态资源缺长缓存（B5 Cache-Control）：%r" % cc)
+            for hk, hv in (("X-Content-Type-Options", "nosniff"),
+                           ("X-Frame-Options", "SAMEORIGIN")):
+                if r.headers.get(hk) != hv:
+                    fail("静态资源缺安全头（B5 %s）：%r" % (hk, r.headers.get(hk)))
+            print("smoke：B5 静态长缓存 + 安全头通过（Cache-Control=%s）" % cc)
+
+            rj = requests.get("http://127.0.0.1:%d/api/tools" % port, timeout=10)
+            enc = rj.headers.get("Content-Encoding")
+            n = len(rj.content)
+            if enc != "gzip" and n >= 256:
+                fail("JSON 响应未压缩（B5）：len=%d enc=%r" % (n, enc))
+            print("smoke：B5 文本响应压缩能力通过（enc=%s len=%d）" % (enc, n))
+
+            # 阶段 0（2026-10-17）：带壳 Cookie 真走一次 /api/tools，钉住「首屏埋点」不失效。
+            # 注：WebView 首屏不保证执行完 main.js 的拉取，故这里用 HTTP 显式触发。
+            ss = requests.Session()
+            ss.get("http://127.0.0.1:%d/shell-boot?_shell=%s&next=/"
+                   % (port, shell_token), timeout=10)
+            rt = ss.get("http://127.0.0.1:%d/api/tools" % port, timeout=10)
+            # 只钉「埋点契约」：/api/tools 的状态取决于是否配了可达的服务器地址
+            # （本 smoke 前面已把地址设为不可达的 192.168.1.10:5000 测配置落盘），
+            # 而本视图无论走本地降级还是代理都会先打点，故状态不作断言。
+            if "[perf] first-tools" not in _log_tail():
+                fail("首屏埋点未落日志（[perf] first-tools）——阶段 0 埋点失效"
+                     "（/api/tools 状态=%s）" % rt.status_code)
+            print("smoke：阶段 0 首屏埋点通过（[perf] first-tools 已落日志，状态=%s）"
+                  % rt.status_code)
+        except SystemExit:
+            raise
+        except Exception as exc:
+            fail("B5 响应外壳检查异常：%r" % exc)
+
 
         # 自重启链路（2026-10-08 加固）：该端点曾因裸名 sys（NameError→500 HTML）从未
         # 生效过，前端只见「自动重启失败」。断言：旧进程退出 → 新实例带 --await-pid

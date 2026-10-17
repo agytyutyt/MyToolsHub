@@ -214,9 +214,14 @@ class PluginExecutor:
         try:
             # CREATE_NO_WINDOW：运行时 python.exe 是控制台子系统程序，GUI 父进程不加该标志
             # 会弹出黑色控制台窗口（真机报告：打开插件弹黑窗，2026-10-08）；stdio 管道不受影响。
-            return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            _t0 = time.perf_counter()
+            proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=err, env=env,
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            # 阶段 0（2026-10-17）：进程创建耗时；冷启真实成本见 _cold_note（含解释器与插件 import）
+            self._log("[perf] worker-spawn %s %.0fms"
+                      % (pid, (time.perf_counter() - _t0) * 1000.0))
+            return proc
         finally:
             err.close()
 
@@ -225,7 +230,24 @@ class PluginExecutor:
         os.makedirs(d, exist_ok=True)
         return open(os.path.join(d, plugin_id + ".log"), "ab")
 
+    def _cold_note(self, manifest, t0):
+        """阶段 0（2026-10-17）：每个插件只记一次**首个往返**耗时。
+
+        Popen 只测到进程创建；这里包含解释器启动 + 插件 import + register(app)，
+        才是「冷启」的真实成本（worker 崩溃后重启不再重复采样，属已知局限）。
+        """
+        pid = manifest.get("id") or "?"
+        seen = getattr(self, "_cold_seen", None)
+        if seen is None:
+            seen = self._cold_seen = set()
+        if pid in seen:
+            return
+        seen.add(pid)
+        self._log("[perf] worker-cold-roundtrip %s %.0fms"
+                  % (pid, (time.perf_counter() - t0) * 1000.0))
+
     def _roundtrip(self, proc, manifest, method, path, headers, body, timeout_ms, resident):
+        _t_all = time.perf_counter()
         req = {"request_id": uuid.uuid4().hex, "method": method, "path": path,
                "headers": headers or {}, "body_b64": base64.b64encode(body or b"").decode()}
         deadline = time.time() + max(timeout_ms or 60000, 1000) / 1000.0
@@ -252,9 +274,11 @@ class PluginExecutor:
         if len(body) > WORKER_BODY_LIMIT:
             # L-3 响应体上限 8MB（规范 §16.3）：超限回 502 并提示写临时文件传路径——
             # 此前该上限只在规范里声明、链路无强制（批次 10 适配核对发现）。
+            self._cold_note(manifest, _t_all)
             return 502, {"Content-Type": "application/json"}, json.dumps(
                 {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——大结果请写临时文件传路径"
                           % (WORKER_BODY_LIMIT // 1048576)}).encode()
+        self._cold_note(manifest, _t_all)
         return resp.get("status", 200), resp.get("headers", {}), body
 
     def _audit(self, plugin_id, method, path, seconds, outcome, user=""):
