@@ -11,12 +11,36 @@
 派发 = mini-WSGI：插件 routes.register(app) 后经 werkzeug test_client 派发
 （与进程内注册同构，插件代码零感知）。
 """
+import time as _time
+
+#: 阶段 2/S2-4：冷启分段埋点基准 —— 放在**第一条语句**，使"解释器就绪前"的
+#: 分界尽量靠近进程入口（该段无法在进程内测到，由父侧 worker-cold-roundtrip 与
+#: worker-import 之差反推：≈解释器引导 + 到本行为止的启动成本）。
+_T0 = _time.perf_counter()
+
 import argparse
 import base64
 import io
 import json
 import os
 import sys
+
+
+def _perf_note(stage):
+    """打一条冷启分段（stderr → 执行器把它落到 plugin-logs/<id>.log）。
+
+    只在启动期调用 1–3 次，**不进请求路径**；异常一律吞掉（埋点绝不能影响启动）。
+    ⚠ **默认关闭**，需显式 `JZ_WORKER_PERF=1` 才输出 —— 否则会污染生产 plugin-logs
+    （本卡风险清单里写明的一条）。测量脚本/台架按需开。
+    """
+    if not os.environ.get("JZ_WORKER_PERF"):
+        return
+    try:
+        sys.stderr.write("[perf] worker-%s %d %.0fms\n"
+                         % (stage, os.getpid(), (_time.perf_counter() - _T0) * 1000.0))
+        sys.stderr.flush()
+    except Exception:
+        pass
 
 _here = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_here)
@@ -28,6 +52,8 @@ for _p in (_here, os.path.join(_here, "kernel"), _ROOT, os.path.join(_ROOT, "ker
         sys.path.insert(0, _p)
 
 import jz_plugin_host  # noqa: E402
+
+_perf_note("import")      # 本模块 import 栈（含 jz_plugin_host）到此结束
 
 
 def build_app(plugin_dir):
@@ -85,7 +111,9 @@ def main():
         # runtime：<prog>/runtime/runtime/pylibs → 依赖组件全 import 不到、插件误报
         # 「依赖未满足」——2026-10-08 真机报告）
         jz_plugin_host.setup_dep_components(pylibs_dir=args.pylibs)
+    _perf_note("deps")        # pylibs 注入完（会改变后续 import 成本，故分界卡在它之后）
     app, _manifest = build_app(plugin_dir)
+    _perf_note("ready")       # 插件 import + register(app) 完 —— 此后可接请求
 
     if args.resident:
         for line in sys.stdin:
