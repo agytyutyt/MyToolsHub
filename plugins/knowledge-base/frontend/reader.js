@@ -452,11 +452,11 @@
       .then(function (results) {
         var buf = results[0];
         var text = new TextDecoder("utf-8").decode(buf);
-        var html = window.marked.parse(text);
-        var clean = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
         var div = document.createElement("div");
         div.className = "paper";
-        div.innerHTML = clean;
+        // F-3（2026-10-17）：消毒与赋值**同句**完成（原为上一行声明 clean，行内启发式不追踪局部变量）
+        div.innerHTML = window.DOMPurify.sanitize(window.marked.parse(text),
+                                                  { USE_PROFILES: { html: true } });
         container().appendChild(div);
         setZoomTarget(div);
         buildToc(div);
@@ -474,10 +474,12 @@
       .then(function (results) {
         var buf = results[0];
         return window.mammoth.convertToHtml({ arrayBuffer: buf }).then(function (result) {
-          var clean = window.DOMPurify.sanitize(result.value || "", { USE_PROFILES: { html: true } });
           var div = document.createElement("div");
           div.className = "paper";
-          div.innerHTML = clean || "<p>（空文档）</p>";
+          // F-3（2026-10-17）：同句消毒；空文档兜底文案保留（sanitize("") 为假值 → 仍走兜底）
+          div.innerHTML = window.DOMPurify.sanitize(result.value || "",
+                                                    { USE_PROFILES: { html: true } })
+                          || "<p>（空文档）</p>";
           container().appendChild(div);
           status(null);
           callbacks.onReady("复制全文");
@@ -520,7 +522,10 @@
           ).replace(/<table/, '<table class="sheet-table"');
         });
         function show(name) {
-          wrap.innerHTML = tableHtmls[name] || "";
+          // F-3（2026-10-17）：tableHtmls 已在生成处消毒；使用点**再消毒一次**（纵深防御，
+          // 与 :189 同一口径），同时让静态门禁可核
+          wrap.innerHTML = window.DOMPurify.sanitize(tableHtmls[name] || "",
+                                                      { USE_PROFILES: { html: true } });
           Array.prototype.forEach.call(tabs.children, function (b) {
             b.className = b.textContent === name ? "sheet-tab active" : "sheet-tab";
           });
@@ -546,9 +551,9 @@
           copy: function () {
             // 从当前展示的 HTML 表格提取纯文本（保留行列制表分隔）
             var html = tableHtmls[activeName] || "";
-            var tmp = document.createElement("div");
-            tmp.innerHTML = html;
-            var rows = tmp.querySelectorAll("tr");
+            // F-3（2026-10-17）：这里只解析取行（容器从不入文档）→ 改 DOMParser，彻底不用 innerHTML
+            var doc = new DOMParser().parseFromString(html, "text/html");
+            var rows = doc.querySelectorAll("tr");
             var lines = [];
             for (var i = 0; i < rows.length; i++) {
               var cells = rows[i].querySelectorAll("td,th");

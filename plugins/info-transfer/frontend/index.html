@@ -2187,10 +2187,28 @@
     if (!miss.length) return;
     var el = document.getElementById('dep-warn');
     if (!el) return;
-    var items = miss.map(function (x) {
-      return '<li><code>' + x.name + '</code> 未满足 → <b>' + x.feature + '</b> 不可用；' + x.fix + '</li>';
-    }).join('');
-    el.innerHTML = '<div class="dep-warn-title">⚠ 依赖未满足：以下功能将不可用</div><ul>' + items + '</ul>';
+    // F-3（2026-10-17 修正）：本块原先用内联 innerHTML 直拼 missing_deps 的 name/feature/fix
+    // —— 那些值来自后端/清单，属不可信输入。改为 textContent 建 DOM：不解析 HTML，
+    // 既消除 XSS 面，也让 F-3 静态门禁自然通过（无需登记豁免）。
+    var title = document.createElement('div');
+    title.className = 'dep-warn-title';
+    title.textContent = '⚠ 依赖未满足：以下功能将不可用';
+    var ul = document.createElement('ul');
+    miss.forEach(function (x) {
+      var li = document.createElement('li');
+      var code = document.createElement('code');
+      code.textContent = (x && x.name) || '';
+      var b = document.createElement('b');
+      b.textContent = (x && x.feature) || '';
+      li.appendChild(code);
+      li.appendChild(document.createTextNode(' 未满足 → '));
+      li.appendChild(b);
+      li.appendChild(document.createTextNode(' 不可用；' + ((x && x.fix) || '')));
+      ul.appendChild(li);
+    });
+    el.textContent = '';
+    el.appendChild(title);
+    el.appendChild(ul);
     el.hidden = false;
   }).catch(function () { /* 未登录等场景静默 */ });
 })();

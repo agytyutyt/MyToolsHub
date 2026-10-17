@@ -1138,8 +1138,8 @@ _SHARE_IO_TIMEOUT = float(os.environ.get("JZ_SHARE_IO_TIMEOUT") or 20)
 def normalize_share_path(path):
     r"""共享盘路径归一化：长路径前缀 → 普通形态（UNC 两形态统一）。
 
-    - ``\\?\UNC\server\share\...`` → ``\\server\share\...``
-    - ``\\?\C:\...``                → ``C:\...``
+    - ``\\?\UNC\server\share\...`` → ``\\server\share\...``（UNC 形态）
+    - ``\\?\<盘符>:\...``          → ``<盘符>:\...``（本地长路径形态）
     其余（盘符 / 映射盘 / 普通 UNC / 含空格与中文的路径）原样返回——这些由 ``os.path``
     与 ``open`` 原生支持，无需特殊处理。
 
