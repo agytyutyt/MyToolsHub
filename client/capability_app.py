@@ -813,6 +813,9 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                     _log("本地插件 %s 不可运行（%s），跳过挂载" % (pid, verdict.get("reason")))
                     continue
                 try:
+                    # S2-2（2026-10-17）：per-plugin 挂载耗时留痕 —— 实测两个已发布 hybrid 插件
+                    # 使 plugins-load 从 0ms 涨到 920ms（R2.2 的靶心），先量到每插件再谈懒挂载。
+                    _t_mount = time.perf_counter()
                     routes = jz_plugin_host.load_backend_module(local_plugins_dir, pid)
                     sub = Flask("local_" + pid.replace("-", "_"))
                     bp = getattr(routes, "bp", None)
@@ -824,6 +827,8 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
                             raise RuntimeError("未导出 register(app) 或 bp")
                         reg(sub)
                     hybrid_apps[pid] = sub            # 子应用派发：热插拔不受 Flask 首请求后注册限制
+                    _log("[perf] plugin-mount %s %.0fms"
+                         % (pid, (time.perf_counter() - _t_mount) * 1000.0))
                     _log("本地插件子应用已挂载：%s" % pid)
                 except Exception as exc:
                     local_states[pid] = {"status": "error", "reason": str(exc)}
