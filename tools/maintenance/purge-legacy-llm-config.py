@@ -16,11 +16,11 @@ r"""清除插件侧历史明文 LLM 配置（独立脚本，2026-10-16）。
 
 用法
 ----
-    python tools\dev\purge-legacy-llm-config.py                     # 只扫描并报告（默认 dry-run）
-    python tools\dev\purge-legacy-llm-config.py --apply             # 清除（逐文件先备份）
-    python tools\dev\purge-legacy-llm-config.py --root D:\data      # 指定数据根
-    python tools\dev\purge-legacy-llm-config.py --emit keys.json    # 导出发现的接入信息（**含明文**）
-    python tools\dev\purge-legacy-llm-config.py --root D:\data --apply --emit keys.json
+    python tools\maintenance\purge-legacy-llm-config.py                     # 只扫描并报告（默认 dry-run）
+    python tools\maintenance\purge-legacy-llm-config.py --apply             # 清除（逐文件先备份）
+    python tools\maintenance\purge-legacy-llm-config.py --root D:\data      # 指定数据根
+    python tools\maintenance\purge-legacy-llm-config.py --emit keys.json    # 导出发现的接入信息（**含明文**）
+    python tools\maintenance\purge-legacy-llm-config.py --root D:\data --apply --emit keys.json
 
 约定与边界
 ----------

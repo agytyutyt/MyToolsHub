@@ -424,7 +424,7 @@ def resolve(plugin_id=None):
     插件侧不再保存任何接入信息，见 docs/design/数据迁移-设计文档.md）。历史明文 Key 的
     收编/清除曾由主体启动迁移 migrate_plugin_legacy_llm 承担，该迁移已于 2026-10-16 删除
     （项目未上线、无存量数据根）；如需清理遗留数据根，用
-    tools/dev/purge-legacy-llm-config.py。
+    tools/maintenance/purge-legacy-llm-config.py。
     """
     cfg = load_global()
     user = jz_api.get_session_user()

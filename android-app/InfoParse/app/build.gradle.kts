@@ -13,9 +13,11 @@ android {
         applicationId = "com.jztools.infoparse"
         minSdk = 29
         targetSdk = 34
-        versionCode = 5          // 覆盖安装/升级只认它，必须比上一版大（打包手册 §43）
+        versionCode = 6          // 覆盖安装/升级只认它，必须比上一版大（打包手册 §43）
         // 2026-10-16 全产品版本号归到 1.0.0 基线：versionName 回退到 1.0.0 不影响覆盖安装，
         // 但 versionCode 不能跟着回退，否则安卓报「已存在同版本或更高版本」。
+        // 2026-10-17：versionCode 5 已随 v1.0.0 包发出（10-16 09:30），本轮安卓侧修复
+        // （识别页移除「重置」）必须 5→6，否则目标机拒装。
         versionName = "1.0.0"
     }
 

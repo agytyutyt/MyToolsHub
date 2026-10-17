@@ -718,7 +718,7 @@ def register(app):
         cfg = load_config()
         # 统一大模型落地后本插件不再接受接入信息，也不读取 config.json 里的历史 llm 段
         # （历史副本的收编/清除曾由主体启动迁移承担，该迁移已于 2026-10-16 删除；
-        #  若要清理遗留数据根见 tools/dev/purge-legacy-llm-config.py）。
+        #  若要清理遗留数据根见 tools/maintenance/purge-legacy-llm-config.py）。
         # jz_llm.resolve() 的 plugin_id 不参与解析（兼容桥已于 2026-09-23 移除），本插件不再读取它。
         if "keep_columns" in data:
             keep = data.get("keep_columns")

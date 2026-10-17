@@ -304,9 +304,10 @@ docs/
 | 根契约四文档（README/HANDOFF/插件设计规范/移动端APP） | ✅ 是 | `tools/package-content.json` 的 `copy_files`；由 `tools/verify-package.py` 断言 |
 | 业务插件（除核心插件 `admin`、`store`） | ❌ 否 | 主包只带核心插件白名单：`tools/package-content.json` 的 `core_plugins`（当前=admin+store，商店为第二核心插件）；由 `verify-package.py` 断言「`plugins/` 仅含核心插件」|
 | `wheels/`（zfec 预编译 wheel） | ❌ 否 | 随包清单不含它（`tools/package-content.json` 即口径）；由 `verify-package.py` 断言「不含 `wheels/`」。zfec 改由「依赖组件包」提供 |
-| `tools/`（仅带 `plugin-upgrade/`） | ❌ 否 | `tools/package-content.json` 的 `tools_dirs` 仅列 `plugin-upgrade`；由 `verify-package.py` 断言「`tools/` 仅含 `plugin-upgrade`」|
+| `tools/`（仅带 `plugin-upgrade/` 与 `maintenance/`） | 部分 | `tools/package-content.json` 的 `tools_dirs` = `["plugin-upgrade","maintenance"]`；由 `verify-package.py` 断言「`tools/` 仅含这两个子目录」|
 | 插件的 `test_*.py` / `conftest.py` / `_build_phase8.py` | ❌ 否 | `tools/plugin-payload-rules.json` 的 `exclude_globs`/`exclude_files` |
-| `tools/dev/`（开发验证服务：伪造 admin 会话，绝不能上目标机） | ❌ 否 | `tools_dirs` 只含 `plugin-upgrade`；插件包另有 `exclude_dirs` 保留名 `dev` |
+| `tools/maintenance/`（目标机运维脚本：遗留数据根清理，纯标准库 + 自带 dry-run） | ✅ 是 | `tools/package-content.json` 的 `tools_dirs` 含 `maintenance`（2026-10-17 起）。起因：随包文档指向的清理脚本原先放在不随包的 `tools/dev/`，目标机按文档找不到 |
+| `tools/dev/`（开发验证服务：伪造 admin 会话，绝不能上目标机） | ❌ 否 | `tools_dirs` 不含 `dev`；由 `tools/e2e/decouple-acceptance.py` 断言 AC-1「主包不含 `tools/dev/`」 |
 
 > ⚠️ **改随包口径只改一处**：`tools/package-content.json`（组装脚本与 `tools/verify-package.py` 共读；
 > `build-deploy.ps1` 全程跑时组装段已委托组装脚本执行）。

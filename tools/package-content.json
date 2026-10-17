@@ -14,5 +14,5 @@
     "插件设计规范.md",
     "移动端APP.md"
   ],
-  "tools_dirs": ["plugin-upgrade"]
+  "tools_dirs": ["plugin-upgrade", "maintenance"]
 }

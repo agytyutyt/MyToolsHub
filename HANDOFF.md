@@ -64,7 +64,7 @@ HTTP 全链路（含**导出账号→改密码→导入还原→原密码仍能�
 ③ 三个业务插件的 `llm_client.py` 改为**薄适配层**（HTTP 调用/Key/连通测试全部上交），
 插件配置接口不再回传凭据、前端配置卡片改为状态行；提示词文件位置不变（**无数据迁移**）；
 ④ **插件侧历史配置已彻底清除**（2026-09-23 收尾）：`jz_llm` 不再回退读插件 `config.json` 的 `llm` 段；
-启动迁移 `migrate_plugin_legacy_llm()`（2026-10-09 起上移主体 `app.py:100`，带 `llm_migrated.flag` 退场标记，commit 747412d）**先收编、再清除**〔2026-10-16 更新：该启动迁移与 `llm_migrated.flag` 机制已**整段删除**——项目未正式上线、无存量数据根，条件空集满足；遗留数据根如需清理改用 `tools/dev/purge-legacy-llm-config.py`，自带 dry-run 与逐文件备份〕——统一配置为空时把插件那份明文 Key
+启动迁移 `migrate_plugin_legacy_llm()`（2026-10-09 起上移主体 `app.py:100`，带 `llm_migrated.flag` 退场标记，commit 747412d）**先收编、再清除**〔2026-10-16 更新：该启动迁移与 `llm_migrated.flag` 机制已**整段删除**——项目未正式上线、无存量数据根，条件空集满足；遗留数据根如需清理改用 `tools/maintenance/purge-legacy-llm-config.py`，自带 dry-run 与逐文件备份〕——统一配置为空时把插件那份明文 Key
 搬进 `<数据根>/config/llm.json`（加密落盘），随后删除插件侧 `llm` 段，老部署升级后功能不失效
 而明文副本消失（幂等；见设计文档 §8.1）；
 ⑤ 新增 `test_llm_module.py`（45 例）覆盖配置/格式/解析/真实调用（本地桩）/线程纪律/路由/插件联调。

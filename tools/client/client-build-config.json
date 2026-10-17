@@ -3,7 +3,7 @@
   "product": {
     "name": "YFJZ_Client",
     "display_name": "JZ 工具箱",
-    "version": "1.0.0"
+    "version": "1.0.1"
   },
   "paths": {
     "data_dirname": "JZClient",
