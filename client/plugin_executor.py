@@ -14,12 +14,16 @@
 import base64
 import json
 import os
+import queue
 import subprocess
 import threading
 import time
 import uuid
 
 WORKER_BODY_LIMIT = 8 * 1024 * 1024   # 规范 §16.3 L-3：worker 响应体上限（大结果写临时文件传路径）
+
+#: 审计队列上限（S2-5，2026-10-17）：满则丢弃并计数，**绝不阻塞请求**（口径同主包 access_log 的 2000）。
+AUDIT_QUEUE_MAX = 2000
 
 #: 预热探针路径（R1.4，2026-10-17）：**保留路径**——插件不应实现它，命中即 404 属预期。
 #: 选它而不用 `GET /` 的原因：个别插件首页可能带副作用，探针必须确定无副作用。
@@ -42,6 +46,12 @@ class PluginExecutor:
         self._last_used = {}          # plugin_id → 最近一次请求时刻（回收判据）
         self._reaper = None           # 空闲收割线程（有 ttl>0 的常驻单元才起）
         self._reaper_stop = threading.Event()
+        # S2-5（2026-10-17）：审计异步化——请求路径只入队，后台批量落盘（范式同 access_log）
+        self._audit_q = queue.Queue(maxsize=AUDIT_QUEUE_MAX)
+        self._audit_thread = None
+        self._audit_lock = threading.Lock()
+        self._audit_stop = threading.Event()
+        self._audit_dropped = 0
 
     # ---------------- 对外 ----------------
 
@@ -88,6 +98,7 @@ class PluginExecutor:
 
     def shutdown(self):
         """收割全部常驻 worker（托盘退出/关机路径）。"""
+        self.flush_audit()        # S2-5：先落盘审计队列，再收割 worker（退出顺序：审计→worker）
         self._reaper_stop.set()
         with self._lock_all:
             for pid, proc in list(self._residents.items()):
@@ -307,15 +318,84 @@ class PluginExecutor:
         return resp.get("status", 200), resp.get("headers", {}), body
 
     def _audit(self, plugin_id, method, path, seconds, outcome, user=""):
-        # 审计行（V9：落**真实登录身份**——能力层从会话镜像传入；离线/未登录为 "-"）。
+        """审计行**入队**（S2-5，2026-10-17）：请求路径不再触碰文件 IO。
+
+        原实现每请求一次 `makedirs` + `open` + `write` + `close`，在插件高频请求下是可见开销。
+        现改为内存队列 + 后台批量 flush —— 范式与主包 `jz_host/access_log.py` 的
+        「HTTP 线程只入队、QueueListener 后台落盘」一致（那边用 logging 的 QueueHandler，
+        本处是纯文本行，故用裸 `queue.Queue`）。
+
+        ⚠ **语义变化（重要）**：审计从「每请求同步落盘」变为**尽力落盘** —— 进程被强杀时可能丢
+        尾部若干行；退出路径必须调 :meth:`flush_audit`（已接进 :meth:`shutdown`）。队列满时丢弃
+        并计数（首次与每千次记一行到客户端日志），**绝不阻塞请求**。
+        """
+        line = "%s user=%s %s %s %s %.2fs -> %s\n" % (
+            time.strftime("%Y-%m-%d %H:%M:%S"), user or "-", plugin_id, method, path,
+            seconds, outcome)
+        try:
+            self._audit_q.put_nowait(line)
+        except queue.Full:
+            self._audit_dropped += 1
+            if self._audit_dropped in (1, 1000) or self._audit_dropped % 10000 == 0:
+                self._log("审计队列已满，开始丢弃审计行（累计 %d 行）" % self._audit_dropped)
+            return
+        self._ensure_audit_flusher()
+
+    def _ensure_audit_flusher(self):
+        """首个审计行到达时惰性起后台 flush 线程（最简形态：不在装配期白起线程）。"""
+        if self._audit_thread is not None:
+            return
+        with self._audit_lock:
+            if self._audit_thread is not None:
+                return
+            th = threading.Thread(target=self._audit_loop, daemon=True, name="audit-flush")
+            self._audit_thread = th
+            th.start()
+
+    def _audit_loop(self):
+        """后台批量落盘：最多等 0.5s 攒一批（≤256 行）再一次写。"""
+        while True:
+            try:
+                first = self._audit_q.get(timeout=0.5)
+            except queue.Empty:
+                if self._audit_stop.is_set():
+                    return
+                continue
+            buf = [first]
+            while len(buf) < 256:
+                try:
+                    buf.append(self._audit_q.get_nowait())
+                except queue.Empty:
+                    break
+            self._audit_write(buf)
+
+    def _audit_write(self, lines):
         try:
             os.makedirs(os.path.dirname(self._audit_path), exist_ok=True)
             with open(self._audit_path, "a", encoding="utf-8") as f:
-                f.write("%s user=%s %s %s %s %.2fs -> %s\n" % (
-                    time.strftime("%Y-%m-%d %H:%M:%S"), user or "-", plugin_id, method, path,
-                    seconds, outcome))
+                f.writelines(lines)
         except OSError:
             pass
+
+    def flush_audit(self, timeout=2.0):
+        """把队列里剩余审计行落盘（退出路径**必须先调**：flush 审计 → 收割 worker → 退出）。
+
+        timeout 是 join 上限：超时后仍会把队列里剩余的直接写掉，避免后台线程被卡住时丢日志；
+        但若后台线程正卡在磁盘 IO 上，本函数不会无限等（退出不能因为审计而挂住）。
+        """
+        self._audit_stop.set()
+        th = self._audit_thread
+        if th is not None:
+            th.join(timeout)
+        rest = []
+        while True:
+            try:
+                rest.append(self._audit_q.get_nowait())
+            except queue.Empty:
+                break
+        if rest:
+            self._audit_write(rest)
+
 
 
 class WorkerTimeout(Exception):
