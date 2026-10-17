@@ -1184,6 +1184,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         # server 前端：停用 = 本地伺服关闭自动回退中继直出（副本保留），即时生效
         return jsonify({"ok": True, "restart_required": False})
 
+    @app.post("/local-api/plugins/<plugin_id>/warmup")
+    def lp_warmup(plugin_id):
+        """预热常驻插件 worker（R1.4，2026-10-17）：前端进工具页时 fire-and-forget 调用。
+
+        幂等；非 resident 插件返回 warmed=False（前端无需区分）；失败仍 200 + reason，
+        由调用方决定是否记录——预热是加速手段，**不是**功能前置。
+        """
+        m = _find_local(plugin_id)
+        if m is None:
+            return jsonify({"ok": False, "error": "本地插件不存在"}), 404
+        if executor is None:
+            return jsonify({"ok": False, "error": "执行器未装配"}), 503
+        res = executor.warmup(m)
+        return jsonify({"ok": True, "plugin": m.get("id", plugin_id), **res})
+
     @app.post("/local-api/plugins/check-update")
     def lp_check_update():
         """检查更新：经 Source 抽象读目录（server=商店 / share=共享盘，接缝①②收口）。"""

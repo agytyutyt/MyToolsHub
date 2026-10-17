@@ -21,6 +21,10 @@ import uuid
 
 WORKER_BODY_LIMIT = 8 * 1024 * 1024   # 规范 §16.3 L-3：worker 响应体上限（大结果写临时文件传路径）
 
+#: 预热探针路径（R1.4，2026-10-17）：**保留路径**——插件不应实现它，命中即 404 属预期。
+#: 选它而不用 `GET /` 的原因：个别插件首页可能带副作用，探针必须确定无副作用。
+WARMUP_PROBE_PATH = "/__warmup_probe__"
+
 
 class PluginExecutor:
     def __init__(self, runtime_python, host_script, pylibs_dir, data_dir, log=None,
@@ -60,6 +64,27 @@ class PluginExecutor:
                 {"error": "本地插件崩溃退出", "plugin": pid, "detail": str(exc)}).encode()
         self._audit(pid, method, path, time.time() - t0, status, user)
         return status, hdrs, resp_body
+
+    def warmup(self, manifest):
+        """预热一个常驻插件的 worker（R1.4，2026-10-17）。
+
+        ⚠ 为什么**必须打一次真实往返**：`_spawn`（Popen）只要 2–12ms，冷启 ≈1.3s 全在
+        **首个往返**的解释器启动 + 插件 import + `register(app)` 里（P2-4 基线实测）。
+        故预热 = 对该插件发一次无副作用探针（`WARMUP_PROBE_PATH`，404 即算成功），
+        把这段开销提前到「用户点导航」那一刻付掉。
+
+        非 resident 插件不预热：一次性短命进程（请求时 spawn、用完 kill）预热无意义。
+        幂等：resident 分支复用既有进程，连打不叠加 worker。
+        → {"warmed": bool, "resident": bool, "reason": str}
+        """
+        if not manifest.get("resident"):
+            return {"warmed": False, "resident": False, "reason": "非 resident 插件（无需预热）"}
+        try:
+            self.call(manifest, "GET", WARMUP_PROBE_PATH, {}, b"", 30000)
+        except Exception as exc:      # 预热失败不抛：真实请求届时按既有错误语义处理
+            return {"warmed": False, "resident": True,
+                    "reason": "%s: %s" % (type(exc).__name__, exc)}
+        return {"warmed": True, "resident": True, "reason": ""}
 
     def shutdown(self):
         """收割全部常驻 worker（托盘退出/关机路径）。"""

@@ -58,6 +58,13 @@ async function loadTool() {
     const tool = await res.json();
     document.title = (tool.name || toolId) + ' · ' + siteName;
     // iframe 指向插件前端入口（插件间互不污染）
+    // R1.4（2026-10-17）：本地插件进页即预热 worker（fire-and-forget）。冷启实测 ≈1.3s
+    // （P2-4 基线），提到「用户点导航」这一刻付掉；失败静默（预热是加速手段非功能前置）。
+    if (String(tool.id || "").startsWith("local-")) {
+      fetch("/local-api/plugins/" + encodeURIComponent(tool.id) + "/warmup",
+            { method: "POST" }).catch(() => {});
+    }
+
     // 透传外层查询串（2026-10-17，P2-3②）：插件页此前拿不到导航时的 URL 参数，
     // 使「用 URL 参数驱动插件视图」类能力（如知识库 Word 渲染模式 flow/paged）无法触达。
     // 已核实：现有插件均不读自身 location.search，故透传不会改变既有行为。

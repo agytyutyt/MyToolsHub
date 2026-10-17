@@ -291,6 +291,31 @@ def section_bcd():
         check("D2 /local-api/health 在上限内返回并如实申报远程不可达（remote_ok=False）",
               r_h.status_code == 200 and time.time() - t0 < 20
               and hj.get("remote_ok") in (False, None), "%.1fs %s" % (time.time() - t0, hj))
+
+        # E1 预热（R1.4，2026-10-17）：预热后**首个真实请求**不应再含冷启
+        # 冷启 baseline ≈1.3s（含解释器 + 插件 import + register(app)），预热把它提前付掉
+        executor.shutdown()
+        t_colds = time.time()
+        c.get("/api/local/local-t13-res/count")
+        cold_s = time.time() - t_colds
+        executor.shutdown()                      # 清掉，回到「未预热」状态
+        t_ws = time.time()
+        r_w = c.post("/local-api/plugins/local-t13-res/warmup")
+        warm_cost = time.time() - t_ws
+        wj = r_w.get_json() or {}
+        t_rs = time.time()
+        c.get("/api/local/local-t13-res/count")
+        after_s = time.time() - t_rs
+        r_w2 = c.post("/local-api/plugins/local-t13-res/warmup")   # 幂等
+        n_res = len(getattr(executor, "_residents", {}))
+        print("     E1 计时留证：cold=%.2fs warm_cost=%.2fs after_warm=%.2fs"
+              % (cold_s, warm_cost, after_s))
+        check("E1 预热端点生效且幂等（预热后首个真实请求不再含冷启）",
+              r_w.status_code == 200 and wj.get("warmed") is True
+              and r_w2.status_code == 200 and n_res == 1
+              and after_s < max(0.6, cold_s * 0.5),
+              "cold=%.2fs warm_cost=%.2fs after_warm=%.2fs residents=%d"
+              % (cold_s, warm_cost, after_s, n_res))
     finally:
         import shutil
         shutil.rmtree(work, ignore_errors=True)
