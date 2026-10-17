@@ -52,6 +52,8 @@ class PluginExecutor:
         self._audit_lock = threading.Lock()
         self._audit_stop = threading.Event()
         self._audit_dropped = 0
+        # R2.3（2026-10-17）：并发派发的管道状态（仅 concurrency>1 的插件会用到）
+        self._pipes = {}
 
     # ---------------- 对外 ----------------
 
@@ -143,6 +145,19 @@ class PluginExecutor:
                     self._resident_ttl[pid] = 0
                 self._ensure_reaper()
                 lock = self._locks.setdefault(pid, threading.Lock())
+            if self._conc_of(manifest) > 1:
+                # 并发（opt-in）：不占每插件串行锁，按 request_id 配对等待
+                try:
+                    return self._roundtrip_concurrent(proc, manifest, method, path,
+                                                      headers, body, timeout_ms, True)
+                except WorkerCrash:
+                    with self._lock_all:
+                        if self._residents.get(pid) is proc:
+                            self._residents.pop(pid, None)
+                        self._pipes.pop(pid, None)
+                    raise
+                finally:
+                    self._last_used[pid] = time.time()
             with lock:
                 try:
                     return self._roundtrip(proc, manifest, method, path, headers, body,
@@ -237,6 +252,9 @@ class PluginExecutor:
             argv = [self._python, self._host, "--plugin", plugin_dir]
             if resident:
                 argv.append("--resident")
+                _n = self._conc_of(manifest)
+                if _n > 1:
+                    argv += ["--concurrency", str(_n)]   # R2.3：并发派发（opt-in）
             if self._pylibs:
                 argv += ["--pylibs", self._pylibs]
         err = self._stderr_file(pid)      # stderr 归日志（T20 契约）
@@ -316,6 +334,91 @@ class PluginExecutor:
                           % (WORKER_BODY_LIMIT // 1048576)}).encode()
         self._cold_note(manifest, _t_all)
         return resp.get("status", 200), resp.get("headers", {}), body
+
+    # ---------------- R2.3：并发派发（opt-in；concurrency<=1 走原串行路径） ----------------
+
+    def _conc_of(self, manifest):
+        """该插件的声明并发度（缺省 1；夹在 1..8）。非声明即现状。"""
+        try:
+            n = int(manifest.get("concurrency") or 1)
+        except (TypeError, ValueError):
+            n = 1
+        return max(1, min(n, 8))
+
+    def _ensure_pipe(self, pid, proc):
+        """为某 worker 起读线程 + future 表 + 写锁（仅并发模式用；每进程一个）。"""
+        st = self._pipes.get(pid)
+        if st is not None and st.get("proc") is proc and not st["reader"].is_alive() is False:
+            return st
+        st = {"proc": proc, "futures": {}, "wlock": threading.Lock()}
+        th = threading.Thread(target=self._reader_loop, args=(pid, proc),
+                              daemon=True, name="pipe-read-" + str(pid))
+        st["reader"] = th
+        self._pipes[pid] = st
+        th.start()
+        return st
+
+    def _reader_loop(self, pid, proc):
+        """单读线程：把 worker 的响应行按 request_id 派发给等待的 future。
+
+        响应可能**乱序**（并发模式）或顺序（串行 worker 兼容）——按 id 配对两种情况都对。
+        """
+        st = self._pipes.get(pid) or {}
+        try:
+            for raw in proc.stdout:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                try:
+                    resp = json.loads(line)
+                except Exception:
+                    continue
+                rid = resp.get("request_id")
+                fut = (st.get("futures") or {}).pop(rid, None)
+                if fut is not None and not fut.done():
+                    fut.set_result(resp)
+        except Exception:
+            pass
+        finally:
+            for rid, fut in list((st.get("futures") or {}).items()):
+                if not fut.done():
+                    fut.set_exception(WorkerCrash("worker 无响应退出"))
+
+    def _roundtrip_concurrent(self, proc, manifest, method, path, headers, body,
+                              timeout_ms, resident):
+        """并发往返：写请求（写锁下）→ 等对应 request_id 的 future（不占串行锁）。"""
+        import concurrent.futures as _cf
+        pid = manifest.get("id", "?")
+        st = self._ensure_pipe(pid, proc)
+        rid = uuid.uuid4().hex
+        req = {"request_id": rid, "method": method, "path": path,
+               "headers": headers or {}, "body_b64": base64.b64encode(body or b"").decode()}
+        fut = _cf.Future()
+        st["futures"][rid] = fut
+        try:
+            with st["wlock"]:
+                proc.stdin.write((json.dumps(req) + "\n").encode())
+                proc.stdin.flush()
+        except (OSError, ValueError) as exc:
+            st["futures"].pop(rid, None)
+            raise WorkerCrash(str(exc))
+        timeout = max(timeout_ms or 60000, 1000) / 1000.0
+        try:
+            resp = fut.result(timeout=timeout)
+        except _cf.TimeoutError:
+            # 超时：丢弃该 future（worker 侧可能仍在跑；晚到的响应会因 id 已弹出而被忽略）
+            st["futures"].pop(rid, None)
+            if resident and not manifest.get("_killed"):
+                self._residents.pop(pid, None)
+            raise WorkerTimeout("worker 超时")
+        if "error" in resp:
+            raise WorkerCrash(resp["error"])
+        out = base64.b64decode(resp.get("body_b64") or "")
+        if len(out) > WORKER_BODY_LIMIT:
+            return 502, {"Content-Type": "application/json"}, json.dumps(
+                {"error": "本地插件响应体超过 %dMB 上限（规范 L-3）——大结果请写临时文件传路径"
+                          % (WORKER_BODY_LIMIT // 1048576)}).encode()
+        return resp.get("status", 200), resp.get("headers", {}), out
 
     def _audit(self, plugin_id, method, path, seconds, outcome, user=""):
         """审计行**入队**（S2-5，2026-10-17）：请求路径不再触碰文件 IO。

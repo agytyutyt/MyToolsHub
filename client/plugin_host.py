@@ -98,11 +98,54 @@ def emit(obj):
     sys.stdout.flush()
 
 
+#: 并发派发上限（R2.3）：manifest/启动参数声明值会被夹到这个上限内。
+MAX_CONCURRENCY = 8
+_emit_lock = None
+
+
+def _concurrent_emit(obj):
+    """并发模式下的响应输出：**必须加写锁**，否则两个响应行会交错成半行。"""
+    global _emit_lock
+    if _emit_lock is None:
+        import threading as _th
+        _emit_lock = _th.Lock()
+    with _emit_lock:
+        emit(obj)
+
+
+def _handle_one(app, line):
+    try:
+        _concurrent_emit(dispatch(app, json.loads(line)))
+    except Exception as exc:
+        _concurrent_emit({"error": "%s: %s" % (type(exc).__name__, exc)})
+
+
+def serve_concurrent(app, n):
+    """并发派发（R2.3）：**单读线程**读请求 → 线程池处理 → 每行响应在写锁下输出。
+
+    ⚠ 只在本进程被显式要求 concurrency>1 时启用；默认 1 走原来的串行循环，行为与历史一致。
+    插件后端若**非线程安全**（模块级可变状态），必须保持默认 1 —— 这是 opt-in 的唯一理由。
+    stdin 关闭时等在途请求做完再退出（#3 语义：常驻 worker 由父进程 EOF 触发自杀）。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=n, thread_name_prefix="plugreq")
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if not line:
+                continue
+            pool.submit(_handle_one, app, line)
+    finally:
+        pool.shutdown(wait=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--plugin", required=True)
     ap.add_argument("--pylibs", default="")
     ap.add_argument("--resident", action="store_true")
+    ap.add_argument("--concurrency", type=int, default=1,
+                    help="并发派发线程数（R2.3；默认 1＝串行，与历史一致）")
     args = ap.parse_args()
 
     plugin_dir = os.path.abspath(args.plugin)
@@ -115,6 +158,11 @@ def main():
     app, _manifest = build_app(plugin_dir)
     _perf_note("ready")       # 插件 import + register(app) 完 —— 此后可接请求
 
+    _conc = max(1, min(int(args.concurrency or 1), MAX_CONCURRENCY))
+    _perf_note("concurrency=%d" % _conc)
+    if args.resident and _conc > 1:
+        serve_concurrent(app, _conc)
+        return
     if args.resident:
         for line in sys.stdin:
             line = line.strip()
