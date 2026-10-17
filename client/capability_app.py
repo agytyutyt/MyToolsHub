@@ -249,6 +249,27 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     shell_token：本地端口壳自证的 run token（client_main 生成并同步传给壳窗口造
     boot URL；缺省进程内随机）。"""
     _log = log or (lambda m: None)
+    _T0_APP = time.time()      # S1-2：预热耗时基准（自装配起）
+    # ---- /api/tools 短 TTL 缓存（S1-2，2026-10-17）----
+    # ⚠ 必须定义在函数**顶部**：`_apply_account_root` 在装配期（约 :622）就会被调用，
+    # 而闭包自由变量只有在赋值执行后才可见 —— 放到底部会 NameError。
+    _tools_cache = {"payload": None, "ts": 0.0}
+    _TOOLS_TTL = 5.0
+
+    def _tools_cache_get():
+        p = _tools_cache["payload"]
+        if p is not None and time.time() - _tools_cache["ts"] < _TOOLS_TTL:
+            return p
+        return None
+
+    def _tools_cache_put(payload):
+        _tools_cache["payload"] = payload
+        _tools_cache["ts"] = time.time()
+
+    def _tools_cache_drop():
+        """使缓存立即失效（装卸/切号/换地址/登出后必须调，否则最长 5s 陈旧）。"""
+        _tools_cache.update({"payload": None, "ts": 0.0})
+
     app = Flask(
         __name__,
         static_folder=static_dir,
@@ -349,6 +370,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             os.environ["JZTOOLS_DATA_ROOT"] = sub
             if executor is not None:
                 executor.stop_residents()     # G3-2：切号停常驻 worker（防持旧根写串数据）
+                _tools_cache_drop()           # S1-2：切号 → 账号级网格变化，立即失效
             _log("插件数据根：%s" % sub)
             if reload_hybrids and _on_root_change["fn"]:
                 try:
@@ -932,6 +954,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             cfg["remote_token"] = str(data.get("token") or "").strip()
         save_client_config(build_cfg, cfg)
         state["address"] = addr
+        _tools_cache_drop()              # S1-2：换服务器 → 清单来源变化，立即失效
         gate["blocked"] = False          # 配置已变，门状态重判（下一次请求见分晓）
         gate["message"] = ""
         if on_address_change:
@@ -2207,6 +2230,7 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         for pid in list(hybrid_apps):
             if pid not in alive:
                 hybrid_apps.pop(pid, None)    # 卸载即弹（热插拔 L2/L3）
+        _tools_cache_drop()      # S1-2：装卸/启停 → 网格口径变化，立即失效
 
     _on_root_change["fn"] = _rescan       # 账号切换 → 数据根变更后重挂 hybrid 子应用
 
@@ -2360,21 +2384,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
     def _local_only_tools_response():
         return jsonify(_local_only_payload())
 
-    @app.get("/api/tools")
-    def api_tools_merged():
-        _perf("first-tools", _log)      # 阶段 0：首屏数据（仅首次）
-        # 注意：本装饰器必须紧跟本函数——F5 曾把辅助函数插在两者之间，致 /api/tools
-        # 全局误走降级分支（2026-10-08 台架抓出；插入带装饰器函数前一律锚定装饰器行）
+    # ---------------- /api/tools 载荷构造（S1-2，2026-10-17）----------------
+    # 拆出构造体是为了：① 启动期后台预热可复用同一代码路径；② 上方的缓存层能拿到 dict 载荷。
+    # ⚠ 本函数**不是**视图（不得加装饰器）——真正的视图在其下方，装饰器紧跟视图（F5 教训）。
+    def _tools_payload_impl():
+        """构造 /api/tools 载荷：返回 **dict**（可缓存）或 **Response**（上游透传，不缓存）。"""
         _refresh_local_verdicts()      # 每次加载主界面复评三态（依赖装卸后徽标即时翻转）
         if not state["address"]:
-            return _local_only_tools_response()
+            return _local_only_payload()
         headers = client_headers()
         try:
             r = upstream.get(state["address"] + "/api/tools",
                              headers=headers, timeout=(5, 60))
         except requests.RequestException as exc:
             health.mark(False, "%s: %s" % (type(exc).__name__, exc))
-            return _local_only_tools_response()
+            return _local_only_payload()
         health.mark(True)
         # 服务器壳门拒绝（G2-4）：降级仅本地清单 + gate_blocked 标记（主界面渲染指引横幅）
         if r.status_code == 403 and r.headers.get("X-JZ-Gate") == "shell_required":
@@ -2382,12 +2406,13 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             gate["ts"] = time.time()
             gate["message"] = "接入密钥未配置或不正确，请向管理员索取并在连接设置中填写"
             _log("服务器壳门拒绝 /api/tools：接入密钥缺失或不正确（降级仅本地清单）")
-            return jsonify(_local_only_payload(gate_blocked=True))
+            return _local_only_payload(gate_blocked=True)
         sc = r.headers.get("Set-Cookie")
         if sc:
             mirror.update_from_set_cookie(sc)
         if r.status_code == 401:
             mirror.clear()
+            _tools_cache_drop()        # 会话失效：网格口径随之变化，立即失效
         if r.status_code != 200:
             return Response(r.content, status=r.status_code,
                             content_type=r.headers.get("Content-Type", "application/json"))
@@ -2403,12 +2428,12 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
         if reg is not None:
             # 账号级安装（2026-10-11 需求①②）：登记为显示全集 + 双源匹配 + 云卡（§2.2/D22）。
             # 本机 hidden 过滤不再参与（登记制取代本机隐藏；升级补种后 hidden 键已清）。
-            return jsonify(_account_grid_payload(data if isinstance(data, dict) else {},
-                                                 base, reg))
+            return _account_grid_payload(data if isinstance(data, dict) else {},
+                                                 base, reg)
         if _account.get("signed_out"):
             # D19：登出/401 后网格空 + 登录引导（快照保留内容但不展示）
-            return jsonify({"tools": [], "categories": [], "signed_out": True,
-                            "account_mode": True})
+            return {"tools": [], "categories": [], "signed_out": True,
+                    "account_mode": True}
         # 本机移除（legacy：旧服务器无 installs API 时的机器级行为，G2-7 保留）：
         # 服务器侧条目在本机不再下发。只影响本机（客户端数据目录 config.json），
         # 服务器端运行与全局清单不受影响。
@@ -2430,7 +2455,25 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
             data["tools"] = base + merged
         else:
             data = base + merged
-        return jsonify(data)
+        return data
+
+    @app.get("/api/tools")
+    def api_tools_merged():
+        # 注意：本装饰器必须紧跟本函数——F5 曾把辅助函数插在两者之间，致 /api/tools
+        # 全局误走降级分支（2026-10-08 台架抓出；插入带装饰器函数前一律锚定装饰器行）
+        _perf("first-tools", _log)      # 阶段 0：首屏数据（仅首次请求；缓存命中不会重复打点）
+        cached = _tools_cache_get()
+        if cached is not None:
+            resp = jsonify(cached)
+            resp.headers["X-JZ-Tools-Cache"] = "hit"
+            return resp
+        payload = _tools_payload_impl()
+        if isinstance(payload, dict):
+            _tools_cache_put(payload)
+            resp = jsonify(payload)
+            resp.headers["X-JZ-Tools-Cache"] = "miss"
+            return resp
+        return payload          # Response：上游非 200 / 不可解析，透传且不缓存
 
     @app.get("/api/tools/<tool_id>")
     def api_tool_meta(tool_id):
@@ -2462,4 +2505,21 @@ def create_capability_app(build_cfg, client_cfg, address, static_dir,
 
     app.config["CAPABILITY_HEALTH"] = health
     app.config["CAPABILITY_STATE"] = state
+
+    # S1-2（2026-10-17）：**启动即后台预热**首屏清单。用户真正进页要等 webview 起窗（数百 ms 起），
+    # 通常慢于一次 HTTP 往返 → 首次进页多半直接命中热缓存（原来要在请求里同步等远程，
+    # 慢/挂死的服务器可达数秒）。预热失败静默：功能照旧走原同步路径，只是慢。
+    # 用 test_request_context 造一个**空请求上下文**，使 client_headers() 可用（它读 request.headers）；
+    # 该上下文没有客户端请求头，但会话镜像 Cookie 与壳标识仍会带上——对本端点足够。
+    def _warm_tools_cache():
+        try:
+            with app.test_request_context("/api/tools"):
+                payload = _tools_payload_impl()
+            if isinstance(payload, dict):
+                _tools_cache_put(payload)
+                _log("[perf] tools-warm %.0fms" % ((time.time() - _T0_APP) * 1000.0))
+        except Exception as exc:
+            _log("首屏清单预热失败（不影响功能）：%r" % exc)
+
+    threading.Thread(target=_warm_tools_cache, daemon=True, name="tools-warm").start()
     return app
