@@ -200,6 +200,39 @@ def http(port, path, timeout=5):
         return None, b""
 
 
+def shell_asset_check(check):
+    """壳页资源版本戳一致性（S1-1，2026-10-17）。
+
+    背景：`static/index.html` 曾用 `style.css?v=22` 而 `static/tool.html` 用 `?v=20` ——
+    同一份样式两个 URL **各自缓存**，工具页实际长期吃到**旧版壳样式**（本次盘点发现并修复）。
+    本检查把它钉成机械门禁：只比较**被多张壳页共同引用**的资源，避免误伤单页专属资源
+    （如 index 专属 `main.js`、tool 专属 `tool.js`）。
+    """
+    pages = ["static/index.html", "static/tool.html"]
+    seen = {}
+    for rel in pages:
+        p = os.path.join(ROOT, rel)
+        if not os.path.isfile(p):
+            continue
+        html = open(p, encoding="utf-8", errors="replace").read()
+        for m in re.finditer(r'(?:src|href)="([^"]+)"', html):
+            url = m.group(1)
+            if not url.startswith("/"):
+                continue
+            base, _, q = url.partition("?")
+            if not base.endswith((".js", ".css")):
+                continue
+            seen.setdefault(base, {})[rel] = q or "(无)"
+    drift = []
+    for base, per in sorted(seen.items()):
+        if len(per) < 2 or len(set(per.values())) == 1:
+            continue
+        drift.append("%s → %s" % (base, "，".join(
+            "%s=%s" % (k.split("/")[-1], v) for k, v in sorted(per.items()))))
+    check(not drift, "壳页资源版本戳一致（同一资源不得在不同壳页用不同 ?v=）",
+          "改完记得同步所有壳页并递增：" + "；".join(drift) if drift else "")
+
+
 def main():
     ap = argparse.ArgumentParser(description="主包校验")
     ap.add_argument("zipfile", nargs="?", default="", help="zip 路径或已解压的部署目录（缺省取 deploy 下最新的 JZToolsHub-v*.zip）")
@@ -246,6 +279,7 @@ def main():
         check(z.testzip() is None, "zip CRC 全量校验")
     else:
         print("  [--] 目录目标：跳过 zip CRC 全量校验（逐文件内容比对照常）")
+    shell_asset_check(check)   # S1-1：壳页资源版本戳一致性（源侧静态纪律）
     # 阈值随解耦下调：主包不再携带业务插件（-250 条目）、pandas（-900 条目）、cv2/numpy（-1500 条目）。
     # 实测 v2.2.0 主包 1095 个文件（解耦前 3031），当前实测 542 个文件；阈值取 250
     # 用于兜住"打错目录/漏拷"这类事故。
